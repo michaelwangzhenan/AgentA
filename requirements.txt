@@ -1,0 +1,25 @@
+# Vector database
+chromadb
+
+# Embedding model (local, no API needed)
+sentence-transformers
+
+# LLM client (OpenAI-compatible: Kimi / OpenAI / DeepSeek / Grok / Ollama)
+openai
+
+# Anthropic Claude SDK (used in Phase 7)
+anthropic
+
+# Document parsers
+pypdf
+python-docx
+python-pptx
+openpyxl
+beautifulsoup4
+lxml
+
+# Web scraping
+requests
+
+# Environment variables
+python-dotenv

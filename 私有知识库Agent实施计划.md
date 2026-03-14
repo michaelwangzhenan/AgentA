@@ -1,6 +1,6 @@
 # 私有知识库 Agent 实施计划
 
-> 使用 Python 从零搭建，支持多格式文档，LLM 可灵活切换。
+> 使用 Python 从零搭建，VSCode + GitHub Copilot 辅助开发，支持多格式文档，LLM 可灵活切换。
 
 ---
 
@@ -18,13 +18,30 @@
 
 ### 核心理念
 
-- **开发阶段**：使用免费模型（Gemini Flash / Ollama 本地模型）跑通全链路逻辑
+- **开发阶段**：使用Kimi(MOONSHOT_API_KEY)跑通全链路逻辑
 - **生产阶段**：通过统一接口切换至 GPT-4o / Claude 等高性能模型
-- **编码方式**：全程使用 VSCode + GitHub Copilot 提升开发效率
 
 ---
 
 ## 二、整体架构
+
+本项目包含两个独立流程，需要先理解它们的关系：
+
+### 流程一：离线预处理（提前一次性完成，文档有更新时重新运行）
+
+```
+私有文档（MD / TXT / PDF / DOCX / PPTX / XLSX / HTML）
+         ↓ parser.py 解析
+       纯文本字符串
+         ↓ ingest.py 分块（Chunking）
+       文本片段（每块约 600 字符）
+         ↓ sentence-transformers 向量化（Embedding）
+       向量数据
+         ↓ 存储
+       ChromaDB 本地向量数据库 ✅
+```
+
+### 流程二：实时问答（每次用户提问时触发）
 
 ```
 用户输入（自然语言问题）
@@ -40,25 +57,20 @@
    ┌──────────┼──────────────┐
    ▼          ▼              ▼
 search_    fetch_url     (可扩展更多工具)
-knowledge  (网页抓取)
+knowledge  (实时网页抓取)
    │
    ▼
 ┌─────────────────────────┐
 │       RAG 检索层         │
-│  · 向量相似度检索         │
+│  · 向量化用户问题         │
+│  · 相似度检索            │
 │  · 返回 Top-K 文档片段    │
 └──────────┬──────────────┘
            │
 ┌──────────▼──────────────┐
-│     向量数据库           │
-│     ChromaDB（本地）     │
-└──────────┬──────────────┘
-           │
-┌──────────▼──────────────┐
-│      文档解析层          │
-│  MD / TXT / PDF / DOCX  │
-│  PPTX / XLSX / HTML /   │
-│  网页 URL               │
+│  ChromaDB 本地向量数据库  │
+│  （数据来自离线预处理，   │
+│   查询时只读，不再解析）  │
 └─────────────────────────┘
 ```
 
@@ -70,12 +82,12 @@ knowledge  (网页抓取)
 
 | 提供商 | 用途 | 说明 |
 |--------|------|------|
-| Google Gemini Flash | 开发/测试 | 免费额度大，速度快 |
+| Kimi | 开发/测试 | 免费额度大，速度快 |
 | Ollama（本地） | 离线开发 | 完全免费，数据不出本地 |
-| OpenAI GPT-4o | 生产环境 | 高性能，按量计费 |
-| Anthropic Claude | 生产环境 | 高性能，按量计费 |
+| OpenAI GPT-5 | 生产环境 | 高性能，按量计费 |
+| Anthropic Claude 4.6 | 生产环境 | 高性能，按量计费 |
 
-> 所有 Provider 统一通过 OpenAI SDK 格式调用（Gemini / Ollama 均兼容），切换只需改一行配置。
+> 所有 Provider 统一通过 OpenAI SDK 格式调用（Kimi / Ollama 均兼容），切换只需改一行配置。
 
 ### 3.2 向量数据库
 
@@ -164,7 +176,9 @@ LLM_PROVIDER=claude    # 生产阶段：高性能
 
 ### 5.3 `rag/parser.py` — 文档解析
 
-负责将各种格式文档转换为纯文本字符串，供后续分块和向量化使用。每种格式对应一个解析分支，易于扩展。
+**仅在离线预处理阶段使用**，负责将各种格式的本地文档转换为纯文本字符串，供 `ingest.py` 后续分块和向量化使用。每种格式对应一个解析分支，易于扩展新格式。
+
+注意：网页 URL 的实时抓取由 `agent/tools.py` 中的 `fetch_url` 工具负责，不经过此模块。`parser.py` 只处理本地文件。
 
 ### 5.4 `rag/ingest.py` — 文档入库流程
 
@@ -202,42 +216,29 @@ LLM 继续推理：结果是否足够？
 
 ## 六、详细实现步骤
 
-### Phase 0：环境准备（预计 30 分钟）
+### Phase 0：环境准备
 
-- [ ] 安装 Python 3.10+，确认 `python --version`
-- [ ] 安装 VSCode，安装 GitHub Copilot 插件并登录
-- [ ] 创建项目目录 `knowledge-agent/`，用 VSCode 打开
-- [ ] 创建并激活虚拟环境：
-  ```bash
-  python -m venv .venv
-  source .venv/bin/activate   # Windows: .venv\Scripts\activate
-  ```
-- [ ] 安装所有依赖：
-  ```bash
-  pip install chromadb sentence-transformers openai \
-              pypdf python-docx python-pptx openpyxl \
-              beautifulsoup4 requests python-dotenv
-  ```
-- [ ] 申请免费 API Key：前往 [Google AI Studio](https://aistudio.google.com) 获取 Gemini API Key
-- [ ] 创建 `.env` 文件，填入 Key
+- [ ] 项目目录： 使用当前工程 AgentA
+- [ ] 创建并激活虚拟环境
+- [ ] 安装所有依赖
+- [ ] 验证 `.env` 文件
 
 ---
 
-### Phase 1：配置层（预计 20 分钟）
+### Phase 1：配置层
 
 **目标**：建立可切换模型的配置体系
 
 - [ ] 编写 `config.py`：定义各 Provider 的 base_url、model、api_key
 - [ ] 编写 `llm/provider.py`：实现统一 `chat()` 函数
-- [ ] 编写简单测试脚本，验证 LLM 调用成功
-
-**Copilot 使用技巧**：在 `provider.py` 顶部写注释 `# 封装 OpenAI 兼容接口，支持 gemini/openai/ollama 切换`，Copilot 会自动补全大部分代码。
+- [ ] 编写简单测试脚本，验证 LLM 使用 kimi api 调用成功
+- [ ] 预留接口支持 OpenAI、Ollama 等其他 Provider 的快速切换
 
 ---
 
-### Phase 2：文档解析层（预计 1 小时）
+### Phase 2：文档解析层
 
-**目标**：支持所有格式的文档解析为纯文本
+**目标**：支持所有本地文件格式解析为纯文本（仅供离线入库使用）
 
 - [ ] 编写 `rag/parser.py`：
   - [ ] 解析 `.md` / `.txt`（原生读取）
@@ -246,17 +247,20 @@ LLM 继续推理：结果是否足够？
   - [ ] 解析 `.docx`（python-docx）
   - [ ] 解析 `.pptx`（python-pptx，遍历所有 slide 的 shape）
   - [ ] 解析 `.xlsx`（openpyxl，每行转为 `列1 | 列2 | ...` 格式）
-  - [ ] 解析网页 URL（requests + BeautifulSoup，去除 script/style 标签）
 - [ ] 编写解析测试脚本，逐格式验证输出是否正常
+- [ ] 该功能有独立命令执行，每次文档更新后运行一次即可，无需频繁调用
+
+> **说明**：网页 URL 不在此处处理。`parser.py` 只负责本地文件。URL 的实时抓取是 Agent 运行时通过 `fetch_url` 工具完成的（见 Phase 4）。如需将网页内容提前入库，可在 `ingest.py` 中单独扩展一个 URL 列表批量导入功能。
 
 ---
 
-### Phase 3：RAG 向量化入库（预计 1 小时）
+### Phase 3：RAG 向量化入库
 
 **目标**：将文档内容存入向量数据库，支持语义检索
 
 - [ ] 编写 `rag/ingest.py`：
-  - [ ] 实现 `chunk_text()` 函数：固定长度分块，带重叠
+  - [ ] 实现 `chunk_text()` 函数  $env:HF_ENDPOINT="https://hf-mirror.com"
+  .venv\Scripts\python -m rag.ingest：固定长度分块，带重叠
   - [ ] 实现 `ingest_all()` 函数：扫描 `docs/` 目录，逐文件解析 → 分块 → 向量化 → upsert
   - [ ] 使用文件路径 + 块序号的 MD5 作为唯一 ID，支持重复运行不重复入库
 - [ ] 编写 `rag/retriever.py`：
@@ -266,7 +270,7 @@ LLM 继续推理：结果是否足够？
 
 ---
 
-### Phase 4：工具层（预计 30 分钟）
+### Phase 4：工具层（Tools）
 
 **目标**：定义 Agent 可调用的工具，遵循 OpenAI Function Calling 格式
 
@@ -279,7 +283,7 @@ LLM 继续推理：结果是否足够？
 
 ---
 
-### Phase 5：Agent 主控逻辑（预计 1 小时）
+### Phase 5：Agent 主控逻辑
 
 **目标**：实现完整的 ReAct Agent 循环
 
@@ -295,7 +299,7 @@ LLM 继续推理：结果是否足够？
 
 ---
 
-### Phase 6：入口与整合测试（预计 30 分钟）
+### Phase 6：入口与整合测试
 
 - [ ] 编写 `main.py`：实现简单的 CLI 对话循环
 - [ ] 端到端测试：
@@ -306,7 +310,7 @@ LLM 继续推理：结果是否足够？
 
 ---
 
-### Phase 7：模型切换验证（预计 20 分钟）
+### Phase 7：模型切换验证
 
 - [ ] 修改 `.env` 中 `LLM_PROVIDER=openai`，填入 OpenAI Key
 - [ ] 重新运行，验证完全相同的功能正常工作
@@ -337,19 +341,13 @@ LLM 继续推理：结果是否足够？
 def chunk_text(text: str, size: int = 600, overlap: int = 100) -> list[str]:
 ```
 
-### 用 Copilot Chat 解释和审查代码
-
-- 选中代码块 → 右键 → `Copilot: Explain`：理解已有代码逻辑
-- 选中代码块 → 右键 → `Copilot: Review`：检查潜在问题
-- 在 Chat 窗口提问：`@workspace 帮我分析 agent.py 的 ReAct 循环是否有死循环风险`
-
 ### 推荐的开发顺序
 
 每完成一个 Phase，先单独测试该模块，确认无误后再进入下一 Phase。不要一次性写完所有代码再统一测试。
 
 ---
 
-## 八、依赖清单（requirements.txt）
+## 八、依赖清单（ requirements.txt）
 
 ```
 chromadb
@@ -360,46 +358,13 @@ python-docx
 python-pptx
 openpyxl
 beautifulsoup4
+lxml
 requests
 python-dotenv
 ```
 
----
-
-## 九、环境变量模板（.env.example）
-
-```
-# 选择 LLM Provider：gemini / openai / claude / ollama
-LLM_PROVIDER=gemini
-
-# Google Gemini（免费，推荐开发阶段使用）
-GEMINI_API_KEY=your_gemini_api_key_here
-
-# OpenAI（生产阶段）
-OPENAI_API_KEY=your_openai_api_key_here
-
-# Anthropic Claude（生产阶段）
-ANTHROPIC_API_KEY=your_anthropic_api_key_here
-
-# Ollama 无需 Key，确保本地服务已启动即可
-```
+> **说明**：
+> - `lxml` 是 BeautifulSoup 解析 HTML 的推荐后端，比默认的 `html.parser` 更稳定，需显式安装。
+> - 所有 LLM Provider（Gemini、OpenAI、Ollama）均通过 `openai` SDK 调用，因为它们兼容 OpenAI 接口格式。Claude 原生 API 格式与 OpenAI 不同，有两种接入方式：①通过 AWS Bedrock / Google Vertex AI 的 OpenAI 兼容接口调用；②直接安装 `anthropic` SDK 在 `provider.py` 中单独适配。本项目 Phase 7 采用方式②，需额外安装 `anthropic` 库。
 
 ---
-
-## 十、预计总工时
-
-| Phase | 内容 | 预计时间 |
-|-------|------|---------|
-| Phase 0 | 环境准备 | 30 分钟 |
-| Phase 1 | 配置层 | 20 分钟 |
-| Phase 2 | 文档解析层 | 1 小时 |
-| Phase 3 | RAG 向量化入库 | 1 小时 |
-| Phase 4 | 工具层 | 30 分钟 |
-| Phase 5 | Agent 主控逻辑 | 1 小时 |
-| Phase 6 | 入口与整合测试 | 30 分钟 |
-| Phase 7 | 模型切换验证 | 20 分钟 |
-| **合计** | | **约 5.5 小时** |
-
----
-
-*计划制定完成后，可按 Phase 顺序逐步实现，每个 Phase 完成后在对应复选框打勾追踪进度。*
