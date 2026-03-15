@@ -3,13 +3,19 @@ Phase 1 测试：LLM 配置层 & 统一调用接口
 
 测试内容：
     - config.py：Provider 配置加载、active config 获取
-    - llm/provider.py：Kimi API 调用（普通对话 & 带 system prompt）
+    - llm/provider.py：当前激活 Provider API 调用（普通对话 & 带 system prompt）
+    - TestAllProviders：遍历全部 9 个 provider 的 key 完整性（单元）及 API 连通性（集成）
 """
 
 import pytest
 import config
 from config import ACTIVE_PROVIDER, get_active_config
 from llm.provider import chat
+
+# 不走代理的国内 provider（直连）
+_DOMESTIC_PROVIDERS = {"kimi", "deepseek", "qwen", "minimax", "glm", "ollama"}
+# 需要走代理的国外 provider
+_FOREIGN_PROVIDERS = {"openai", "grok", "claude"}
 
 
 class TestConfig:
@@ -98,3 +104,66 @@ class TestLLMProvider:
         # 应返回 response 对象，有 choices 属性
         assert hasattr(response, "choices"), "传入 tools 时应返回 response 对象"
         assert len(response.choices) > 0
+
+
+class TestAllProviders:
+    """遍历全部 provider 的测试"""
+
+    def test_all_providers_registered(self) -> None:
+        """PROVIDER_CONFIGS 应包含全部 9 个 provider"""
+        expected = {"kimi", "openai", "deepseek", "grok", "ollama", "claude",
+                    "qwen", "minimax", "glm"}
+        actual = set(config.PROVIDER_CONFIGS.keys())
+        assert expected == actual, f"缺少 provider: {expected - actual}"
+
+    @pytest.mark.parametrize("provider", [
+        "kimi", "deepseek", "qwen", "minimax", "glm",   # 国内
+        "openai", "grok", "claude",                       # 国外
+    ])
+    def test_provider_has_model_and_url(self, provider: str) -> None:
+        """每个 provider 都必须配置 model 和 base_url（ollama 除外）"""
+        cfg = config.PROVIDER_CONFIGS[provider]
+        assert cfg.model, f"[{provider}] model 未配置"
+        if provider != "claude":  # claude 的 base_url 允许为空（使用原生 SDK）
+            assert cfg.base_url, f"[{provider}] base_url 未配置"
+
+    @pytest.mark.parametrize("provider", [
+        "kimi", "deepseek", "qwen", "minimax", "glm",
+        "openai", "grok", "claude",
+    ])
+    def test_provider_api_key_not_empty(self, provider: str) -> None:
+        """每个非 ollama provider 的 api_key 都必须在 .env 中配置"""
+        cfg = config.PROVIDER_CONFIGS[provider]
+        assert cfg.api_key, (
+            f"[{provider}] api_key 为空，请在 .env 中配置对应的 KEY"
+        )
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("provider", [
+        "kimi", "deepseek", "qwen", "minimax", "glm",
+    ])
+    def test_domestic_provider_chat(self, provider: str) -> None:
+        """遍历国内 provider，各发一条消息验证 API 连通（需真实网络）"""
+        original = config.ACTIVE_PROVIDER
+        config.ACTIVE_PROVIDER = provider
+        try:
+            reply = chat([{"role": "user", "content": "用一句话介绍你自己"}])
+            assert isinstance(reply, str) and len(reply) > 0, \
+                f"[{provider}] 返回内容为空"
+        finally:
+            config.ACTIVE_PROVIDER = original
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("provider", [
+        "openai", "grok", "claude",
+    ])
+    def test_foreign_provider_chat(self, provider: str) -> None:
+        """遍历国外 provider，各发一条消息验证 API 连通（需代理）"""
+        original = config.ACTIVE_PROVIDER
+        config.ACTIVE_PROVIDER = provider
+        try:
+            reply = chat([{"role": "user", "content": "用一句话介绍你自己"}])
+            assert isinstance(reply, str) and len(reply) > 0, \
+                f"[{provider}] 返回内容为空"
+        finally:
+            config.ACTIVE_PROVIDER = original

@@ -80,48 +80,48 @@ knowledge  (实时网页抓取)
 
 ### 3.1 LLM 接口层
 
-| 提供商 | 用途 | 说明 |
-|--------|------|------|
-| Kimi | 开发/测试 | 免费额度大，速度快 |
-| Ollama（本地） | 离线开发 | 完全免费，数据不出本地 |
-| OpenAI GPT-5 | 生产环境 | 高性能，按量计费 |
-| Anthropic Claude 4.6 | 生产环境 | 高性能，按量计费 |
+| 提供商               | 用途      | 说明                   |
+| -------------------- | --------- | ---------------------- |
+| Kimi                 | 开发/测试 | 免费额度大，速度快     |
+| Ollama（本地）       | 离线开发  | 完全免费，数据不出本地 |
+| OpenAI GPT-5         | 生产环境  | 高性能，按量计费       |
+| Anthropic Claude 4.6 | 生产环境  | 高性能，按量计费       |
 
 > 所有 Provider 统一通过 OpenAI SDK 格式调用（Kimi / Ollama 均兼容），切换只需改一行配置。
 
 ### 3.2 向量数据库
 
-| 工具 | 选型理由 |
-|------|---------|
+| 工具               | 选型理由                                     |
+| ------------------ | -------------------------------------------- |
 | **ChromaDB** | 纯本地，零配置，Python 原生，适合个人/小团队 |
 
 ### 3.3 嵌入模型（Embedding）
 
-| 工具 | 说明 |
-|------|------|
+| 工具                      | 说明                         |
+| ------------------------- | ---------------------------- |
 | `sentence-transformers` | 本地运行，完全免费，无需 API |
-| `all-MiniLM-L6-v2` | 默认英文模型，轻量快速 |
-| `BAAI/bge-small-zh` | 中文场景替换此模型 |
+| `all-MiniLM-L6-v2`      | 默认英文模型，轻量快速       |
+| `BAAI/bge-small-zh`     | 中文场景替换此模型           |
 
 ### 3.4 文档解析库
 
-| 格式 | 库 |
-|------|----|
-| PDF | `pypdf` |
-| Word (.docx) | `python-docx` |
-| PPT (.pptx) | `python-pptx` |
-| Excel (.xlsx) | `openpyxl` |
-| HTML / 网页 | `beautifulsoup4` + `requests` |
-| MD / TXT | 原生 Python |
+| 格式          | 库                                |
+| ------------- | --------------------------------- |
+| PDF           | `pypdf`                         |
+| Word (.docx)  | `python-docx`                   |
+| PPT (.pptx)   | `python-pptx`                   |
+| Excel (.xlsx) | `openpyxl`                      |
+| HTML / 网页   | `beautifulsoup4` + `requests` |
+| MD / TXT      | 原生 Python                       |
 
 ### 3.5 开发工具
 
-| 工具 | 用途 |
-|------|------|
-| VSCode | 主力编辑器 |
-| GitHub Copilot | AI 编码辅助 |
-| Python 3.10+ | 运行环境 |
-| python-dotenv | 环境变量管理 |
+| 工具           | 用途         |
+| -------------- | ------------ |
+| VSCode         | 主力编辑器   |
+| GitHub Copilot | AI 编码辅助  |
+| Python 3.10+   | 运行环境     |
+| python-dotenv  | 环境变量管理 |
 
 ---
 
@@ -260,7 +260,7 @@ LLM 继续推理：结果是否足够？
 
 - [ ] 编写 `rag/ingest.py`：
   - [ ] 实现 `chunk_text()` 函数  $env:HF_ENDPOINT="https://hf-mirror.com"
-  .venv\Scripts\python -m rag.ingest：固定长度分块，带重叠
+    .venv\Scripts\python -m rag.ingest：固定长度分块，带重叠
   - [ ] 实现 `ingest_all()` 函数：扫描 `docs/` 目录，逐文件解析 → 分块 → 向量化 → upsert
   - [ ] 使用文件路径 + 块序号的 MD5 作为唯一 ID，支持重复运行不重复入库
 - [ ] 编写 `rag/retriever.py`：
@@ -364,6 +364,7 @@ python-dotenv
 ```
 
 > **说明**：
+>
 > - `lxml` 是 BeautifulSoup 解析 HTML 的推荐后端，比默认的 `html.parser` 更稳定，需显式安装。
 > - 所有 LLM Provider（Gemini、OpenAI、Ollama）均通过 `openai` SDK 调用，因为它们兼容 OpenAI 接口格式。Claude 原生 API 格式与 OpenAI 不同，有两种接入方式：①通过 AWS Bedrock / Google Vertex AI 的 OpenAI 兼容接口调用；②直接安装 `anthropic` SDK 在 `provider.py` 中单独适配。本项目 Phase 7 采用方式②，需额外安装 `anthropic` 库。
 

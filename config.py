@@ -4,11 +4,16 @@
 通过修改 .env 中的 LLM_PROVIDER 变量即可切换底层模型，无需改动任何业务代码。
 
 支持的 Provider：
+    国内直连（无需代理）：
     - kimi    : Moonshot AI（开发/测试，免费额度大）
-    - openai  : OpenAI GPT 系列（生产环境）
     - deepseek: DeepSeek（国产，性价比高）
-    - grok    : xAI Grok（生产环境）
+    - qwen    : 阿里云通义千问（国产）
+    - minimax : MiniMax（国产）
+    - glm     : 智谱 AI GLM（国产）
     - ollama  : 本地 Ollama（完全离线，数据不出本地）
+    国外需要代理：
+    - openai  : OpenAI GPT 系列（生产环境）
+    - grok    : xAI Grok（生产环境）
     - claude  : Anthropic Claude（生产环境，使用原生 SDK）
 """
 
@@ -17,7 +22,7 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)  # override=True 确保 .env 覆盖系统环境变量
 
 
 @dataclass(frozen=True)
@@ -58,6 +63,22 @@ PROVIDER_CONFIGS: dict[str, ProviderConfig] = {
         api_key="ollama",  # Ollama 不需要真实 key，填占位符即可
         model="qwen2.5:7b",
     ),
+    # ── 国内直连 ────────────────────────────────────────────────
+    "qwen": ProviderConfig(
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        api_key=os.getenv("QWEN_API_KEY", ""),
+        model="qwen-plus",
+    ),
+    "minimax": ProviderConfig(
+        base_url="https://api.minimax.chat/v1",
+        api_key=os.getenv("MINIMAX_API_KEY", ""),
+        model="MiniMax-Text-01",
+    ),
+    "glm": ProviderConfig(
+        base_url="https://open.bigmodel.cn/api/paas/v4",
+        api_key=os.getenv("GLM_API_KEY", ""),
+        model="glm-4-flash",
+    ),
     # claude 使用原生 anthropic SDK，base_url/api_key 在 provider.py 中单独处理
     "claude": ProviderConfig(
         base_url="",  # 不使用 OpenAI SDK，由 provider.py 原生调用
@@ -80,7 +101,7 @@ EMBEDDING_MODELS: dict[str, tuple[str, str]] = {
 }
 
 # 默认 embedding 别名，可通过 .env 中的 EMBEDDING_MODEL 覆盖（填别名 en/zh，或直接填模型名）
-_default_model_env: str = os.getenv("EMBEDDING_MODEL", "en")
+DEFAULT_EMBEDDING_ALIAS: str = os.getenv("EMBEDDING_MODEL", "en")
 
 def resolve_embedding(model_alias: str) -> tuple[str, str]:
     """
@@ -102,7 +123,7 @@ def resolve_embedding(model_alias: str) -> tuple[str, str]:
 # 默认 (model_name, collection_name)，供未指定时使用
 DEFAULT_EMBEDDING_MODEL: str
 DEFAULT_COLLECTION: str
-DEFAULT_EMBEDDING_MODEL, DEFAULT_COLLECTION = resolve_embedding(_default_model_env)
+DEFAULT_EMBEDDING_MODEL, DEFAULT_COLLECTION = resolve_embedding(DEFAULT_EMBEDDING_ALIAS)
 
 # 向后兼容：保留 EMBEDDING_MODEL / CHROMA_COLLECTION 名称，指向默认值
 EMBEDDING_MODEL: str = DEFAULT_EMBEDDING_MODEL
@@ -113,6 +134,15 @@ DOCS_DIR: str = os.getenv("DOCS_DIR", "./docs")
 
 # RAG 检索返回的最大文档片段数
 RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "5"))
+
+# HTTP 代理配置
+# 格式示例：http://10.144.1.10:8080
+# 置空则不使用代理
+LLM_PROXY: str = os.getenv("LLM_PROXY", "")
+
+# 需要走代理的 provider（国外服务）
+# 国内直连的 provider（kimi / deepseek / ollama）不在此集合中
+PROXIED_PROVIDERS: frozenset[str] = frozenset({"openai", "grok", "claude"})
 
 # 文本分块配置
 CHUNK_SIZE: int = 600

@@ -20,7 +20,7 @@
 # 因为这些库在 import 时就会读取 HF_ENDPOINT / TRANSFORMERS_OFFLINE
 import os
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(override=True)
 # 将 .env 中的 HF 相关配置提前注入 os.environ（load_dotenv 已完成，此处确认）
 for _key in ("HF_ENDPOINT", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE"):
     _val = os.getenv(_key)
@@ -85,7 +85,7 @@ def _make_chunk_id(file_path: str, chunk_index: int) -> str:
 
 def ingest_all(
     docs_dir: str = config.DOCS_DIR,
-    model: str = config._default_model_env,
+    model: str = config.DEFAULT_EMBEDDING_ALIAS,
 ) -> None:
     """
     扫描 docs_dir 目录，将所有支持格式的文档入库到 ChromaDB。
@@ -95,7 +95,7 @@ def ingest_all(
     Args:
         docs_dir: 文档目录路径，默认读取 config.DOCS_DIR。
         model: embedding 模型别名（en/zh）或模型名称，决定使用哪个 collection。
-               默认使用 config._default_model_env（读取 .env EMBEDDING_MODEL）。
+               默认使用 config.DEFAULT_EMBEDDING_ALIAS（读取 .env EMBEDDING_MODEL）。
     """
     model_name, collection_name = config.resolve_embedding(model)
 
@@ -200,7 +200,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-m", "--model",
-        default=config._default_model_env,
+        default=config.DEFAULT_EMBEDDING_ALIAS,
         help="embedding 模型别名：en / zh，或完整模型名（默认: %(default)s）",
     )
     args = parser.parse_args()

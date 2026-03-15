@@ -12,10 +12,10 @@ LLM 统一调用接口
 from collections.abc import Sequence
 from typing import Any
 
+import httpx
 import openai
 
 import config
-from config import ACTIVE_PROVIDER
 
 
 def chat(
@@ -39,16 +39,13 @@ def chat(
         ValueError: 当 ACTIVE_PROVIDER 为 'claude' 时走原生 SDK 分支。
         openai.APIError: API 调用失败时抛出。
     """
-    if ACTIVE_PROVIDER == "claude":
+    if config.ACTIVE_PROVIDER == "claude":
         return _chat_claude(messages, tools, temperature)
 
     provider_config = config.get_active_config()
 
-    client = openai.OpenAI(
-        api_key=provider_config.api_key,
-        base_url=provider_config.base_url,
-    )
-
+    # 对国外 provider（openai / grok）注入 HTTP 代理；国内 provider（kimi / deepseek / ollama）直连
+    # claude 走独立分支，不在此处处理
     kwargs: dict[str, Any] = {
         "model": provider_config.model,
         "messages": messages,
@@ -58,7 +55,21 @@ def chat(
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
 
-    response = client.chat.completions.create(**kwargs)
+    need_proxy = config.ACTIVE_PROVIDER in config.PROXIED_PROVIDERS and bool(config.LLM_PROXY)
+    if need_proxy:
+        with httpx.Client(proxy=config.LLM_PROXY) as http_client:
+            client = openai.OpenAI(
+                api_key=provider_config.api_key,
+                base_url=provider_config.base_url or None,
+                http_client=http_client,
+            )
+            response = client.chat.completions.create(**kwargs)
+    else:
+        client = openai.OpenAI(
+            api_key=provider_config.api_key,
+            base_url=provider_config.base_url or None,
+        )
+        response = client.chat.completions.create(**kwargs)
 
     # 若没有传入 tools，直接返回文本，方便简单场景使用
     if not tools:
@@ -81,7 +92,6 @@ def _chat_claude(
     import anthropic
 
     provider_config = config.get_active_config()
-    client = anthropic.Anthropic(api_key=provider_config.api_key)
 
     # 分离 system prompt 和对话历史（Anthropic API 要求分开传）
     system_prompt = ""
@@ -104,7 +114,17 @@ def _chat_claude(
         # 将 OpenAI tools 格式转换为 Anthropic 格式
         kwargs["tools"] = _convert_tools_to_anthropic(tools)
 
-    response = client.messages.create(**kwargs)
+    # Claude 也是国外服务，同样支持 HTTP 代理；用 with 确保连接正确关闭
+    if config.LLM_PROXY:
+        with httpx.Client(proxy=config.LLM_PROXY) as http_client:
+            client = anthropic.Anthropic(
+                api_key=provider_config.api_key,
+                http_client=http_client,
+            )
+            response = client.messages.create(**kwargs)
+    else:
+        client = anthropic.Anthropic(api_key=provider_config.api_key)
+        response = client.messages.create(**kwargs)
 
     # 若无 tools，直接返回文本
     if not tools:

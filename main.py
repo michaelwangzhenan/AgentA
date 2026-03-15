@@ -15,14 +15,18 @@ CLI 入口 —— 私有知识库 Agent 对话界面
 
 import logging
 import sys
+import warnings
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# 消除 HuggingFace tokenizer 的 FutureWarning
+warnings.filterwarnings("ignore", category=FutureWarning, module="transformers")
+
+load_dotenv(override=True)  # override=True 确保 .env 覆盖系统环境变量
 
 # 设置日志：INFO 级别，只显示工具调用信息，不显示 DEBUG
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%H:%M:%S",
 )
@@ -37,8 +41,8 @@ import config
 BANNER = """
 ╔══════════════════════════════════════════════╗
 ║         私有知识库 Agent  v0.1               ║
-║  LLM: {provider:<38}║
-║  输入 /help 查看命令列表                      ║
+║  LLM: {provider:<38} ║
+║  输入 /help 查看命令列表                     ║
 ╚══════════════════════════════════════════════╝
 """.format(provider=config.ACTIVE_PROVIDER)
 
@@ -46,9 +50,9 @@ HELP_TEXT = """
 可用命令：
   /help                      显示本帮助信息
   /ingest                    扫描默认 docs/ 目录并入库（模型: .env EMBEDDING_MODEL）
-  /ingest <目录>            扫描指定目录，例：/ingest D:/mydata
-  /ingest <目录> -m zh      指定目录 + 中文模型（BAAI/bge-small-zh）
-  /ingest <目录> -m en      指定目录 + 英文模型（all-MiniLM-L6-v2）
+  /ingest <目录>             扫描指定目录，例：/ingest D:/mydata
+  /ingest <目录> -m zh       指定目录 + 中文模型（BAAI/bge-small-zh）
+  /ingest <目录> -m en       指定目录 + 英文模型（all-MiniLM-L6-v2）
   /ingest -m zh              默认目录 + 中文模型
   /clear                     清空对话历史，重置 Agent
   /quit                      退出程序
@@ -66,7 +70,7 @@ def _run_ingest(docs_dir: str | None = None, model: str | None = None) -> None:
     """在 CLI 中触发文档入库，可指定文档目录和 embedding 模型。"""
     import os
     target_dir = docs_dir or config.DOCS_DIR
-    target_model = model or config._default_model_env
+    target_model = model or config.DEFAULT_EMBEDDING_ALIAS
     # 路径校验
     if not os.path.exists(target_dir):
         print(f"❌ 目录不存在: {target_dir}\n")

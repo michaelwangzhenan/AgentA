@@ -10,6 +10,9 @@ openai
 # Anthropic Claude SDK (used in Phase 7)
 anthropic
 
+# HTTP client (used directly for proxy injection in provider.py)
+httpx
+
 # Document parsers
 pypdf
 python-docx
@@ -23,3 +26,6 @@ requests
 
 # Environment variables
 python-dotenv
+
+# Testing
+pytest

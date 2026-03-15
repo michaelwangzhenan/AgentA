@@ -192,11 +192,14 @@ AgentA/
 
 ```ini
 LLM_PROVIDER=kimi       # Moonshot Kimi（开发/测试，免费额度大）
-LLM_PROVIDER=openai     # OpenAI GPT-4o
 LLM_PROVIDER=deepseek   # DeepSeek（高性价比）
-LLM_PROVIDER=grok       # xAI Grok
-LLM_PROVIDER=ollama     # 本地 Ollama（完全离线，需先启动 Ollama 服务）
-LLM_PROVIDER=claude     # Anthropic Claude（需 pip install anthropic）
+LLM_PROVIDER=qwen       # 阿里云通义千问 Qwen
+LLM_PROVIDER=minimax    # MiniMax
+LLM_PROVIDER=glm        # 智谱 AI GLM
+LLM_PROVIDER=ollama     # 本地 Ollama（完全离线）
+LLM_PROVIDER=openai     # OpenAI GPT-4o（需代理）
+LLM_PROVIDER=grok       # xAI Grok（需代理）
+LLM_PROVIDER=claude     # Anthropic Claude（需代理，需 pip install anthropic）
 ```
 
 ---
