@@ -58,6 +58,19 @@ class TestAgentInit:
         assert agent.max_iterations == 3
         assert agent.verbose is False
 
+    def test_session_id_auto_generated(self) -> None:
+        agent = Agent()
+        assert isinstance(agent.session_id, str)
+        assert len(agent.session_id) > 0
+
+    def test_custom_session_id(self) -> None:
+        agent = Agent(session_id="my-session")
+        assert agent.session_id == "my-session"
+
+    def test_default_max_history_turns(self) -> None:
+        agent = Agent()
+        assert agent.max_history_turns == 20
+
 
 class TestAgentDirectReply:
     """测试 LLM 直接返回文本（不调用工具）的场景"""

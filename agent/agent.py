@@ -2,27 +2,41 @@
 Agent 主控逻辑 —— ReAct（Reason + Act）循环
 
 执行流程：
-    1. 接收用户问题，构建初始 messages
-    2. 调用 LLM（携带工具定义）
-    3. 若 LLM 返回 tool_calls → 执行工具 → 将结果追加到 messages → 继续循环
-    4. 若 LLM 直接返回文本 → 输出最终回答，退出循环
-    5. 超过最大迭代次数时强制退出，防止死循环
+    1. 接收用户问题，从 MemoryStore 加载历史消息
+    2. 拼接为 [system] + history + [user]，超长时自动截断
+    3. 调用 LLM（携带工具定义）
+    4. 若 LLM 返回 tool_calls → 执行工具 → 将结果追加到 messages → 继续循环
+    5. 若 LLM 直接返回文本 → 输出最终回答，退出循环
+    6. 超过最大迭代次数时强制退出，防止死循环
 
 使用方式：
     from agent.agent import Agent
-    agent = Agent()
+    agent = Agent(session_id="my-session")
     reply = agent.run("什么是 RAG？")
     print(reply)
 """
 
 import json
 import logging
+import uuid
 from typing import Any
 
 from agent.tools import TOOLS, execute_tool
 from llm.provider import chat
+from memory.store import MemoryStore
 
 logger = logging.getLogger(__name__)
+
+# 模块级共享 MemoryStore 实例（单进程内所有 Agent 共享同一个 DB 连接）
+_shared_memory: MemoryStore | None = None
+
+
+def _get_shared_memory() -> MemoryStore:
+    """获取模块级共享 MemoryStore，首次调用时懒加载初始化。"""
+    global _shared_memory
+    if _shared_memory is None:
+        _shared_memory = MemoryStore()
+    return _shared_memory
 
 # Agent 系统提示：指导 LLM 的行为策略
 SYSTEM_PROMPT = """你是一个私有知识库智能助手。
@@ -51,6 +65,8 @@ class Agent:
         system_prompt: Agent 的系统提示，定义行为策略。
         max_iterations: 最大工具调用轮次，超出后强制返回当前结果。
         verbose: 是否打印每轮工具调用的调试信息。
+        session_id: 会话 ID，用于持久化对话历史。
+        max_history_turns: 加载历史时保留最近 N 轮（一轮 = user + assistant），防止超出 context window。
     """
 
     def __init__(
@@ -58,14 +74,24 @@ class Agent:
         system_prompt: str = SYSTEM_PROMPT,
         max_iterations: int = MAX_ITERATIONS,
         verbose: bool = True,
+        session_id: str | None = None,
+        max_history_turns: int = 20,
+        memory: MemoryStore | None = None,
     ) -> None:
         self.system_prompt = system_prompt
         self.max_iterations = max_iterations
         self.verbose = verbose
+        self.session_id: str = session_id or str(uuid.uuid4())
+        self.max_history_turns = max_history_turns
+        # 支持从外部传入 memory（便于测试 mock），默认使用模块级共享实例
+        self._memory: MemoryStore = memory if memory is not None else _get_shared_memory()
 
     def run(self, user_input: str) -> str:
         """
         执行完整的 ReAct 循环，返回最终回答文本。
+
+        会先从 MemoryStore 加载历史消息，拼接到当前轮对话后一起发送给 LLM。
+        每轮工具调用和最终回答均实时写入 SQLite。
 
         Args:
             user_input: 用户的自然语言问题。
@@ -73,13 +99,21 @@ class Agent:
         Returns:
             Agent 的最终回答字符串。
         """
+        # 加载历史，应用截断策略
+        history = self._load_truncated_history()
+
+        # 构建当前轮完整 messages
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": self.system_prompt},
+            *history,
             {"role": "user", "content": user_input},
         ]
 
+        # 将当前轮用户输入写入 DB
+        self._memory.append(self.session_id, {"role": "user", "content": user_input})
+
         for iteration in range(1, self.max_iterations + 1):
-            logger.debug(f"[Agent] 第 {iteration} 轮推理，messages 长度: {len(messages)}")
+            logger.debug("[Agent] 第 %d 轮推理，messages 长度: %d", iteration, len(messages))
 
             # 调用 LLM（携带工具定义）
             response = chat(messages, tools=TOOLS)
@@ -87,8 +121,10 @@ class Agent:
 
             # ── 情况 1：LLM 决定调用工具 ──────────────────────────────────────
             if message.tool_calls:
-                # 将 assistant 的 tool_calls 消息追加到 messages
-                messages.append(self._assistant_message(message))
+                # 将 assistant 的 tool_calls 消息追加到 messages 并写入 DB
+                assistant_msg = self._assistant_message(message)
+                messages.append(assistant_msg)
+                self._memory.append(self.session_id, assistant_msg)
 
                 for tool_call in message.tool_calls:
                     tool_name = tool_call.function.name
@@ -96,8 +132,9 @@ class Agent:
 
                     if self.verbose:
                         logger.info(
-                            f"[Agent] 调用工具: {tool_name}，"
-                            f"参数: {json.dumps(tool_args, ensure_ascii=False)}"
+                            "[Agent] 调用工具: %s，参数: %s",
+                            tool_name,
+                            json.dumps(tool_args, ensure_ascii=False),
                         )
 
                     # 执行工具
@@ -105,14 +142,16 @@ class Agent:
 
                     if self.verbose:
                         preview = tool_result[:100].replace("\n", " ")
-                        logger.info(f"[Agent] 工具结果预览: {preview}...")
+                        logger.info("[Agent] 工具结果预览: %s...", preview)
 
-                    # 将工具结果追加到 messages
-                    messages.append({
+                    # 将工具结果追加到 messages 并写入 DB
+                    tool_msg: dict[str, Any] = {
                         "role": "tool",
                         "tool_call_id": tool_call.id,
                         "content": tool_result,
-                    })
+                    }
+                    messages.append(tool_msg)
+                    self._memory.append(self.session_id, tool_msg)
 
                 # 继续下一轮推理
                 continue
@@ -120,7 +159,12 @@ class Agent:
             # ── 情况 2：LLM 直接返回最终回答 ──────────────────────────────────
             final_answer = message.content or ""
             if final_answer.strip():
-                logger.debug(f"[Agent] 第 {iteration} 轮得到最终回答，退出循环")
+                logger.debug("[Agent] 第 %d 轮得到最终回答，退出循环", iteration)
+                # 将最终回答写入 DB
+                self._memory.append(
+                    self.session_id,
+                    {"role": "assistant", "content": final_answer.strip()},
+                )
                 return final_answer.strip()
 
             # LLM 返回了空内容（异常情况），退出
@@ -128,8 +172,35 @@ class Agent:
             return "抱歉，未能生成有效回答，请重试。"
 
         # 超过最大迭代次数
-        logger.warning(f"[Agent] 达到最大迭代次数 {self.max_iterations}，强制返回")
+        logger.warning("[Agent] 达到最大迭代次数 %d，强制返回", self.max_iterations)
         return "抱歉，推理过程过于复杂，未能在规定轮次内完成。请尝试更具体的问题。"
+
+    def _load_truncated_history(self) -> list[dict[str, Any]]:
+        """
+        从 MemoryStore 加载历史，并按 max_history_turns 截断。
+
+        截断策略：保留最近 N 轮，一轮以 user 消息为起点计数。
+        system 消息不计入轮数，在 run() 中单独拼接。
+        """
+        all_msgs = self._memory.load(self.session_id)
+        # 过滤掉 system 消息（由 run() 单独拼接）
+        history = [m for m in all_msgs if m["role"] != "system"]
+
+        if not history:
+            return []
+
+        # 找到所有 user 消息的位置，按轮数从后往前截断
+        user_indices = [i for i, m in enumerate(history) if m["role"] == "user"]
+        if len(user_indices) > self.max_history_turns:
+            start = user_indices[-self.max_history_turns]
+            history = history[start:]
+            logger.debug(
+                "[Agent] 历史超过 %d 轮，已截断保留最近 %d 轮",
+                len(user_indices),
+                self.max_history_turns,
+            )
+
+        return history
 
     @staticmethod
     def _assistant_message(message: Any) -> dict[str, Any]:

@@ -9,7 +9,10 @@ CLI 入口 —— 私有知识库 Agent 对话界面
     输入 /help              查看帮助
     输入 /ingest            重新扫描默认 docs/ 目录并入库（默认模型）
     输入 /ingest <目录> [-m en|zh]  扫描指定目录，可选指定模型
-    输入 /clear             清空对话历史（重置 Agent）
+    输入 /clear             清空当前 session 的对话历史并重置 Agent
+    输入 /history           查看当前 session 的对话摘要
+    输入 /session           列出所有历史 session
+    输入 /session <id>      切换到指定 session 并恢复历史
     输入 /quit 或 /exit 或 Ctrl+C 退出
 """
 
@@ -35,6 +38,7 @@ for _noisy in ("httpx", "httpcore", "openai", "chromadb", "sentence_transformers
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 
 from agent.agent import Agent
+from memory.store import MemoryStore
 import config
 
 
@@ -54,7 +58,10 @@ HELP_TEXT = """
   /ingest <目录> -m zh       指定目录 + 中文模型（BAAI/bge-small-zh）
   /ingest <目录> -m en       指定目录 + 英文模型（all-MiniLM-L6-v2）
   /ingest -m zh              默认目录 + 中文模型
-  /clear                     清空对话历史，重置 Agent
+  /clear                     清空当前 session 的对话历史并重置 Agent
+  /history                   查看当前 session 的历史对话摘要
+  /session                   列出所有历史 session
+  /session <id>              切换到指定 session 并恢复历史
   /quit                      退出程序
   /exit                      退出程序（同 /quit）
 
@@ -89,17 +96,50 @@ def _run_ingest(docs_dir: str | None = None, model: str | None = None) -> None:
         print(f"❌ 入库失败: {e}\n")
 
 
+def _show_history(memory: MemoryStore, session_id: str) -> None:
+    """展示当前 session 的历史对话摘要（角色 + 内容前 60 字）。"""
+    msgs = [m for m in memory.load(session_id) if m["role"] in ("user", "assistant")]
+    if not msgs:
+        print("📭 当前 session 暂无对话历史。\n")
+        return
+    print(f"\n📋 Session {session_id} 历史摘要（共 {len(msgs)} 条）：")
+    for i, msg in enumerate(msgs, 1):
+        role_label = "你" if msg["role"] == "user" else "Agent"
+        content = (msg.get("content") or "").replace("\n", " ")
+        preview = content[:60] + ("…" if len(content) > 60 else "")
+        print(f"  [{i:02d}] {role_label}: {preview}")
+    print()
+
+
+def _list_sessions(memory: MemoryStore) -> None:
+    """列出所有历史 session。"""
+    sessions = memory.list_sessions()
+    if not sessions:
+        print("📭 暂无历史 session 记录。\n")
+        return
+    print(f"\n📚 历史 Session 列表（共 {len(sessions)} 个）：")
+    for s in sessions:
+        created = s["created_at"][:19].replace("T", " ")
+        first_msg = (s["first_user_msg"] or "（无用户消息）")[:40]
+        print(f"  {s['session_id']}  [{created}]  {s['msg_count']} 条  首问: {first_msg}")
+    print()
+
+
 def main() -> None:
     """CLI 主循环。"""
     print(BANNER)
 
-    agent = Agent(verbose=True)
+    # 共享 MemoryStore 实例，整个进程生命周期内复用
+    memory = MemoryStore()
+    agent = Agent(verbose=True, memory=memory)
+    print(f"💬 当前 Session: {agent.session_id}\n")
 
     while True:
         try:
             user_input = input("你: ").strip()
         except (KeyboardInterrupt, EOFError):
             print("\n\n👋 再见！")
+            memory.close()
             sys.exit(0)
 
         if not user_input:
@@ -111,6 +151,7 @@ def main() -> None:
         match cmd_lower.split()[0] if cmd_lower.split() else "":
             case "/quit" | "/exit":
                 print("👋 再见！")
+                memory.close()
                 sys.exit(0)
             case "/help":
                 print(HELP_TEXT)
@@ -138,8 +179,24 @@ def main() -> None:
                 _run_ingest(docs_dir=docs_dir, model=model_alias)
                 continue
             case "/clear":
-                agent = Agent(verbose=True)
-                print("✅ 对话历史已清空，Agent 已重置。\n")
+                memory.clear(agent.session_id)
+                agent = Agent(verbose=True, memory=memory)
+                print(f"✅ 对话历史已清空，Agent 已重置。\n💬 新 Session: {agent.session_id}\n")
+                continue
+            case "/history":
+                _show_history(memory, agent.session_id)
+                continue
+            case "/session":
+                session_arg = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""
+                if session_arg:
+                    # 切换到指定 session
+                    agent = Agent(verbose=True, session_id=session_arg, memory=memory)
+                    history = memory.load(session_arg)
+                    msg_count = len([m for m in history if m["role"] != "system"])
+                    print(f"✅ 已切换到 Session: {session_arg}（共 {msg_count} 条历史消息）\n")
+                else:
+                    # 列出所有历史 session
+                    _list_sessions(memory)
                 continue
 
         # ── 正常问答 ──────────────────────────────────────────────────────────

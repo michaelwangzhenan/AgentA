@@ -1,0 +1,149 @@
+优先级：
+High: 1, 2, 3, 8 
+Middle: 4, 5, 6, 9,
+Low: 7, 10, 11, 12, 13, 14
+tbd: 15, 16, 17, 18
+
+待优化项：
+
+1. 对话记忆 => Done
+  目标： 将 messages 历史持久化到 SQLite，重启后仍可延续上下文，支持多轮跨会话对话
+  
+  详细实施计划：
+    【数据层 — memory/store.py】
+      - 新建 memory/ 模块，封装 SQLite 读写，对上层隐藏 DB 细节
+      - 表结构：messages(id, session_id, role, content, tool_calls_json, tool_call_id, timestamp)
+        · tool_calls / tool 角色的结构化字段序列化为 JSON 存储，读取时反序列化还原
+      - 提供 append(session_id, msg)、load(session_id) -> list[dict]、clear(session_id)、
+        list_sessions() -> list[session_id] 四个核心接口
+
+    【Agent 层 — agent/agent.py】
+      - Agent.__init__ 增加 session_id: str | None 参数（None 时自动生成 UUID）
+      - run() 启动时先从 store.load(session_id) 加载历史 messages，拼接到 [system] + history + [user]
+      - 每轮对话后（含 tool 结果）调用 store.append() 追加，而非等到最终回答才写入
+      - 增加上下文窗口截断策略：当 messages token 估算超过阈值时，保留 system + 最近 N 轮，
+        防止历史无限增长超出 LLM context window（建议默认保留最近 20 轮）
+
+    【CLI 层 — main.py】
+      - 启动时显示当前 session_id，方便用户记录和恢复
+      - /clear   — 保持现有行为（重置 Agent），同时清空当前 session 的 DB 记录
+      - /history — 展示当前 session 的历史对话摘要（角色 + 内容前 50 字）
+      - /session [id] — 不带参数时列出所有历史 session（id + 首条消息 + 时间）；
+                        带 id 时切换到指定 session 并恢复历史
+
+    【测试】
+      - 单元测试：append/load/clear/list_sessions 接口的正确性
+      - 集成测试：跨 run() 调用验证历史消息正确拼接
+      - 边界测试：tool_calls 序列化还原、超长历史截断、session 不存在时的降级处理
+
+2. 知识库未命中时自动联网搜索
+  目标： 当 `search_knowledge` 返回空或相似度过低时，通过指令（对话）触发 LLM 自行搜索，
+    并提示 LLM 优先在国内网站查找信息，而非直接返回"暂无内容"。
+  
+  详细实施计划：
+    【根本原因重新定位】
+      经验证明：LLM 本身已具备自主决策访问哪些网页的能力（通过 fetch_url 工具）。
+      真正的问题是：SYSTEM_PROMPT 第3条用"可调用"语气太弱，LLM 知识库没命中时倾向于
+      直接放弃，而不是主动去搜。且 LLM 自选 URL 时偏向 Google/Reuters 等国外网站，在无代理环境下经常超时失败。
+      方案：仅改 System Prompt + fetch_url description，无需新增工具。
+
+    【Agent 层 — agent/agent.py SYSTEM_PROMPT】
+      修改工具调用策略第3条，将"可调用"改为"必须"，并明确国内网站优先级：
+        旧：若知识库无相关内容，可调用 fetch_url 抓取指定网页获取补充信息。
+        新：若 search_knowledge 返回"知识库为空"或内容与问题明显无关，
+            **必须主动调用 fetch_url 进行网络搜索**，不允许直接回复"暂无内容"。
+            选择 URL 时优先访问国内可达网站，例如：
+              · 新闻资讯：xinhuanet.com、people.com.cn、百度新闻(news.baidu.com)
+              · 技术问题：segmentfault.com、csdn.net、zhihu.com
+              · 通用搜索：baidu.com、so.com（360搜索）
+            若国内网站无法提供有效信息，再尝试访问国外网站。
+
+    【工具层 — agent/tools.py fetch_url description】
+      在 fetch_url 的 description 中补充国内网站引导说明：
+        新增：「知识库无内容时，优先抓取国内可访问网站，
+        如 xinhuanet.com、people.com.cn、baidu.com、zhihu.com、segmentfault.com 等」
+
+    【测试】
+      - 单元测试：SYSTEM_PROMPT 包含"必须"强制搜索策略和国内网站示例
+      - 单元测试：fetch_url description 包含国内网站引导说明
+      - 集成测试（integration marker）：验证知识库无命中时 Agent 主动调用 fetch_url
+
+3. 重排序（Reranking）
+  目标： 在向量检索结果上加 Cross-Encoder 二次排序，提升精度
+  详细实施计划：
+
+4. 定制 System Prompt
+  目标： 支持通过配置文件或 CLI 参数覆盖 Agent 的系统提示，适配不同业务场景（客服、代码助手等）
+  详细实施计划：  
+
+5. 定制 Skills
+  目标： 支持通过 YAML/JSON 配置文件声明领域技能集合，动态注入工具描述和调用策略，无需修改代码即可扩展 Agent 能力
+  详细实施计划：
+
+6. MCP 工具服务器接入
+  目标： 接入 Model Context Protocol（MCP）标准，允许 Agent 调用外部 MCP Server 提供的工具，实现与第三方服务的标准化集成
+  详细实施计划：
+
+7. 用户自定义 Workflow
+  目标： 支持用户通过配置文件或脚本（如 YAML/DSL）自定义工作流，编排多步骤工具调用和 LLM 调用序列，
+    实现无需编写代码即可完成复杂自动化任务。
+    注：与 no.5「定制 Skills」的边界 —— Skills 管理的是单个工具的描述和参数；Workflow 管理的是
+    多个工具/LLM 的调用顺序和条件分支，属于更高层的编排逻辑。前置依赖 no.5 完成后再实现。
+  详细实施计划：
+
+8. 优化 ReAct
+  目标： 提升 Agent 在多轮对话中的推理能力和工具调用效率，具体包括：
+    · 动态工具选择策略：根据问题类型优化 System Prompt，引导 LLM 更准确地决策何时调用哪个工具
+    · 工具调用失败重试：工具执行出错时自动重试或降级，而非直接返回失败
+    · 多步骤任务规划：支持 LLM 在单次 run() 中拆解复杂任务并按步骤执行
+    · 工具结果质量判断：LLM 能识别工具返回内容为空/无关时主动切换策略，而非直接生成回答
+  详细实施计划：
+
+9. 多Agent协作
+  目标： 支持多个 Agent 协同工作，共享知识和任务，提高整体效率
+  详细实施计划：
+
+10. Web UI
+  目标： 接入 Gradio 或 Streamlit，提供图形界面
+  详细实施计划：
+
+11. 支持企业级向量数据库
+  目标： 支持接入企业级向量数据库，如 Pinecone、Weaviate 等，提高数据存储和检索能力
+  详细实施计划：
+
+12. Ollama
+  目标： 支持本地 Ollama 模型，完全离线运行
+  详细实施计划：
+
+13. URL 批量导入
+  目标： 支持通过配置文件批量爬取指定网页并入库
+  详细实施计划：
+
+14. 文档自动同步
+  目标： 用 `watchdog` 监听 `docs/` 变化，自动增量入库
+  详细实施计划：
+
+15. API/SDK接口
+  目标： 方便第三方系统集成
+  详细实施计划：
+
+16. 安全与权限管理
+  目标： 适合企业/团队场景
+  详细实施计划：
+
+17. 多语言支持
+  目标： 适应国际化需求
+  详细实施计划：
+
+18. 本地工具扩展
+  目标： 开发更多工具，扩充 Agent 工具集，增强处理复杂任务的能力
+  候选工具清单：
+    a. web_search：集成 Bing Search API 或 DuckDuckGo，直接返回搜索结果摘要+URL列表，
+       比 fetch_url 更高效（不需抓取全页，直接得到摘要）。可作为未来自动搜索的工具基础。
+       实现方案：
+         · 首选：Bing Search API（国内可访，安全密起环境变量 BING_SEARCH_API_KEY）
+         · 备选：duckduckgo-search 库（无需 Key，但需代理）
+    b. run_python：在沙筱环境中执行 Python 代码片段，返回输出结果
+    c. read_file：读取本地文件内容（如日志、csv），支持行范围指定
+    d. shell_cmd：执行本地 Shell 命令，返回 stdout/stderr
+  详细实施计划：

@@ -218,10 +218,10 @@ LLM 继续推理：结果是否足够？
 
 ### Phase 0：环境准备
 
-- [ ] 项目目录： 使用当前工程 AgentA
-- [ ] 创建并激活虚拟环境
-- [ ] 安装所有依赖
-- [ ] 验证 `.env` 文件
+- [x] 项目目录： 使用当前工程 AgentA
+- [x] 创建并激活虚拟环境
+- [x] 安装所有依赖
+- [x] 验证 `.env` 文件
 
 ---
 
@@ -229,10 +229,10 @@ LLM 继续推理：结果是否足够？
 
 **目标**：建立可切换模型的配置体系
 
-- [ ] 编写 `config.py`：定义各 Provider 的 base_url、model、api_key
-- [ ] 编写 `llm/provider.py`：实现统一 `chat()` 函数
-- [ ] 编写简单测试脚本，验证 LLM 使用 kimi api 调用成功
-- [ ] 预留接口支持 OpenAI、Ollama 等其他 Provider 的快速切换
+- [x] 编写 `config.py`：定义各 Provider 的 base_url、model、api_key
+- [x] 编写 `llm/provider.py`：实现统一 `chat()` 函数
+- [x] 编写简单测试脚本，验证 LLM 使用 kimi api 调用成功
+- [x] 预留接口支持 OpenAI、Ollama 等其他 Provider 的快速切换
 
 ---
 
@@ -240,15 +240,15 @@ LLM 继续推理：结果是否足够？
 
 **目标**：支持所有本地文件格式解析为纯文本（仅供离线入库使用）
 
-- [ ] 编写 `rag/parser.py`：
-  - [ ] 解析 `.md` / `.txt`（原生读取）
-  - [ ] 解析 `.html`（BeautifulSoup 提取正文）
-  - [ ] 解析 `.pdf`（pypdf）
-  - [ ] 解析 `.docx`（python-docx）
-  - [ ] 解析 `.pptx`（python-pptx，遍历所有 slide 的 shape）
-  - [ ] 解析 `.xlsx`（openpyxl，每行转为 `列1 | 列2 | ...` 格式）
-- [ ] 编写解析测试脚本，逐格式验证输出是否正常
-- [ ] 该功能有独立命令执行，每次文档更新后运行一次即可，无需频繁调用
+- [x] 编写 `rag/parser.py`：
+  - [x] 解析 `.md` / `.txt`（原生读取）
+  - [x] 解析 `.html`（BeautifulSoup 提取正文）
+  - [x] 解析 `.pdf`（pypdf）
+  - [x] 解析 `.docx`（python-docx）
+  - [x] 解析 `.pptx`（python-pptx，遍历所有 slide 的 shape）
+  - [x] 解析 `.xlsx`（openpyxl，每行转为 `列1 | 列2 | ...` 格式）
+- [x] 编写解析测试脚本，逐格式验证输出是否正常
+- [x] 该功能有独立命令执行，每次文档更新后运行一次即可，无需频繁调用
 
 > **说明**：网页 URL 不在此处处理。`parser.py` 只负责本地文件。URL 的实时抓取是 Agent 运行时通过 `fetch_url` 工具完成的（见 Phase 4）。如需将网页内容提前入库，可在 `ingest.py` 中单独扩展一个 URL 列表批量导入功能。
 
@@ -258,15 +258,15 @@ LLM 继续推理：结果是否足够？
 
 **目标**：将文档内容存入向量数据库，支持语义检索
 
-- [ ] 编写 `rag/ingest.py`：
-  - [ ] 实现 `chunk_text()` 函数  $env:HF_ENDPOINT="https://hf-mirror.com"
+- [x] 编写 `rag/ingest.py`：
+  - [x] 实现 `chunk_text()` 函数  $env:HF_ENDPOINT="https://hf-mirror.com"
     .venv\Scripts\python -m rag.ingest：固定长度分块，带重叠
-  - [ ] 实现 `ingest_all()` 函数：扫描 `docs/` 目录，逐文件解析 → 分块 → 向量化 → upsert
-  - [ ] 使用文件路径 + 块序号的 MD5 作为唯一 ID，支持重复运行不重复入库
-- [ ] 编写 `rag/retriever.py`：
-  - [ ] 实现 `search(query, top_k=5)` 函数：向量化 query → 检索 → 格式化返回结果（含来源文件名）
-- [ ] 将几份测试文档放入 `docs/`，运行 `python rag/ingest.py` 验证入库
-- [ ] 手动调用 `search()` 验证检索结果是否相关
+  - [x] 实现 `ingest_all()` 函数：扫描 `docs/` 目录，逐文件解析 → 分块 → 向量化 → upsert
+  - [x] 使用文件路径 + 块序号的 MD5 作为唯一 ID，支持重复运行不重复入库
+- [x] 编写 `rag/retriever.py`：
+  - [x] 实现 `search(query, top_k=5)` 函数：向量化 query → 检索 → 格式化返回结果（含来源文件名）
+- [x] 将几份测试文档放入 `docs/`，运行 `python rag/ingest.py` 验证入库
+- [x] 手动调用 `search()` 验证检索结果是否相关
 
 ---
 
@@ -274,12 +274,12 @@ LLM 继续推理：结果是否足够？
 
 **目标**：定义 Agent 可调用的工具，遵循 OpenAI Function Calling 格式
 
-- [ ] 编写 `agent/tools.py`：
-  - [ ] 定义 `TOOLS` 列表（JSON Schema 格式）：
+- [x] 编写 `agent/tools.py`：
+  - [x] 定义 `TOOLS` 列表（JSON Schema 格式）：
     - `search_knowledge`：搜索私有知识库
     - `fetch_url`：抓取网页内容
-  - [ ] 实现 `execute_tool(name, args)` 函数：根据工具名路由执行
-- [ ] 手动测试每个工具函数，确认返回格式正确
+  - [x] 实现 `execute_tool(name, args)` 函数：根据工具名路由执行
+- [x] 手动测试每个工具函数，确认返回格式正确
 
 ---
 
@@ -287,40 +287,40 @@ LLM 继续推理：结果是否足够？
 
 **目标**：实现完整的 ReAct Agent 循环
 
-- [ ] 编写 `agent/agent.py`：
-  - [ ] 定义 `SYSTEM_PROMPT`：指导 Agent 优先调用知识库，其次抓取网页
-  - [ ] 实现 `run(user_input)` 函数：
+- [x] 编写 `agent/agent.py`：
+  - [x] 定义 `SYSTEM_PROMPT`：指导 Agent 优先调用知识库，其次抓取网页
+  - [x] 实现 `run(user_input)` 函数：
     - 构建初始 messages
     - 循环调用 LLM
     - 检测是否有 `tool_calls`
     - 若有：执行工具，将结果追加到 messages，继续循环
     - 若无：输出最终回答，退出循环
-  - [ ] 加入调试日志：打印每次工具调用的名称和参数
+  - [x] 加入调试日志：打印每次工具调用的名称和参数
 
 ---
 
 ### Phase 6：入口与整合测试
 
-- [ ] 编写 `main.py`：实现简单的 CLI 对话循环
-- [ ] 端到端测试：
-  - [ ] 提问知识库内有答案的问题，验证 RAG 检索生效
-  - [ ] 提问知识库内没有的问题，验证 Agent 会调用 `fetch_url`
-  - [ ] 提问需要多步推理的问题，观察 Agent 多轮工具调用行为
-- [ ] 修复发现的 Bug
+- [x] 编写 `main.py`：实现简单的 CLI 对话循环
+- [x] 端到端测试：
+  - [x] 提问知识库内有答案的问题，验证 RAG 检索生效
+  - [x] 提问知识库内没有的问题，验证 Agent 会调用 `fetch_url`
+  - [x] 提问需要多步推理的问题，观察 Agent 多轮工具调用行为
+- [x] 修复发现的 Bug
 
 ---
 
 ### Phase 7：模型切换验证
 
-- [ ] 修改 `.env` 中 `LLM_PROVIDER=openai`，填入 OpenAI Key
-- [ ] 重新运行，验证完全相同的功能正常工作
+- [x] 修改 `.env` 中 `LLM_PROVIDER=openai`，填入 OpenAI Key
+- [x] 重新运行，验证完全相同的功能正常工作
 - [ ] （可选）部署 Ollama，切换为本地模型，验证离线运行
 
 ---
 
 ### Phase 8：优化与扩展（按需）
 
-- [ ] **中文优化**：将嵌入模型替换为 `BAAI/bge-small-zh`
+- [x] **中文优化**：增加嵌入模型 `BAAI/bge-small-zh` 的支持
 - [ ] **文档自动同步**：使用 `watchdog` 监听 `docs/` 目录变化，自动增量入库
 - [ ] **对话记忆**：将 messages 历史持久化到 SQLite，支持多轮上下文
 - [ ] **Web UI**：接入 Gradio 或 Streamlit，提供图形界面
@@ -367,5 +367,4 @@ python-dotenv
 >
 > - `lxml` 是 BeautifulSoup 解析 HTML 的推荐后端，比默认的 `html.parser` 更稳定，需显式安装。
 > - 所有 LLM Provider（Gemini、OpenAI、Ollama）均通过 `openai` SDK 调用，因为它们兼容 OpenAI 接口格式。Claude 原生 API 格式与 OpenAI 不同，有两种接入方式：①通过 AWS Bedrock / Google Vertex AI 的 OpenAI 兼容接口调用；②直接安装 `anthropic` SDK 在 `provider.py` 中单独适配。本项目 Phase 7 采用方式②，需额外安装 `anthropic` 库。
-
 ---
