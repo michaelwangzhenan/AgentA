@@ -180,6 +180,49 @@ class MemoryStore:
             )
         logger.debug("已清空 session: %s", session_id)
 
+    def delete_session(self, session_id: str) -> bool:
+        """
+        删除指定 session 的所有消息记录及元数据。
+
+        与 clear() 不同：clear() 用于重置当前活跃 session（调用方随后会新建同名或新 session）；
+        delete_session() 用于彻底删除任意历史 session，返回是否实际删除了记录。
+
+        Args:
+            session_id: 要删除的会话 ID。
+
+        Returns:
+            True 表示 session 存在并已删除；False 表示 session 不存在。
+        """
+        with self._conn:
+            existed = self._conn.execute(
+                "SELECT 1 FROM sessions WHERE session_id = ?", (session_id,)
+            ).fetchone() is not None
+            self._conn.execute(
+                "DELETE FROM messages WHERE session_id = ?", (session_id,)
+            )
+            self._conn.execute(
+                "DELETE FROM sessions WHERE session_id = ?", (session_id,)
+            )
+        if existed:
+            logger.debug("已删除 session: %s", session_id)
+        else:
+            logger.debug("delete_session: session 不存在，跳过: %s", session_id)
+        return existed
+
+    def clean_all_sessions(self) -> int:
+        """
+        清空数据库中所有 session 的消息记录和元数据。
+
+        Returns:
+            被删除的 session 数量。
+        """
+        with self._conn:
+            count: int = self._conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+            self._conn.execute("DELETE FROM messages")
+            self._conn.execute("DELETE FROM sessions")
+        logger.debug("已清空全部 %d 个 session", count)
+        return count
+
     def list_sessions(self) -> list[dict[str, Any]]:
         """
         列出所有历史 session，按创建时间降序排列。

@@ -139,6 +139,86 @@ class TestClear:
         store.clear("does-not-exist")  # 不应 raise
 
 
+# ── 单元测试：delete_session ──────────────────────────────────────────────────
+
+class TestDeleteSession:
+    """测试彻底删除指定历史 session。"""
+
+    def test_delete_existing_session_returns_true(self, store: MemoryStore) -> None:
+        store.append("del-session", {"role": "user", "content": "待删除"})
+        result = store.delete_session("del-session")
+        assert result is True
+
+    def test_delete_removes_all_messages(self, store: MemoryStore) -> None:
+        store.append("del-session", {"role": "user", "content": "消息1"})
+        store.append("del-session", {"role": "assistant", "content": "回答1"})
+        store.delete_session("del-session")
+        assert store.load("del-session") == []
+
+    def test_delete_removes_session_metadata(self, store: MemoryStore) -> None:
+        store.append("del-session", {"role": "user", "content": "消息"})
+        store.delete_session("del-session")
+        ids = [s["session_id"] for s in store.list_sessions()]
+        assert "del-session" not in ids
+
+    def test_delete_nonexistent_session_returns_false(self, store: MemoryStore) -> None:
+        result = store.delete_session("ghost-session")
+        assert result is False
+
+    def test_delete_nonexistent_session_is_safe(self, store: MemoryStore) -> None:
+        """删除不存在的 session 不应抛异常。"""
+        store.delete_session("ghost-session")  # 不应 raise
+
+    def test_delete_does_not_affect_other_sessions(self, store: MemoryStore) -> None:
+        store.append("keep-session", {"role": "user", "content": "保留"})
+        store.append("del-session", {"role": "user", "content": "删除"})
+        store.delete_session("del-session")
+        assert store.load("del-session") == []
+        assert len(store.load("keep-session")) == 1
+
+    def test_delete_session_no_longer_in_list(self, store: MemoryStore) -> None:
+        store.append("s-a", {"role": "user", "content": "A"})
+        store.append("s-b", {"role": "user", "content": "B"})
+        store.delete_session("s-a")
+        ids = [s["session_id"] for s in store.list_sessions()]
+        assert "s-a" not in ids
+        assert "s-b" in ids
+
+
+# ── 单元测试：clean_all_sessions ──────────────────────────────────────────────
+
+class TestCleanAllSessions:
+    """测试清空所有 session。"""
+
+    def test_clean_all_returns_correct_count(self, store: MemoryStore) -> None:
+        store.append("s1", {"role": "user", "content": "A"})
+        store.append("s2", {"role": "user", "content": "B"})
+        store.append("s3", {"role": "user", "content": "C"})
+        count = store.clean_all_sessions()
+        assert count == 3
+
+    def test_clean_all_removes_all_messages(self, store: MemoryStore) -> None:
+        store.append("s1", {"role": "user", "content": "A"})
+        store.append("s2", {"role": "user", "content": "B"})
+        store.clean_all_sessions()
+        assert store.load("s1") == []
+        assert store.load("s2") == []
+
+    def test_clean_all_removes_all_session_metadata(self, store: MemoryStore) -> None:
+        store.append("s1", {"role": "user", "content": "A"})
+        store.append("s2", {"role": "user", "content": "B"})
+        store.clean_all_sessions()
+        assert store.list_sessions() == []
+
+    def test_clean_all_on_empty_db_returns_zero(self, store: MemoryStore) -> None:
+        count = store.clean_all_sessions()
+        assert count == 0
+
+    def test_clean_all_on_empty_db_is_safe(self, store: MemoryStore) -> None:
+        """空库时调用不应抛异常。"""
+        store.clean_all_sessions()  # 不应 raise
+
+
 # ── 单元测试：list_sessions ───────────────────────────────────────────────────
 
 class TestListSessions:

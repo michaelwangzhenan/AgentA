@@ -54,6 +54,9 @@ TOOLS: list[dict[str, Any]] = [
             "description": (
                 "抓取指定网页的正文内容并返回纯文本。"
                 "当问题需要实时信息、或知识库中没有相关内容时调用此工具。"
+                "选择 URL 时优先访问国内可达网站，"
+                "如 xinhuanet.com、people.com.cn、baidu.com、zhihu.com、segmentfault.com、csdn.net 等，"
+                "国内无法满足需求时再尝试国外网站。"
             ),
             "parameters": {
                 "type": "object",

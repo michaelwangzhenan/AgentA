@@ -13,6 +13,8 @@ CLI 入口 —— 私有知识库 Agent 对话界面
     输入 /history           查看当前 session 的对话摘要
     输入 /session           列出所有历史 session
     输入 /session <id>      切换到指定 session 并恢复历史
+    输入 /del-session <id>   彻底删除指定历史 session 的所有记录
+    输入 /clean-session       清空所有历史 session 的记录
     输入 /quit 或 /exit 或 Ctrl+C 退出
 """
 
@@ -62,6 +64,8 @@ HELP_TEXT = """
   /history                   查看当前 session 的历史对话摘要
   /session                   列出所有历史 session
   /session <id>              切换到指定 session 并恢复历史
+  /del-session <id>          彻底删除指定历史 session 的所有记录（不可恢复）
+  /clean-session             清空所有历史 session 的记录（不可恢复）
   /quit                      退出程序
   /exit                      退出程序（同 /quit）
 
@@ -197,6 +201,33 @@ def main() -> None:
                 else:
                     # 列出所有历史 session
                     _list_sessions(memory)
+                continue
+            case "/del-session":
+                target_id = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""
+                if not target_id:
+                    print("⚠️  请指定要删除的 session ID，例：/del-session <id>\n")
+                elif target_id == agent.session_id:
+                    print("⚠️  不能删除当前活跃 session，请先用 /session <id> 切换到其他 session 后再删除。\n")
+                else:
+                    deleted = memory.delete_session(target_id)
+                    if deleted:
+                        print(f"🗑️  Session {target_id} 已彻底删除。\n")
+                    else:
+                        print(f"❌ Session {target_id} 不存在。\n")
+                continue
+            case "/clean-session":
+                sessions = memory.list_sessions()
+                if not sessions:
+                    print("📭 暂无历史 session 记录，无需清空。\n")
+                else:
+                    confirm = input(f"⚠️  即将清空全部 {len(sessions)} 个 session 记录（不可恢复），确认请输入 yes：").strip().lower()
+                    if confirm == "yes":
+                        count = memory.clean_all_sessions()
+                        # 当前 Agent 的历史也已被清除，重建一个新 session
+                        agent = Agent(verbose=True, memory=memory)
+                        print(f"🗑️  已清空全部 {count} 个 session 记录。新 Session: {agent.session_id}\n")
+                    else:
+                        print("已取消。\n")
                 continue
 
         # ── 正常问答 ──────────────────────────────────────────────────────────
