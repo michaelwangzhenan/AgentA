@@ -13,6 +13,9 @@ anthropic
 # HTTP client (used directly for proxy injection in provider.py)
 httpx
 
+# CLI Tab completion
+prompt_toolkit
+
 # Document parsers
 pypdf
 python-docx

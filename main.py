@@ -23,6 +23,9 @@ import sys
 import warnings
 
 from dotenv import load_dotenv
+from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.history import InMemoryHistory
 
 # 消除 HuggingFace tokenizer 的 FutureWarning
 warnings.filterwarnings("ignore", category=FutureWarning, module="transformers")
@@ -129,6 +132,22 @@ def _list_sessions(memory: MemoryStore) -> None:
     print()
 
 
+# 所有可补全的命令（不含需要参数的后缀，由用户自行补全参数）
+_CLI_COMMANDS: list[str] = [
+    "/help",
+    "/ingest",
+    "/ingest -m zh",
+    "/ingest -m en",
+    "/clear",
+    "/history",
+    "/session",
+    "/del-session",
+    "/clean-session",
+    "/quit",
+    "/exit",
+]
+
+
 def main() -> None:
     """CLI 主循环。"""
     print(BANNER)
@@ -138,9 +157,27 @@ def main() -> None:
     agent = Agent(verbose=True, memory=memory)
     print(f"💬 当前 Session: {agent.session_id}\n")
 
+    # 构建 Tab 补全器；completer 会在每次 prompt 前动态刷新 session 列表
+    def _make_completer() -> WordCompleter:
+        session_ids = [s["session_id"] for s in memory.list_sessions()]
+        words = _CLI_COMMANDS + [
+            f"/session {sid}" for sid in session_ids
+        ] + [
+            f"/del-session {sid}" for sid in session_ids
+        ]
+        return WordCompleter(words, sentence=True, match_middle=False)
+
+    prompt_session: PromptSession[str] = PromptSession(
+        history=InMemoryHistory(),
+        completer=_make_completer(),
+        complete_while_typing=False,  # 仅 Tab 触发，不干扰正常输入
+    )
+
     while True:
         try:
-            user_input = input("你: ").strip()
+            # 每轮刷新补全器，确保新建/删除的 session id 即时出现
+            prompt_session.completer = _make_completer()
+            user_input = prompt_session.prompt("你: ").strip()
         except (KeyboardInterrupt, EOFError):
             print("\n\n👋 再见！")
             memory.close()
