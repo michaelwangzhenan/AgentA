@@ -1,36 +1,23 @@
-# Project general coding guidelines
+# AgentA 编码规范
 
-## Conversion
-- Use Chinese in chat
+> 私有知识库 ReAct Agent，核心栈：Python 3.10+ / ChromaDB / sentence-transformers / OpenAI-compatible LLM / SQLite 记忆 / prompt_toolkit CLI
 
-## Code Style
-- Prefer modern Python (3.10+) features like match/case, structural pattern matching, `|` union types
-- Use type hints for all function signatures and important variables
-- Prefer list/dict/set comprehensions and generator expressions over raw loops
-- Use context managers (`with` statement) for resource management
-- Prefer `dataclasses` or `NamedTuple` for data containers
-- Use f-strings for string formatting instead of `%` or `.format()`
+## 通用
+- **用中文**回复和注释
+- Python 3.10+：match/case、`X | Y` 联合类型、f-string
+- 全量类型注解；`-> None` 显式标注；可空用 `X | None`
+- 异常捕获具体类型，禁止裸 `except`
 
-## Naming Conventions
-- Use `PascalCase` for class names
-- Use `snake_case` for variables, functions, and methods
-- Prefix private members with single underscore (`_private`)
-- Use `UPPER_CASE` for module-level constants
-- Use descriptive type variable names (e.g., `ItemType`, `KeyType` instead of just `T`)
+## 命名
+- 类 `PascalCase`，函数/变量 `snake_case`，私有成员 `_前缀`，常量 `UPPER_CASE`
 
-## Code Quality
-- Use meaningful variable and function names that clearly describe their purpose
-- Include docstrings for all public functions, classes, and modules
-- Add error handling using specific exception types (avoid bare `except:`)
-- Use `@dataclass(frozen=True)` for immutable value objects
-- Use `assert` and `typing.assert_never` for exhaustiveness checks
-- Add `-> None` return type annotations explicitly
-- Use `collections.abc` protocols (`Sequence`, `Mapping`, `Iterable`) for flexible typing
-- Use `typing.Optional[X]` or `X | None` for nullable values
+## 设计
+- 数据容器用 `@dataclass(frozen=True)` 或 `NamedTuple`
+- 接口用 `Protocol`，优先组合而非继承
+- 缓存用 `functools.cache` / `lru_cache`
+- 资源管理用 `with` 语句
+- 推荐 `collections.abc`（`Sequence`、`Mapping`、`Iterable`）做参数类型
 
-## Project-Specific Patterns
-- Use `Protocol` for structural subtyping (duck typing with type safety)
-- Use `TypeVar` and `Generic` for reusable generic classes/functions
-- Prefer composition over inheritance; use `Protocol` instead of `ABC` where possible
-- Use `functools.lru_cache` / `cache` for memoization
-- Follow defensive programming: validate inputs early, use `typing.TypeGuard` for narrowing
+## 项目约定
+- 项目根目录：`README.md`、`.env.example`、`src/`、`docs/`
+- 业务代码在 `src/`，入口 `main.py`, 功能实现要模块化
