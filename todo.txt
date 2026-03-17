@@ -150,13 +150,91 @@
     多个工具/LLM 的调用顺序和条件分支，属于更高层的编排逻辑。前置依赖 no.5 完成后再实现。
   详细实施计划：
 
-8. 优化 ReAct
+8. 优化 ReAct => Done
   目标： 提升 Agent 在多轮对话中的推理能力和工具调用效率，具体包括：
     · 动态工具选择策略：根据问题类型优化 System Prompt，引导 LLM 更准确地决策何时调用哪个工具
     · 工具调用失败重试：工具执行出错时自动重试或降级，而非直接返回失败
     · 多步骤任务规划：支持 LLM 在单次 run() 中拆解复杂任务并按步骤执行
     · 工具结果质量判断：LLM 能识别工具返回内容为空/无关时主动切换策略，而非直接生成回答
   详细实施计划：
+
+    【现状分析】
+      agent.py run() 循环已支持多轮 tool_calls，但存在以下问题：
+        1. 工具执行异常由 execute_tool() 内部 try/except 消化后返回错误字符串，
+           LLM 看到 "错误：..." 后倾向于直接生成失败回答，不会自动重试
+        2. SYSTEM_PROMPT 未告知 LLM"看到工具返回错误时应重试或换策略"
+        3. MAX_ITERATIONS=10 无分层保护：全部轮次耗尽后才发现是因为反复失败重试
+        4. 工具结果没有结构化标注（成功/失败/空结果），LLM 靠内容推断，可靠性低
+        5. execute_tool() 抛出 ValueError（未知工具）时，run() 未捕获，会崩溃
+
+    【实施步骤】
+
+    1. src/agent/tools.py — 工具结果结构化封装
+       新增 ToolResult dataclass：
+         @dataclass(frozen=True)
+         class ToolResult:
+             status: Literal["ok", "empty", "error"]
+             content: str
+             def to_llm_str(self) -> str  # 返回给 LLM 的格式化字符串，使用 [工具成功]/[结果为空]/[工具失败] 前缀标签
+       修改 _tool_search_knowledge()：
+         - 检测返回内容是否包含来源标记 "[1]"（有 → ok；无 → empty），与文案解耦
+         - 正常内容 → status="ok"
+       修改 _tool_fetch_url()：
+         - 以 "错误：" 开头 → status="error"；内容为空 → status="empty"；否则 "ok"
+       修改 execute_tool()：
+         - 返回 ToolResult 而非裸字符串
+         - 用 try/except Exception 兜底捕获所有异常（含未知工具 ValueError），返回 status="error"，
+           不再向上抛出异常，消除 run() 的崩溃风险
+
+    2. src/agent/agent.py — tool message 引导文字 + SYSTEM_PROMPT 第 5 条
+       【删除】_run_tool_with_retry()：Python 层静默重试绕过 LLM 推理，违反 ReAct 范式；
+               应由 LLM 在下一轮推理中主动决定是否换策略/换工具/换 URL
+       新增常量：
+         TOOL_EMPTY_HINT: str  # 知识库空结果时追加给 LLM 的引导提示（放在 tool message 末尾）
+       修改 run() 中工具执行部分：
+         - execute_tool() 返回 ToolResult，写入 messages 时用 result.to_llm_str()
+         - status="error" 时，在 tool message content 末尾追加
+           "\n\n[提示] 请换一种方式（换参数或换工具）重试，不要直接回答"
+         - status="empty" 且工具是 search_knowledge 时，追加 TOOL_EMPTY_HINT 提示，
+           引导 LLM 下一轮改调 fetch_url
+       在 SYSTEM_PROMPT "## 工具使用策略"末尾新增第 5 条：
+         5. 若工具返回 [结果为空] 或 [工具失败]：
+            - search_knowledge 返回 [结果为空] → 立即改调 fetch_url 补充搜索，不允许直接回答
+            - fetch_url 返回 [工具失败] → 换一个同类型的备选 URL 重试（最多换 2 次）
+            - 两种工具均无法获取有效信息时，才如实告知用户"当前无法获取相关信息"
+
+    3. src/agent/agent.py — 迭代次数分层保护
+       将单一 MAX_ITERATIONS 拆分为两个维度：
+         MAX_TOOL_ROUNDS: int = 8    # 最多 8 轮含 tool_calls 的推理（防止工具死循环）
+         MAX_TOTAL_ROUNDS: int = 12  # 含最终回答在内的总推理轮次上限
+       run() 中增加 tool_rounds 计数器：
+         - 每次 message.tool_calls 触发时 tool_rounds += 1
+         - tool_rounds >= MAX_TOOL_ROUNDS 时，下一轮 chat() 调用改为 tools=None（不传工具定义），
+           LLM 无工具可调，自然生成文本回答——消息序列格式合法，不违反 OpenAI 协议
+       保留原 max_iterations 参数签名不变（默认值改为 MAX_TOTAL_ROUNDS），向后兼容
+
+    4. tests/ — 同步更新测试
+       tests/test_phase4_tools.py：
+         - execute_tool() 返回类型从 str → ToolResult，所有字符串断言改为 .content 属性访问
+         - 新增：未知工具名返回 status="error" 而非抛 ValueError
+       tests/test_phase5_agent.py — 新增 TestToolGuidance 类：
+         - test_error_result_appends_hint：工具返回 error 时 tool message content 含"[提示]"
+         - test_empty_knowledge_appends_empty_hint：search_knowledge 返回 empty 时含 TOOL_EMPTY_HINT
+         - test_tool_rounds_limit_disables_tools：tool_rounds 达上限时 chat() 以 tools=None 调用
+         - test_total_rounds_limit_fallback：超过 MAX_TOTAL_ROUNDS 时返回兜底回答
+       修改已有 TestAgentInit：
+         - 验证 max_iterations 默认值为 MAX_TOTAL_ROUNDS
+
+    【涉及文件】
+      src/agent/tools.py         — ToolResult dataclass、execute_tool() 返回类型变更
+      src/agent/agent.py         — 引导文字、tools=None 降级、分层计数、SYSTEM_PROMPT 第5条
+      tests/test_phase4_tools.py — 断言适配 ToolResult.content + 新增未知工具测试
+      tests/test_phase5_agent.py — 新增 TestToolGuidance（4 个测试）+ 修改 TestAgentInit
+
+    【注意事项】
+      - to_llm_str() 使用 [工具成功]/[结果为空]/[工具失败] 标签，与 SYSTEM_PROMPT 第5条描述保持一致
+      - _tool_fetch_url() 内部异常已全部 try/except，ToolResult 封装仅在返回时包装，不改变内部逻辑
+      - tools=None 降级方案符合 OpenAI / 各兼容 Provider 协议，不会破坏消息序列格式
 
 9. 多Agent协作
   目标： 支持多个 Agent 协同工作，共享知识和任务，提高整体效率
@@ -196,6 +274,7 @@
 
 18. 本地工具扩展
   目标： 开发更多工具，扩充 Agent 工具集，增强处理复杂任务的能力
+  --> 工具扩展后，使用工具的 prompt, skills, reAct 等要对应优化
   候选工具清单：
     a. web_search：集成 Bing Search API 或 DuckDuckGo，直接返回搜索结果摘要+URL列表，
        比 fetch_url 更高效（不需抓取全页，直接得到摘要）。可作为未来自动搜索的工具基础。

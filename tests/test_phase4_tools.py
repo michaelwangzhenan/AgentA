@@ -9,7 +9,7 @@ Phase 4 测试：工具层
 """
 
 import pytest
-from src.agent.tools import TOOLS, execute_tool
+from src.agent.tools import TOOLS, ToolResult, execute_tool
 
 
 class TestToolsSchema:
@@ -48,21 +48,25 @@ class TestToolsSchema:
 class TestExecuteToolRouting:
     """测试 execute_tool() 路由逻辑"""
 
-    def test_unknown_tool_raises_value_error(self) -> None:
-        with pytest.raises(ValueError, match="未知工具"):
-            execute_tool("nonexistent_tool", {})
+    def test_unknown_tool_returns_error_result(self) -> None:
+        """未知工具名应返回 status='error' 的 ToolResult，不抛出异常"""
+        result = execute_tool("nonexistent_tool", {})
+        assert isinstance(result, ToolResult)
+        assert result.status == "error"
+        assert "未知工具" in result.content
 
     @pytest.mark.integration
-    def test_search_knowledge_returns_string(self) -> None:
+    def test_search_knowledge_returns_tool_result(self) -> None:
         result = execute_tool("search_knowledge", {"query": "RAG 技术", "top_k": 2})
-        assert isinstance(result, str)
-        assert len(result) > 0
+        assert isinstance(result, ToolResult)
+        assert result.status in ("ok", "empty")
+        assert len(result.content) > 0
 
     @pytest.mark.integration
     def test_search_knowledge_default_top_k(self) -> None:
         """top_k 未传时应使用默认值 5，不抛出异常"""
         result = execute_tool("search_knowledge", {"query": "向量数据库"})
-        assert isinstance(result, str)
+        assert isinstance(result, ToolResult)
 
 
 class TestFetchUrl:
@@ -70,21 +74,24 @@ class TestFetchUrl:
 
     def test_invalid_url_scheme_returns_error(self) -> None:
         result = execute_tool("fetch_url", {"url": "ftp://example.com"})
-        assert "错误" in result
-        assert "http" in result
+        assert isinstance(result, ToolResult)
+        assert result.status == "error"
+        assert "http" in result.content
 
     def test_invalid_url_no_scheme_returns_error(self) -> None:
         result = execute_tool("fetch_url", {"url": "example.com"})
-        assert "错误" in result
+        assert isinstance(result, ToolResult)
+        assert result.status == "error"
 
     @pytest.mark.integration
-    def test_fetch_valid_url_returns_text(self) -> None:
+    def test_fetch_valid_url_returns_ok(self) -> None:
         """抓取一个稳定的公开页面，验证返回非空文本"""
         result = execute_tool("fetch_url", {"url": "https://httpbin.org/html", "max_chars": 500})
-        assert isinstance(result, str)
-        assert len(result) > 0
+        assert isinstance(result, ToolResult)
+        assert result.status == "ok"
+        assert len(result.content) > 0
         # httpbin 返回 Herman Melville 的段落，不含 script 标签
-        assert "<script>" not in result
+        assert "<script>" not in result.content
 
     @pytest.mark.integration
     def test_fetch_url_respects_max_chars(self) -> None:
@@ -92,12 +99,13 @@ class TestFetchUrl:
         max_chars = 200
         result = execute_tool("fetch_url", {"url": "https://httpbin.org/html", "max_chars": max_chars})
         # 截断后的内容 ≤ max_chars + 截断提示（约 30 字符）
-        assert len(result) <= max_chars + 60
+        assert len(result.content) <= max_chars + 60
 
     @pytest.mark.integration
     def test_fetch_nonexistent_url_returns_error(self) -> None:
         result = execute_tool("fetch_url", {"url": "https://this-domain-does-not-exist-xyz123.com"})
-        assert "错误" in result
+        assert isinstance(result, ToolResult)
+        assert result.status == "error"
 
 
 class TestFetchUrlDescriptionGuidance:

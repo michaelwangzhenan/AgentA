@@ -21,7 +21,7 @@ import logging
 import uuid
 from typing import Any
 
-from src.agent.tools import TOOLS, execute_tool
+from src.agent.tools import TOOLS, execute_tool, ToolResult
 from src.llm.provider import chat
 from src.memory.store import MemoryStore
 
@@ -51,6 +51,10 @@ SYSTEM_PROMPT = """你是一个私有知识库智能助手。
    - 通用搜索：baidu.com、so.com（360搜索）
    若国内网站无法提供有效信息，再尝试访问国外网站。
 4. 所有工具调用结束后，综合已获取的信息生成最终回答。
+5. 若工具返回 [结果为空] 或 [工具失败]：
+   - `search_knowledge` 返回 [结果为空] → 立即改调 `fetch_url` 补充搜索，不允许直接回答
+   - `fetch_url` 返回 [工具失败] → 换一个同类型的备选 URL 重试（最多换 2 次）
+   - 两种工具均无法获取有效信息时，才如实告知用户"当前无法获取相关信息"
 
 ## 回答要求
 - 回答须基于工具返回的实际内容，不要凭空捏造。
@@ -58,8 +62,17 @@ SYSTEM_PROMPT = """你是一个私有知识库智能助手。
 - 回答简洁、准确，使用中文。
 """
 
-# 最大 ReAct 循环迭代次数，防止 LLM 无限调用工具
-MAX_ITERATIONS: int = 10
+# 最大工具调用轮次，防止 LLM 陷入工具调用死循环
+MAX_TOOL_ROUNDS: int = 8
+# 含最终回答在内的总推理轮次上限
+MAX_TOTAL_ROUNDS: int = 12
+# 向后兼容别名
+MAX_ITERATIONS: int = MAX_TOTAL_ROUNDS
+
+# search_knowledge 返回空结果时追加给 LLM 的引导提示
+TOOL_EMPTY_HINT: str = (
+    "\n\n[提示] 知识库中未找到相关内容，请立即改调 fetch_url 工具进行网络搜索，不允许直接回答。"
+)
 
 
 class Agent:
@@ -68,7 +81,7 @@ class Agent:
 
     Attributes:
         system_prompt: Agent 的系统提示，定义行为策略。
-        max_iterations: 最大工具调用轮次，超出后强制返回当前结果。
+        max_iterations: 最大总推理轮次（含工具调用和最终回答），超出后强制返回兜底回答。
         verbose: 是否打印每轮工具调用的调试信息。
         session_id: 会话 ID，用于持久化对话历史。
         max_history_turns: 加载历史时保留最近 N 轮（一轮 = user + assistant），防止超出 context window。
@@ -77,7 +90,7 @@ class Agent:
     def __init__(
         self,
         system_prompt: str = SYSTEM_PROMPT,
-        max_iterations: int = MAX_ITERATIONS,
+        max_iterations: int = MAX_TOTAL_ROUNDS,
         verbose: bool = True,
         session_id: str | None = None,
         max_history_turns: int = 20,
@@ -117,15 +130,24 @@ class Agent:
         # 将当前轮用户输入写入 DB
         self._memory.append(self.session_id, {"role": "user", "content": user_input})
 
+        tool_rounds = 0  # 已消耗的工具调用轮次计数
+
         for iteration in range(1, self.max_iterations + 1):
             logger.info("[Agent] 第 %d 轮推理，messages 长度: %d", iteration, len(messages))
 
-            # 调用 LLM（携带工具定义）
-            response = chat(messages, tools=TOOLS)
+            # 工具轮次达上限时，去掉 tools 参数，让 LLM 强制生成文本回答
+            # （不注入 user 消息，保持消息序列格式合法）
+            active_tools = TOOLS if tool_rounds < MAX_TOOL_ROUNDS else None
+            if active_tools is None and tool_rounds >= MAX_TOOL_ROUNDS:
+                logger.warning("[Agent] 工具调用已达上限 %d 轮，强制生成最终回答", MAX_TOOL_ROUNDS)
+
+            # 调用 LLM（携带工具定义，或 None 时强制文本回答）
+            response = chat(messages, tools=active_tools)
             message = response.choices[0].message
 
             # ── 情况 1：LLM 决定调用工具 ──────────────────────────────────────
             if message.tool_calls:
+                tool_rounds += 1
                 # 将 assistant 的 tool_calls 消息追加到 messages 并写入 DB
                 assistant_msg = self._assistant_message(message)
                 messages.append(assistant_msg)
@@ -142,18 +164,27 @@ class Agent:
                             json.dumps(tool_args, ensure_ascii=False),
                         )
 
-                    # 执行工具
-                    tool_result = execute_tool(tool_name, tool_args)
+                    # 执行工具，返回结构化 ToolResult
+                    result: ToolResult = execute_tool(tool_name, tool_args)
 
                     if self.verbose:
-                        preview = tool_result[:100].replace("\n", " ")
-                        logger.info("[Agent] 工具结果预览: %s...", preview)
+                        preview = result.content[:100].replace("\n", " ")
+                        logger.info(
+                            "[Agent] 工具结果 [%s] 预览: %s...", result.status, preview
+                        )
+
+                    # 构造写入 LLM 的 content：状态标签 + 引导提示
+                    llm_content = result.to_llm_str()
+                    if result.status == "error":
+                        llm_content += "\n\n[提示] 请换一种方式（换参数或换工具）重试，不要直接回答。"
+                    elif result.status == "empty" and tool_name == "search_knowledge":
+                        llm_content += TOOL_EMPTY_HINT
 
                     # 将工具结果追加到 messages 并写入 DB
-                    tool_msg: dict[str, Any] = {
+                    tool_msg: dict = {
                         "role": "tool",
                         "tool_call_id": tool_call.id,
-                        "content": tool_result,
+                        "content": llm_content,
                     }
                     messages.append(tool_msg)
                     self._memory.append(self.session_id, tool_msg)

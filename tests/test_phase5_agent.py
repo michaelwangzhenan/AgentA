@@ -16,7 +16,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.agent.agent import Agent, MAX_ITERATIONS, SYSTEM_PROMPT
+from src.agent.agent import Agent, MAX_ITERATIONS, MAX_TOOL_ROUNDS, MAX_TOTAL_ROUNDS, SYSTEM_PROMPT, TOOL_EMPTY_HINT
+from src.agent.tools import ToolResult
 
 
 # ── 辅助函数：构造 mock LLM response ─────────────────────────────────────────
@@ -49,8 +50,12 @@ class TestAgentInit:
     def test_default_init(self) -> None:
         agent = Agent()
         assert agent.system_prompt == SYSTEM_PROMPT
-        assert agent.max_iterations == MAX_ITERATIONS
+        assert agent.max_iterations == MAX_TOTAL_ROUNDS
         assert agent.verbose is True
+
+    def test_max_iterations_alias_equals_total_rounds(self) -> None:
+        """MAX_ITERATIONS 向后兼容别名应等于 MAX_TOTAL_ROUNDS"""
+        assert MAX_ITERATIONS == MAX_TOTAL_ROUNDS
 
     def test_custom_init(self) -> None:
         agent = Agent(system_prompt="custom", max_iterations=3, verbose=False)
@@ -111,7 +116,7 @@ class TestAgentToolCall:
             return _make_text_response("RAG 是检索增强生成技术。")
 
         with patch("src.agent.agent.chat", side_effect=mock_chat), \
-             patch("src.agent.agent.execute_tool", return_value="RAG 相关文档片段"):
+             patch("src.agent.agent.execute_tool", return_value=ToolResult(status="ok", content="RAG 相关文档片段")):
             result = agent.run("什么是 RAG？")
 
         assert result == "RAG 是检索增强生成技术。"
@@ -129,7 +134,7 @@ class TestAgentToolCall:
             return _make_text_response("最终回答")
 
         with patch("src.agent.agent.chat", side_effect=mock_chat), \
-             patch("src.agent.agent.execute_tool", return_value="工具返回内容"):
+             patch("src.agent.agent.execute_tool", return_value=ToolResult(status="ok", content="工具返回内容")):
             agent.run("测试问题")
 
         # 应有 tool role 的 message
@@ -150,7 +155,7 @@ class TestAgentToolCall:
             return _make_text_response("完成")
 
         with patch("src.agent.agent.chat", side_effect=mock_chat), \
-             patch("src.agent.agent.execute_tool", return_value="结果"):
+             patch("src.agent.agent.execute_tool", return_value=ToolResult(status="ok", content="结果")):
             agent.run("问题")
 
         tool_messages = [m for m in captured if m.get("role") == "tool"]
@@ -166,7 +171,7 @@ class TestAgentMaxIterations:
 
         with patch("src.agent.agent.chat",
                    return_value=_make_tool_call_response("search_knowledge", {"query": "q"})), \
-             patch("src.agent.agent.execute_tool", return_value="结果"):
+             patch("src.agent.agent.execute_tool", return_value=ToolResult(status="ok", content="结果")):
             result = agent.run("无法结束的问题")
 
         assert "抱歉" in result or "规定轮次" in result
@@ -179,7 +184,7 @@ class TestAgentMaxIterations:
         )
 
         with patch("src.agent.agent.chat", mock_chat), \
-             patch("src.agent.agent.execute_tool", return_value="结果"):
+             patch("src.agent.agent.execute_tool", return_value=ToolResult(status="ok", content="结果")):
             agent.run("问题")
 
         assert mock_chat.call_count == 3
@@ -249,13 +254,13 @@ class TestSystemPromptWebSearch:
 
         tool_calls: list[str] = []
 
-        def mock_execute_tool(name: str, args: dict) -> str:
+        def mock_execute_tool(name: str, args: dict) -> ToolResult:
             tool_calls.append(name)
             if name == "search_knowledge":
-                return "知识库为空，未找到相关内容。"
+                return ToolResult(status="empty", content="知识库为空，未找到相关内容。")
             if name == "fetch_url":
-                return "百度新闻页面内容：AI大模型新动态……"
-            return ""
+                return ToolResult(status="ok", content="百度新闻页面内容：AI大模型新动态……")
+            return ToolResult(status="error", content="未知工具")
 
         with patch("src.agent.agent.chat", side_effect=mock_chat), \
              patch("src.agent.agent.execute_tool", side_effect=mock_execute_tool):
@@ -272,3 +277,103 @@ class TestSystemPromptWebSearch:
         result = agent.run("今天的天气怎么样？请上网查一下。")
         assert isinstance(result, str)
         assert len(result) > 10
+
+
+class TestToolGuidance:
+    """测试 ToolResult 引导文字注入与工具轮次分层保护"""
+
+    def test_error_result_appends_hint_in_tool_message(self) -> None:
+        """工具返回 error 时，写入 messages 的 content 应含 [提示] 引导文字"""
+        agent = Agent(verbose=False)
+        captured_tool_messages: list[dict] = []
+
+        def mock_chat(messages, tools=None, **kwargs):
+            for m in messages:
+                if isinstance(m, dict) and m.get("role") == "tool":
+                    captured_tool_messages.append(m)
+            # 第一轮调用工具，第二轮直接回答
+            if not captured_tool_messages:
+                return _make_tool_call_response("fetch_url", {"url": "https://example.com"})
+            return _make_text_response("无法获取信息。")
+
+        error_result = ToolResult(status="error", content="请求超时（15s），URL: https://example.com")
+
+        with patch("src.agent.agent.chat", side_effect=mock_chat), \
+             patch("src.agent.agent.execute_tool", return_value=error_result):
+            agent.run("查询某网页")
+
+        assert captured_tool_messages, "应有 tool role 消息"
+        tool_content = captured_tool_messages[0]["content"]
+        assert "[工具失败]" in tool_content
+        assert "[提示]" in tool_content
+        assert "换一种方式" in tool_content
+
+    def test_empty_knowledge_appends_tool_empty_hint(self) -> None:
+        """search_knowledge 返回 empty 时，tool message 应含 TOOL_EMPTY_HINT"""
+        agent = Agent(verbose=False)
+        captured_tool_messages: list[dict] = []
+
+        def mock_chat(messages, tools=None, **kwargs):
+            for m in messages:
+                if isinstance(m, dict) and m.get("role") == "tool":
+                    captured_tool_messages.append(m)
+            if not captured_tool_messages:
+                return _make_tool_call_response("search_knowledge", {"query": "未知主题"})
+            return _make_text_response("当前无法获取相关信息。")
+
+        empty_result = ToolResult(status="empty", content="知识库为空，未找到相关内容。")
+
+        with patch("src.agent.agent.chat", side_effect=mock_chat), \
+             patch("src.agent.agent.execute_tool", return_value=empty_result):
+            agent.run("未知主题")
+
+        assert captured_tool_messages
+        tool_content = captured_tool_messages[0]["content"]
+        assert "[结果为空]" in tool_content
+        assert TOOL_EMPTY_HINT.strip() in tool_content
+
+    def test_ok_result_has_no_hint(self) -> None:
+        """工具返回 ok 时，tool message 不应含 [提示] 引导文字"""
+        agent = Agent(verbose=False)
+        captured_tool_messages: list[dict] = []
+
+        def mock_chat(messages, tools=None, **kwargs):
+            for m in messages:
+                if isinstance(m, dict) and m.get("role") == "tool":
+                    captured_tool_messages.append(m)
+            if not captured_tool_messages:
+                return _make_tool_call_response("search_knowledge", {"query": "RAG"})
+            return _make_text_response("这是回答。")
+
+        ok_result = ToolResult(status="ok", content="[1] 来源: doc.txt\nRAG 相关内容")
+
+        with patch("src.agent.agent.chat", side_effect=mock_chat), \
+             patch("src.agent.agent.execute_tool", return_value=ok_result):
+            agent.run("什么是 RAG？")
+
+        assert captured_tool_messages
+        tool_content = captured_tool_messages[0]["content"]
+        assert "[提示]" not in tool_content
+        assert "[工具失败]" not in tool_content
+
+    def test_tool_rounds_limit_disables_tools_in_chat(self) -> None:
+        """tool_rounds 达到 MAX_TOOL_ROUNDS 时，chat() 应以 tools=None 调用"""
+        agent = Agent(verbose=False)
+        chat_calls: list[Any] = []
+
+        def mock_chat(messages, tools=None, **kwargs):
+            chat_calls.append(tools)
+            # 前 MAX_TOOL_ROUNDS 轮一直返回 tool_call，最后一轮（tools=None）返回文本
+            if tools is not None:
+                return _make_tool_call_response("search_knowledge", {"query": "q"})
+            return _make_text_response("最终回答")
+
+        ok_result = ToolResult(status="ok", content="结果内容")
+
+        with patch("src.agent.agent.chat", side_effect=mock_chat), \
+             patch("src.agent.agent.execute_tool", return_value=ok_result):
+            result = agent.run("测试工具轮次上限")
+
+        # 最后一次 chat 调用应传入 tools=None
+        assert chat_calls[-1] is None, "达到工具轮次上限后应以 tools=None 调用 chat()"
+        assert result == "最终回答"
