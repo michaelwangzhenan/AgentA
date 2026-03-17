@@ -92,10 +92,12 @@ def search(query: str, top_k: int = config.RAG_TOP_K) -> str:
     """
     在所有已入库的 collection 中检索最相关的 Top-K 文档片段。
 
-    策略：遍历 config.EMBEDDING_MODELS 中定义的所有 (model, collection) 组合，
-    每个 collection 内部按自身距离升序各取 top_k 条。
-    因不同 embedding 模型距离空间不可比，最终采用 round-robin 交错合并：
-    依次取每个 collection 的第 1、2、3 名……，直到凑齐出全局 top_k 条。
+    两阶段流程：
+      阶段一（召回）：遍历所有 (model, collection)，每个 collection 内部按自身
+        距离升序各取 top_k × RERANKER_RECALL_MULTIPLIER 条；因不同 embedding
+        模型距离空间不可比，采用 round-robin 交错合并得到候选集。
+      阶段二（精排）：RERANKER_ENABLED=true 时，用 Cross-Encoder 对候选集重新
+        打分并降序排列，截取 top_k 条；否则直接截取 round-robin 前 top_k 条。
 
     Args:
         query: 用户的自然语言问题。
@@ -107,10 +109,17 @@ def search(query: str, top_k: int = config.RAG_TOP_K) -> str:
     """
     client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
 
-    # 每个 collection 各自检索 top_k 条，结果按内部距离升序
+    # 召回窗口：开启精排时扩大取回范围，关闭时与 top_k 相同
+    recall_k = (
+        top_k * config.RERANKER_RECALL_MULTIPLIER
+        if config.RERANKER_ENABLED
+        else top_k
+    )
+
+    # 每个 collection 各自检索 recall_k 条，结果按内部距离升序
     per_collection: list[list[_Hit]] = []
     for alias, (model_name, collection_name) in config.EMBEDDING_MODELS.items():
-        hits = _query_collection(client, model_name, collection_name, query, top_k)
+        hits = _query_collection(client, model_name, collection_name, query, recall_k)
         if hits:
             hits.sort(key=lambda h: h.distance)
             per_collection.append(hits)
@@ -126,15 +135,15 @@ def search(query: str, top_k: int = config.RAG_TOP_K) -> str:
 
     # Round-robin 交错合并：依次取每个 collection 的第 1、2、... 名
     # 避免跨模型距离不可比导致某个库被整体压制
-    top_hits: list[_Hit] = []
+    candidates: list[_Hit] = []
     iterators = [iter(bucket) for bucket in per_collection]
-    while len(top_hits) < top_k and iterators:
+    while len(candidates) < recall_k and iterators:
         exhausted: list[int] = []
         for idx, it in enumerate(iterators):
-            if len(top_hits) >= top_k:
+            if len(candidates) >= recall_k:
                 break
             try:
-                top_hits.append(next(it))
+                candidates.append(next(it))
             except StopIteration:
                 exhausted.append(idx)
         # 移除已耗尽的迭代器（倒序避免索引错位）
@@ -142,6 +151,14 @@ def search(query: str, top_k: int = config.RAG_TOP_K) -> str:
             iterators.pop(idx)
         if not iterators:
             break
+
+    # 阶段二：精排（如已开启）
+    if config.RERANKER_ENABLED:
+        from src.rag.reranker import rerank
+        top_hits = rerank(query=query, hits=candidates, top_k=top_k)
+        logger.info("Reranker 精排后保留 %d 条", len(top_hits))
+    else:
+        top_hits = candidates[:top_k]
 
     # 格式化输出，供 LLM 使用
     parts: list[str] = []

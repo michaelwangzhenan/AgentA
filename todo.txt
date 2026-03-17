@@ -1,11 +1,10 @@
 优先级：
-High: 1, 2, 3, 8 
-Middle: 4, 5, 6, 9,
-Low: 7, 10, 11, 12, 13, 14
-tbd: 15, 16, 17, 18
-
+  High: 1, 2, 3, 8 
+  Middle: 4, 5, 6, 9,
+  Low: 7, 10, 11, 12, 13, 14
+  tbd: 15, 16, 17, 18
+-
 待优化项：
-
 1. 对话记忆 => Done
   目标： 将 messages 历史持久化到 SQLite，重启后仍可延续上下文，支持多轮跨会话对话
   
@@ -68,9 +67,69 @@ tbd: 15, 16, 17, 18
       - 单元测试：fetch_url description 包含国内网站引导说明
       - 集成测试（integration marker）：验证知识库无命中时 Agent 主动调用 fetch_url
 
-3. 重排序（Reranking）
+3. 重排序（Reranking）=> Done
   目标： 在向量检索结果上加 Cross-Encoder 二次排序，提升精度
   详细实施计划：
+    【背景】
+      当前 retriever.py 采用两个 Bi-Encoder（SentenceTransformer）+ round-robin 合并：
+        · all-MiniLM-L6-v2     → 英文向量化入库 / 召回 kb_en collection
+        · BAAI/bge-small-zh    → 中文向量化入库 / 召回 kb_zh collection
+      Bi-Encoder 速度快但精度有限——它将 query 和 document 各自单独编码，
+      无法捕捉两者之间的细粒度语义交互。
+
+      Reranking 引入第三个模型 Cross-Encoder（ms-marco-MiniLM-L-6-v2）作为二阶段精排：
+        · 三个模型职责不同，互不替代，同时工作：
+            阶段一（召回）：两个 Bi-Encoder 各自查询 → round-robin 合并取 top_k×3 候选
+            阶段二（精排）：Cross-Encoder 对候选逐对打分 → 降序重排 → 截取最终 top_k 条
+        · RERANKER_ENABLED=false 时跳过阶段二，两个 Bi-Encoder 行为完全不变（向后兼容）
+
+      三个模型对比：
+        模型                       职责          输入          特点
+        all-MiniLM-L6-v2          英文召回       单个文本      速度快，支持批量入库
+        BAAI/bge-small-zh         中文召回       单个文本      速度快，支持批量入库
+        ms-marco-MiniLM-L-6-v2    精排打分       (query, doc)  精度高，不可用于入库
+
+    【选型】
+      模型：cross-encoder/ms-marco-MiniLM-L-6-v2（约 23MB，推理极快，中英双语）
+      包：sentence-transformers（已安装，CrossEncoder 类在其中，无需新增依赖）
+      缓存：首次下载后通过 TRANSFORMERS_OFFLINE=1 完全离线运行
+
+    【实施步骤】
+
+    1. src/rag/reranker.py — 新建 Reranker 模块
+       - 封装 CrossEncoder，对外暴露 rerank(query, hits, top_k) -> list[_Hit] 接口
+       - 懒加载（首次调用时才初始化模型），避免影响无需 rerank 场景的启动速度
+       - 模型名通过 config.RERANKER_MODEL 读取
+       - 候选数 ≤ top_k 时直接透传，不做无意义的重排
+
+    2. src/config.py — 新增配置项
+       - RERANKER_MODEL: str = os.getenv("RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+       - RERANKER_ENABLED: bool = os.getenv("RERANKER_ENABLED", "true").lower() == "true"
+       - RERANKER_RECALL_MULTIPLIER: int = int(os.getenv("RERANKER_RECALL_MULTIPLIER", "3"))
+
+    3. src/rag/retriever.py — 集成 Reranker
+       - search() 召回窗口扩大为 top_k × RERANKER_RECALL_MULTIPLIER
+       - RERANKER_ENABLED=true 时调用 reranker.rerank()，否则直接使用 round-robin 结果
+
+    4. .env.example + .env — 补充三个新配置项注释，.env 默认开启 RERANKER_ENABLED=true
+
+    5. tests/test_phase3_rag.py — 新增测试
+       - 单元测试：rerank() 返回数量 ≤ top_k、分数降序排列
+       - 单元测试：候选数 ≤ top_k 时直接透传，不调用 CrossEncoder
+       - 单元测试：RERANKER_ENABLED=false 时 search() 跳过 rerank（mock 验证未调用）
+       - 集成测试（integration marker）：真实 query 重排后 top-1 相关性高于重排前
+
+    6. README — 更新项目结构（新增 reranker.py）、配置项说明、工作流程图
+
+    【模型下载（首次）】
+      $env:TRANSFORMERS_OFFLINE="0"; $env:HF_ENDPOINT="https://hf-mirror.com"
+      .venv\Scripts\python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); print('OK')"
+      下载完成后恢复 TRANSFORMERS_OFFLINE=1
+
+    【风险与边界】
+      - 模型冷启动：首次调用 CrossEncoder 约需 1-2 秒加载，后续调用毫秒级
+      - 召回窗口倍数：默认 3（即 top_k=5 时取 15 条候选再精排），可通过环境变量调整
+      - 两个 collection 都为空时，round-robin 阶段已返回空，rerank 不会被调用
 
 4. 定制 System Prompt
   目标： 支持通过配置文件或 CLI 参数覆盖 Agent 的系统提示，适配不同业务场景（客服、代码助手等）

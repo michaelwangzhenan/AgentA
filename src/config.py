@@ -151,6 +151,16 @@ PROXIED_PROVIDERS: frozenset[str] = frozenset({"openai", "grok", "claude"})
 CHUNK_SIZE: int = 600
 CHUNK_OVERLAP: int = 100
 
+# ── Reranker 配置 ────────────────────────────────────────────────────────────
+# Cross-Encoder 模型，用于在 Bi-Encoder 召回结果上做二阶段精排
+RERANKER_MODEL: str = os.getenv(
+    "RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"
+)
+# true 开启二阶段精排；false 跳过精排，直接使用 round-robin 结果（向后兼容）
+RERANKER_ENABLED: bool = os.getenv("RERANKER_ENABLED", "true").lower() == "true"
+# 召回窗口倍数：精排前取 top_k × N 条候选，默认 3
+RERANKER_RECALL_MULTIPLIER: int = int(os.getenv("RERANKER_RECALL_MULTIPLIER", "3"))
+
 
 def get_active_config() -> ProviderConfig:
     """获取当前激活的 Provider 配置，若不存在则抛出异常。"""

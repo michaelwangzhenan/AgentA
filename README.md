@@ -7,6 +7,7 @@
 - 解析多种格式文档：MD / TXT / HTML / PDF / DOCX / PPTX / XLSX
 - 本地向量化存储（ChromaDB），数据不出本地
 - **双语 Embedding**：英文用 `all-MiniLM-L6-v2`（kb_en），中文用 `BAAI/bge-small-zh`（kb_zh），各自独立 collection，检索时 round-robin 交错合并，避免跨模型距离不可比
+- **Cross-Encoder 二阶段精排**：召回阶段取 `top_k × RERANKER_RECALL_MULTIPLIER` 条候选，再由 `cross-encoder/ms-marco-MiniLM-L-6-v2` 重新打分排序，显著提升 Top-K 精度；可通过 `RERANKER_ENABLED=false` 关闭（向后兼容）
 - 自然语言提问，ReAct Agent 自动检索相关文档片段后调用 LLM 生成答案
 - 支持网页内容实时抓取（`fetch_url` 工具）作为知识库补充
 - 支持 9 个 LLM Provider ：Kimi / DeepSeek / Qwen / MiniMax / GLM / Ollama / OpenAI / Grok / Claude
@@ -68,6 +69,9 @@ $env:TRANSFORMERS_OFFLINE="0"; $env:HF_ENDPOINT="https://hf-mirror.com"
 
 # 中文模型（~96MB，可选）
 .venv\Scripts\python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-small-zh'); print('OK')"
+
+# Cross-Encoder 精排模型（~23MB，中英文双语）
+.venv\Scripts\python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); print('OK')"
 ```
 
 下载完成后将 `.env` 中 `TRANSFORMERS_OFFLINE=1` 恢复即可完全离线运行。
@@ -77,7 +81,9 @@ Embedding 模型别名：
 | `en` | `all-MiniLM-L6-v2` | `kb_en` | 英文 / 多语言 |
 | `zh` | `BAAI/bge-small-zh` | `kb_zh` | 中文文档 |
 
-检索时自动查询所有已有 collection，采用 **round-robin 交错合并**（准轮流取每个 collection 的第 1、2、... 名），避免不同模型距离值域差异导致某个库被整体压制。
+检索流程（两阶段）：
+1. **召回**：每个 collection 各取 `top_k × RERANKER_RECALL_MULTIPLIER` 条，round-robin 交错合并为候选集
+2. **精排**：Cross-Encoder 对候选集重新打分，降序截取最终 `top_k` 条；设 `RERANKER_ENABLED=false` 可跳过精排
 
 ---
 
@@ -130,7 +136,7 @@ LLM_PROVIDER=claude     # Anthropic Claude
 # 按模块测试
 .venv\Scripts\python -m pytest tests/test_phase1_llm.py    # LLM 配置 & Provider
 .venv\Scripts\python -m pytest tests/test_phase2_parser.py # 文档解析（7 种格式）
-.venv\Scripts\python -m pytest tests/test_phase3_rag.py    # 分块 & 双语检索
+.venv\Scripts\python -m pytest tests/test_phase3_rag.py    # 分块 & 双语检索 & Reranker
 .venv\Scripts\python -m pytest tests/test_phase4_tools.py  # 工具层（search/fetch）
 .venv\Scripts\python -m pytest tests/test_phase5_agent.py  # Agent ReAct 循环
 ```
