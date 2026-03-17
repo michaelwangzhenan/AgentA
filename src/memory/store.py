@@ -12,7 +12,7 @@
         content       TEXT     NOT NULL DEFAULT '',
         tool_calls    TEXT     NOT NULL DEFAULT '[]',  -- JSON，assistant role 时使用
         tool_call_id  TEXT     NOT NULL DEFAULT '',    -- tool role 时使用
-        timestamp     TEXT     NOT NULL    -- ISO 8601 格式
+        timestamp     TEXT     NOT NULL    -- ISO 8601 本地时间，精确到秒
     )
     sessions(
         session_id    TEXT     PRIMARY KEY,
@@ -24,7 +24,7 @@
 import json
 import logging
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -100,7 +100,7 @@ class MemoryStore:
         tool_calls_raw = msg.get("tool_calls") or []
         tool_calls_json: str = json.dumps(tool_calls_raw, ensure_ascii=False)
         tool_call_id: str = msg.get("tool_call_id") or ""
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now().isoformat(timespec="seconds")
 
         with self._conn:
             # 若 session 不存在，插入 session 记录
