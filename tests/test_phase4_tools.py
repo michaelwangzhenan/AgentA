@@ -1,4 +1,4 @@
-"""
+﻿"""
 Phase 4 测试：工具层
 
 测试内容：
@@ -9,7 +9,7 @@ Phase 4 测试：工具层
 """
 
 import pytest
-from agent.tools import TOOLS, execute_tool
+from src.agent.tools import TOOLS, execute_tool
 
 
 class TestToolsSchema:

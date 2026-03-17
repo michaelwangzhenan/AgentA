@@ -1,4 +1,4 @@
-"""
+﻿"""
 Phase 2 测试：文档解析层
 
 测试内容：
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from rag.parser import parse_file, SUPPORTED_EXTENSIONS
+from src.rag.parser import parse_file, SUPPORTED_EXTENSIONS
 
 # 测试文档目录
 DOCS_DIR = Path(__file__).parent.parent / "docs"

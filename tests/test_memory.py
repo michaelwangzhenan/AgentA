@@ -1,4 +1,4 @@
-"""
+﻿"""
 测试对话记忆模块（memory/store.py）
 
 测试内容：
@@ -19,8 +19,8 @@ from unittest.mock import patch
 
 import pytest
 
-from memory.store import MemoryStore
-from agent.agent import Agent
+from src.memory.store import MemoryStore
+from src.agent.agent import Agent
 
 
 # ── 辅助 fixture ──────────────────────────────────────────────────────────────
@@ -267,7 +267,7 @@ class TestAgentMemoryIntegration:
             captured_messages.append(list(messages))
             return self._make_text_response("回答")
 
-        with patch("agent.agent.chat", side_effect=mock_chat):
+        with patch("src.agent.agent.chat", side_effect=mock_chat):
             agent.run("第一个问题")
             agent.run("第二个问题")
 
@@ -287,7 +287,7 @@ class TestAgentMemoryIntegration:
         store1 = MemoryStore(db_path=db_path)
         agent1 = Agent(verbose=False, session_id="persist-session", memory=store1)
 
-        with patch("agent.agent.chat", return_value=self._make_text_response("第一轮回答")):
+        with patch("src.agent.agent.chat", return_value=self._make_text_response("第一轮回答")):
             agent1.run("第一轮问题")
         store1.close()
 
@@ -300,7 +300,7 @@ class TestAgentMemoryIntegration:
             return self._make_text_response("第二轮回答")
 
         agent2 = Agent(verbose=False, session_id="persist-session", memory=store2)
-        with patch("agent.agent.chat", side_effect=mock_chat2):
+        with patch("src.agent.agent.chat", side_effect=mock_chat2):
             agent2.run("第二轮问题")
 
         second_messages = captured[0]
@@ -331,7 +331,7 @@ class TestHistoryTruncation:
             captured.append(list(messages))
             return self._make_text_response("回答")
 
-        with patch("agent.agent.chat", side_effect=mock_chat):
+        with patch("src.agent.agent.chat", side_effect=mock_chat):
             for i in range(5):
                 agent.run(f"第 {i+1} 个问题")
 

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Phase 5 测试：Agent 主控逻辑
 
 测试内容：
@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agent.agent import Agent, MAX_ITERATIONS, SYSTEM_PROMPT
+from src.agent.agent import Agent, MAX_ITERATIONS, SYSTEM_PROMPT
 
 
 # ── 辅助函数：构造 mock LLM response ─────────────────────────────────────────
@@ -77,20 +77,20 @@ class TestAgentDirectReply:
 
     def test_run_returns_string(self) -> None:
         agent = Agent(verbose=False)
-        with patch("agent.agent.chat", return_value=_make_text_response("这是回答")):
+        with patch("src.agent.agent.chat", return_value=_make_text_response("这是回答")):
             result = agent.run("你好")
         assert isinstance(result, str)
         assert result == "这是回答"
 
     def test_run_strips_whitespace(self) -> None:
         agent = Agent(verbose=False)
-        with patch("agent.agent.chat", return_value=_make_text_response("  回答有空白  \n")):
+        with patch("src.agent.agent.chat", return_value=_make_text_response("  回答有空白  \n")):
             result = agent.run("问题")
         assert result == "回答有空白"
 
     def test_run_empty_content_returns_fallback(self) -> None:
         agent = Agent(verbose=False)
-        with patch("agent.agent.chat", return_value=_make_text_response("")):
+        with patch("src.agent.agent.chat", return_value=_make_text_response("")):
             result = agent.run("问题")
         assert "抱歉" in result or len(result) >= 0  # 返回 fallback 提示
 
@@ -110,8 +110,8 @@ class TestAgentToolCall:
                 return _make_tool_call_response("search_knowledge", {"query": "RAG"})
             return _make_text_response("RAG 是检索增强生成技术。")
 
-        with patch("agent.agent.chat", side_effect=mock_chat), \
-             patch("agent.agent.execute_tool", return_value="RAG 相关文档片段"):
+        with patch("src.agent.agent.chat", side_effect=mock_chat), \
+             patch("src.agent.agent.execute_tool", return_value="RAG 相关文档片段"):
             result = agent.run("什么是 RAG？")
 
         assert result == "RAG 是检索增强生成技术。"
@@ -128,8 +128,8 @@ class TestAgentToolCall:
                 return _make_tool_call_response("search_knowledge", {"query": "test"})
             return _make_text_response("最终回答")
 
-        with patch("agent.agent.chat", side_effect=mock_chat), \
-             patch("agent.agent.execute_tool", return_value="工具返回内容"):
+        with patch("src.agent.agent.chat", side_effect=mock_chat), \
+             patch("src.agent.agent.execute_tool", return_value="工具返回内容"):
             agent.run("测试问题")
 
         # 应有 tool role 的 message
@@ -149,8 +149,8 @@ class TestAgentToolCall:
                 return _make_tool_call_response("search_knowledge", {"query": "x"}, call_id="call_xyz")
             return _make_text_response("完成")
 
-        with patch("agent.agent.chat", side_effect=mock_chat), \
-             patch("agent.agent.execute_tool", return_value="结果"):
+        with patch("src.agent.agent.chat", side_effect=mock_chat), \
+             patch("src.agent.agent.execute_tool", return_value="结果"):
             agent.run("问题")
 
         tool_messages = [m for m in captured if m.get("role") == "tool"]
@@ -164,9 +164,9 @@ class TestAgentMaxIterations:
         """LLM 一直调用工具超过上限，应返回 fallback 提示"""
         agent = Agent(max_iterations=3, verbose=False)
 
-        with patch("agent.agent.chat",
+        with patch("src.agent.agent.chat",
                    return_value=_make_tool_call_response("search_knowledge", {"query": "q"})), \
-             patch("agent.agent.execute_tool", return_value="结果"):
+             patch("src.agent.agent.execute_tool", return_value="结果"):
             result = agent.run("无法结束的问题")
 
         assert "抱歉" in result or "规定轮次" in result
@@ -178,8 +178,8 @@ class TestAgentMaxIterations:
             return_value=_make_tool_call_response("search_knowledge", {"query": "q"})
         )
 
-        with patch("agent.agent.chat", mock_chat), \
-             patch("agent.agent.execute_tool", return_value="结果"):
+        with patch("src.agent.agent.chat", mock_chat), \
+             patch("src.agent.agent.execute_tool", return_value="结果"):
             agent.run("问题")
 
         assert mock_chat.call_count == 3
@@ -257,8 +257,8 @@ class TestSystemPromptWebSearch:
                 return "百度新闻页面内容：AI大模型新动态……"
             return ""
 
-        with patch("agent.agent.chat", side_effect=mock_chat), \
-             patch("agent.agent.execute_tool", side_effect=mock_execute_tool):
+        with patch("src.agent.agent.chat", side_effect=mock_chat), \
+             patch("src.agent.agent.execute_tool", side_effect=mock_execute_tool):
             result = agent.run("最新AI新闻是什么？")
 
         assert "fetch_url" in tool_calls, "知识库为空时，Agent 应调用 fetch_url"

@@ -1,4 +1,4 @@
-"""
+﻿"""
 文档入库模块 —— 离线预处理阶段使用
 
 执行完整的入库流程：扫描 docs/ 目录 → 解析文本 → 分块 → 向量化 → 存入 ChromaDB。
@@ -34,8 +34,8 @@ from pathlib import Path
 import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
-import config
-from rag.parser import SUPPORTED_EXTENSIONS, parse_file
+import src.config as config
+from src.rag.parser import SUPPORTED_EXTENSIONS, parse_file
 
 logging.basicConfig(
     level=logging.INFO,
@@ -150,7 +150,7 @@ def ingest_all(
             )
             if existing["ids"]:
                 collection.delete(ids=existing["ids"])
-                logger.debug(f"  清除旧数据: {file_path.name} → 删除 {len(existing['ids'])} 条")
+                logger.info(f"  清除旧数据: {file_path.name} → 删除 {len(existing['ids'])} 条")
 
             # 写入新 chunks
             ids = [_make_chunk_id(str(file_path), i) for i in range(len(chunks))]

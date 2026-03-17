@@ -15,7 +15,7 @@ from typing import Any
 import httpx
 import openai
 
-import config
+import src.config as config
 
 
 def chat(

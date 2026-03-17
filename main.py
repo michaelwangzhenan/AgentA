@@ -1,4 +1,4 @@
-"""
+﻿"""
 CLI 入口 —— 私有知识库 Agent 对话界面
 
 使用方式：
@@ -24,27 +24,28 @@ import warnings
 
 from dotenv import load_dotenv
 from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.history import InMemoryHistory
+
+from src.cli.tab_complete import make_completer
 
 # 消除 HuggingFace tokenizer 的 FutureWarning
 warnings.filterwarnings("ignore", category=FutureWarning, module="transformers")
 
 load_dotenv(override=True)  # override=True 确保 .env 覆盖系统环境变量
 
-# 设置日志：INFO 级别，只显示工具调用信息，不显示 DEBUG
+# 设置日志：INFO 级别，显示文件名、行号和时间
 logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s [%(levelname)s] %(message)s",
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(filename)s:%(lineno)d - %(message)s",
     datefmt="%H:%M:%S",
 )
 # 关闭第三方库的冗余日志
 for _noisy in ("httpx", "httpcore", "openai", "chromadb", "sentence_transformers"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 
-from agent.agent import Agent
-from memory.store import MemoryStore
-import config
+from src.agent.agent import Agent
+from src.memory.store import MemoryStore
+import src.config as config
 
 
 BANNER = """
@@ -132,22 +133,6 @@ def _list_sessions(memory: MemoryStore) -> None:
     print()
 
 
-# 所有可补全的命令（不含需要参数的后缀，由用户自行补全参数）
-_CLI_COMMANDS: list[str] = [
-    "/help",
-    "/ingest",
-    "/ingest -m zh",
-    "/ingest -m en",
-    "/clear",
-    "/history",
-    "/session",
-    "/del-session",
-    "/clean-session",
-    "/quit",
-    "/exit",
-]
-
-
 def main() -> None:
     """CLI 主循环。"""
     print(BANNER)
@@ -157,26 +142,16 @@ def main() -> None:
     agent = Agent(verbose=True, memory=memory)
     print(f"💬 当前 Session: {agent.session_id}\n")
 
-    # 构建 Tab 补全器；completer 会在每次 prompt 前动态刷新 session 列表
-    def _make_completer() -> WordCompleter:
-        session_ids = [s["session_id"] for s in memory.list_sessions()]
-        words = _CLI_COMMANDS + [
-            f"/session {sid}" for sid in session_ids
-        ] + [
-            f"/del-session {sid}" for sid in session_ids
-        ]
-        return WordCompleter(words, sentence=True, match_middle=False)
-
     prompt_session: PromptSession[str] = PromptSession(
         history=InMemoryHistory(),
-        completer=_make_completer(),
+        completer=make_completer(memory),
         complete_while_typing=False,  # 仅 Tab 触发，不干扰正常输入
     )
 
     while True:
         try:
             # 每轮刷新补全器，确保新建/删除的 session id 即时出现
-            prompt_session.completer = _make_completer()
+            prompt_session.completer = make_completer(memory)
             user_input = prompt_session.prompt("你: ").strip()
         except (KeyboardInterrupt, EOFError):
             print("\n\n👋 再见！")

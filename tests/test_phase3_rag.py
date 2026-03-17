@@ -1,4 +1,4 @@
-"""
+﻿"""
 Phase 3 测试：RAG 向量化入库 & 检索
 
 测试内容：
@@ -8,9 +8,9 @@ Phase 3 测试：RAG 向量化入库 & 检索
 """
 
 import pytest
-import config
-from rag.ingest import chunk_text
-from rag.retriever import search
+import src.config as config
+from src.rag.ingest import chunk_text
+from src.rag.retriever import search
 
 
 class TestChunkText:

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Phase 1 测试：LLM 配置层 & 统一调用接口
 
 测试内容：
@@ -8,9 +8,9 @@ Phase 1 测试：LLM 配置层 & 统一调用接口
 """
 
 import pytest
-import config
-from config import ACTIVE_PROVIDER, get_active_config
-from llm.provider import chat
+import src.config as config
+from src.config import ACTIVE_PROVIDER, get_active_config
+from src.llm.provider import chat
 
 # 不走代理的国内 provider（直连）
 _DOMESTIC_PROVIDERS = {"kimi", "deepseek", "qwen", "minimax", "glm", "ollama"}

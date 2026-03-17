@@ -1,4 +1,4 @@
-"""
+﻿"""
 Agent 主控逻辑 —— ReAct（Reason + Act）循环
 
 执行流程：
@@ -21,9 +21,9 @@ import logging
 import uuid
 from typing import Any
 
-from agent.tools import TOOLS, execute_tool
-from llm.provider import chat
-from memory.store import MemoryStore
+from src.agent.tools import TOOLS, execute_tool
+from src.llm.provider import chat
+from src.memory.store import MemoryStore
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +118,7 @@ class Agent:
         self._memory.append(self.session_id, {"role": "user", "content": user_input})
 
         for iteration in range(1, self.max_iterations + 1):
-            logger.debug("[Agent] 第 %d 轮推理，messages 长度: %d", iteration, len(messages))
+            logger.info("[Agent] 第 %d 轮推理，messages 长度: %d", iteration, len(messages))
 
             # 调用 LLM（携带工具定义）
             response = chat(messages, tools=TOOLS)
@@ -164,7 +164,7 @@ class Agent:
             # ── 情况 2：LLM 直接返回最终回答 ──────────────────────────────────
             final_answer = message.content or ""
             if final_answer.strip():
-                logger.debug("[Agent] 第 %d 轮得到最终回答，退出循环", iteration)
+                logger.info("[Agent] 第 %d 轮得到最终回答，退出循环", iteration)
                 # 将最终回答写入 DB
                 self._memory.append(
                     self.session_id,
@@ -199,7 +199,7 @@ class Agent:
         if len(user_indices) > self.max_history_turns:
             start = user_indices[-self.max_history_turns]
             history = history[start:]
-            logger.debug(
+            logger.info(
                 "[Agent] 历史超过 %d 轮，已截断保留最近 %d 轮",
                 len(user_indices),
                 self.max_history_turns,

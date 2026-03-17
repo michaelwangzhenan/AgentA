@@ -90,6 +90,9 @@ PROVIDER_CONFIGS: dict[str, ProviderConfig] = {
 # ChromaDB 存储路径
 CHROMA_DB_PATH: str = os.getenv("CHROMA_DB_PATH", "./chroma_db")
 
+# 对话历史 SQLite 路径，可通过 .env 中的 MEMORY_DB_PATH 覆盖
+MEMORY_DB_PATH: str = os.getenv("MEMORY_DB_PATH", "../sqlite_db/chat_history.db")
+
 # ── Embedding 模型配置 ────────────────────────────────────────────────────────
 # 预定义的 embedding 模型别名，每个别名绑定一个独立的 ChromaDB collection，
 # 不同模型向量维度不同（MiniLM=384, bge-small-zh=512），必须分开存储。

@@ -1,4 +1,4 @@
-"""
+﻿"""
 工具层 —— Agent 可调用的工具定义与执行
 
 遵循 OpenAI Function Calling 格式，Agent 通过 LLM 的 tool_calls 决定调用哪个工具。
@@ -15,7 +15,7 @@ from typing import Any
 import requests
 from bs4 import BeautifulSoup
 
-from rag.retriever import search
+from src.rag.retriever import search
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +93,7 @@ def _tool_search_knowledge(query: str, top_k: int = 5) -> str:
         格式化的检索结果，含来源和相似度；若知识库为空则返回提示。
     """
     top_k = min(max(1, top_k), 10)  # 限制在 1~10 之间
-    logger.debug(f"[tool] search_knowledge: query={query!r}, top_k={top_k}")
+    logger.info(f"[tool] search_knowledge: query={query!r}, top_k={top_k}")
     return search(query, top_k=top_k)
 
 
@@ -108,7 +108,7 @@ def _tool_fetch_url(url: str, max_chars: int = 3000) -> str:
     Returns:
         网页正文纯文本（截断至 max_chars），抓取失败时返回错误说明。
     """
-    logger.debug(f"[tool] fetch_url: url={url!r}, max_chars={max_chars}")
+    logger.info(f"[tool] fetch_url: url={url!r}, max_chars={max_chars}")
 
     if not url.startswith(("http://", "https://")):
         return f"错误：URL 必须以 http:// 或 https:// 开头，收到：{url!r}"

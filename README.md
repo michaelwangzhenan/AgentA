@@ -1,6 +1,6 @@
 # AgentA
 
-本地运行的私有知识库 Agent，支持多格式文档解析、双语向量化存储与自然语言问答，LLM 可一键切换。
+本地运行的私有知识库 Agent，支持多格式文档解析、双语向量化存储与自然语言问答，LLM 可配置。
 
 ## **功能特性**
 
@@ -9,7 +9,7 @@
 - **双语 Embedding**：英文用 `all-MiniLM-L6-v2`（kb_en），中文用 `BAAI/bge-small-zh`（kb_zh），各自独立 collection，检索时 round-robin 交错合并，避免跨模型距离不可比
 - 自然语言提问，ReAct Agent 自动检索相关文档片段后调用 LLM 生成答案
 - 支持网页内容实时抓取（`fetch_url` 工具）作为知识库补充
-- 支持 9 个 LLM Provider 一键切换：Kimi / DeepSeek / Qwen / MiniMax / GLM / Ollama / OpenAI / Grok / Claude
+- 支持 9 个 LLM Provider ：Kimi / DeepSeek / Qwen / MiniMax / GLM / Ollama / OpenAI / Grok / Claude
 - 国外 Provider（OpenAI / Grok / Claude）支持通过 `LLM_PROXY` 配置 HTTP 代理
 
 ---
@@ -88,72 +88,8 @@ Embedding 模型别名：
 ```
 
 CLI 内置命令：
-
 ```
 /help                      查看帮助
-/ingest                    扫描默认 docs/ 目录并入库
-/ingest <目录> -m zh       指定目录 + 中文模型入库
-/ingest <目录> -m en       指定目录 + 英文模型入库
-/clear                     清空对话历史，重置 Agent
-/quit                      退出
-```
-
----
-
-## 测试
-
-```bash
-# 快速单元测试（不调用 API，约 3 秒完成，70 个用例）
-.venv\Scripts\python -m pytest -m "not integration" -v
-
-# 完整测试（含真实 API 调用和 ChromaDB 检索，需先完成入库）
-.venv\Scripts\python -m pytest
-
-# 按模块测试
-.venv\Scripts\python -m pytest tests/test_phase1_llm.py    # LLM 配置 & Provider
-.venv\Scripts\python -m pytest tests/test_phase2_parser.py # 文档解析（7 种格式）
-.venv\Scripts\python -m pytest tests/test_phase3_rag.py    # 分块 & 双语检索
-.venv\Scripts\python -m pytest tests/test_phase4_tools.py  # 工具层（search/fetch）
-.venv\Scripts\python -m pytest tests/test_phase5_agent.py  # Agent ReAct 循环
-```
-
----
-
-## 项目结构
-
-```
-AgentA/
-├── .env                    # API Keys 与配置（不提交 Git）
-├── config.py               # 全局配置：LLM 切换 + Embedding 多模型注册
-├── main.py                 # CLI 问答入口
-├── requirements.txt        # 依赖清单
-│
-├── llm/
-│   └── provider.py         # LLM 统一调用接口（Function Calling + Claude 适配）
-│
-├── rag/
-│   ├── parser.py           # 多格式文档解析（MD/TXT/HTML/PDF/DOCX/PPTX/XLSX）
-│   ├── ingest.py           # 文档入库：解析→分块→向量化→ChromaDB（支持 -m 模型选择）
-│   └── retriever.py        # 向量检索：跨 collection 合并排序
-│
-├── agent/
-│   ├── agent.py            # Agent 主控（ReAct 循环，最大 10 轮迭代）
-│   └── tools.py            # 工具定义（search_knowledge / fetch_url）
-│
-├── docs/                   # 英文/多语言文档（不提交 Git）
-├── docs_zh/                # 中文文档（不提交 Git）
-├── chroma_db/              # ChromaDB 向量库（自动生成，不提交 Git）
-│   ├── chroma.sqlite3      # 元数据索引（collection name ↔ UUID 映射）
-│   ├── <uuid>/             # kb_en 向量索引（HNSW）
-│   └── <uuid>/             # kb_zh 向量索引（HNSW）
-│
-└── tests/
-    ├── test_phase1_llm.py
-    ├── test_phase2_parser.py
-    ├── test_phase3_rag.py
-    ├── test_phase4_tools.py
-    ├── test_phase5_agent.py
-    └── manual_test.ipynb   # 交互式测试 Notebook
 ```
 
 ---
@@ -164,8 +100,8 @@ AgentA/
 
 ```ini
 # 国内直连（无需代理）
-LLM_PROVIDER=kimi       # Moonshot Kimi（开发/测试，免费额度大）
-LLM_PROVIDER=deepseek   # DeepSeek（高性价比）
+LLM_PROVIDER=kimi       # Moonshot Kimi
+LLM_PROVIDER=deepseek   # DeepSeek
 LLM_PROVIDER=qwen       # 阿里云通义千问 Qwen
 LLM_PROVIDER=minimax    # MiniMax
 LLM_PROVIDER=glm        # 智谱 AI GLM
@@ -180,3 +116,21 @@ LLM_PROVIDER=claude     # Anthropic Claude
 > **代理配置**：国外 Provider 需在 `.env` 中设置 `LLM_PROXY=http://ip:port`，国内 Provider 自动直连，无需改动其他代码。
 
 ---
+
+
+## 测试
+
+```bash
+# 快速单元测试
+.venv\Scripts\python -m pytest -m "not integration" -v
+
+# 完整测试（含真实 API 调用和 ChromaDB 检索，需先完成入库）
+.venv\Scripts\python -m pytest
+
+# 按模块测试
+.venv\Scripts\python -m pytest tests/test_phase1_llm.py    # LLM 配置 & Provider
+.venv\Scripts\python -m pytest tests/test_phase2_parser.py # 文档解析（7 种格式）
+.venv\Scripts\python -m pytest tests/test_phase3_rag.py    # 分块 & 双语检索
+.venv\Scripts\python -m pytest tests/test_phase4_tools.py  # 工具层（search/fetch）
+.venv\Scripts\python -m pytest tests/test_phase5_agent.py  # Agent ReAct 循环
+```

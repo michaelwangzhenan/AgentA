@@ -24,7 +24,7 @@ import chromadb
 from chromadb.errors import NotFoundError
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
-import config
+import src.config as config
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ def search(query: str, top_k: int = config.RAG_TOP_K) -> str:
         if hits:
             hits.sort(key=lambda h: h.distance)
             per_collection.append(hits)
-            logger.debug("  [%s] %s: %d 条命中", alias, collection_name, len(hits))
+            logger.info("  [%s] %s: %d 条命中", alias, collection_name, len(hits))
 
     if not per_collection:
         return (

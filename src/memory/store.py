@@ -28,15 +28,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import config
+import src.config as config
 
 logger = logging.getLogger(__name__)
 
-# SQLite 文件路径，与 chroma_db 同级，可通过环境变量覆盖
-MEMORY_DB_PATH: str = config.__dict__.get(
-    "MEMORY_DB_PATH",
-    str(Path(config.CHROMA_DB_PATH).parent / "memory.db"),
-)
+# SQLite 文件路径，由 config.MEMORY_DB_PATH 决定（对应 .env 中的 MEMORY_DB_PATH）
+MEMORY_DB_PATH: str = config.MEMORY_DB_PATH
 
 
 class MemoryStore:
@@ -58,7 +55,7 @@ class MemoryStore:
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._create_tables()
-        logger.debug("MemoryStore 初始化完成: %s", db_path)
+        logger.info("MemoryStore 初始化完成: %s", db_path)
 
     # ── 表结构初始化 ──────────────────────────────────────────────────────────
 
@@ -178,7 +175,7 @@ class MemoryStore:
             self._conn.execute(
                 "DELETE FROM sessions WHERE session_id = ?", (session_id,)
             )
-        logger.debug("已清空 session: %s", session_id)
+        logger.info("已清空 session: %s", session_id)
 
     def delete_session(self, session_id: str) -> bool:
         """
@@ -204,9 +201,9 @@ class MemoryStore:
                 "DELETE FROM sessions WHERE session_id = ?", (session_id,)
             )
         if existed:
-            logger.debug("已删除 session: %s", session_id)
+            logger.info("已删除 session: %s", session_id)
         else:
-            logger.debug("delete_session: session 不存在，跳过: %s", session_id)
+            logger.info("delete_session: session 不存在，跳过: %s", session_id)
         return existed
 
     def clean_all_sessions(self) -> int:
@@ -220,7 +217,7 @@ class MemoryStore:
             count: int = self._conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
             self._conn.execute("DELETE FROM messages")
             self._conn.execute("DELETE FROM sessions")
-        logger.debug("已清空全部 %d 个 session", count)
+        logger.info("已清空全部 %d 个 session", count)
         return count
 
     def list_sessions(self) -> list[dict[str, Any]]:
