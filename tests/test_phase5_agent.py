@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.agent.agent import Agent, MAX_ITERATIONS, MAX_TOOL_ROUNDS, MAX_TOTAL_ROUNDS, SYSTEM_PROMPT, TOOL_EMPTY_HINT
+from src.agent.agent import Agent, MAX_TOOL_ROUNDS, MAX_TOTAL_ROUNDS, SYSTEM_PROMPT, TOOL_EMPTY_HINT
 from src.agent.tools import ToolResult
 
 
@@ -54,8 +54,8 @@ class TestAgentInit:
         assert agent.verbose is True
 
     def test_max_iterations_alias_equals_total_rounds(self) -> None:
-        """MAX_ITERATIONS 向后兼容别名应等于 MAX_TOTAL_ROUNDS"""
-        assert MAX_ITERATIONS == MAX_TOTAL_ROUNDS
+        """max_iterations 默认应等于 MAX_TOTAL_ROUNDS"""
+        assert Agent().max_iterations == MAX_TOTAL_ROUNDS
 
     def test_custom_init(self) -> None:
         agent = Agent(system_prompt="custom", max_iterations=3, verbose=False)

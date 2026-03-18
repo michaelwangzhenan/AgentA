@@ -44,16 +44,16 @@ SYSTEM_PROMPT = """你是一个私有知识库智能助手。
 ## 工具使用策略
 1. 收到问题后，**优先调用 `search_knowledge`** 在私有知识库中检索相关信息。
 2. 若检索结果足以回答问题，直接基于检索内容生成回答。
-3. 若 `search_knowledge` 返回"知识库为空"或内容与问题明显无关，**必须主动调用 `fetch_url` 进行网络搜索**，
-   不允许直接回复"暂无内容"。选择 URL 时**优先访问国内可达网站**，例如：
-   - 新闻资讯：xinhuanet.com、people.com.cn、news.baidu.com
-   - 技术问题：segmentfault.com、csdn.net、zhihu.com
-   - 通用搜索：baidu.com、so.com（360搜索）
-   若国内网站无法提供有效信息，再尝试访问国外网站。
+3. 若 search_knowledge 返回 [结果为空] 或内容与问题明显无关，按第5条处理。
 4. 所有工具调用结束后，综合已获取的信息生成最终回答。
-5. 若工具返回 [结果为空] 或 [工具失败]：
-   - `search_knowledge` 返回 [结果为空] → 立即改调 `fetch_url` 补充搜索，不允许直接回答
-   - `fetch_url` 返回 [工具失败] → 换一个同类型的备选 URL 重试（最多换 2 次）
+5. 工具结果处理规则：
+   - search_knowledge [结果为空] → **必须主动调用 `fetch_url` 进行网络搜索**，不允许直接回复"暂无内容"。
+     选择 URL 时**优先访问国内可达网站**，例如：
+     - 新闻资讯：xinhuanet.com、people.com.cn、news.baidu.com
+     - 技术问题：segmentfault.com、csdn.net、zhihu.com
+     - 通用搜索：baidu.com、so.com（360搜索）
+     若国内网站无法提供有效信息，再尝试访问国外网站。
+   - fetch_url [工具失败] → 换一个同类型的备选 URL 重试（最多再试 2 次）
    - 两种工具均无法获取有效信息时，才如实告知用户"当前无法获取相关信息"
 
 ## 回答要求
@@ -66,8 +66,6 @@ SYSTEM_PROMPT = """你是一个私有知识库智能助手。
 MAX_TOOL_ROUNDS: int = 8
 # 含最终回答在内的总推理轮次上限
 MAX_TOTAL_ROUNDS: int = 12
-# 向后兼容别名
-MAX_ITERATIONS: int = MAX_TOTAL_ROUNDS
 
 # search_knowledge 返回空结果时追加给 LLM 的引导提示
 TOOL_EMPTY_HINT: str = (
@@ -136,9 +134,8 @@ class Agent:
             logger.info("[Agent] 第 %d 轮推理，messages 长度: %d", iteration, len(messages))
 
             # 工具轮次达上限时，去掉 tools 参数，让 LLM 强制生成文本回答
-            # （不注入 user 消息，保持消息序列格式合法）
             active_tools = TOOLS if tool_rounds < MAX_TOOL_ROUNDS else None
-            if active_tools is None and tool_rounds >= MAX_TOOL_ROUNDS:
+            if active_tools is None:
                 logger.warning("[Agent] 工具调用已达上限 %d 轮，强制生成最终回答", MAX_TOOL_ROUNDS)
 
             # 调用 LLM（携带工具定义，或 None 时强制文本回答）
@@ -148,48 +145,7 @@ class Agent:
             # ── 情况 1：LLM 决定调用工具 ──────────────────────────────────────
             if message.tool_calls:
                 tool_rounds += 1
-                # 将 assistant 的 tool_calls 消息追加到 messages 并写入 DB
-                assistant_msg = self._assistant_message(message)
-                messages.append(assistant_msg)
-                self._memory.append(self.session_id, assistant_msg)
-
-                for tool_call in message.tool_calls:
-                    tool_name = tool_call.function.name
-                    tool_args = json.loads(tool_call.function.arguments)
-
-                    if self.verbose:
-                        logger.info(
-                            "[Agent] 调用工具: %s，参数: %s",
-                            tool_name,
-                            json.dumps(tool_args, ensure_ascii=False),
-                        )
-
-                    # 执行工具，返回结构化 ToolResult
-                    result: ToolResult = execute_tool(tool_name, tool_args)
-
-                    if self.verbose:
-                        preview = result.content[:100].replace("\n", " ")
-                        logger.info(
-                            "[Agent] 工具结果 [%s] 预览: %s...", result.status, preview
-                        )
-
-                    # 构造写入 LLM 的 content：状态标签 + 引导提示
-                    llm_content = result.to_llm_str()
-                    if result.status == "error":
-                        llm_content += "\n\n[提示] 请换一种方式（换参数或换工具）重试，不要直接回答。"
-                    elif result.status == "empty" and tool_name == "search_knowledge":
-                        llm_content += TOOL_EMPTY_HINT
-
-                    # 将工具结果追加到 messages 并写入 DB
-                    tool_msg: dict = {
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": llm_content,
-                    }
-                    messages.append(tool_msg)
-                    self._memory.append(self.session_id, tool_msg)
-
-                # 继续下一轮推理
+                self._process_tool_calls(message, messages)
                 continue
 
             # ── 情况 2：LLM 直接返回最终回答 ──────────────────────────────────
@@ -217,15 +173,21 @@ class Agent:
 
         截断策略：保留最近 N 轮，一轮以 user 消息为起点计数。
         system 消息不计入轮数，在 run() 中单独拼接。
+
+        使用 load_last_n_messages 在 SQL 层做粗粒度过滤（× 8 作为安全上限，
+        每轮实际消息数受并行 tool_calls 数量影响），内存层再按 user 轮数精确截断。
         """
-        all_msgs = self._memory.load(self.session_id)
-        # 过滤掉 system 消息（由 run() 单独拼接）
-        history = [m for m in all_msgs if m["role"] != "system"]
+        # SQL 层粗粒度过滤：避免全量加载长历史 session（优化 F）
+        limit = self.max_history_turns * 8
+        history = [
+            m for m in self._memory.load_last_n_messages(self.session_id, limit)
+            if m["role"] != "system"
+        ]
 
         if not history:
             return []
 
-        # 找到所有 user 消息的位置，按轮数从后往前截断
+        # 内存层精确截断：按 user 轮数从后往前保留 max_history_turns 轮
         user_indices = [i for i, m in enumerate(history) if m["role"] == "user"]
         if len(user_indices) > self.max_history_turns:
             start = user_indices[-self.max_history_turns]
@@ -237,6 +199,57 @@ class Agent:
             )
 
         return history
+
+    def _process_tool_calls(
+        self,
+        message: Any,
+        messages: list[dict[str, Any]],
+    ) -> None:
+        """
+        执行本轮所有 tool_calls，将结果注入 messages 并写入 DB。
+
+        DB 写入使用不含引导提示的干净内容；当前轮 messages 注入含引导提示的版本，
+        避免引导提示污染下次加载的历史记录。
+        """
+        assistant_msg = self._assistant_message(message)
+        messages.append(assistant_msg)
+        self._memory.append(self.session_id, assistant_msg)
+
+        for tool_call in message.tool_calls:
+            tool_name = tool_call.function.name
+            tool_args = json.loads(tool_call.function.arguments)
+
+            if self.verbose:
+                logger.info(
+                    "[Agent] 调用工具: %s，参数: %s",
+                    tool_name,
+                    json.dumps(tool_args, ensure_ascii=False),
+                )
+
+            result: ToolResult = execute_tool(tool_name, tool_args)
+
+            if self.verbose:
+                preview = result.content[:100].replace("\n", " ")
+                logger.info("[Agent] 工具结果 [%s] 预览: %s...", result.status, preview)
+
+            # DB 写入干净内容（无引导提示），避免污染历史
+            db_content = result.to_llm_str()
+            db_msg: dict[str, Any] = {
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": db_content,
+            }
+            self._memory.append(self.session_id, db_msg)
+
+            # 当前轮 messages 注入含引导提示的版本，引导 LLM 下一步决策
+            llm_content = db_content
+            if result.status == "error":
+                llm_content += "\n\n[提示] 请换一种方式（换参数或换工具）重试，不要直接回答。"
+            elif result.status == "empty" and tool_name == "search_knowledge":
+                llm_content += TOOL_EMPTY_HINT
+
+            live_msg: dict[str, Any] = {**db_msg, "content": llm_content}
+            messages.append(live_msg)
 
     @staticmethod
     def _assistant_message(message: Any) -> dict[str, Any]:

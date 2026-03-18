@@ -3,6 +3,8 @@
   Middle: 4, 5, 6, 9,
   Low: 7, 10, 11, 12, 13, 14
   tbd: 15, 16, 17, 18
+  instant: 19, 20 => Done
+
 -
 待优化项：
 1. 对话记忆 => Done
@@ -285,3 +287,125 @@
     c. read_file：读取本地文件内容（如日志、csv），支持行范围指定
     d. shell_cmd：执行本地 Shell 命令，返回 stdout/stderr
   详细实施计划：
+
+19. 使用Tab键补全命令
+  CLI 输入命令时支持Tab键补
+20. Agent 优化 => Done
+  目标：
+    提升推理准确性
+    提高推理性能，考虑： 减少推理时间，CPU/内存消耗，尽量节省token(保证推理质量，寻找最佳性价比)
+    Clean Code
+  实施计划：
+
+    【优化点汇总】
+      A. 引导提示污染历史（准确性，🔴 高优先）
+      B. SYSTEM_PROMPT 第3/5条语义重叠（Token，🟡 中优先）
+      C. 冗余条件判断（可读性，🟢 低）
+      D. run() 方法拆分（可维护性，🟢 低）
+      E. tool_msg 类型标注不完整（Clean Code，🟢 低）
+      F. DB 全量加载历史后 Python 截断（性能，🟡 中优先，需改 store.py）
+
+    【A】引导提示污染历史 —— src/agent/agent.py
+      问题：
+        llm_content = result.to_llm_str() + TOOL_EMPTY_HINT（或 error 提示）
+        当前代码将拼接后的 llm_content 原样写入 SQLite（_memory.append）。
+        下次加载历史时，"[提示] 请换一种方式..." 等临时引导语会随历史喂给 LLM，
+        累积多轮后干扰推理，使 LLM 误判工具历史状态。
+      修复方案：
+        写入 DB 时用 result.to_llm_str()（无引导提示的原始版本）；
+        只有注入当前 messages 时才拼接引导提示，DB 保持干净。
+        具体改动：
+          # 当前（有 bug）：
+          tool_msg = {"role": "tool", ..., "content": llm_content}  # llm_content 含提示
+          messages.append(tool_msg)
+          self._memory.append(self.session_id, tool_msg)            # 含提示写入 DB ❌
+
+          # 修复后（分离）：先写DB再注入messages，保持与现有代码一致的操作顺序
+          db_content = result.to_llm_str()                          # 写 DB 用干净版本
+          mem_msg = {"role": "tool", ..., "content": db_content}
+          self._memory.append(self.session_id, mem_msg)             # ✅ 先写 DB（干净）
+          live_msg = {**mem_msg, "content": llm_content}            # 当前轮含提示
+          messages.append(live_msg)                                  # ✅ 再注入 messages
+
+    【B】SYSTEM_PROMPT 第3/5条语义重叠 —— src/agent/agent.py
+      问题：
+        第3条："若 search_knowledge 无结果，必须调 fetch_url"
+        第5条："若工具返回 [结果为空]，search_knowledge 空 → 改调 fetch_url"
+        两条几乎重复，每次推理多消耗约 60~80 token。
+      修复方案：
+        删除第3条中重复的联网指引，将其内容并入第5条，不删国内站列表：
+          修改第3条为：
+            若 search_knowledge 返回 [结果为空] 或内容与问题明显无关，按第5条处理。
+          第5条扩充为：
+            5. 工具结果处理规则：
+               - search_knowledge [结果为空] → 立即改调 fetch_url 进行网络搜索，选择 URL 时优先访问国内可达网站：
+                 新闻资讯：xinhuanet.com、people.com.cn、news.baidu.com
+                 技术问题：segmentfault.com、csdn.net、zhihu.com
+                 通用搜索：baidu.com、so.com（360搜索）
+                 国内无法满足需求时再尝试国外网站。
+               - fetch_url [工具失败] → 换一个同类型的备选 URL 重试（最多再试 2 次）
+               - 两种工具均无法获取有效信息时，才如实告知用户“当前无法获取相关信息”
+
+    【C】冗余条件判断 —— src/agent/agent.py run()
+      问题：
+        active_tools = TOOLS if tool_rounds < MAX_TOOL_ROUNDS else None
+        if active_tools is None and tool_rounds >= MAX_TOOL_ROUNDS:  # 等价于 if active_tools is None
+            logger.warning(...)
+      修复方案：
+        active_tools = TOOLS if tool_rounds < MAX_TOOL_ROUNDS else None
+        if active_tools is None:
+            logger.warning("[Agent] 工具调用已达上限 %d 轮，强制生成最终回答", MAX_TOOL_ROUNDS)
+
+    【D】run() 方法拆分 —— src/agent/agent.py
+      问题：run() 约 80 行，工具调用处理（执行→构造提示→写DB→注入messages）内联在循环体内，
+            可读性差，单元测试难以针对性验证工具处理逻辑。
+      修复方案：提取私有方法 _process_tool_calls()：
+        def _process_tool_calls(
+            self,
+            message: Any,
+            messages: list[dict[str, Any]],
+        ) -> None:
+            """执行本轮所有 tool_calls，将结果注入 messages 并写入 DB。"""
+            assistant_msg = self._assistant_message(message)
+            messages.append(assistant_msg)
+            self._memory.append(self.session_id, assistant_msg)
+            for tool_call in message.tool_calls:
+                ... # 执行工具、构造提示、分离写DB/注入messages 逻辑
+        run() 主干简化为：
+          if message.tool_calls:
+              tool_rounds += 1
+              self._process_tool_calls(message, messages)
+              continue
+
+    【E】tool_msg 类型标注 —— src/agent/agent.py run()
+      问题：tool_msg: dict  →  缺少泛型参数，与其他 messages 元素类型不一致
+      修复：tool_msg: dict[str, Any]
+
+    【F】DB 全量加载历史后 Python 截断 —— src/memory/store.py
+      问题：
+        load() 用 SELECT * ORDER BY id ASC 全量取回所有历史，
+        _load_truncated_history() 在内存中按轮数截断。
+        长历史 session（如 100 轮）每次 run() 都传输全量数据，浪费 DB I/O 和内存。
+      修复方案：
+        在 store.py 新增 load_last_n_messages(session_id, n) 方法：
+          SELECT * FROM messages WHERE session_id=? ORDER BY id DESC LIMIT ?
+          再 reversed() 还原时序
+        Agent._load_truncated_history() 改为：
+          直接调用 load_last_n_messages(session_id, max_history_turns * 8)
+          （× 8 作为安全上限，实际每轮消息数受 tool_calls 并行数量影响可能远超过 4）
+          SQL 层做粗粒度过滤，内存层按 user 轮数做精确截断（逻辑不变）
+      涉及文件：src/memory/store.py（新增方法）、src/agent/agent.py（改调用）、
+               tests/test_memory.py（新增 load_last_n_messages 测试）
+
+    【实施顺序】
+      1. A（bug 修复，最高优先）
+      2. C + E（2行改动，顺手完成）
+      3. B（SYSTEM_PROMPT 精简，减 token）
+      4. D（run() 拆分，需同步更新 test_phase5_agent.py 中捕获 messages 的测试）
+      5. F（需改 store.py + 测试，独立 PR）
+
+    【测试影响】
+      A 修复后：TestToolGuidance 中捕获 DB 写入内容的断言需同步验证干净版本
+      D 拆分后：TestAgentToolCall 中部分 mock_chat 捕获 messages 的测试逻辑不变，
+               但可新增 _process_tool_calls 的独立单元测试
+      F 完成后：新增 test_memory.py::TestLoadLastN 类（3~4 个测试）

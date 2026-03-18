@@ -161,6 +161,44 @@ class MemoryStore:
 
         return messages
 
+    def load_last_n_messages(self, session_id: str, n: int) -> list[dict[str, Any]]:
+        """
+        仅加载指定 session 最近 n 条消息，避免全量加载长历史 session 的 DB I/O 开销。
+
+        先按 id 倒序取 n 条，再反转还原时序，等价于全量加载后取末尾 n 条。
+
+        Args:
+            session_id: 会话 ID。
+            n: 最多返回的消息条数。
+
+        Returns:
+            最近 n 条消息，时序升序，格式与 load() 相同。
+        """
+        rows = self._conn.execute(
+            """SELECT role, content, tool_calls, tool_call_id
+               FROM messages
+               WHERE session_id = ?
+               ORDER BY id DESC
+               LIMIT ?""",
+            (session_id, n),
+        ).fetchall()
+
+        messages: list[dict[str, Any]] = []
+        for row in reversed(rows):  # 还原时序
+            msg: dict[str, Any] = {"role": row["role"]}
+            msg["content"] = row["content"] if row["content"] else ""
+
+            tool_calls = json.loads(row["tool_calls"])
+            if tool_calls:
+                msg["tool_calls"] = tool_calls
+
+            if row["tool_call_id"]:
+                msg["tool_call_id"] = row["tool_call_id"]
+
+            messages.append(msg)
+
+        return messages
+
     def clear(self, session_id: str) -> None:
         """
         清空指定 session 的所有消息记录（同时删除 session 元数据）。

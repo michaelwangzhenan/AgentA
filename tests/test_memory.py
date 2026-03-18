@@ -342,3 +342,54 @@ class TestHistoryTruncation:
         assert len(user_msgs) <= agent.max_history_turns + 1
 
         store.close()
+
+
+# ── 单元测试：load_last_n_messages SQL 层粗粒度过滤 ───────────────────────────
+
+class TestLoadLastN:
+    """测试 load_last_n_messages() SQL 层粗粒度过滤。"""
+
+    def test_returns_empty_for_nonexistent_session(self, store: MemoryStore) -> None:
+        result = store.load_last_n_messages("no-such-session", 10)
+        assert result == []
+
+    def test_returns_all_when_n_exceeds_total(self, store: MemoryStore) -> None:
+        for i in range(3):
+            store.append("s1", {"role": "user", "content": f"msg{i}"})
+        result = store.load_last_n_messages("s1", 100)
+        assert len(result) == 3
+
+    def test_returns_last_n_in_chronological_order(self, store: MemoryStore) -> None:
+        for i in range(5):
+            store.append("s2", {"role": "user", "content": f"msg{i}"})
+        result = store.load_last_n_messages("s2", 3)
+        assert len(result) == 3
+        # 应为最后 3 条：msg2, msg3, msg4，且保持时间顺序
+        assert result[0]["content"] == "msg2"
+        assert result[1]["content"] == "msg3"
+        assert result[2]["content"] == "msg4"
+
+    def test_preserves_message_fields(self, store: MemoryStore) -> None:
+        store.append("s3", {"role": "user", "content": "hello"})
+        result = store.load_last_n_messages("s3", 5)
+        assert result[0]["role"] == "user"
+        assert result[0]["content"] == "hello"
+
+    def test_result_matches_tail_of_full_load(self, store: MemoryStore) -> None:
+        """load_last_n_messages(n) 结果应等于 load() 结果的末尾 n 条。"""
+        for i in range(8):
+            store.append("s4", {"role": "user", "content": f"turn{i}"})
+        full = store.load("s4")
+        last3 = store.load_last_n_messages("s4", 3)
+        assert last3 == full[-3:]
+
+    def test_isolates_sessions(self, store: MemoryStore) -> None:
+        """不同 session 的消息不应互相干扰。"""
+        for i in range(4):
+            store.append("sa", {"role": "user", "content": f"a{i}"})
+        for i in range(4):
+            store.append("sb", {"role": "user", "content": f"b{i}"})
+        result_a = store.load_last_n_messages("sa", 2)
+        result_b = store.load_last_n_messages("sb", 2)
+        assert all(m["content"].startswith("a") for m in result_a)
+        assert all(m["content"].startswith("b") for m in result_b)
