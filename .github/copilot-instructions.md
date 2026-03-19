@@ -18,6 +18,13 @@
 - 资源管理用 `with` 语句
 - 推荐 `collections.abc`（`Sequence`、`Mapping`、`Iterable`）做参数类型
 
+
+## 如何制定实施计划
+- 计划必须极度简洁，为了简洁，可以牺牲语法
+- 每个计划结束时，列出尚未解决的问题列表（如果有的话）
+
+
 ## 项目约定
 - 项目根目录：`README.md`、`.env.example`、`src/`、`docs/`
 - 业务代码在 `src/`，入口 `main.py`, 功能实现要模块化
+

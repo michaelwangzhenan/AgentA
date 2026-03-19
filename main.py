@@ -15,6 +15,8 @@ CLI 入口 —— 私有知识库 Agent 对话界面
     输入 /session <id>      切换到指定 session 并恢复历史
     输入 /del-session <id>   彻底删除指定历史 session 的所有记录
     输入 /clean-session       清空所有历史 session 的记录
+    输入 /reload-prompts      重新扫描 advanced/prompts/ 目录，刷新自定义 Prompt 命令
+    输入 /<prompt_name> [问题] 切换到指定自定义 Prompt 并重置 Agent，可附带首个问题
     输入 /quit 或 /exit 或 Ctrl+C 退出
 """
 
@@ -27,6 +29,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.history import InMemoryHistory
 
 from src.cli.tab_complete import make_completer
+from src.cli.prompt_loader import scan_prompts
 
 # 消除 HuggingFace tokenizer 的 FutureWarning
 warnings.filterwarnings("ignore", category=FutureWarning, module="transformers")
@@ -47,6 +50,9 @@ from src.agent.agent import Agent
 from src.memory.store import MemoryStore
 import src.config as config
 
+
+# 自定义 Prompt 配置目录
+PROMPTS_DIR: str = "advanced/prompts"
 
 BANNER = """
 ╔══════════════════════════════════════════════╗
@@ -70,12 +76,18 @@ HELP_TEXT = """
   /session <id>              切换到指定 session 并恢复历史
   /del-session <id>          彻底删除指定历史 session 的所有记录（不可恢复）
   /clean-session             清空所有历史 session 的记录（不可恢复）
+  /reload-prompts            重新扫描 advanced/prompts/ 目录，刷新自定义 Prompt 命令
+  /<prompt_name> [问题]      切换到指定自定义 Prompt 并重置 Agent，可附带首个问题
   /quit                      退出程序
   /exit                      退出程序（同 /quit）
 
 模型别名：
   en  →  all-MiniLM-L6-v2   英文/多语言
   zh  →  BAAI/bge-small-zh   中文优化
+
+自定义 Prompt：
+  在 advanced/prompts/ 目录下放置 <名称>.prompt.md 文件即可。
+  文件名即命令名（如 5g-expert.prompt.md → /5g-expert），名称只允许字母、数字、- 和 _。
 
 直接输入问题即可开始对话。
 """
@@ -142,17 +154,26 @@ def main() -> None:
     agent = Agent(verbose=True, memory=memory)
     print(f"💬 当前 Session: {agent.session_id}\n")
 
+    # 启动时扫描自定义 Prompt 目录
+    custom_prompts: dict[str, str] = scan_prompts(PROMPTS_DIR)
+    if custom_prompts:
+        print(f"🎭 已加载自定义 Prompt：{', '.join(custom_prompts)}\n")
+
+    # 当前激活的 prompt 名称（None 表示使用默认提示符 "你"）
+    active_prompt_name: str | None = None
+
     prompt_session: PromptSession[str] = PromptSession(
         history=InMemoryHistory(),
-        completer=make_completer(memory),
+        completer=make_completer(memory, custom_prompts),
         complete_while_typing=False,  # 仅 Tab 触发，不干扰正常输入
     )
 
     while True:
         try:
             # 每轮刷新补全器，确保新建/删除的 session id 即时出现
-            prompt_session.completer = make_completer(memory)
-            user_input = prompt_session.prompt("你: ").strip()
+            prompt_session.completer = make_completer(memory, custom_prompts)
+            input_label = f"{active_prompt_name}: " if active_prompt_name else "你: "
+            user_input = prompt_session.prompt(input_label).strip()
         except (KeyboardInterrupt, EOFError):
             print("\n\n👋 再见！")
             memory.close()
@@ -197,6 +218,7 @@ def main() -> None:
             case "/clear":
                 memory.clear(agent.session_id)
                 agent = Agent(verbose=True, memory=memory)
+                active_prompt_name = None
                 print(f"✅ 对话历史已清空，Agent 已重置。\n💬 新 Session: {agent.session_id}\n")
                 continue
             case "/history":
@@ -207,6 +229,7 @@ def main() -> None:
                 if session_arg:
                     # 切换到指定 session
                     agent = Agent(verbose=True, session_id=session_arg, memory=memory)
+                    active_prompt_name = None
                     history = memory.load(session_arg)
                     msg_count = len([m for m in history if m["role"] != "system"])
                     print(f"✅ 已切换到 Session: {session_arg}（共 {msg_count} 条历史消息）\n")
@@ -237,10 +260,38 @@ def main() -> None:
                         count = memory.clean_all_sessions()
                         # 当前 Agent 的历史也已被清除，重建一个新 session
                         agent = Agent(verbose=True, memory=memory)
+                        active_prompt_name = None
                         print(f"🗑️  已清空全部 {count} 个 session 记录。新 Session: {agent.session_id}\n")
                     else:
                         print("已取消。\n")
                 continue
+            case "/reload-prompts":
+                custom_prompts = scan_prompts(PROMPTS_DIR)
+                cmds_str = ', '.join(custom_prompts) if custom_prompts else '（无）'
+                print(f"🔄 Prompt 已重新加载，共 {len(custom_prompts)} 个：{cmds_str}\n")
+                continue
+
+        # ── 自定义 Prompt 命令匹配 ────────────────────────────────────────────
+        cmd_name = cmd_lower.split()[0] if cmd_lower.split() else ""
+        if cmd_name in custom_prompts:
+            question = user_input[len(cmd_name):].strip()
+            agent = Agent(
+                verbose=True,
+                memory=memory,
+                system_prompt=custom_prompts[cmd_name],
+            )
+            active_prompt_name = cmd_name[1:]  # 去掉 / 前缀，如 "5g-expert"
+            print(f"🎭 已切换到 Prompt：{active_prompt_name}  (新 Session: {agent.session_id})\n")
+            if question:
+                print()
+                try:
+                    reply = agent.run(question)
+                    print(f"Agent: {reply}\n")
+                except KeyboardInterrupt:
+                    print("\n⚠️  已中断当前回答。\n")
+                except Exception as e:
+                    print(f"❌ 出错了: {e}\n")
+            continue
 
         # ── 正常问答 ──────────────────────────────────────────────────────────
         print()

@@ -1,16 +1,9 @@
-优先级：
-  High: 1, 2, 3, 8 
-  Middle: 4, 5, 6, 9,
-  Low: 7, 10, 11, 12, 13, 14
-  tbd: 15, 16, 17, 18
-  instant: 19, 20 => Done
-
 -
 待优化项：
 1. 对话记忆 => Done
   目标： 将 messages 历史持久化到 SQLite，重启后仍可延续上下文，支持多轮跨会话对话
   
-  详细实施计划：
+  实施计划：
     【数据层 — memory/store.py】
       - 新建 memory/ 模块，封装 SQLite 读写，对上层隐藏 DB 细节
       - 表结构：messages(id, session_id, role, content, tool_calls_json, tool_call_id, timestamp)
@@ -41,7 +34,7 @@
   目标： 当 `search_knowledge` 返回空或相似度过低时，通过指令（对话）触发 LLM 自行搜索，
     并提示 LLM 优先在国内网站查找信息，而非直接返回"暂无内容"。
   
-  详细实施计划：
+  实施计划：
     【根本原因重新定位】
       经验证明：LLM 本身已具备自主决策访问哪些网页的能力（通过 fetch_url 工具）。
       真正的问题是：SYSTEM_PROMPT 第3条用"可调用"语气太弱，LLM 知识库没命中时倾向于
@@ -71,7 +64,7 @@
 
 3. 重排序（Reranking）=> Done
   目标： 在向量检索结果上加 Cross-Encoder 二次排序，提升精度
-  详细实施计划：
+  实施计划：
     【背景】
       当前 retriever.py 采用两个 Bi-Encoder（SentenceTransformer）+ round-robin 合并：
         · all-MiniLM-L6-v2     → 英文向量化入库 / 召回 kb_en collection
@@ -133,24 +126,140 @@
       - 召回窗口倍数：默认 3（即 top_k=5 时取 15 条候选再精排），可通过环境变量调整
       - 两个 collection 都为空时，round-robin 阶段已返回空，rerank 不会被调用
 
-4. 定制 System Prompt
-  目标： 支持通过配置文件或 CLI 参数覆盖 Agent 的系统提示，适配不同业务场景（客服、代码助手等）
-  详细实施计划：  
+4. 定制 Prompt => Done
+  目标：
+    - 支持配置文件(./advanced/prompts/prompt_name.prompt.md)， prompt_name.prompt.md 为用户自定义 prompt.
+    - 该 prompt 覆盖 Agent 的系统提示(SYSTEM_PROMPT)，适配不同业务场景（5G专家、代码助手等）。
+    - 系统启动时检查./advanced/prompts目录，把目录下的prompt 添加为可用命令，只添加一次，不要重复
+    - 检查./advanced/prompts目录与可用命令的一致性，删除掉的prompt对应的命令也要删除
+    - 用法：用户输入 "/prompt_name [问题（可选）]""
+    - 该功能类似 github copilot 的配置 .github/prompts/prompt_name.prompt.md
+  实施计划：
+
+    【设计原则】
+      - 约定优于配置：文件名即命令名，无需注册表，无需修改代码
+      - 启动时扫描一次，运行中不自动热更新（避免中途混乱）；/reload-prompts 手动触发重新扫描
+      - Prompt 文件仅替换 SYSTEM_PROMPT，其余 Agent 逻辑不变
+      - 命名约束：prompt 名只允许字母、数字、连字符（-）和下划线（_），防止命令冲突
+      - 内置命令保留字（help/clear/history/session/ingest/quit/exit/reload-prompts）
+        不允许被 prompt 文件覆盖，加载时自动跳过并 warning
+
+    【1】目录与文件约定 — advanced/prompts/
+      创建示例目录结构：
+        advanced/
+          prompts/
+            5g-expert.prompt.md       → 激活命令 /5g-expert
+            code-assistant.prompt.md  → 激活命令 /code-assistant
+      Markdown 文件正文即 SYSTEM_PROMPT 内容，无需特殊格式，直接读取原始文本
+
+    【2】src/cli/prompt_loader.py — 新建 Prompt 加载模块
+      功能：扫描目录、加载文件、校验名称合法性、返回命令→内容映射
+      接口：
+        RESERVED_COMMANDS: frozenset[str]   # 内置保留命令集合
+        PROMPT_NAME_RE: re.Pattern          # 合法名称正则：^[a-zA-Z0-9_-]+$
+
+        def scan_prompts(prompts_dir: str) -> dict[str, str]:
+            """扫描目录下所有 *.prompt.md，返回 {"/cmd_name": "prompt内容"} 映射。
+            跳过：名称非法、与保留命令冲突的文件（logging.warning 提示）。
+            目录不存在时静默返回空字典。
+            """
+
+        def load_prompt_file(path: str) -> str:
+            """读取单个 .prompt.md 文件内容，去除首尾空白。"""
+
+    【3】src/cli/tab_complete.py — 扩展补全器，注入动态 prompt 命令
+      修改 make_completer(memory, custom_prompts) 签名，增加 custom_prompts 参数：
+        def make_completer(memory: MemoryStore, custom_prompts: dict[str, str] = {}) -> WordCompleter:
+      补全词列表追加：list(custom_prompts.keys())
+        /reload-prompts 也加入 CLI_COMMANDS 静态列表
+
+    【4】src/agent/agent.py — Agent 支持动态 system_prompt 覆盖
+      修改 Agent.__init__ 增加 system_prompt: str | None = None 参数：
+        self._system_prompt = system_prompt or SYSTEM_PROMPT
+      run() 中构建 messages 时改用 self._system_prompt（已有 SYSTEM_PROMPT 引用替换）
+      无需新增公开方法，调用方传参即可切换
+
+    【5】main.py — 集成 prompt 命令分发
+      启动时调用 scan_prompts() 加载 custom_prompts，打印已加载的 prompt 命令列表（若有）
+      在 main() 主循环命令分发逻辑中增加：
+
+        # 启动
+        from src.cli.prompt_loader import scan_prompts
+        PROMPTS_DIR = "advanced/prompts"
+        custom_prompts: dict[str, str] = scan_prompts(PROMPTS_DIR)
+        if custom_prompts:
+            print(f"🎭 已加载自定义 Prompt：{', '.join(custom_prompts)}\n")
+
+        # /reload-prompts 命令处理
+        case "/reload-prompts":
+            custom_prompts = scan_prompts(PROMPTS_DIR)
+            print(f"🔄 Prompt 已重新加载，共 {len(custom_prompts)} 个：{', '.join(custom_prompts) or '（无）'}\n")
+            continue
+
+        # 主循环末尾：自定义 prompt 命令匹配（在 case 默认分支之前）
+        cmd_name = cmd_lower.split()[0]   # e.g. "/5g-expert"
+        if cmd_name in custom_prompts:
+            # 携带可选问题：/5g-expert 什么是 5G 核心网？
+            question = user_input[len(cmd_name):].strip()
+            agent = Agent(
+                verbose=True,
+                memory=memory,
+                system_prompt=custom_prompts[cmd_name],
+            )
+            print(f"🎭 已切换到 Prompt：{cmd_name[1:]}\n")
+            if question:
+                reply = agent.run(question)
+                print(f"Agent: {reply}\n")
+            continue
+
+        # make_completer 调用也同步传入 custom_prompts
+        prompt_session.completer = make_completer(memory, custom_prompts)
+
+      HELP_TEXT 末尾追加 Prompt 相关说明（动态生成）：
+        /reload-prompts            重新扫描 advanced/prompts/ 目录，刷新自定义 Prompt 命令
+        /<prompt_name> [问题]      切换到指定自定义 Prompt 并重置 Agent，可附带首个问题
+
+    【6】tests/test_prompt_loader.py — 新增测试
+      - test_scan_returns_empty_when_dir_not_exists：目录不存在时返回空字典
+      - test_scan_loads_prompt_files：正确读取 *.prompt.md 文件，key 为 "/name"
+      - test_scan_skips_invalid_names：非法名称（含空格/特殊符号）跳过
+      - test_scan_skips_reserved_commands：与内置命令同名时跳过，不报错
+      - test_load_prompt_file_strips_whitespace：前后空白被去除
+      - test_scan_ignores_non_prompt_files：.md / .txt 等非 .prompt.md 文件被忽略
+      tests/test_phase5_agent.py — 新增 TestCustomSystemPrompt：
+      - test_custom_system_prompt_replaces_default：传入 system_prompt 时 LLM 收到的 messages[0] 为自定义内容
+
+    【涉及文件】
+      advanced/prompts/（新建示例目录 + 示例文件）
+      src/cli/prompt_loader.py    — 新建
+      src/cli/tab_complete.py     — make_completer 增加 custom_prompts 参数
+      src/agent/agent.py          — Agent.__init__ 增加 system_prompt 参数
+      main.py                     — 集成 scan_prompts、命令分发、HELP_TEXT 更新
+      tests/test_prompt_loader.py — 新建
+      tests/test_phase5_agent.py  — 新增 TestCustomSystemPrompt
+
+    【边界与注意事项】
+      - Prompt 文件编码统一使用 UTF-8（open(..., encoding="utf-8")），支持中文内容
+      - 切换 Prompt 时新建 Agent 实例（不复用历史 session），保持上下文干净；
+        如需携带历史，用 /session <id> 先切换，再用 /prompt_name 覆盖 system_prompt
+        → 这是第二期再考虑的高级用法，本期不实现
+      - advanced/prompts/ 加入 .gitignore 排除（用户私有场景），但提供 .gitkeep 占位
+      - prompt 文件内容不做格式校验，用户自行负责内容质量
 
 5. 定制 Skills
   目标： 支持通过 YAML/JSON 配置文件声明领域技能集合，动态注入工具描述和调用策略，无需修改代码即可扩展 Agent 能力
-  详细实施计划：
+  实施计划：
 
 6. MCP 工具服务器接入
   目标： 接入 Model Context Protocol（MCP）标准，允许 Agent 调用外部 MCP Server 提供的工具，实现与第三方服务的标准化集成
-  详细实施计划：
+  实施计划：
 
 7. 用户自定义 Workflow
   目标： 支持用户通过配置文件或脚本（如 YAML/DSL）自定义工作流，编排多步骤工具调用和 LLM 调用序列，
     实现无需编写代码即可完成复杂自动化任务。
     注：与 no.5「定制 Skills」的边界 —— Skills 管理的是单个工具的描述和参数；Workflow 管理的是
     多个工具/LLM 的调用顺序和条件分支，属于更高层的编排逻辑。前置依赖 no.5 完成后再实现。
-  详细实施计划：
+  实施计划：
 
 8. 优化 ReAct => Done
   目标： 提升 Agent 在多轮对话中的推理能力和工具调用效率，具体包括：
@@ -158,7 +267,7 @@
     · 工具调用失败重试：工具执行出错时自动重试或降级，而非直接返回失败
     · 多步骤任务规划：支持 LLM 在单次 run() 中拆解复杂任务并按步骤执行
     · 工具结果质量判断：LLM 能识别工具返回内容为空/无关时主动切换策略，而非直接生成回答
-  详细实施计划：
+  实施计划：
 
     【现状分析】
       agent.py run() 循环已支持多轮 tool_calls，但存在以下问题：
@@ -240,39 +349,39 @@
 
 9. 多Agent协作
   目标： 支持多个 Agent 协同工作，共享知识和任务，提高整体效率
-  详细实施计划：
+  实施计划：
 
 10. Web UI
   目标： 接入 Gradio 或 Streamlit，提供图形界面
-  详细实施计划：
+  实施计划：
 
 11. 支持企业级向量数据库
   目标： 支持接入企业级向量数据库，如 Pinecone、Weaviate 等，提高数据存储和检索能力
-  详细实施计划：
+  实施计划：
 
 12. Ollama
   目标： 支持本地 Ollama 模型，完全离线运行
-  详细实施计划：
+  实施计划：
 
 13. URL 批量导入
   目标： 支持通过配置文件批量爬取指定网页并入库
-  详细实施计划：
+  实施计划：
 
 14. 文档自动同步
   目标： 用 `watchdog` 监听 `docs/` 变化，自动增量入库
-  详细实施计划：
+  实施计划：
 
 15. API/SDK接口
   目标： 方便第三方系统集成
-  详细实施计划：
+  实施计划：
 
 16. 安全与权限管理
   目标： 适合企业/团队场景
-  详细实施计划：
+  实施计划：
 
 17. 多语言支持
   目标： 适应国际化需求
-  详细实施计划：
+  实施计划：
 
 18. 本地工具扩展
   目标： 开发更多工具，扩充 Agent 工具集，增强处理复杂任务的能力
@@ -286,15 +395,16 @@
     b. run_python：在沙筱环境中执行 Python 代码片段，返回输出结果
     c. read_file：读取本地文件内容（如日志、csv），支持行范围指定
     d. shell_cmd：执行本地 Shell 命令，返回 stdout/stderr
-  详细实施计划：
+  实施计划：
 
-19. 使用Tab键补全命令
+19. 使用Tab键补全命令 => Done
   CLI 输入命令时支持Tab键补
 20. Agent 优化 => Done
   目标：
     提升推理准确性
     提高推理性能，考虑： 减少推理时间，CPU/内存消耗，尽量节省token(保证推理质量，寻找最佳性价比)
     Clean Code
+  
   实施计划：
 
     【优化点汇总】
@@ -405,7 +515,71 @@
       5. F（需改 store.py + 测试，独立 PR）
 
     【测试影响】
-      A 修复后：TestToolGuidance 中捕获 DB 写入内容的断言需同步验证干净版本
+      A 修复后： TestToolGuidance 中捕获 DB 写入内容的断言需同步验证干净版本
       D 拆分后：TestAgentToolCall 中部分 mock_chat 捕获 messages 的测试逻辑不变，
                但可新增 _process_tool_calls 的独立单元测试
       F 完成后：新增 test_memory.py::TestLoadLastN 类（3~4 个测试）
+21. 优化 session 信息
+  目标：
+    使用/session <id> 命令时，切回到原来的 prompt_name， 而不是"你"
+    /session 信息中，增加一列显示对应的 prompt_name， 如"5g-expert"
+    /session 切换命令中，提示 session id 只需显示前8位，后面加上"首问 "，用户更加容易选择要切换的session
+  实施计划：
+
+    【核心决策】
+      prompt_name 必须持久化到 DB（内存变量重启即丢失），
+      sessions 表新增 prompt_name 列，
+      新建/切换 prompt 时显式写入，其余写入路径（append）无需感知。
+
+    【1】src/memory/store.py — sessions 表新增 prompt_name 列
+      _create_tables() 中用 ALTER TABLE 做迁移兼容（列不存在才加）：
+        ALTER TABLE sessions ADD COLUMN prompt_name TEXT NOT NULL DEFAULT ''
+      新增方法：
+        def set_prompt_name(self, session_id: str, prompt_name: str) -> None:
+            """更新 session 对应的 prompt_name，session 不存在时静默忽略。"""
+      list_sessions() 返回的 dict 中同步包含 prompt_name 字段
+
+    【2】main.py — 切换/新建 prompt 时持久化 prompt_name
+      自定义 prompt 命令分发处（新建 Agent 后）：
+        memory.set_prompt_name(agent.session_id, active_prompt_name)
+      /clear 重置后 prompt_name 为空（新 session，无需额外写入，DB 默认 ''）
+      /session <id> 切换后，从 list_sessions() 读取该 session 的 prompt_name，
+        恢复 active_prompt_name（空字符串 → None）
+
+    【3】main.py — _list_sessions() 显示优化
+      session_id 只显示前 8 位（方便用户记忆和输入）：
+        sid_short = s['session_id'][:8]
+      新增 prompt_name 列，无 prompt 时显示"默认"：
+        prompt_label = s['prompt_name'] or '默认'
+      输出格式调整为：
+        {sid_short}  [{created}]  {msg_count}条  [{prompt_label}]  首问: {first_msg}
+
+    【4】main.py — Tab 补全中 session id 缩短为前 8 位 + 首问
+      tab_complete.py make_completer() 中补全词格式不变（仍用完整 session_id，确保命令可用）；
+      用户在 /session 列表里看到的是短 id，输入时可 Tab 补全出完整 id，
+      无需修改补全逻辑本身。
+
+    【5】tests/test_memory.py — 新增 TestSetPromptName 类
+      - test_set_prompt_name_updates_value：写入后 list_sessions() 返回正确 prompt_name
+      - test_set_prompt_name_nonexistent_session_is_ignored：session 不存在时静默不报错
+      - test_list_sessions_includes_prompt_name：list_sessions() 结果含 prompt_name 字段
+
+    【涉及文件】
+      src/memory/store.py  — sessions 表 ALTER TABLE 迁移 + set_prompt_name() + list_sessions() 更新
+      main.py              — 切换 prompt 时调用 set_prompt_name()；/session 切换时恢复 active_prompt_name；_list_sessions() 格式调整
+      tests/test_memory.py — 新增 TestSetPromptName（3 个测试）
+
+    【注意事项】
+      - ALTER TABLE ADD COLUMN 在 SQLite 中是安全的幂等操作（列已存在会报错，需捕获 OperationalError 跳过）
+      - tab 补全仍用完整 session_id，用户看短 id 后可 Tab 补全，体验一致
+
+
+
+22. /tests 优化
+  目标：
+    test_xxx.py 命名风格同一，命名更common 和 符合命名习惯， 去除“phaseN”。
+    精简合并case,只保留必要case,节省测试资源。
+    重构case, 使 cases 那模块分组。
+
+
+-

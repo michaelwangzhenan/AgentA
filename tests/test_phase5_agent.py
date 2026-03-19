@@ -377,3 +377,56 @@ class TestToolGuidance:
         # 最后一次 chat 调用应传入 tools=None
         assert chat_calls[-1] is None, "达到工具轮次上限后应以 tools=None 调用 chat()"
         assert result == "最终回答"
+
+
+# ── 单元测试：自定义 system_prompt ───────────────────────────────────────────
+
+class TestCustomSystemPrompt:
+    """测试 Agent 支持外部传入自定义 system_prompt 覆盖默认 SYSTEM_PROMPT。"""
+
+    def test_custom_system_prompt_replaces_default(self) -> None:
+        """传入 system_prompt 时，LLM 收到的 messages[0] 内容应为自定义内容。"""
+        custom = "你是一位 5G 通信专家助手。"
+        agent = Agent(verbose=False, system_prompt=custom)
+        captured_messages: list[list[dict]] = []
+
+        def mock_chat(messages, tools=None, **kwargs):
+            captured_messages.append(list(messages))
+            return _make_text_response("5G 回答")
+
+        with patch("src.agent.agent.chat", side_effect=mock_chat):
+            agent.run("什么是 5G？")
+
+        assert captured_messages, "chat() 应被调用"
+        system_msg = captured_messages[0][0]
+        assert system_msg["role"] == "system"
+        assert system_msg["content"] == custom
+
+    def test_default_system_prompt_used_when_none_passed(self) -> None:
+        """不传 system_prompt 时，LLM 收到的 messages[0] 应为默认 SYSTEM_PROMPT。"""
+        agent = Agent(verbose=False)
+        captured_messages: list[list[dict]] = []
+
+        def mock_chat(messages, tools=None, **kwargs):
+            captured_messages.append(list(messages))
+            return _make_text_response("默认回答")
+
+        with patch("src.agent.agent.chat", side_effect=mock_chat):
+            agent.run("测试默认提示")
+
+        system_msg = captured_messages[0][0]
+        assert system_msg["role"] == "system"
+        assert system_msg["content"] == SYSTEM_PROMPT
+
+    def test_custom_prompt_stored_as_attribute(self) -> None:
+        """自定义 system_prompt 应存储在 agent.system_prompt 属性中。"""
+        custom = "你是代码助手。"
+        agent = Agent(verbose=False, system_prompt=custom)
+        assert agent.system_prompt == custom
+
+    def test_two_agents_with_different_prompts_are_independent(self) -> None:
+        """两个 Agent 使用不同 system_prompt 时，互不干扰。"""
+        agent_a = Agent(verbose=False, system_prompt="Prompt A")
+        agent_b = Agent(verbose=False, system_prompt="Prompt B")
+        assert agent_a.system_prompt == "Prompt A"
+        assert agent_b.system_prompt == "Prompt B"
