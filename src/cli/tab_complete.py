@@ -49,12 +49,28 @@ def make_completer(
     Returns:
         WordCompleter，可直接赋给 PromptSession.completer。
     """
-    session_ids = [s["session_id"] for s in memory.list_sessions()]
+    session_list = memory.list_sessions()
     prompt_cmds: list[str] = list(custom_prompts.keys()) if custom_prompts else []
-    words: list[str] = (
-        CLI_COMMANDS
-        + prompt_cmds
-        + [f"/session {sid}" for sid in session_ids]
-        + [f"/del-session {sid}" for sid in session_ids]
-    )
-    return WordCompleter(words, sentence=True, match_middle=False)
+
+    # Tab 候选词：实际输入内容为完整 session_id，显示文字为“短 id + 首问”
+    session_words: list[str] = []
+    session_display: dict[str, str] = {}
+    del_words: list[str] = []
+    del_display: dict[str, str] = {}
+    for s in session_list:
+        full_id = s["session_id"]
+        short_id = full_id[:8]
+        first_q = (s["first_user_msg"] or "").replace("\n", " ")[:30]
+        label = f"{short_id}  {first_q}" if first_q else short_id
+
+        session_cmd = f"/session {full_id}"
+        session_words.append(session_cmd)
+        session_display[session_cmd] = f"/session {label}"
+
+        del_cmd = f"/del-session {full_id}"
+        del_words.append(del_cmd)
+        del_display[del_cmd] = f"/del-session {label}"
+
+    display_dict = {**session_display, **del_display}
+    words: list[str] = CLI_COMMANDS + prompt_cmds + session_words + del_words
+    return WordCompleter(words, display_dict=display_dict, sentence=True, match_middle=False)

@@ -92,12 +92,14 @@ class Agent:
         session_id: str | None = None,
         max_history_turns: int = 20,
         memory: MemoryStore | None = None,
+        prompt_name: str = "",
     ) -> None:
         self.system_prompt = system_prompt
         self.max_iterations = max_iterations
         self.verbose = verbose
         self.session_id: str = session_id or str(uuid.uuid4())
         self.max_history_turns = max_history_turns
+        self._prompt_name = prompt_name
         # 支持从外部传入 memory（便于测试 mock），默认使用模块级共享实例
         self._memory: MemoryStore = memory if memory is not None else _get_shared_memory()
 
@@ -124,8 +126,12 @@ class Agent:
             {"role": "user", "content": user_input},
         ]
 
-        # 将当前轮用户输入写入 DB
-        self._memory.append(self.session_id, {"role": "user", "content": user_input})
+        # 将当前轮用户输入写入 DB，并在首次创建 session 时带入 prompt_name
+        self._memory.append(
+            self.session_id,
+            {"role": "user", "content": user_input},
+            prompt_name=self._prompt_name,
+        )
 
         tool_rounds = 0  # 已消耗的工具调用轮次计数
 

@@ -519,7 +519,7 @@
       D 拆分后：TestAgentToolCall 中部分 mock_chat 捕获 messages 的测试逻辑不变，
                但可新增 _process_tool_calls 的独立单元测试
       F 完成后：新增 test_memory.py::TestLoadLastN 类（3~4 个测试）
-21. 优化 session 信息
+21. 优化 session 信息 => Done
   目标：
     使用/session <id> 命令时，切回到原来的 prompt_name， 而不是"你"
     /session 信息中，增加一列显示对应的 prompt_name， 如"5g-expert"

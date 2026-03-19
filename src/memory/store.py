@@ -17,7 +17,8 @@
     sessions(
         session_id    TEXT     PRIMARY KEY,
         created_at    TEXT     NOT NULL,
-        first_user_msg TEXT   NOT NULL DEFAULT ''  -- 首条用户消息摘要，便于展示
+        first_user_msg TEXT   NOT NULL DEFAULT '',  -- 首条用户消息摘要，便于展示
+        prompt_name   TEXT     NOT NULL DEFAULT ''  -- 当前激活的自定义 prompt 名称，空表示使用默认提示
     )
 """
 
@@ -77,23 +78,35 @@ class MemoryStore:
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id    TEXT PRIMARY KEY,
                 created_at    TEXT NOT NULL,
-                first_user_msg TEXT NOT NULL DEFAULT ''
+                first_user_msg TEXT NOT NULL DEFAULT '',
+                prompt_name   TEXT NOT NULL DEFAULT ''
             );
         """)
+        # 老库迁移兼容：若 sessions 表已存在但缺少 prompt_name 列，则动态添加
+        try:
+            self._conn.execute(
+                "ALTER TABLE sessions ADD COLUMN prompt_name TEXT NOT NULL DEFAULT ''"
+            )
+            self._conn.commit()
+            logger.info("MemoryStore: sessions 表已迁移添加 prompt_name 列")
+        except Exception:
+            # 列已存在（OperationalError: duplicate column name）或其他原因，均安全跳过
+            pass
         self._conn.commit()
 
     # ── 核心接口 ──────────────────────────────────────────────────────────────
 
-    def append(self, session_id: str, msg: dict[str, Any]) -> None:
+    def append(self, session_id: str, msg: dict[str, Any], prompt_name: str = "") -> None:
         """
         将单条 message 追加到指定 session。
 
         自动处理 tool_calls（assistant role）和 tool_call_id（tool role）的序列化。
-        若 session 不存在则自动创建。
+        若 session 不存在则自动创建，并将 prompt_name 一并写入。
 
         Args:
             session_id: 会话 ID。
             msg: 标准 OpenAI messages 格式的单条消息 dict。
+            prompt_name: 当前 session 使用的自定义 prompt 名称，默认为空字符串。
         """
         role: str = msg.get("role", "")
         content: str = msg.get("content") or ""
@@ -109,8 +122,8 @@ class MemoryStore:
             ).fetchone()
             if not existing:
                 self._conn.execute(
-                    "INSERT INTO sessions(session_id, created_at, first_user_msg) VALUES(?,?,?)",
-                    (session_id, now, content[:80] if role == "user" else ""),
+                    "INSERT INTO sessions(session_id, created_at, first_user_msg, prompt_name) VALUES(?,?,?,?)",
+                    (session_id, now, content[:80] if role == "user" else "", prompt_name),
                 )
 
             # 追加消息
@@ -199,6 +212,22 @@ class MemoryStore:
 
         return messages
 
+    def set_prompt_name(self, session_id: str, prompt_name: str) -> None:
+        """
+        更新指定 session 对应的 prompt_name。
+
+        session 不存在时静默忽略（不报错）。
+
+        Args:
+            session_id: 会话 ID。
+            prompt_name: 要写入的 prompt 名称（不含 / 前缀）。
+        """
+        with self._conn:
+            self._conn.execute(
+                "UPDATE sessions SET prompt_name = ? WHERE session_id = ?",
+                (prompt_name, session_id),
+            )
+
     def clear(self, session_id: str) -> None:
         """
         清空指定 session 的所有消息记录（同时删除 session 元数据）。
@@ -266,7 +295,7 @@ class MemoryStore:
             list of dict，每项包含 session_id、created_at、first_user_msg、msg_count。
         """
         rows = self._conn.execute(
-            """SELECT s.session_id, s.created_at, s.first_user_msg,
+            """SELECT s.session_id, s.created_at, s.first_user_msg, s.prompt_name,
                       COUNT(m.id) AS msg_count
                FROM sessions s
                LEFT JOIN messages m ON s.session_id = m.session_id

@@ -138,10 +138,14 @@ def _list_sessions(memory: MemoryStore) -> None:
         print("📭 暂无历史 session 记录。\n")
         return
     print(f"\n📚 历史 Session 列表（共 {len(sessions)} 个）：")
+    print(f"  {'ID':<10}  {'Create On':<19}  {'messages':<12}  {'Prompt':<16}  {'1st Question':<40}")
+    print(f"  {'-'*8:<10}  {'-'*19:<19}  {'-'*12:<12}  {'-'*16:<16}  {'-'*40}")
     for s in sessions:
         created = s["created_at"][:19].replace("T", " ")
+        sid_short = s["session_id"][:8]
+        prompt_label = s["prompt_name"] or "默认"
         first_msg = (s["first_user_msg"] or "（无用户消息）")[:40]
-        print(f"  {s['session_id']}  [{created}]  {s['msg_count']} 条  首问: {first_msg}")
+        print(f"  {sid_short:<10}  {created:<19}  {s['msg_count']:<12}  {prompt_label:<16}  {first_msg:<40}")
     print()
 
 
@@ -229,10 +233,14 @@ def main() -> None:
                 if session_arg:
                     # 切换到指定 session
                     agent = Agent(verbose=True, session_id=session_arg, memory=memory)
-                    active_prompt_name = None
+                    # 从 DB 恢复该 session 的 prompt_name
+                    sessions_info = {s["session_id"]: s for s in memory.list_sessions()}
+                    saved_prompt = sessions_info.get(session_arg, {}).get("prompt_name", "")
+                    active_prompt_name = saved_prompt or None
                     history = memory.load(session_arg)
                     msg_count = len([m for m in history if m["role"] != "system"])
-                    print(f"✅ 已切换到 Session: {session_arg}（共 {msg_count} 条历史消息）\n")
+                    prompt_hint = f"  Prompt: {active_prompt_name}" if active_prompt_name else ""
+                    print(f"✅ 已切换到 Session: {session_arg}（共 {msg_count} 条历史消息）{prompt_hint}\n")
                 else:
                     # 列出所有历史 session
                     _list_sessions(memory)
@@ -275,12 +283,13 @@ def main() -> None:
         cmd_name = cmd_lower.split()[0] if cmd_lower.split() else ""
         if cmd_name in custom_prompts:
             question = user_input[len(cmd_name):].strip()
+            active_prompt_name = cmd_name[1:]  # 去掉 / 前缀，如 "5g-expert"
             agent = Agent(
                 verbose=True,
                 memory=memory,
                 system_prompt=custom_prompts[cmd_name],
+                prompt_name=active_prompt_name,
             )
-            active_prompt_name = cmd_name[1:]  # 去掉 / 前缀，如 "5g-expert"
             print(f"🎭 已切换到 Prompt：{active_prompt_name}  (新 Session: {agent.session_id})\n")
             if question:
                 print()
