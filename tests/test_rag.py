@@ -1,11 +1,11 @@
-﻿"""
-Phase 3 测试：RAG 向量化入库 & 检索
+"""
+测试：RAG 向量化入库 & 检索
 
 测试内容：
     - rag/ingest.py：chunk_text() 分块逻辑
     - config.py：resolve_embedding() 多模型解析
     - rag/reranker.py：rerank() 精排逻辑（单元测试，不依赖向量数据库）
-    - rag/retriever.py：search() 检索返回格式（需要已完成入库）
+    - rag/retriever.py：search() 检索返回格式（集成，需要已完成入库）
 """
 
 import pytest
@@ -43,7 +43,6 @@ class TestChunkText:
         text = "X" * 700
         chunks = chunk_text(text, size=600, overlap=100)
         assert len(chunks) == 2
-        # 第一块末尾 100 字符应与第二块开头 100 字符相同
         assert chunks[0][-100:] == chunks[1][:100]
 
     def test_custom_size_and_overlap(self) -> None:
@@ -97,30 +96,20 @@ class TestSearch:
         assert len(result) > 0
 
     @pytest.mark.integration
-    def test_search_result_contains_source(self) -> None:
-        """检索结果应包含来源文件名"""
+    def test_search_result_format(self) -> None:
+        """检索结果应包含来源、相似度、库名称"""
         result = search("ChromaDB 向量数据库", top_k=2)
         assert "来源:" in result
-
-    @pytest.mark.integration
-    def test_search_result_contains_similarity(self) -> None:
-        """检索结果应包含相似度分数"""
-        result = search("LLM 大语言模型", top_k=2)
         assert "相似度:" in result
-
-    @pytest.mark.integration
-    def test_search_result_contains_collection_name(self) -> None:
-        """检索结果应包含 collection 名称（库: kb_xx）"""
-        result = search("LLM 大语言模型", top_k=2)
         assert "库:" in result
 
     @pytest.mark.integration
     def test_search_top_k_limits_results(self) -> None:
         """返回的文档片段数量不应超过 top_k"""
         result = search("测试", top_k=2)
-        # 每个结果以 [N] 开头
-        count = result.count("\n[")  # 第 2 个及之后的结果
-        assert count <= 1  # top_k=2 时最多有 1 个 "\n[" 分隔符
+        # 每个结果以 [N] 开头，top_k=2 时最多有 1 个 "\n[" 分隔符
+        count = result.count("\n[")
+        assert count <= 1
 
     @pytest.mark.integration
     def test_search_irrelevant_query_still_returns_result(self) -> None:
@@ -130,9 +119,7 @@ class TestSearch:
         assert len(result) > 0
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# TestReranker：Cross-Encoder 二阶段精排（纯单元测试，不依赖向量数据库）
-# ─────────────────────────────────────────────────────────────────────────────
+# ── 辅助函数 ──────────────────────────────────────────────────────────────────
 
 def _make_hits(n: int) -> list[_Hit]:
     """构造 n 条虚拟 _Hit，source/document 带编号以便区分。"""
@@ -148,7 +135,7 @@ def _make_hits(n: int) -> list[_Hit]:
 
 
 class TestReranker:
-    """测试 src/rag/reranker.rerank() 精排逻辑"""
+    """测试 src/rag/reranker.rerank() 精排逻辑（纯单元测试，不依赖向量数据库）"""
 
     def test_rerank_passthrough_when_candidates_le_top_k(self) -> None:
         """候选数量 ≤ top_k 时直接原样返回，不加载 CrossEncoder。"""
@@ -157,7 +144,6 @@ class TestReranker:
         hits = _make_hits(3)
         with patch("src.rag.reranker._get_cross_encoder") as mock_ce:
             result = reranker.rerank(query="测试", hits=hits, top_k=5)
-        # CrossEncoder 不应被调用
         mock_ce.assert_not_called()
         assert result is hits  # 直接返回同一对象（passthrough）
 
@@ -166,7 +152,6 @@ class TestReranker:
         from src.rag import reranker
 
         hits = _make_hits(9)
-        # 构造一个假的 CrossEncoder：predict 返回降序分数
         mock_model = MagicMock()
         mock_model.predict.return_value = [float(9 - i) for i in range(9)]
 
@@ -204,7 +189,7 @@ class TestReranker:
         with patch("src.rag.reranker._get_cross_encoder", return_value=mock_model):
             reranker.rerank(query="关键词检索", hits=hits, top_k=2)
 
-        call_args = mock_model.predict.call_args[0][0]  # 第一个位置参数
+        call_args = mock_model.predict.call_args[0][0]
         assert len(call_args) == 3
         for pair, hit in zip(call_args, hits):
             assert pair == ("关键词检索", hit.document)
@@ -240,5 +225,4 @@ class TestReranker:
             _Hit(source="c.txt", document="Python 列表推导式可以简化循环代码。", distance=0.2, collection="kb_test"),
         ]
         result = rerank(query=query, hits=hits, top_k=2)
-        # b.txt（最相关）应排在第一位
         assert result[0].source == "b.txt"

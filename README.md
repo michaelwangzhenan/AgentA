@@ -134,9 +134,11 @@ LLM_PROVIDER=claude     # Anthropic Claude
 .venv\Scripts\python -m pytest
 
 # 按模块测试
-.venv\Scripts\python -m pytest tests/test_phase1_llm.py    # LLM 配置 & Provider
-.venv\Scripts\python -m pytest tests/test_phase2_parser.py # 文档解析（7 种格式）
-.venv\Scripts\python -m pytest tests/test_phase3_rag.py    # 分块 & 双语检索 & Reranker
-.venv\Scripts\python -m pytest tests/test_phase4_tools.py  # 工具层（search/fetch）
-.venv\Scripts\python -m pytest tests/test_phase5_agent.py  # Agent ReAct 循环
+.venv\Scripts\python -m pytest tests/test_llm.py           # LLM 配置 & Provider
+.venv\Scripts\python -m pytest tests/test_parser.py        # 文档解析（7 种格式）
+.venv\Scripts\python -m pytest tests/test_rag.py           # 分块 & 双语检索 & Reranker
+.venv\Scripts\python -m pytest tests/test_tools.py         # 工具层（search/fetch）
+.venv\Scripts\python -m pytest tests/test_agent.py         # Agent ReAct 循环
+.venv\Scripts\python -m pytest tests/test_memory.py        # 对话记忆持久化
+.venv\Scripts\python -m pytest tests/test_prompt_loader.py # 自定义 Prompt 加载
 ```

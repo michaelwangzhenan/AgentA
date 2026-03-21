@@ -1,5 +1,5 @@
-﻿"""
-Phase 1 测试：LLM 配置层 & 统一调用接口
+"""
+测试：LLM 配置层 & 统一调用接口
 
 测试内容：
     - config.py：Provider 配置加载、active config 获取
@@ -101,7 +101,6 @@ class TestLLMProvider:
             [{"role": "user", "content": "北京今天天气怎么样？"}],
             tools=tools,
         )
-        # 应返回 response 对象，有 choices 属性
         assert hasattr(response, "choices"), "传入 tools 时应返回 response 对象"
         assert len(response.choices) > 0
 
@@ -121,7 +120,7 @@ class TestAllProviders:
         "openai", "grok", "claude",                       # 国外
     ])
     def test_provider_has_model_and_url(self, provider: str) -> None:
-        """每个 provider 都必须配置 model 和 base_url（ollama 除外）"""
+        """每个 provider 都必须配置 model 和 base_url（claude 除外）"""
         cfg = config.PROVIDER_CONFIGS[provider]
         assert cfg.model, f"[{provider}] model 未配置"
         if provider != "claude":  # claude 的 base_url 允许为空（使用原生 SDK）

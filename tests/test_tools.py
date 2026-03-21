@@ -1,5 +1,5 @@
-﻿"""
-Phase 4 测试：工具层
+"""
+测试：工具层
 
 测试内容：
     - TOOLS 列表结构是否符合 OpenAI Function Calling 格式
@@ -90,7 +90,6 @@ class TestFetchUrl:
         assert isinstance(result, ToolResult)
         assert result.status == "ok"
         assert len(result.content) > 0
-        # httpbin 返回 Herman Melville 的段落，不含 script 标签
         assert "<script>" not in result.content
 
     @pytest.mark.integration
@@ -98,7 +97,6 @@ class TestFetchUrl:
         """返回内容不应超过 max_chars + 截断提示的长度"""
         max_chars = 200
         result = execute_tool("fetch_url", {"url": "https://httpbin.org/html", "max_chars": max_chars})
-        # 截断后的内容 ≤ max_chars + 截断提示（约 30 字符）
         assert len(result.content) <= max_chars + 60
 
     @pytest.mark.integration
@@ -111,20 +109,13 @@ class TestFetchUrl:
 class TestFetchUrlDescriptionGuidance:
     """测试 fetch_url description 包含国内网站优先引导说明"""
 
-    def _get_fetch_url_description(self) -> str:
+    def test_fetch_url_description_has_domestic_guidance(self) -> None:
+        """description 应包含国内网站关键词（≥3个）、国内优先和国外备选提示"""
         tool = next(t for t in TOOLS if t["function"]["name"] == "fetch_url")
-        return tool["function"]["description"]
+        desc = tool["function"]["description"]
 
-    def test_description_mentions_domestic_sites(self) -> None:
-        desc = self._get_fetch_url_description()
         domestic_keywords = ["xinhuanet", "baidu", "zhihu", "segmentfault", "csdn", "people"]
         matched = [kw for kw in domestic_keywords if kw in desc]
         assert len(matched) >= 3, f"description 应包含至少3个国内网站关键词，实际匹配：{matched}"
-
-    def test_description_mentions_domestic_priority(self) -> None:
-        desc = self._get_fetch_url_description()
-        assert "国内" in desc, "description 应包含'国内'字样以引导优先使用国内网站"
-
-    def test_description_mentions_fallback_to_foreign(self) -> None:
-        desc = self._get_fetch_url_description()
+        assert "国内" in desc, "description 应包含'国内'字样"
         assert "国外" in desc, "description 应提及国外网站作为备选"

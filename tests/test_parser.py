@@ -1,5 +1,5 @@
-﻿"""
-Phase 2 测试：文档解析层
+"""
+测试：文档解析层
 
 测试内容：
     - rag/parser.py：各格式文档解析（md/txt/html/docx/pptx/xlsx）

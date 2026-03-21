@@ -575,11 +575,10 @@
 
 
 
-22. /tests 优化
+22. tests 优化
   目标：
-    test_xxx.py 命名风格同一，命名更common 和 符合命名习惯， 去除“phaseN”。
+    统一 test_xxx.py 命名风格，使命名更common 和 符合命名习惯， 去除“phaseN”。
     精简合并case,只保留必要case,节省测试资源。
     重构case, 使 cases 那模块分组。
-
 
 -

@@ -1,5 +1,5 @@
-﻿"""
-Phase 5 测试：Agent 主控逻辑
+"""
+测试：Agent 主控逻辑
 
 测试内容：
     - Agent 初始化参数
@@ -7,6 +7,7 @@ Phase 5 测试：Agent 主控逻辑
     - 工具调用流程（mock execute_tool）
     - 最大迭代次数保护
     - 真实端到端对话（integration）
+    - 自定义 system_prompt 覆盖
 """
 
 import json
@@ -53,10 +54,6 @@ class TestAgentInit:
         assert agent.max_iterations == MAX_TOTAL_ROUNDS
         assert agent.verbose is True
 
-    def test_max_iterations_alias_equals_total_rounds(self) -> None:
-        """max_iterations 默认应等于 MAX_TOTAL_ROUNDS"""
-        assert Agent().max_iterations == MAX_TOTAL_ROUNDS
-
     def test_custom_init(self) -> None:
         agent = Agent(system_prompt="custom", max_iterations=3, verbose=False)
         assert agent.system_prompt == "custom"
@@ -97,7 +94,7 @@ class TestAgentDirectReply:
         agent = Agent(verbose=False)
         with patch("src.agent.agent.chat", return_value=_make_text_response("")):
             result = agent.run("问题")
-        assert "抱歉" in result or len(result) >= 0  # 返回 fallback 提示
+        assert "抱歉" in result or len(result) >= 0
 
 
 class TestAgentToolCall:
@@ -137,7 +134,6 @@ class TestAgentToolCall:
              patch("src.agent.agent.execute_tool", return_value=ToolResult(status="ok", content="工具返回内容")):
             agent.run("测试问题")
 
-        # 应有 tool role 的 message
         roles = [m["role"] for m in captured_messages if isinstance(m, dict)]
         assert "tool" in roles
 
@@ -215,23 +211,18 @@ class TestAgentIntegration:
 class TestSystemPromptWebSearch:
     """测试 SYSTEM_PROMPT 包含强制联网搜索策略和国内网站优先引导"""
 
-    def test_system_prompt_forbids_direct_no_content_reply(self) -> None:
-        """SYSTEM_PROMPT 应包含'必须'等强制语气，禁止直接回复暂无内容"""
+    def test_system_prompt_has_mandatory_search_strategy(self) -> None:
+        """SYSTEM_PROMPT 应包含强制搜索策略：必须、fetch_url、国外备选"""
         assert "必须" in SYSTEM_PROMPT, "SYSTEM_PROMPT 应包含'必须'强制策略"
-
-    def test_system_prompt_mentions_fetch_url(self) -> None:
         assert "fetch_url" in SYSTEM_PROMPT
+        assert "国外" in SYSTEM_PROMPT, "SYSTEM_PROMPT 应提及国外网站作为备选"
 
-    def test_system_prompt_mentions_domestic_sites(self) -> None:
+    def test_system_prompt_has_domestic_site_guidance(self) -> None:
+        """SYSTEM_PROMPT 应包含国内优先引导和至少 3 个国内网站"""
+        assert "国内" in SYSTEM_PROMPT, "SYSTEM_PROMPT 应包含'国内'字样"
         domestic_keywords = ["xinhuanet", "baidu", "zhihu", "segmentfault", "csdn", "people"]
         matched = [kw for kw in domestic_keywords if kw in SYSTEM_PROMPT]
         assert len(matched) >= 3, f"SYSTEM_PROMPT 应列出至少3个国内网站，实际匹配：{matched}"
-
-    def test_system_prompt_mentions_domestic_priority(self) -> None:
-        assert "国内" in SYSTEM_PROMPT, "SYSTEM_PROMPT 应包含'国内'字样"
-
-    def test_system_prompt_mentions_fallback_to_foreign(self) -> None:
-        assert "国外" in SYSTEM_PROMPT, "SYSTEM_PROMPT 应提及国外网站作为备选"
 
     def test_agent_calls_fetch_url_when_knowledge_empty(self) -> None:
         """知识库返回空时，Agent 应主动调用 fetch_url（通过 mock 验证）"""
@@ -242,14 +233,11 @@ class TestSystemPromptWebSearch:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                # 第一轮：先搜索知识库
                 return _make_tool_call_response("search_knowledge", {"query": "最新AI新闻"})
             if call_count == 2:
-                # 第二轮：知识库为空，调用 fetch_url
                 return _make_tool_call_response(
                     "fetch_url", {"url": "https://news.baidu.com"}, call_id="call_fetch_001"
                 )
-            # 第三轮：生成最终回答
             return _make_text_response("根据百度新闻，最新AI动态如下……")
 
         tool_calls: list[str] = []
@@ -273,7 +261,6 @@ class TestSystemPromptWebSearch:
     def test_integration_web_search_triggered_by_unknown_topic(self) -> None:
         """集成测试：询问知识库中没有的实时信息时，Agent 应主动联网搜索"""
         agent = Agent(verbose=True)
-        # 使用知识库中不可能存在的实时问题触发联网
         result = agent.run("今天的天气怎么样？请上网查一下。")
         assert isinstance(result, str)
         assert len(result) > 10
@@ -291,7 +278,6 @@ class TestToolGuidance:
             for m in messages:
                 if isinstance(m, dict) and m.get("role") == "tool":
                     captured_tool_messages.append(m)
-            # 第一轮调用工具，第二轮直接回答
             if not captured_tool_messages:
                 return _make_tool_call_response("fetch_url", {"url": "https://example.com"})
             return _make_text_response("无法获取信息。")
@@ -363,7 +349,6 @@ class TestToolGuidance:
 
         def mock_chat(messages, tools=None, **kwargs):
             chat_calls.append(tools)
-            # 前 MAX_TOOL_ROUNDS 轮一直返回 tool_call，最后一轮（tools=None）返回文本
             if tools is not None:
                 return _make_tool_call_response("search_knowledge", {"query": "q"})
             return _make_text_response("最终回答")
@@ -374,12 +359,9 @@ class TestToolGuidance:
              patch("src.agent.agent.execute_tool", return_value=ok_result):
             result = agent.run("测试工具轮次上限")
 
-        # 最后一次 chat 调用应传入 tools=None
         assert chat_calls[-1] is None, "达到工具轮次上限后应以 tools=None 调用 chat()"
         assert result == "最终回答"
 
-
-# ── 单元测试：自定义 system_prompt ───────────────────────────────────────────
 
 class TestCustomSystemPrompt:
     """测试 Agent 支持外部传入自定义 system_prompt 覆盖默认 SYSTEM_PROMPT。"""
@@ -417,16 +399,3 @@ class TestCustomSystemPrompt:
         system_msg = captured_messages[0][0]
         assert system_msg["role"] == "system"
         assert system_msg["content"] == SYSTEM_PROMPT
-
-    def test_custom_prompt_stored_as_attribute(self) -> None:
-        """自定义 system_prompt 应存储在 agent.system_prompt 属性中。"""
-        custom = "你是代码助手。"
-        agent = Agent(verbose=False, system_prompt=custom)
-        assert agent.system_prompt == custom
-
-    def test_two_agents_with_different_prompts_are_independent(self) -> None:
-        """两个 Agent 使用不同 system_prompt 时，互不干扰。"""
-        agent_a = Agent(verbose=False, system_prompt="Prompt A")
-        agent_b = Agent(verbose=False, system_prompt="Prompt B")
-        assert agent_a.system_prompt == "Prompt A"
-        assert agent_b.system_prompt == "Prompt B"
