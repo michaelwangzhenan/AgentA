@@ -94,7 +94,7 @@ class TestAgentDirectReply:
         agent = Agent(verbose=False)
         with patch("src.agent.agent.chat", return_value=_make_text_response("")):
             result = agent.run("问题")
-        assert "抱歉" in result or len(result) >= 0
+        assert "抱歉" in result
 
 
 class TestAgentToolCall:
@@ -242,7 +242,7 @@ class TestSystemPromptWebSearch:
 
         tool_calls: list[str] = []
 
-        def mock_execute_tool(name: str, args: dict) -> ToolResult:
+        def mock_execute_tool(name: str, args: dict, skill_bodies: dict | None = None) -> ToolResult:
             tool_calls.append(name)
             if name == "search_knowledge":
                 return ToolResult(status="empty", content="知识库为空，未找到相关内容。")

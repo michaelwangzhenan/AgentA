@@ -21,7 +21,8 @@ import logging
 import uuid
 from typing import Any
 
-from src.agent.tools import TOOLS, execute_tool, ToolResult
+from src.agent.tools import get_tools, execute_tool, ToolResult
+from src.cli.skill_loader import SkillInfo, build_skill_catalog
 from src.llm.provider import chat
 from src.memory.store import MemoryStore
 
@@ -93,7 +94,13 @@ class Agent:
         max_history_turns: int = 20,
         memory: MemoryStore | None = None,
         prompt_name: str = "",
+        skills: dict[str, SkillInfo] | None = None,
     ) -> None:
+        # 若传入 skills，提取 bodies，并将含 description 的 catalog 追加到 system_prompt
+        self._skill_bodies: dict[str, str] = {}
+        if skills:
+            self._skill_bodies = {name: info.body for name, info in skills.items()}
+            system_prompt = system_prompt + build_skill_catalog(skills)
         self.system_prompt = system_prompt
         self.max_iterations = max_iterations
         self.verbose = verbose
@@ -139,7 +146,7 @@ class Agent:
             logger.info("[Agent] 第 %d 轮推理，messages 长度: %d", iteration, len(messages))
 
             # 工具轮次达上限时，去掉 tools 参数，让 LLM 强制生成文本回答
-            active_tools = TOOLS if tool_rounds < MAX_TOOL_ROUNDS else None
+            active_tools = get_tools(self._skill_bodies) if tool_rounds < MAX_TOOL_ROUNDS else None
             if active_tools is None:
                 logger.warning("[Agent] 工具调用已达上限 %d 轮，强制生成最终回答", MAX_TOOL_ROUNDS)
 
@@ -196,7 +203,12 @@ class Agent:
         user_indices = [i for i, m in enumerate(history) if m["role"] == "user"]
         if len(user_indices) > self.max_history_turns:
             start = user_indices[-self.max_history_turns]
+            # 保护含 skill 内容的完整 assistant+tool 消息组，避免孤立 tool 消息违反协议
+            protected = self._collect_skill_pairs(history[:start])
             history = history[start:]
+            if protected:
+                history = protected + history
+                logger.info("[Agent] 保护 %d 条 skill 内容消息免被截断", len(protected))
             logger.info(
                 "[Agent] 历史超过 %d 轮，已截断保留最近 %d 轮",
                 len(user_indices),
@@ -204,6 +216,31 @@ class Agent:
             )
 
         return history
+
+    @staticmethod
+    def _collect_skill_pairs(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """
+        从消息列表中提取包含 skill_content 的完整「assistant + 对应 tool」消息组。
+        确保不产生孤立的 tool 消息（违反 OpenAI 协议会导致 400 Bad Request）。
+        """
+        protected: list[dict[str, Any]] = []
+        i = 0
+        while i < len(msgs):
+            m = msgs[i]
+            if m.get("role") == "assistant" and m.get("tool_calls"):
+                # 收集本组：assistant 消息 + 紧随其后的所有 tool 消息
+                group: list[dict[str, Any]] = [m]
+                j = i + 1
+                while j < len(msgs) and msgs[j].get("role") == "tool":
+                    group.append(msgs[j])
+                    j += 1
+                # 只要组内有任意 tool 消息含 skill_content，保留整组
+                if any("<skill_content" in (msg.get("content") or "") for msg in group):
+                    protected.extend(group)
+                i = j
+            else:
+                i += 1
+        return protected
 
     def _process_tool_calls(
         self,
@@ -231,7 +268,7 @@ class Agent:
                     json.dumps(tool_args, ensure_ascii=False),
                 )
 
-            result: ToolResult = execute_tool(tool_name, tool_args)
+            result: ToolResult = execute_tool(tool_name, tool_args, self._skill_bodies)
 
             if self.verbose:
                 preview = result.content[:100].replace("\n", " ")
@@ -275,3 +312,27 @@ class Agent:
             "content": message.content or "",
             "tool_calls": tool_calls_data,
         }
+
+    def activate_skill(self, name: str, body: str) -> bool:
+        """
+        手动激活 Skill：注入 system_prompt 并从工具枚举中移除，防止 LLM 重复 load_skill。
+
+        Args:
+            name: Skill 名称。
+            body: Skill 正文内容（SKILL.md body）。
+
+        Returns:
+            True — 首次激活成功；False — 该 Skill 已处于激活状态，不重复注入。
+        """
+        tag = f'<skill_content name="{name}">'
+        if tag in self.system_prompt:
+            return False
+        self.system_prompt = (
+            self.system_prompt
+            + f"\n\n{tag}\n{body}\n</skill_content>"
+        )
+        # 从实例级 _skill_bodies 移除，使 get_tools() 的 enum 不再含此 skill，
+        # 避免 LLM 再次调用 load_skill 导致内容重复注入
+        self._skill_bodies.pop(name, None)
+        logger.info("[Agent] Skill [%s] 已手动激活并从工具枚举移除", name)
+        return True

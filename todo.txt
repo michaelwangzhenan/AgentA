@@ -2,129 +2,31 @@
 待优化项：
 1. 对话记忆 => Done
   目标： 将 messages 历史持久化到 SQLite，重启后仍可延续上下文，支持多轮跨会话对话
-  
-  实施计划：
-    【数据层 — memory/store.py】
-      - 新建 memory/ 模块，封装 SQLite 读写，对上层隐藏 DB 细节
-      - 表结构：messages(id, session_id, role, content, tool_calls_json, tool_call_id, timestamp)
-        · tool_calls / tool 角色的结构化字段序列化为 JSON 存储，读取时反序列化还原
-      - 提供 append(session_id, msg)、load(session_id) -> list[dict]、clear(session_id)、
-        list_sessions() -> list[session_id] 四个核心接口
-
-    【Agent 层 — agent/agent.py】
-      - Agent.__init__ 增加 session_id: str | None 参数（None 时自动生成 UUID）
-      - run() 启动时先从 store.load(session_id) 加载历史 messages，拼接到 [system] + history + [user]
-      - 每轮对话后（含 tool 结果）调用 store.append() 追加，而非等到最终回答才写入
-      - 增加上下文窗口截断策略：当 messages token 估算超过阈值时，保留 system + 最近 N 轮，
-        防止历史无限增长超出 LLM context window（建议默认保留最近 20 轮）
-
-    【CLI 层 — main.py】
-      - 启动时显示当前 session_id，方便用户记录和恢复
-      - /clear   — 保持现有行为（重置 Agent），同时清空当前 session 的 DB 记录
-      - /history — 展示当前 session 的历史对话摘要（角色 + 内容前 50 字）
-      - /session [id] — 不带参数时列出所有历史 session（id + 首条消息 + 时间）；
-                        带 id 时切换到指定 session 并恢复历史
-
-    【测试】
-      - 单元测试：append/load/clear/list_sessions 接口的正确性
-      - 集成测试：跨 run() 调用验证历史消息正确拼接
-      - 边界测试：tool_calls 序列化还原、超长历史截断、session 不存在时的降级处理
 
 2. 知识库未命中时自动联网搜索 => Done
   目标： 当 `search_knowledge` 返回空或相似度过低时，通过指令（对话）触发 LLM 自行搜索，
     并提示 LLM 优先在国内网站查找信息，而非直接返回"暂无内容"。
-  
-  实施计划：
-    【根本原因重新定位】
-      经验证明：LLM 本身已具备自主决策访问哪些网页的能力（通过 fetch_url 工具）。
-      真正的问题是：SYSTEM_PROMPT 第3条用"可调用"语气太弱，LLM 知识库没命中时倾向于
-      直接放弃，而不是主动去搜。且 LLM 自选 URL 时偏向 Google/Reuters 等国外网站，在无代理环境下经常超时失败。
-      方案：仅改 System Prompt + fetch_url description，无需新增工具。
-
-    【Agent 层 — agent/agent.py SYSTEM_PROMPT】
-      修改工具调用策略第3条，将"可调用"改为"必须"，并明确国内网站优先级：
-        旧：若知识库无相关内容，可调用 fetch_url 抓取指定网页获取补充信息。
-        新：若 search_knowledge 返回"知识库为空"或内容与问题明显无关，
-            **必须主动调用 fetch_url 进行网络搜索**，不允许直接回复"暂无内容"。
-            选择 URL 时优先访问国内可达网站，例如：
-              · 新闻资讯：xinhuanet.com、people.com.cn、百度新闻(news.baidu.com)
-              · 技术问题：segmentfault.com、csdn.net、zhihu.com
-              · 通用搜索：baidu.com、so.com（360搜索）
-            若国内网站无法提供有效信息，再尝试访问国外网站。
-
-    【工具层 — agent/tools.py fetch_url description】
-      在 fetch_url 的 description 中补充国内网站引导说明：
-        新增：「知识库无内容时，优先抓取国内可访问网站，
-        如 xinhuanet.com、people.com.cn、baidu.com、zhihu.com、segmentfault.com 等」
-
-    【测试】
-      - 单元测试：SYSTEM_PROMPT 包含"必须"强制搜索策略和国内网站示例
-      - 单元测试：fetch_url description 包含国内网站引导说明
-      - 集成测试（integration marker）：验证知识库无命中时 Agent 主动调用 fetch_url
 
 3. 重排序（Reranking）=> Done
   目标： 在向量检索结果上加 Cross-Encoder 二次排序，提升精度
-  实施计划：
-    【背景】
-      当前 retriever.py 采用两个 Bi-Encoder（SentenceTransformer）+ round-robin 合并：
-        · all-MiniLM-L6-v2     → 英文向量化入库 / 召回 kb_en collection
-        · BAAI/bge-small-zh    → 中文向量化入库 / 召回 kb_zh collection
-      Bi-Encoder 速度快但精度有限——它将 query 和 document 各自单独编码，
-      无法捕捉两者之间的细粒度语义交互。
+  背景:
+    当前 retriever.py 采用两个 Bi-Encoder（SentenceTransformer）+ round-robin 合并：
+      · all-MiniLM-L6-v2     → 英文向量化入库 / 召回 kb_en collection
+      · BAAI/bge-small-zh    → 中文向量化入库 / 召回 kb_zh collection
+    Bi-Encoder 速度快但精度有限——它将 query 和 document 各自单独编码，
+    无法捕捉两者之间的细粒度语义交互。
 
-      Reranking 引入第三个模型 Cross-Encoder（ms-marco-MiniLM-L-6-v2）作为二阶段精排：
-        · 三个模型职责不同，互不替代，同时工作：
-            阶段一（召回）：两个 Bi-Encoder 各自查询 → round-robin 合并取 top_k×3 候选
-            阶段二（精排）：Cross-Encoder 对候选逐对打分 → 降序重排 → 截取最终 top_k 条
-        · RERANKER_ENABLED=false 时跳过阶段二，两个 Bi-Encoder 行为完全不变（向后兼容）
+    Reranking 引入第三个模型 Cross-Encoder（ms-marco-MiniLM-L-6-v2）作为二阶段精排：
+      · 三个模型职责不同，互不替代，同时工作：
+          阶段一（召回）：两个 Bi-Encoder 各自查询 → round-robin 合并取 top_k×3 候选
+          阶段二（精排）：Cross-Encoder 对候选逐对打分 → 降序重排 → 截取最终 top_k 条
+      · RERANKER_ENABLED=false 时跳过阶段二，两个 Bi-Encoder 行为完全不变（向后兼容）
 
-      三个模型对比：
-        模型                       职责          输入          特点
-        all-MiniLM-L6-v2          英文召回       单个文本      速度快，支持批量入库
-        BAAI/bge-small-zh         中文召回       单个文本      速度快，支持批量入库
-        ms-marco-MiniLM-L-6-v2    精排打分       (query, doc)  精度高，不可用于入库
-
-    【选型】
-      模型：cross-encoder/ms-marco-MiniLM-L-6-v2（约 23MB，推理极快，中英双语）
-      包：sentence-transformers（已安装，CrossEncoder 类在其中，无需新增依赖）
-      缓存：首次下载后通过 TRANSFORMERS_OFFLINE=1 完全离线运行
-
-    【实施步骤】
-
-    1. src/rag/reranker.py — 新建 Reranker 模块
-       - 封装 CrossEncoder，对外暴露 rerank(query, hits, top_k) -> list[_Hit] 接口
-       - 懒加载（首次调用时才初始化模型），避免影响无需 rerank 场景的启动速度
-       - 模型名通过 config.RERANKER_MODEL 读取
-       - 候选数 ≤ top_k 时直接透传，不做无意义的重排
-
-    2. src/config.py — 新增配置项
-       - RERANKER_MODEL: str = os.getenv("RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
-       - RERANKER_ENABLED: bool = os.getenv("RERANKER_ENABLED", "true").lower() == "true"
-       - RERANKER_RECALL_MULTIPLIER: int = int(os.getenv("RERANKER_RECALL_MULTIPLIER", "3"))
-
-    3. src/rag/retriever.py — 集成 Reranker
-       - search() 召回窗口扩大为 top_k × RERANKER_RECALL_MULTIPLIER
-       - RERANKER_ENABLED=true 时调用 reranker.rerank()，否则直接使用 round-robin 结果
-
-    4. .env.example + .env — 补充三个新配置项注释，.env 默认开启 RERANKER_ENABLED=true
-
-    5. tests/test_phase3_rag.py — 新增测试
-       - 单元测试：rerank() 返回数量 ≤ top_k、分数降序排列
-       - 单元测试：候选数 ≤ top_k 时直接透传，不调用 CrossEncoder
-       - 单元测试：RERANKER_ENABLED=false 时 search() 跳过 rerank（mock 验证未调用）
-       - 集成测试（integration marker）：真实 query 重排后 top-1 相关性高于重排前
-
-    6. README — 更新项目结构（新增 reranker.py）、配置项说明、工作流程图
-
-    【模型下载（首次）】
-      $env:TRANSFORMERS_OFFLINE="0"; $env:HF_ENDPOINT="https://hf-mirror.com"
-      .venv\Scripts\python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); print('OK')"
-      下载完成后恢复 TRANSFORMERS_OFFLINE=1
-
-    【风险与边界】
-      - 模型冷启动：首次调用 CrossEncoder 约需 1-2 秒加载，后续调用毫秒级
-      - 召回窗口倍数：默认 3（即 top_k=5 时取 15 条候选再精排），可通过环境变量调整
-      - 两个 collection 都为空时，round-robin 阶段已返回空，rerank 不会被调用
+    三个模型对比：
+      模型                       职责          输入          特点
+      all-MiniLM-L6-v2          英文召回       单个文本      速度快，支持批量入库
+      BAAI/bge-small-zh         中文召回       单个文本      速度快，支持批量入库
+      ms-marco-MiniLM-L-6-v2    精排打分       (query, doc)  精度高，不可用于入库
 
 4. 定制 Prompt => Done
   目标：
@@ -134,121 +36,46 @@
     - 检查./advanced/prompts目录与可用命令的一致性，删除掉的prompt对应的命令也要删除
     - 用法：用户输入 "/prompt_name [问题（可选）]""
     - 该功能类似 github copilot 的配置 .github/prompts/prompt_name.prompt.md
+
+5. 支持 Skills => Done
+  目标： 
+    符合 skills 规范， 参考: https://agentskills.io/specification
+    如何支持 skills 参考: https://agentskills.io/client-implementation/adding-skills-support
+    本项目 skills 目录： advanced/skills/
   实施计划：
+    Step1 发现(Discover)
+      新建 src/cli/skill_loader.py
+      扫描 advanced/skills/**/SKILL.md（最大深度4）；按 name 去重（同名取项目级优先）
 
-    【设计原则】
-      - 约定优于配置：文件名即命令名，无需注册表，无需修改代码
-      - 启动时扫描一次，运行中不自动热更新（避免中途混乱）；/reload-prompts 手动触发重新扫描
-      - Prompt 文件仅替换 SYSTEM_PROMPT，其余 Agent 逻辑不变
-      - 命名约束：prompt 名只允许字母、数字、连字符（-）和下划线（_），防止命令冲突
-      - 内置命令保留字（help/clear/history/session/ingest/quit/exit/reload-prompts）
-        不允许被 prompt 文件覆盖，加载时自动跳过并 warning
+    Step2 解析(Parse)
+      提取 YAML frontmatter → name, description；body = frontmatter 之后的 Markdown
+      宽容模式：缺 description → 跳过并警告；其余字段问题 → 警告但继续加载
 
-    【1】目录与文件约定 — advanced/prompts/
-      创建示例目录结构：
-        advanced/
-          prompts/
-            5g-expert.prompt.md       → 激活命令 /5g-expert
-            code-assistant.prompt.md  → 激活命令 /code-assistant
-      Markdown 文件正文即 SYSTEM_PROMPT 内容，无需特殊格式，直接读取原始文本
+    Step3 披露(Disclose)
+      若有 skill，在 SYSTEM_PROMPT 末尾追加 catalog 块：
+        <available_skills>
+          <skill><name>…</name><description>…</description><location>…</location></skill>
+          …
+        </available_skills>
+        + 指令：当任务匹配某 skill，先调用 load_skill(name) 读取完整指令再执行
+      无 skill 时完全省略该块
 
-    【2】src/cli/prompt_loader.py — 新建 Prompt 加载模块
-      功能：扫描目录、加载文件、校验名称合法性、返回命令→内容映射
-      接口：
-        RESERVED_COMMANDS: frozenset[str]   # 内置保留命令集合
-        PROMPT_NAME_RE: re.Pattern          # 合法名称正则：^[a-zA-Z0-9_-]+$
+    Step4 激活(Activate)
+      模型驱动：注册工具 load_skill(name) → 返回 <skill_content> 包裹的 body
+        name 限定为已发现的 skill 名（enum），防止幻觉
+      用户显式：CLI 识别 /skill-name [问题]，直接注入 body 到 system，复用 prompt_loader 的模式
+      tab_complete.py 中加入 /skill-name 补全
 
-        def scan_prompts(prompts_dir: str) -> dict[str, str]:
-            """扫描目录下所有 *.prompt.md，返回 {"/cmd_name": "prompt内容"} 映射。
-            跳过：名称非法、与保留命令冲突的文件（logging.warning 提示）。
-            目录不存在时静默返回空字典。
-            """
+    Step5 上下文管理
+      load_skill 返回的 tool result 标记 protected=True，截断历史时跳过
+      session 内去重：同一 skill 已激活则不重复注入
 
-        def load_prompt_file(path: str) -> str:
-            """读取单个 .prompt.md 文件内容，去除首尾空白。"""
-
-    【3】src/cli/tab_complete.py — 扩展补全器，注入动态 prompt 命令
-      修改 make_completer(memory, custom_prompts) 签名，增加 custom_prompts 参数：
-        def make_completer(memory: MemoryStore, custom_prompts: dict[str, str] = {}) -> WordCompleter:
-      补全词列表追加：list(custom_prompts.keys())
-        /reload-prompts 也加入 CLI_COMMANDS 静态列表
-
-    【4】src/agent/agent.py — Agent 支持动态 system_prompt 覆盖
-      修改 Agent.__init__ 增加 system_prompt: str | None = None 参数：
-        self._system_prompt = system_prompt or SYSTEM_PROMPT
-      run() 中构建 messages 时改用 self._system_prompt（已有 SYSTEM_PROMPT 引用替换）
-      无需新增公开方法，调用方传参即可切换
-
-    【5】main.py — 集成 prompt 命令分发
-      启动时调用 scan_prompts() 加载 custom_prompts，打印已加载的 prompt 命令列表（若有）
-      在 main() 主循环命令分发逻辑中增加：
-
-        # 启动
-        from src.cli.prompt_loader import scan_prompts
-        PROMPTS_DIR = "advanced/prompts"
-        custom_prompts: dict[str, str] = scan_prompts(PROMPTS_DIR)
-        if custom_prompts:
-            print(f"🎭 已加载自定义 Prompt：{', '.join(custom_prompts)}\n")
-
-        # /reload-prompts 命令处理
-        case "/reload-prompts":
-            custom_prompts = scan_prompts(PROMPTS_DIR)
-            print(f"🔄 Prompt 已重新加载，共 {len(custom_prompts)} 个：{', '.join(custom_prompts) or '（无）'}\n")
-            continue
-
-        # 主循环末尾：自定义 prompt 命令匹配（在 case 默认分支之前）
-        cmd_name = cmd_lower.split()[0]   # e.g. "/5g-expert"
-        if cmd_name in custom_prompts:
-            # 携带可选问题：/5g-expert 什么是 5G 核心网？
-            question = user_input[len(cmd_name):].strip()
-            agent = Agent(
-                verbose=True,
-                memory=memory,
-                system_prompt=custom_prompts[cmd_name],
-            )
-            print(f"🎭 已切换到 Prompt：{cmd_name[1:]}\n")
-            if question:
-                reply = agent.run(question)
-                print(f"Agent: {reply}\n")
-            continue
-
-        # make_completer 调用也同步传入 custom_prompts
-        prompt_session.completer = make_completer(memory, custom_prompts)
-
-      HELP_TEXT 末尾追加 Prompt 相关说明（动态生成）：
-        /reload-prompts            重新扫描 advanced/prompts/ 目录，刷新自定义 Prompt 命令
-        /<prompt_name> [问题]      切换到指定自定义 Prompt 并重置 Agent，可附带首个问题
-
-    【6】tests/test_prompt_loader.py — 新增测试
-      - test_scan_returns_empty_when_dir_not_exists：目录不存在时返回空字典
-      - test_scan_loads_prompt_files：正确读取 *.prompt.md 文件，key 为 "/name"
-      - test_scan_skips_invalid_names：非法名称（含空格/特殊符号）跳过
-      - test_scan_skips_reserved_commands：与内置命令同名时跳过，不报错
-      - test_load_prompt_file_strips_whitespace：前后空白被去除
-      - test_scan_ignores_non_prompt_files：.md / .txt 等非 .prompt.md 文件被忽略
-      tests/test_phase5_agent.py — 新增 TestCustomSystemPrompt：
-      - test_custom_system_prompt_replaces_default：传入 system_prompt 时 LLM 收到的 messages[0] 为自定义内容
-
-    【涉及文件】
-      advanced/prompts/（新建示例目录 + 示例文件）
-      src/cli/prompt_loader.py    — 新建
-      src/cli/tab_complete.py     — make_completer 增加 custom_prompts 参数
-      src/agent/agent.py          — Agent.__init__ 增加 system_prompt 参数
-      main.py                     — 集成 scan_prompts、命令分发、HELP_TEXT 更新
-      tests/test_prompt_loader.py — 新建
-      tests/test_phase5_agent.py  — 新增 TestCustomSystemPrompt
-
-    【边界与注意事项】
-      - Prompt 文件编码统一使用 UTF-8（open(..., encoding="utf-8")），支持中文内容
-      - 切换 Prompt 时新建 Agent 实例（不复用历史 session），保持上下文干净；
-        如需携带历史，用 /session <id> 先切换，再用 /prompt_name 覆盖 system_prompt
-        → 这是第二期再考虑的高级用法，本期不实现
-      - advanced/prompts/ 加入 .gitignore 排除（用户私有场景），但提供 .gitkeep 占位
-      - prompt 文件内容不做格式校验，用户自行负责内容质量
-
-5. 定制 Skills
-  目标： 支持通过 YAML/JSON 配置文件声明领域技能集合，动态注入工具描述和调用策略，无需修改代码即可扩展 Agent 能力
-  实施计划：
+    文件改动清单
+      新建 src/cli/skill_loader.py  （发现+解析）
+      改   src/agent/tools.py       （注册 load_skill 工具）
+      改   src/agent/agent.py       （SYSTEM_PROMPT 拼接 catalog；protected 保护逻辑）
+      改   src/cli/tab_complete.py  （加入 skill 命令补全）
+      改   main.py                  （启动时调用 skill_loader，传入 agent）
 
 6. MCP 工具服务器接入
   目标： 接入 Model Context Protocol（MCP）标准，允许 Agent 调用外部 MCP Server 提供的工具，实现与第三方服务的标准化集成
@@ -267,85 +94,6 @@
     · 工具调用失败重试：工具执行出错时自动重试或降级，而非直接返回失败
     · 多步骤任务规划：支持 LLM 在单次 run() 中拆解复杂任务并按步骤执行
     · 工具结果质量判断：LLM 能识别工具返回内容为空/无关时主动切换策略，而非直接生成回答
-  实施计划：
-
-    【现状分析】
-      agent.py run() 循环已支持多轮 tool_calls，但存在以下问题：
-        1. 工具执行异常由 execute_tool() 内部 try/except 消化后返回错误字符串，
-           LLM 看到 "错误：..." 后倾向于直接生成失败回答，不会自动重试
-        2. SYSTEM_PROMPT 未告知 LLM"看到工具返回错误时应重试或换策略"
-        3. MAX_ITERATIONS=10 无分层保护：全部轮次耗尽后才发现是因为反复失败重试
-        4. 工具结果没有结构化标注（成功/失败/空结果），LLM 靠内容推断，可靠性低
-        5. execute_tool() 抛出 ValueError（未知工具）时，run() 未捕获，会崩溃
-
-    【实施步骤】
-
-    1. src/agent/tools.py — 工具结果结构化封装
-       新增 ToolResult dataclass：
-         @dataclass(frozen=True)
-         class ToolResult:
-             status: Literal["ok", "empty", "error"]
-             content: str
-             def to_llm_str(self) -> str  # 返回给 LLM 的格式化字符串，使用 [工具成功]/[结果为空]/[工具失败] 前缀标签
-       修改 _tool_search_knowledge()：
-         - 检测返回内容是否包含来源标记 "[1]"（有 → ok；无 → empty），与文案解耦
-         - 正常内容 → status="ok"
-       修改 _tool_fetch_url()：
-         - 以 "错误：" 开头 → status="error"；内容为空 → status="empty"；否则 "ok"
-       修改 execute_tool()：
-         - 返回 ToolResult 而非裸字符串
-         - 用 try/except Exception 兜底捕获所有异常（含未知工具 ValueError），返回 status="error"，
-           不再向上抛出异常，消除 run() 的崩溃风险
-
-    2. src/agent/agent.py — tool message 引导文字 + SYSTEM_PROMPT 第 5 条
-       【删除】_run_tool_with_retry()：Python 层静默重试绕过 LLM 推理，违反 ReAct 范式；
-               应由 LLM 在下一轮推理中主动决定是否换策略/换工具/换 URL
-       新增常量：
-         TOOL_EMPTY_HINT: str  # 知识库空结果时追加给 LLM 的引导提示（放在 tool message 末尾）
-       修改 run() 中工具执行部分：
-         - execute_tool() 返回 ToolResult，写入 messages 时用 result.to_llm_str()
-         - status="error" 时，在 tool message content 末尾追加
-           "\n\n[提示] 请换一种方式（换参数或换工具）重试，不要直接回答"
-         - status="empty" 且工具是 search_knowledge 时，追加 TOOL_EMPTY_HINT 提示，
-           引导 LLM 下一轮改调 fetch_url
-       在 SYSTEM_PROMPT "## 工具使用策略"末尾新增第 5 条：
-         5. 若工具返回 [结果为空] 或 [工具失败]：
-            - search_knowledge 返回 [结果为空] → 立即改调 fetch_url 补充搜索，不允许直接回答
-            - fetch_url 返回 [工具失败] → 换一个同类型的备选 URL 重试（最多换 2 次）
-            - 两种工具均无法获取有效信息时，才如实告知用户"当前无法获取相关信息"
-
-    3. src/agent/agent.py — 迭代次数分层保护
-       将单一 MAX_ITERATIONS 拆分为两个维度：
-         MAX_TOOL_ROUNDS: int = 8    # 最多 8 轮含 tool_calls 的推理（防止工具死循环）
-         MAX_TOTAL_ROUNDS: int = 12  # 含最终回答在内的总推理轮次上限
-       run() 中增加 tool_rounds 计数器：
-         - 每次 message.tool_calls 触发时 tool_rounds += 1
-         - tool_rounds >= MAX_TOOL_ROUNDS 时，下一轮 chat() 调用改为 tools=None（不传工具定义），
-           LLM 无工具可调，自然生成文本回答——消息序列格式合法，不违反 OpenAI 协议
-       保留原 max_iterations 参数签名不变（默认值改为 MAX_TOTAL_ROUNDS），向后兼容
-
-    4. tests/ — 同步更新测试
-       tests/test_phase4_tools.py：
-         - execute_tool() 返回类型从 str → ToolResult，所有字符串断言改为 .content 属性访问
-         - 新增：未知工具名返回 status="error" 而非抛 ValueError
-       tests/test_phase5_agent.py — 新增 TestToolGuidance 类：
-         - test_error_result_appends_hint：工具返回 error 时 tool message content 含"[提示]"
-         - test_empty_knowledge_appends_empty_hint：search_knowledge 返回 empty 时含 TOOL_EMPTY_HINT
-         - test_tool_rounds_limit_disables_tools：tool_rounds 达上限时 chat() 以 tools=None 调用
-         - test_total_rounds_limit_fallback：超过 MAX_TOTAL_ROUNDS 时返回兜底回答
-       修改已有 TestAgentInit：
-         - 验证 max_iterations 默认值为 MAX_TOTAL_ROUNDS
-
-    【涉及文件】
-      src/agent/tools.py         — ToolResult dataclass、execute_tool() 返回类型变更
-      src/agent/agent.py         — 引导文字、tools=None 降级、分层计数、SYSTEM_PROMPT 第5条
-      tests/test_phase4_tools.py — 断言适配 ToolResult.content + 新增未知工具测试
-      tests/test_phase5_agent.py — 新增 TestToolGuidance（4 个测试）+ 修改 TestAgentInit
-
-    【注意事项】
-      - to_llm_str() 使用 [工具成功]/[结果为空]/[工具失败] 标签，与 SYSTEM_PROMPT 第5条描述保持一致
-      - _tool_fetch_url() 内部异常已全部 try/except，ToolResult 封装仅在返回时包装，不改变内部逻辑
-      - tools=None 降级方案符合 OpenAI / 各兼容 Provider 协议，不会破坏消息序列格式
 
 9. 多Agent协作
   目标： 支持多个 Agent 协同工作，共享知识和任务，提高整体效率
@@ -405,180 +153,17 @@
     提高推理性能，考虑： 减少推理时间，CPU/内存消耗，尽量节省token(保证推理质量，寻找最佳性价比)
     Clean Code
   
-  实施计划：
-
-    【优化点汇总】
-      A. 引导提示污染历史（准确性，🔴 高优先）
-      B. SYSTEM_PROMPT 第3/5条语义重叠（Token，🟡 中优先）
-      C. 冗余条件判断（可读性，🟢 低）
-      D. run() 方法拆分（可维护性，🟢 低）
-      E. tool_msg 类型标注不完整（Clean Code，🟢 低）
-      F. DB 全量加载历史后 Python 截断（性能，🟡 中优先，需改 store.py）
-
-    【A】引导提示污染历史 —— src/agent/agent.py
-      问题：
-        llm_content = result.to_llm_str() + TOOL_EMPTY_HINT（或 error 提示）
-        当前代码将拼接后的 llm_content 原样写入 SQLite（_memory.append）。
-        下次加载历史时，"[提示] 请换一种方式..." 等临时引导语会随历史喂给 LLM，
-        累积多轮后干扰推理，使 LLM 误判工具历史状态。
-      修复方案：
-        写入 DB 时用 result.to_llm_str()（无引导提示的原始版本）；
-        只有注入当前 messages 时才拼接引导提示，DB 保持干净。
-        具体改动：
-          # 当前（有 bug）：
-          tool_msg = {"role": "tool", ..., "content": llm_content}  # llm_content 含提示
-          messages.append(tool_msg)
-          self._memory.append(self.session_id, tool_msg)            # 含提示写入 DB ❌
-
-          # 修复后（分离）：先写DB再注入messages，保持与现有代码一致的操作顺序
-          db_content = result.to_llm_str()                          # 写 DB 用干净版本
-          mem_msg = {"role": "tool", ..., "content": db_content}
-          self._memory.append(self.session_id, mem_msg)             # ✅ 先写 DB（干净）
-          live_msg = {**mem_msg, "content": llm_content}            # 当前轮含提示
-          messages.append(live_msg)                                  # ✅ 再注入 messages
-
-    【B】SYSTEM_PROMPT 第3/5条语义重叠 —— src/agent/agent.py
-      问题：
-        第3条："若 search_knowledge 无结果，必须调 fetch_url"
-        第5条："若工具返回 [结果为空]，search_knowledge 空 → 改调 fetch_url"
-        两条几乎重复，每次推理多消耗约 60~80 token。
-      修复方案：
-        删除第3条中重复的联网指引，将其内容并入第5条，不删国内站列表：
-          修改第3条为：
-            若 search_knowledge 返回 [结果为空] 或内容与问题明显无关，按第5条处理。
-          第5条扩充为：
-            5. 工具结果处理规则：
-               - search_knowledge [结果为空] → 立即改调 fetch_url 进行网络搜索，选择 URL 时优先访问国内可达网站：
-                 新闻资讯：xinhuanet.com、people.com.cn、news.baidu.com
-                 技术问题：segmentfault.com、csdn.net、zhihu.com
-                 通用搜索：baidu.com、so.com（360搜索）
-                 国内无法满足需求时再尝试国外网站。
-               - fetch_url [工具失败] → 换一个同类型的备选 URL 重试（最多再试 2 次）
-               - 两种工具均无法获取有效信息时，才如实告知用户“当前无法获取相关信息”
-
-    【C】冗余条件判断 —— src/agent/agent.py run()
-      问题：
-        active_tools = TOOLS if tool_rounds < MAX_TOOL_ROUNDS else None
-        if active_tools is None and tool_rounds >= MAX_TOOL_ROUNDS:  # 等价于 if active_tools is None
-            logger.warning(...)
-      修复方案：
-        active_tools = TOOLS if tool_rounds < MAX_TOOL_ROUNDS else None
-        if active_tools is None:
-            logger.warning("[Agent] 工具调用已达上限 %d 轮，强制生成最终回答", MAX_TOOL_ROUNDS)
-
-    【D】run() 方法拆分 —— src/agent/agent.py
-      问题：run() 约 80 行，工具调用处理（执行→构造提示→写DB→注入messages）内联在循环体内，
-            可读性差，单元测试难以针对性验证工具处理逻辑。
-      修复方案：提取私有方法 _process_tool_calls()：
-        def _process_tool_calls(
-            self,
-            message: Any,
-            messages: list[dict[str, Any]],
-        ) -> None:
-            """执行本轮所有 tool_calls，将结果注入 messages 并写入 DB。"""
-            assistant_msg = self._assistant_message(message)
-            messages.append(assistant_msg)
-            self._memory.append(self.session_id, assistant_msg)
-            for tool_call in message.tool_calls:
-                ... # 执行工具、构造提示、分离写DB/注入messages 逻辑
-        run() 主干简化为：
-          if message.tool_calls:
-              tool_rounds += 1
-              self._process_tool_calls(message, messages)
-              continue
-
-    【E】tool_msg 类型标注 —— src/agent/agent.py run()
-      问题：tool_msg: dict  →  缺少泛型参数，与其他 messages 元素类型不一致
-      修复：tool_msg: dict[str, Any]
-
-    【F】DB 全量加载历史后 Python 截断 —— src/memory/store.py
-      问题：
-        load() 用 SELECT * ORDER BY id ASC 全量取回所有历史，
-        _load_truncated_history() 在内存中按轮数截断。
-        长历史 session（如 100 轮）每次 run() 都传输全量数据，浪费 DB I/O 和内存。
-      修复方案：
-        在 store.py 新增 load_last_n_messages(session_id, n) 方法：
-          SELECT * FROM messages WHERE session_id=? ORDER BY id DESC LIMIT ?
-          再 reversed() 还原时序
-        Agent._load_truncated_history() 改为：
-          直接调用 load_last_n_messages(session_id, max_history_turns * 8)
-          （× 8 作为安全上限，实际每轮消息数受 tool_calls 并行数量影响可能远超过 4）
-          SQL 层做粗粒度过滤，内存层按 user 轮数做精确截断（逻辑不变）
-      涉及文件：src/memory/store.py（新增方法）、src/agent/agent.py（改调用）、
-               tests/test_memory.py（新增 load_last_n_messages 测试）
-
-    【实施顺序】
-      1. A（bug 修复，最高优先）
-      2. C + E（2行改动，顺手完成）
-      3. B（SYSTEM_PROMPT 精简，减 token）
-      4. D（run() 拆分，需同步更新 test_phase5_agent.py 中捕获 messages 的测试）
-      5. F（需改 store.py + 测试，独立 PR）
-
-    【测试影响】
-      A 修复后： TestToolGuidance 中捕获 DB 写入内容的断言需同步验证干净版本
-      D 拆分后：TestAgentToolCall 中部分 mock_chat 捕获 messages 的测试逻辑不变，
-               但可新增 _process_tool_calls 的独立单元测试
-      F 完成后：新增 test_memory.py::TestLoadLastN 类（3~4 个测试）
 21. 优化 session 信息 => Done
   目标：
     使用/session <id> 命令时，切回到原来的 prompt_name， 而不是"你"
     /session 信息中，增加一列显示对应的 prompt_name， 如"5g-expert"
     /session 切换命令中，提示 session id 只需显示前8位，后面加上"首问 "，用户更加容易选择要切换的session
-  实施计划：
 
-    【核心决策】
-      prompt_name 必须持久化到 DB（内存变量重启即丢失），
-      sessions 表新增 prompt_name 列，
-      新建/切换 prompt 时显式写入，其余写入路径（append）无需感知。
-
-    【1】src/memory/store.py — sessions 表新增 prompt_name 列
-      _create_tables() 中用 ALTER TABLE 做迁移兼容（列不存在才加）：
-        ALTER TABLE sessions ADD COLUMN prompt_name TEXT NOT NULL DEFAULT ''
-      新增方法：
-        def set_prompt_name(self, session_id: str, prompt_name: str) -> None:
-            """更新 session 对应的 prompt_name，session 不存在时静默忽略。"""
-      list_sessions() 返回的 dict 中同步包含 prompt_name 字段
-
-    【2】main.py — 切换/新建 prompt 时持久化 prompt_name
-      自定义 prompt 命令分发处（新建 Agent 后）：
-        memory.set_prompt_name(agent.session_id, active_prompt_name)
-      /clear 重置后 prompt_name 为空（新 session，无需额外写入，DB 默认 ''）
-      /session <id> 切换后，从 list_sessions() 读取该 session 的 prompt_name，
-        恢复 active_prompt_name（空字符串 → None）
-
-    【3】main.py — _list_sessions() 显示优化
-      session_id 只显示前 8 位（方便用户记忆和输入）：
-        sid_short = s['session_id'][:8]
-      新增 prompt_name 列，无 prompt 时显示"默认"：
-        prompt_label = s['prompt_name'] or '默认'
-      输出格式调整为：
-        {sid_short}  [{created}]  {msg_count}条  [{prompt_label}]  首问: {first_msg}
-
-    【4】main.py — Tab 补全中 session id 缩短为前 8 位 + 首问
-      tab_complete.py make_completer() 中补全词格式不变（仍用完整 session_id，确保命令可用）；
-      用户在 /session 列表里看到的是短 id，输入时可 Tab 补全出完整 id，
-      无需修改补全逻辑本身。
-
-    【5】tests/test_memory.py — 新增 TestSetPromptName 类
-      - test_set_prompt_name_updates_value：写入后 list_sessions() 返回正确 prompt_name
-      - test_set_prompt_name_nonexistent_session_is_ignored：session 不存在时静默不报错
-      - test_list_sessions_includes_prompt_name：list_sessions() 结果含 prompt_name 字段
-
-    【涉及文件】
-      src/memory/store.py  — sessions 表 ALTER TABLE 迁移 + set_prompt_name() + list_sessions() 更新
-      main.py              — 切换 prompt 时调用 set_prompt_name()；/session 切换时恢复 active_prompt_name；_list_sessions() 格式调整
-      tests/test_memory.py — 新增 TestSetPromptName（3 个测试）
-
-    【注意事项】
-      - ALTER TABLE ADD COLUMN 在 SQLite 中是安全的幂等操作（列已存在会报错，需捕获 OperationalError 跳过）
-      - tab 补全仍用完整 session_id，用户看短 id 后可 Tab 补全，体验一致
-
-
-
-22. tests 优化
+22. tests 优化 => Done
   目标：
     统一 test_xxx.py 命名风格，使命名更common 和 符合命名习惯， 去除“phaseN”。
     精简合并case,只保留必要case,节省测试资源。
     重构case, 使 cases 那模块分组。
+23. 统计tokens
 
 -

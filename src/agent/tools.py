@@ -18,6 +18,8 @@ from bs4 import BeautifulSoup
 
 from src.rag.retriever import search
 
+# （已移除全局 _skill_bodies，改为实例级参数传递，消除多 Agent 实例的状态污染）
+
 logger = logging.getLogger(__name__)
 
 
@@ -48,6 +50,45 @@ class ToolResult:
                 return f"[结果为空] {self.content}"
             case "error":
                 return f"[工具失败] {self.content}"
+
+# ── Skills 工具支持 ─────────────────────────────────────────────────────────
+
+def get_tools(skill_bodies: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    """
+    返回当前可用的工具列表。
+
+    若传入 skill_bodies，追加 load_skill 工具定义（name 字段限定为已有名称枚举）。
+    """
+    tools = list(TOOLS)
+    if skill_bodies:
+        tools.append(_build_load_skill_def(list(skill_bodies.keys())))
+    return tools
+
+
+def _build_load_skill_def(skill_names: list[str]) -> dict[str, Any]:
+    """构建 load_skill 工具的 JSON Schema，name 参数使用 enum 约束防止幻觉。"""
+    return {
+        "type": "function",
+        "function": {
+            "name": "load_skill",
+            "description": (
+                "加载指定 Skill 的完整指令内容。"
+                "当任务与某个 Skill 描述匹配时，先调用此工具获取专业指令，再执行任务。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "要加载的 Skill 名称。",
+                        "enum": skill_names,
+                    },
+                },
+                "required": ["name"],
+            },
+        },
+    }
+
 
 # ── 工具 JSON Schema 定义（传给 LLM 的 tools 参数）────────────────────────────
 
@@ -196,16 +237,43 @@ def _tool_fetch_url(url: str, max_chars: int = 3000) -> ToolResult:
         return ToolResult(status="error", content=f"解析页面失败 — {e}")
 
 
+def _tool_load_skill(name: str, skill_bodies: dict[str, str]) -> ToolResult:
+    """
+    加载 Skill 的完整指令正文，返回 <skill_content> 包裹的内容。
+
+    Args:
+        name: 已注册的 skill 名称。
+        skill_bodies: {name: body} 映射，由 Agent 实例持有并传入。
+
+    Returns:
+        ToolResult：找到 → status="ok"；未找到 → status="error"。
+    """
+    logger.info(f"[tool] load_skill: name={name!r}")
+    body = skill_bodies.get(name)
+    if body is None:
+        return ToolResult(
+            status="error",
+            content=f"Skill '{name}' 不存在，可用 skills: {list(skill_bodies.keys())}",
+        )
+    content = f'<skill_content name="{name}">\n{body}\n</skill_content>'
+    return ToolResult(status="ok", content=content)
+
+
 # ── 统一路由入口 ──────────────────────────────────────────────────────────────
 
 
-def execute_tool(name: str, args: dict[str, Any]) -> ToolResult:
+def execute_tool(
+    name: str,
+    args: dict[str, Any],
+    skill_bodies: dict[str, str] | None = None,
+) -> ToolResult:
     """
     根据工具名称路由执行对应工具函数。
 
     Args:
         name: 工具名称，对应 TOOLS 列表中的 function.name。
         args: 工具参数字典，由 LLM 的 tool_calls 解析而来。
+        skill_bodies: {skill_name: body} 映射，供 load_skill 工具使用。
 
     Returns:
         ToolResult：status 为 "ok"/"empty"/"error"，content 为工具输出内容。
@@ -225,10 +293,15 @@ def execute_tool(name: str, args: dict[str, Any]) -> ToolResult:
                     url=args["url"],
                     max_chars=args.get("max_chars", 3000),
                 )
+            case "load_skill":
+                return _tool_load_skill(
+                    name=args["name"],
+                    skill_bodies=skill_bodies or {},
+                )
             case _:
                 return ToolResult(
                     status="error",
-                    content=f"未知工具: '{name}'，支持的工具: {[t['function']['name'] for t in TOOLS]}",
+                    content=f"未知工具: '{name}'，支持的工具: {[t['function']['name'] for t in get_tools()]}",
                 )
     except Exception as e:
         logger.warning("[tool] execute_tool 异常兜底: %s", e)

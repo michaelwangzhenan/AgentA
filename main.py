@@ -30,6 +30,7 @@ from prompt_toolkit.history import InMemoryHistory
 
 from src.cli.tab_complete import make_completer
 from src.cli.prompt_loader import scan_prompts
+from src.cli.skill_loader import scan_skills, SkillInfo
 
 # 消除 HuggingFace tokenizer 的 FutureWarning
 warnings.filterwarnings("ignore", category=FutureWarning, module="transformers")
@@ -46,13 +47,15 @@ logging.basicConfig(
 for _noisy in ("httpx", "httpcore", "openai", "chromadb", "sentence_transformers"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 
-from src.agent.agent import Agent
+from src.agent.agent import Agent, SYSTEM_PROMPT
 from src.memory.store import MemoryStore
 import src.config as config
 
 
 # 自定义 Prompt 配置目录
 PROMPTS_DIR: str = "advanced/prompts"
+# Skills 目录
+SKILLS_DIR: str = "advanced/skills"
 
 BANNER = """
 ╔══════════════════════════════════════════════╗
@@ -77,7 +80,9 @@ HELP_TEXT = """
   /del-session <id>          彻底删除指定历史 session 的所有记录（不可恢复）
   /clean-session             清空所有历史 session 的记录（不可恢复）
   /reload-prompts            重新扫描 advanced/prompts/ 目录，刷新自定义 Prompt 命令
+  /reload-skills             重新扫描 advanced/skills/ 目录，刷新 Skill 列表
   /<prompt_name> [问题]      切换到指定自定义 Prompt 并重置 Agent，可附带首个问题
+  /<skill_name> [问题]       激活指定 Skill（注入 Skill 指令到当前会话），可附带首个问题
   /quit                      退出程序
   /exit                      退出程序（同 /quit）
 
@@ -88,6 +93,10 @@ HELP_TEXT = """
 自定义 Prompt：
   在 advanced/prompts/ 目录下放置 <名称>.prompt.md 文件即可。
   文件名即命令名（如 5g-expert.prompt.md → /5g-expert），名称只允许字母、数字、- 和 _。
+
+Skills：
+  在 advanced/skills/<名称>/SKILL.md 放置符合 agentskills.io 规范的 Skill。
+  Agent 会自动发现并在合适时调用；也可用 /<skill_name> [问题] 手动激活。
 
 直接输入问题即可开始对话。
 """
@@ -155,27 +164,35 @@ def main() -> None:
 
     # 共享 MemoryStore 实例，整个进程生命周期内复用
     memory = MemoryStore()
-    agent = Agent(verbose=True, memory=memory)
-    print(f"💬 当前 Session: {agent.session_id}\n")
 
     # 启动时扫描自定义 Prompt 目录
     custom_prompts: dict[str, str] = scan_prompts(PROMPTS_DIR)
     if custom_prompts:
         print(f"🎭 已加载自定义 Prompt：{', '.join(custom_prompts)}\n")
 
+    # 启动时扫描 Skills 目录
+    skills_map: dict[str, SkillInfo] = scan_skills(SKILLS_DIR)
+    # 供 CLI 匹配的 {/name: body} 字典（tab 补全 + 手动激活）
+    skill_cmds: dict[str, str] = {f"/{name}": info.body for name, info in skills_map.items()}
+    if skills_map:
+        print(f"🔧 已加载 Skills：{', '.join(skill_cmds)}\n")
+
+    agent = Agent(verbose=True, memory=memory, skills=skills_map or None)
+    print(f"💬 当前 Session: {agent.session_id}\n")
+
     # 当前激活的 prompt 名称（None 表示使用默认提示符 "你"）
     active_prompt_name: str | None = None
 
     prompt_session: PromptSession[str] = PromptSession(
         history=InMemoryHistory(),
-        completer=make_completer(memory, custom_prompts),
+        completer=make_completer(memory, custom_prompts, list(skill_cmds.keys())),
         complete_while_typing=False,  # 仅 Tab 触发，不干扰正常输入
     )
 
     while True:
         try:
             # 每轮刷新补全器，确保新建/删除的 session id 即时出现
-            prompt_session.completer = make_completer(memory, custom_prompts)
+            prompt_session.completer = make_completer(memory, custom_prompts, list(skill_cmds.keys()))
             input_label = f"{active_prompt_name}: " if active_prompt_name else "你: "
             user_input = prompt_session.prompt(input_label).strip()
         except (KeyboardInterrupt, EOFError):
@@ -221,7 +238,7 @@ def main() -> None:
                 continue
             case "/clear":
                 memory.clear(agent.session_id)
-                agent = Agent(verbose=True, memory=memory)
+                agent = Agent(verbose=True, memory=memory, skills=skills_map or None)
                 active_prompt_name = None
                 print(f"✅ 对话历史已清空，Agent 已重置。\n💬 新 Session: {agent.session_id}\n")
                 continue
@@ -232,7 +249,7 @@ def main() -> None:
                 session_arg = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""
                 if session_arg:
                     # 切换到指定 session
-                    agent = Agent(verbose=True, session_id=session_arg, memory=memory)
+                    agent = Agent(verbose=True, session_id=session_arg, memory=memory, skills=skills_map or None)
                     # 从 DB 恢复该 session 的 prompt_name
                     sessions_info = {s["session_id"]: s for s in memory.list_sessions()}
                     saved_prompt = sessions_info.get(session_arg, {}).get("prompt_name", "")
@@ -267,7 +284,7 @@ def main() -> None:
                     if confirm == "yes":
                         count = memory.clean_all_sessions()
                         # 当前 Agent 的历史也已被清除，重建一个新 session
-                        agent = Agent(verbose=True, memory=memory)
+                        agent = Agent(verbose=True, memory=memory, skills=skills_map or None)
                         active_prompt_name = None
                         print(f"🗑️  已清空全部 {count} 个 session 记录。新 Session: {agent.session_id}\n")
                     else:
@@ -277,6 +294,26 @@ def main() -> None:
                 custom_prompts = scan_prompts(PROMPTS_DIR)
                 cmds_str = ', '.join(custom_prompts) if custom_prompts else '（无）'
                 print(f"🔄 Prompt 已重新加载，共 {len(custom_prompts)} 个：{cmds_str}\n")
+                continue
+            case "/reload-skills":
+                skills_map = scan_skills(SKILLS_DIR)
+                skill_cmds = {f"/{name}": info.body for name, info in skills_map.items()}
+                # 重建 Agent，使 system_prompt 中的 catalog 立即刷新
+                _base_prompt = (
+                    (custom_prompts.get(f"/{active_prompt_name}") or SYSTEM_PROMPT)
+                    if active_prompt_name
+                    else SYSTEM_PROMPT
+                )
+                agent = Agent(
+                    verbose=True,
+                    memory=memory,
+                    session_id=agent.session_id,
+                    system_prompt=_base_prompt,
+                    prompt_name=active_prompt_name or "",
+                    skills=skills_map or None,
+                )
+                cmds_str = ', '.join(skill_cmds) if skill_cmds else '（无）'
+                print(f"🔄 Skills 已重新加载，共 {len(skill_cmds)} 个：{cmds_str}\n")
                 continue
 
         # ── 自定义 Prompt 命令匹配 ────────────────────────────────────────────
@@ -289,8 +326,30 @@ def main() -> None:
                 memory=memory,
                 system_prompt=custom_prompts[cmd_name],
                 prompt_name=active_prompt_name,
+                skills=skills_map or None,
             )
             print(f"🎭 已切换到 Prompt：{active_prompt_name}  (新 Session: {agent.session_id})\n")
+            if question:
+                print()
+                try:
+                    reply = agent.run(question)
+                    print(f"Agent: {reply}\n")
+                except KeyboardInterrupt:
+                    print("\n⚠️  已中断当前回答。\n")
+                except Exception as e:
+                    print(f"❌ 出错了: {e}\n")
+            continue
+
+        # ── 用户显式 Skill 激活 ──────────────────────────────────────────────
+        if cmd_name in skill_cmds:
+            question = user_input[len(cmd_name):].strip()
+            skill_name = cmd_name[1:]  # 去掉 / 前缀
+            skill_body = skill_cmds[cmd_name]
+            activated = agent.activate_skill(skill_name, skill_body)
+            if activated:
+                print(f"🔧 Skill [{skill_name}] 已激活（注入当前会话）\n")
+            else:
+                print(f"🔧 Skill [{skill_name}] 已处于激活状态\n")
             if question:
                 print()
                 try:

@@ -10,6 +10,8 @@ CLI Tab 补全模块
     prompt_session = PromptSession(completer=make_completer(memory, custom_prompts))
 """
 
+from collections.abc import Sequence
+
 from prompt_toolkit.completion import WordCompleter
 
 from src.memory.store import MemoryStore
@@ -26,6 +28,7 @@ CLI_COMMANDS: list[str] = [
     "/del-session",
     "/clean-session",
     "/reload-prompts",
+    "/reload-skills",
     "/quit",
     "/exit",
 ]
@@ -34,23 +37,25 @@ CLI_COMMANDS: list[str] = [
 def make_completer(
     memory: MemoryStore,
     custom_prompts: dict[str, str] | None = None,
+    custom_skills: Sequence[str] | None = None,
 ) -> WordCompleter:
     """
-    构建 Tab 补全器，动态注入 session ID 和自定义 prompt 命令。
+    构建 Tab 补全器，动态注入 session ID、自定义 prompt 命令和 skill 命令。
 
     每次调用都从 MemoryStore 实时读取 session 列表，
-    确保新建或删除 session 后补全列表即时更新。
-    custom_prompts 中的命令（如 /5g-expert）也会加入补全词表。
+    确保新建/删除 session 后补全列表即时更新。
 
     Args:
         memory: 当前进程共享的 MemoryStore 实例。
         custom_prompts: scan_prompts() 返回的 {"/cmd": "内容"} 映射，可为 None。
+        custom_skills: skill 命令名称列表（如 ["/example-skill"]），可为 None。
 
     Returns:
         WordCompleter，可直接赋给 PromptSession.completer。
     """
     session_list = memory.list_sessions()
     prompt_cmds: list[str] = list(custom_prompts.keys()) if custom_prompts else []
+    skill_cmds: list[str] = list(custom_skills) if custom_skills else []
 
     # Tab 候选词：实际输入内容为完整 session_id，显示文字为“短 id + 首问”
     session_words: list[str] = []
@@ -72,5 +77,5 @@ def make_completer(
         del_display[del_cmd] = f"/del-session {label}"
 
     display_dict = {**session_display, **del_display}
-    words: list[str] = CLI_COMMANDS + prompt_cmds + session_words + del_words
+    words: list[str] = CLI_COMMANDS + prompt_cmds + skill_cmds + session_words + del_words
     return WordCompleter(words, display_dict=display_dict, sentence=True, match_middle=False)

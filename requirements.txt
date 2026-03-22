@@ -27,6 +27,9 @@ lxml
 # Web scraping
 requests
 
+# YAML parsing (for Skills SKILL.md frontmatter)
+pyyaml
+
 # Environment variables
 python-dotenv
 
