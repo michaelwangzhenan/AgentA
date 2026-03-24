@@ -349,6 +349,9 @@ def main() -> None:
                 try:
                     reply = agent.run(question)
                     print(f"Agent: {reply}\n")
+                    if agent.last_usage:
+                        u = agent.last_usage
+                        print(f"  📊 Token：输入 {u.prompt_tokens} + 输出 {u.completion_tokens} = 合计 {u.total_tokens}\n")
                 except KeyboardInterrupt:
                     print("\n⚠️  已中断当前回答。\n")
                 except Exception as e:
@@ -370,6 +373,9 @@ def main() -> None:
                 try:
                     reply = agent.run(question)
                     print(f"Agent: {reply}\n")
+                    if agent.last_usage:
+                        u = agent.last_usage
+                        print(f"  📊 Token：输入 {u.prompt_tokens} + 输出 {u.completion_tokens} = 合计 {u.total_tokens}\n")
                 except KeyboardInterrupt:
                     print("\n⚠️  已中断当前回答。\n")
                 except Exception as e:
@@ -381,6 +387,9 @@ def main() -> None:
         try:
             reply = agent.run(user_input)
             print(f"Agent: {reply}\n")
+            if agent.last_usage:
+                u = agent.last_usage
+                print(f"  📊 Token：输入 {u.prompt_tokens} + 输出 {u.completion_tokens} = 合计 {u.total_tokens}\n")
         except KeyboardInterrupt:
             print("\n⚠️  已中断当前回答。\n")
         except Exception as e:

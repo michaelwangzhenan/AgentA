@@ -164,6 +164,7 @@
     统一 test_xxx.py 命名风格，使命名更common 和 符合命名习惯， 去除“phaseN”。
     精简合并case,只保留必要case,节省测试资源。
     重构case, 使 cases 那模块分组。
-23. 统计tokens
+23. 统计tokens => Done
+  目标： 增加在每次对话结束时，显示当前对话消耗的 token数。
 
 -
