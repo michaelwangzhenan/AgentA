@@ -18,8 +18,6 @@ from bs4 import BeautifulSoup
 
 from src.rag.retriever import search
 
-# （已移除全局 _skill_bodies，改为实例级参数传递，消除多 Agent 实例的状态污染）
-
 logger = logging.getLogger(__name__)
 
 

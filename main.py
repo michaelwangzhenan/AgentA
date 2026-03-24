@@ -47,7 +47,6 @@ logging.basicConfig(
 for _noisy in ("httpx", "httpcore", "openai", "chromadb", "sentence_transformers"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 
-from src.agent.agent import Agent, SYSTEM_PROMPT
 from src.memory.store import MemoryStore
 import src.config as config
 
@@ -162,6 +161,11 @@ def main() -> None:
     """CLI 主循环。"""
     print(BANNER)
 
+    # 延迟导入重型依赖（chromadb / sentence-transformers），使 banner 能即时显示
+    print("⏳ 正在初始化...", end="\r", flush=True)
+    from src.agent.agent import Agent, SYSTEM_PROMPT
+    print(" " * 30, end="\r", flush=True)
+
     # 共享 MemoryStore 实例，整个进程生命周期内复用
     memory = MemoryStore()
 
@@ -188,6 +192,17 @@ def main() -> None:
         completer=make_completer(memory, custom_prompts, list(skill_cmds.keys())),
         complete_while_typing=False,  # 仅 Tab 触发，不干扰正常输入
     )
+
+    # Windows：清空控制台输入缓冲区，防止 activate.bat 等激活脚本产生的残留
+    # 输入事件被 prompt_toolkit 误读为用户首条输入
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.kernel32.FlushConsoleInputBuffer(
+                ctypes.windll.kernel32.GetStdHandle(-10)  # STD_INPUT_HANDLE
+            )
+        except Exception:
+            pass
 
     while True:
         try:
@@ -300,7 +315,7 @@ def main() -> None:
                 skill_cmds = {f"/{name}": info.body for name, info in skills_map.items()}
                 # 重建 Agent，使 system_prompt 中的 catalog 立即刷新
                 _base_prompt = (
-                    (custom_prompts.get(f"/{active_prompt_name}") or SYSTEM_PROMPT)
+                    custom_prompts.get(f"/{active_prompt_name}", SYSTEM_PROMPT)
                     if active_prompt_name
                     else SYSTEM_PROMPT
                 )
