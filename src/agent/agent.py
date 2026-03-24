@@ -19,7 +19,7 @@ Agent 主控逻辑 —— ReAct（Reason + Act）循环
 import json
 import logging
 import uuid
-from typing import Any
+from typing import Any, NamedTuple
 
 from src.agent.tools import get_tools, execute_tool, ToolResult
 from src.cli.skill_loader import SkillInfo, build_skill_catalog
@@ -27,6 +27,13 @@ from src.llm.provider import chat
 from src.memory.store import MemoryStore
 
 logger = logging.getLogger(__name__)
+
+
+class TokenUsage(NamedTuple):
+    """单次 Agent.run() 调用累计消耗的 token 统计。"""
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
 
 # 模块级共享 MemoryStore 实例（单进程内所有 Agent 共享同一个 DB 连接）
 _shared_memory: MemoryStore | None = None
@@ -109,6 +116,7 @@ class Agent:
         self._prompt_name = prompt_name
         # 支持从外部传入 memory（便于测试 mock），默认使用模块级共享实例
         self._memory: MemoryStore = memory if memory is not None else _get_shared_memory()
+        self.last_usage: TokenUsage | None = None  # 最近一次 run() 的 token 统计
 
     def run(self, user_input: str) -> str:
         """
@@ -141,6 +149,7 @@ class Agent:
         )
 
         tool_rounds = 0  # 已消耗的工具调用轮次计数
+        _prompt_tokens = _comp_tokens = 0  # 本次 run() 各轮累计 token
 
         for iteration in range(1, self.max_iterations + 1):
             logger.info("[Agent] 第 %d 轮推理，messages 长度: %d", iteration, len(messages))
@@ -152,6 +161,10 @@ class Agent:
 
             # 调用 LLM（携带工具定义，或 None 时强制文本回答）
             response = chat(messages, tools=active_tools)
+            _u = getattr(response, "usage", None)
+            if _u:
+                _prompt_tokens += getattr(_u, "prompt_tokens", 0)
+                _comp_tokens += getattr(_u, "completion_tokens", 0)
             message = response.choices[0].message
 
             # ── 情况 1：LLM 决定调用工具 ──────────────────────────────────────
@@ -169,14 +182,26 @@ class Agent:
                     self.session_id,
                     {"role": "assistant", "content": final_answer.strip()},
                 )
+                self.last_usage = (
+                    TokenUsage(_prompt_tokens, _comp_tokens, _prompt_tokens + _comp_tokens)
+                    if (_prompt_tokens or _comp_tokens) else None
+                )
                 return final_answer.strip()
 
             # LLM 返回了空内容（异常情况），退出
             logger.warning("[Agent] LLM 返回空内容，提前退出")
+            self.last_usage = (
+                TokenUsage(_prompt_tokens, _comp_tokens, _prompt_tokens + _comp_tokens)
+                if (_prompt_tokens or _comp_tokens) else None
+            )
             return "抱歉，未能生成有效回答，请重试。"
 
         # 超过最大迭代次数
         logger.warning("[Agent] 达到最大迭代次数 %d，强制返回", self.max_iterations)
+        self.last_usage = (
+            TokenUsage(_prompt_tokens, _comp_tokens, _prompt_tokens + _comp_tokens)
+            if (_prompt_tokens or _comp_tokens) else None
+        )
         return "抱歉，推理过程过于复杂，未能在规定轮次内完成。请尝试更具体的问题。"
 
     def _load_truncated_history(self) -> list[dict[str, Any]]:

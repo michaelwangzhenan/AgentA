@@ -32,8 +32,7 @@ def chat(
         temperature: 采样温度，0.0 ~ 1.0，越低越确定性。
 
     Returns:
-        - 若未传入 tools：返回 LLM 回复的文本字符串。
-        - 若传入 tools：返回完整的 ChatCompletion response 对象，供 Agent 判断是否有 tool_calls。
+        始终返回完整的 ChatCompletion response 对象，供 Agent 读取 choices 和 usage。
 
     Raises:
         ValueError: 当 ACTIVE_PROVIDER 为 'claude' 时走原生 SDK 分支。
@@ -70,10 +69,6 @@ def chat(
             base_url=provider_config.base_url or None,
         )
         response = client.chat.completions.create(**kwargs)
-
-    # 若没有传入 tools，直接返回文本，方便简单场景使用
-    if not tools:
-        return response.choices[0].message.content
 
     return response
 
@@ -126,10 +121,6 @@ def _chat_claude(
         client = anthropic.Anthropic(api_key=provider_config.api_key)
         response = client.messages.create(**kwargs)
 
-    # 若无 tools，直接返回文本
-    if not tools:
-        return response.content[0].text
-
     return _wrap_anthropic_response(response)
 
 
@@ -177,4 +168,9 @@ def _wrap_anthropic_response(response: Any) -> Any:
         tool_calls=tool_calls if tool_calls else None,
     )
     choice = SimpleNamespace(message=message)
-    return SimpleNamespace(choices=[choice])
+    usage = SimpleNamespace(
+        prompt_tokens=response.usage.input_tokens,
+        completion_tokens=response.usage.output_tokens,
+        total_tokens=response.usage.input_tokens + response.usage.output_tokens,
+    )
+    return SimpleNamespace(choices=[choice], usage=usage)
