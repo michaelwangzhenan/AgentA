@@ -29,6 +29,7 @@ CLI_COMMANDS: list[str] = [
     "/clean-session",
     "/reload-prompts",
     "/reload-skills",
+    "/save",
     "/quit",
     "/exit",
 ]

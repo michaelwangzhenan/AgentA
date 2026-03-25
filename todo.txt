@@ -1,5 +1,4 @@
--
-待优化项：
+ToDo List：
 1. 对话记忆 => Done
   目标： 将 messages 历史持久化到 SQLite，重启后仍可延续上下文，支持多轮跨会话对话
 
@@ -42,51 +41,18 @@
     符合 skills 规范， 参考: https://agentskills.io/specification
     如何支持 skills 参考: https://agentskills.io/client-implementation/adding-skills-support
     本项目 skills 目录： advanced/skills/
-  实施计划：
-    Step1 发现(Discover)
-      新建 src/cli/skill_loader.py
-      扫描 advanced/skills/**/SKILL.md（最大深度4）；按 name 去重（同名取项目级优先）
 
-    Step2 解析(Parse)
-      提取 YAML frontmatter → name, description；body = frontmatter 之后的 Markdown
-      宽容模式：缺 description → 跳过并警告；其余字段问题 → 警告但继续加载
-
-    Step3 披露(Disclose)
-      若有 skill，在 SYSTEM_PROMPT 末尾追加 catalog 块：
-        <available_skills>
-          <skill><name>…</name><description>…</description><location>…</location></skill>
-          …
-        </available_skills>
-        + 指令：当任务匹配某 skill，先调用 load_skill(name) 读取完整指令再执行
-      无 skill 时完全省略该块
-
-    Step4 激活(Activate)
-      模型驱动：注册工具 load_skill(name) → 返回 <skill_content> 包裹的 body
-        name 限定为已发现的 skill 名（enum），防止幻觉
-      用户显式：CLI 识别 /skill-name [问题]，直接注入 body 到 system，复用 prompt_loader 的模式
-      tab_complete.py 中加入 /skill-name 补全
-
-    Step5 上下文管理
-      load_skill 返回的 tool result 标记 protected=True，截断历史时跳过
-      session 内去重：同一 skill 已激活则不重复注入
-
-    文件改动清单
-      新建 src/cli/skill_loader.py  （发现+解析）
-      改   src/agent/tools.py       （注册 load_skill 工具）
-      改   src/agent/agent.py       （SYSTEM_PROMPT 拼接 catalog；protected 保护逻辑）
-      改   src/cli/tab_complete.py  （加入 skill 命令补全）
-      改   main.py                  （启动时调用 skill_loader，传入 agent）
 
 6. MCP 工具服务器接入
   目标： 接入 Model Context Protocol（MCP）标准，允许 Agent 调用外部 MCP Server 提供的工具，实现与第三方服务的标准化集成
-  实施计划：
+
 
 7. 用户自定义 Workflow
   目标： 支持用户通过配置文件或脚本（如 YAML/DSL）自定义工作流，编排多步骤工具调用和 LLM 调用序列，
     实现无需编写代码即可完成复杂自动化任务。
     注：与 no.5「定制 Skills」的边界 —— Skills 管理的是单个工具的描述和参数；Workflow 管理的是
     多个工具/LLM 的调用顺序和条件分支，属于更高层的编排逻辑。前置依赖 no.5 完成后再实现。
-  实施计划：
+
 
 8. 优化 ReAct => Done
   目标： 提升 Agent 在多轮对话中的推理能力和工具调用效率，具体包括：
@@ -95,41 +61,41 @@
     · 多步骤任务规划：支持 LLM 在单次 run() 中拆解复杂任务并按步骤执行
     · 工具结果质量判断：LLM 能识别工具返回内容为空/无关时主动切换策略，而非直接生成回答
 
-9. 多Agent协作
+9. 多Agent协作 A2A
   目标： 支持多个 Agent 协同工作，共享知识和任务，提高整体效率
-  实施计划：
+
 
 10. Web UI
   目标： 接入 Gradio 或 Streamlit，提供图形界面
-  实施计划：
+
 
 11. 支持企业级向量数据库
   目标： 支持接入企业级向量数据库，如 Pinecone、Weaviate 等，提高数据存储和检索能力
-  实施计划：
+
 
 12. Ollama
   目标： 支持本地 Ollama 模型，完全离线运行
-  实施计划：
+
 
 13. URL 批量导入
   目标： 支持通过配置文件批量爬取指定网页并入库
-  实施计划：
+
 
 14. 文档自动同步
   目标： 用 `watchdog` 监听 `docs/` 变化，自动增量入库
-  实施计划：
+
 
 15. API/SDK接口
   目标： 方便第三方系统集成
-  实施计划：
+
 
 16. 安全与权限管理
   目标： 适合企业/团队场景
-  实施计划：
+
 
 17. 多语言支持
   目标： 适应国际化需求
-  实施计划：
+
 
 18. 本地工具扩展
   目标： 开发更多工具，扩充 Agent 工具集，增强处理复杂任务的能力
@@ -143,7 +109,7 @@
     b. run_python：在沙筱环境中执行 Python 代码片段，返回输出结果
     c. read_file：读取本地文件内容（如日志、csv），支持行范围指定
     d. shell_cmd：执行本地 Shell 命令，返回 stdout/stderr
-  实施计划：
+
 
 19. 使用Tab键补全命令 => Done
   CLI 输入命令时支持Tab键补
@@ -166,7 +132,7 @@
     重构case, 使 cases 那模块分组。
 23. 统计tokens => Done
   目标： 增加在每次对话结束时，显示当前对话消耗的 token数。
-24. 添加 UT 测试脚本
+24. 添加 UT 测试脚本 => Done
   脚本类型：shell
   脚本位置和名称：workspace_root/t.sh
   用户可以运行 t [parameter] 来运行对应的UT
@@ -182,4 +148,10 @@
     .venv\Scripts\python -m pytest tests/test_agent.py         # Agent ReAct 循环
     .venv\Scripts\python -m pytest tests/test_memory.py        # 对话记忆持久化
     .venv\Scripts\python -m pytest tests/test_prompt_loader.py # 自定义 Prompt 加载
+25. 对话导出
+  实现/save <文件名>命令，把当前 session 完整对话记录存储到 history/文件名.txt
+26. 思考过程
+27. Agentic Search  / agent S
+
+
 -

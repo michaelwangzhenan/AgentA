@@ -17,6 +17,7 @@ CLI 入口 —— 私有知识库 Agent 对话界面
     输入 /clean-session       清空所有历史 session 的记录
     输入 /reload-prompts      重新扫描 advanced/prompts/ 目录，刷新自定义 Prompt 命令
     输入 /<prompt_name> [问题] 切换到指定自定义 Prompt 并重置 Agent，可附带首个问题
+    输入 /save <文件名>    导出当前 session 完整对话到 history/<文件名>.txt
     输入 /quit 或 /exit 或 Ctrl+C 退出
 """
 
@@ -82,6 +83,7 @@ HELP_TEXT = """
   /reload-skills             重新扫描 advanced/skills/ 目录，刷新 Skill 列表
   /<prompt_name> [问题]      切换到指定自定义 Prompt 并重置 Agent，可附带首个问题
   /<skill_name> [问题]       激活指定 Skill（注入 Skill 指令到当前会话），可附带首个问题
+  /save <文件名>            导出当前 session 完整对话到 history/<文件名>.txt
   /quit                      退出程序
   /exit                      退出程序（同 /quit）
 
@@ -122,6 +124,50 @@ def _run_ingest(docs_dir: str | None = None, model: str | None = None) -> None:
         print()
     except Exception as e:
         print(f"❌ 入库失败: {e}\n")
+
+
+def _save_history(memory: MemoryStore, session_id: str, filename: str) -> None:
+    """将当前 session 的 user/assistant 对话导出到 history/<filename>.md。"""
+    import re
+    from datetime import datetime
+    from pathlib import Path
+
+    msgs = [m for m in memory.load(session_id) if m["role"] in ("user", "assistant")]
+    if not msgs:
+        print("📭 当前 session 暂无对话历史，无可导出内容。\n")
+        return
+
+    # 去掉用户传入的扩展名后再校验，统一追加 .md
+    stem = re.sub(r'\.(md|txt)$', '', filename, flags=re.IGNORECASE)
+    safe_name = re.sub(r'[^\w\-.]', '_', stem)
+    if not safe_name or safe_name.startswith('.'):
+        print(f"❌ 无效文件名：{filename!r}\n")
+        return
+
+    history_dir = Path("history")
+    history_dir.mkdir(exist_ok=True)
+    out_path = history_dir / f"{safe_name}.md"
+
+    lines: list[str] = [
+        f"# {safe_name}",
+        "",
+        f"- **Session**: `{session_id}`",
+        f"- **导出时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"- **消息数**: {len(msgs)}",
+        "",
+        "---",
+        "",
+    ]
+    for msg in msgs:
+        role_label = "你" if msg["role"] == "user" else "Agent"
+        content = (msg.get("content") or "").strip()
+        lines.append(f"## {role_label}")
+        lines.append("")
+        lines.append(content)
+        lines.append("")
+
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+    print(f"💾 对话已导出到 {out_path}（共 {len(msgs)} 条）\n")
 
 
 def _show_history(memory: MemoryStore, session_id: str) -> None:
@@ -263,12 +309,23 @@ def main() -> None:
             case "/session":
                 session_arg = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""
                 if session_arg:
-                    # 切换到指定 session
-                    agent = Agent(verbose=True, session_id=session_arg, memory=memory, skills=skills_map or None)
-                    # 从 DB 恢复该 session 的 prompt_name
+                    # 先查 session 的 prompt_name，再恢复对应的 system_prompt
                     sessions_info = {s["session_id"]: s for s in memory.list_sessions()}
                     saved_prompt = sessions_info.get(session_arg, {}).get("prompt_name", "")
                     active_prompt_name = saved_prompt or None
+                    restored_prompt = (
+                        custom_prompts.get(f"/{saved_prompt}")
+                        if saved_prompt and f"/{saved_prompt}" in custom_prompts
+                        else None
+                    )
+                    agent = Agent(
+                        verbose=True,
+                        session_id=session_arg,
+                        memory=memory,
+                        skills=skills_map or None,
+                        system_prompt=restored_prompt or SYSTEM_PROMPT,
+                        prompt_name=saved_prompt or "",
+                    )
                     history = memory.load(session_arg)
                     msg_count = len([m for m in history if m["role"] != "system"])
                     prompt_hint = f"  Prompt: {active_prompt_name}" if active_prompt_name else ""
@@ -330,8 +387,13 @@ def main() -> None:
                 cmds_str = ', '.join(skill_cmds) if skill_cmds else '（无）'
                 print(f"🔄 Skills 已重新加载，共 {len(skill_cmds)} 个：{cmds_str}\n")
                 continue
-
-        # ── 自定义 Prompt 命令匹配 ────────────────────────────────────────────
+            case "/save":
+                save_arg = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""
+                if not save_arg:
+                    print("⚠️  请指定文件名，例：/save my-chat\n")
+                else:
+                    _save_history(memory, agent.session_id, save_arg)
+                continue
         cmd_name = cmd_lower.split()[0] if cmd_lower.split() else ""
         if cmd_name in custom_prompts:
             question = user_input[len(cmd_name):].strip()

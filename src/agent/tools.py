@@ -199,6 +199,22 @@ def _tool_fetch_url(url: str, max_chars: int = 3000) -> ToolResult:
         }
         response = requests.get(url, headers=headers, timeout=15)
         response.raise_for_status()
+
+        # 二进制内容检测：Content-Type 非文本或魔术字节
+        content_type = response.headers.get("Content-Type", "").lower().split(";")[0].strip()
+        _TEXT_TYPES = ("text/", "application/json", "application/xml", "application/xhtml")
+        if not any(content_type.startswith(t) for t in _TEXT_TYPES):
+            return ToolResult(
+                status="error",
+                content=f"不支持下载二进制文件（Content-Type: {content_type}）。请访问对应的 HTML 页面或文档索引。",
+            )
+        _BINARY_MAGIC = (b"PK\x03\x04", b"%PDF", b"\x89PNG", b"GIF8", b"\xff\xd8\xff")
+        if any(response.content.startswith(magic) for magic in _BINARY_MAGIC):
+            return ToolResult(
+                status="error",
+                content=f"响应内容为二进制文件（如 .zip/.pdf/.png 等），无法提取文本。请访问对应的 HTML 页面。",
+            )
+
         response.encoding = response.apparent_encoding
 
         soup = BeautifulSoup(response.text, "lxml")
