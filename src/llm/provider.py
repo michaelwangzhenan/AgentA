@@ -9,9 +9,10 @@ LLM 统一调用接口
     2. Function Calling：传入 tools 参数，返回原始 response 供 Agent 处理
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable
 from typing import Any
 
+import json
 import httpx
 import openai
 
@@ -35,8 +36,8 @@ def chat(
         始终返回完整的 ChatCompletion response 对象，供 Agent 读取 choices 和 usage。
 
     Raises:
-        ValueError: 当 ACTIVE_PROVIDER 为 'claude' 时走原生 SDK 分支。
-        openai.APIError: API 调用失败时抛出。
+        openai.APIError: OpenAI 兼容 API 调用失败时抛出。
+        anthropic.APIError: ACTIVE_PROVIDER 为 'claude' 时，原生 SDK 调用失败时抛出。
     """
     if config.ACTIVE_PROVIDER == "claude":
         return _chat_claude(messages, tools, temperature)
@@ -53,6 +54,8 @@ def chat(
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
+    if provider_config.extra_body:
+        kwargs["extra_body"] = provider_config.extra_body
 
     need_proxy = config.ACTIVE_PROVIDER in config.PROXIED_PROVIDERS and bool(config.LLM_PROXY)
     if need_proxy:
@@ -89,13 +92,15 @@ def _chat_claude(
     provider_config = config.get_active_config()
 
     # 分离 system prompt 和对话历史（Anthropic API 要求分开传）
-    system_prompt = ""
+    # 多条 system 消息拼接为一条，避免只保留最后一条导致前面内容丢失
+    system_parts: list[str] = []
     filtered_messages: list[dict[str, Any]] = []
     for msg in messages:
         if msg["role"] == "system":
-            system_prompt = msg["content"]
+            system_parts.append(msg["content"])
         else:
             filtered_messages.append(msg)
+    system_prompt = "\n\n".join(system_parts)
 
     kwargs: dict[str, Any] = {
         "model": provider_config.model,
@@ -151,7 +156,6 @@ def _wrap_anthropic_response(response: Any) -> Any:
 
     for block in response.content:
         if block.type == "tool_use":
-            import json
             tool_calls.append(SimpleNamespace(
                 id=block.id,
                 type="function",
@@ -172,5 +176,232 @@ def _wrap_anthropic_response(response: Any) -> Any:
         prompt_tokens=response.usage.input_tokens,
         completion_tokens=response.usage.output_tokens,
         total_tokens=response.usage.input_tokens + response.usage.output_tokens,
+    )
+    return SimpleNamespace(choices=[choice], usage=usage)
+
+
+# ── Extended Thinking ────────────────────────────────────────────────────────
+
+def call_with_thinking(
+    messages: list[dict[str, Any]],
+    budget_tokens: int = 8000,
+    tools: list[dict[str, Any]] | None = None,
+    on_thinking_chunk: Callable[[str], None] | None = None,
+) -> Any:
+    """
+    通用 Extended Thinking 入口。
+
+    - Claude：走流式 thinking 分支，通过 on_thinking_chunk 回调实时输出思考过程。
+    - 其他 provider：静默降级为普通 chat()，保持向后兼容。
+
+    Args:
+        messages: 对话历史（OpenAI 格式）。
+        budget_tokens: thinking 预算 tokens（仅 Claude 有效）。
+        tools: Function Calling 工具列表，可为 None。
+        on_thinking_chunk: 每收到一段 thinking 文本时的回调，可为 None。
+
+    Returns:
+        与 chat() 相同格式的 response 对象。
+    """
+    if config.ACTIVE_PROVIDER == "claude":
+        return _chat_claude_thinking(messages, budget_tokens, tools, on_thinking_chunk)
+    if config.ACTIVE_PROVIDER == "qwen":
+        return _chat_qwen_thinking(messages, budget_tokens, tools, on_thinking_chunk)
+    # 其他 provider 静默降级，thinking 不可用
+    return chat(messages, tools=tools)
+
+
+def _chat_claude_thinking(
+    messages: list[dict[str, Any]],
+    budget_tokens: int,
+    tools: list[dict[str, Any]] | None,
+    on_thinking_chunk: Callable[[str], None] | None,
+) -> Any:
+    """Claude 原生 Extended Thinking 流式调用。"""
+    import anthropic
+
+    provider_config = config.get_active_config()
+
+    system_parts = []
+    filtered_messages: list[dict[str, Any]] = []
+    for msg in messages:
+        if msg["role"] == "system":
+            system_parts.append(msg["content"])
+        else:
+            filtered_messages.append(msg)
+    system_prompt = "\n\n".join(system_parts)
+
+    kwargs: dict[str, Any] = {
+        "model": provider_config.model,
+        # max_tokens 必须 > budget_tokens，Anthropic 强制要求
+        "max_tokens": budget_tokens + 4096,
+        "temperature": 1,  # Extended Thinking 要求 temperature=1
+        "thinking": {"type": "enabled", "budget_tokens": budget_tokens},
+        "messages": filtered_messages,
+    }
+    if system_prompt:
+        kwargs["system"] = system_prompt
+    if tools:
+        kwargs["tools"] = _convert_tools_to_anthropic(tools)
+
+    if config.LLM_PROXY:
+        with httpx.Client(proxy=config.LLM_PROXY) as http_client:
+            client = anthropic.Anthropic(
+                api_key=provider_config.api_key,
+                http_client=http_client,
+            )
+            final = _run_thinking_stream(client, kwargs, on_thinking_chunk)
+    else:
+        client = anthropic.Anthropic(api_key=provider_config.api_key)
+        final = _run_thinking_stream(client, kwargs, on_thinking_chunk)
+
+    return _wrap_anthropic_response(final)
+
+
+def _run_thinking_stream(
+    client: Any,
+    kwargs: dict[str, Any],
+    on_thinking_chunk: Callable[[str], None] | None,
+) -> Any:
+    """
+    以流式方式驱动 Claude thinking 调用，通过回调逐块输出思考过程。
+
+    thinking 内容仅通过回调透传给调用方（打印到终端），不写入返回值，
+    不进入 messages 历史，防止 prompt injection。
+    """
+    with client.messages.stream(**kwargs) as stream:
+        for event in stream:
+            event_type = getattr(event, "type", None)
+            if event_type == "content_block_delta" and on_thinking_chunk is not None:
+                delta = getattr(event, "delta", None)
+                if delta and getattr(delta, "type", None) == "thinking_delta":
+                    thinking_text = getattr(delta, "thinking", "")
+                    if thinking_text:
+                        on_thinking_chunk(thinking_text)
+        return stream.get_final_message()
+
+
+def _chat_qwen_thinking(
+    messages: list[dict[str, Any]],
+    budget_tokens: int,
+    tools: list[dict[str, Any]] | None,
+    on_thinking_chunk: Callable[[str], None] | None,
+) -> Any:
+    """
+    Qwen3 Extended Thinking 流式调用。
+
+    Qwen3 API 要求 enable_thinking=True 时必须使用 stream=True；
+    thinking 内容位于 delta.reasoning_content，正文位于 delta.content。
+    thinking 内容仅通过回调输出到终端，不写入返回值，不进 messages，防止 prompt injection。
+    """
+    from types import SimpleNamespace
+
+    provider_config = config.get_active_config()
+
+    kwargs: dict[str, Any] = {
+        "model": provider_config.model,
+        "messages": messages,
+        "stream": True,
+        "stream_options": {"include_usage": True},  # 确保最后一个 chunk 携带 usage 统计
+        "extra_body": {"enable_thinking": True},
+    }
+    if tools:
+        kwargs["tools"] = tools
+        kwargs["tool_choice"] = "auto"
+
+    need_proxy = config.ACTIVE_PROVIDER in config.PROXIED_PROVIDERS and bool(config.LLM_PROXY)
+    if need_proxy:
+        with httpx.Client(proxy=config.LLM_PROXY) as http_client:
+            client = openai.OpenAI(
+                api_key=provider_config.api_key,
+                base_url=provider_config.base_url or None,
+                http_client=http_client,
+            )
+            return _run_qwen_thinking_stream(client, kwargs, on_thinking_chunk)
+    else:
+        client = openai.OpenAI(
+            api_key=provider_config.api_key,
+            base_url=provider_config.base_url or None,
+        )
+        return _run_qwen_thinking_stream(client, kwargs, on_thinking_chunk)
+
+
+def _run_qwen_thinking_stream(
+    client: Any,
+    kwargs: dict[str, Any],
+    on_thinking_chunk: Callable[[str], None] | None,
+) -> Any:
+    """
+    消费 Qwen3 流式响应，分离 reasoning_content（thinking）和 content（正文），
+    拼接后返回与普通 chat() 兼容的 SimpleNamespace response 对象。
+
+    thinking 内容只通过回调透传，不写入返回对象，防止 prompt injection。
+    """
+    from types import SimpleNamespace
+
+    content_parts: list[str] = []
+    tool_calls_map: dict[int, dict[str, Any]] = {}
+    prompt_tokens = completion_tokens = 0
+
+    stream = client.chat.completions.create(**kwargs)
+    for chunk in stream:
+        # usage 在任意 chunk 上（含 choices=[] 的最后一个 chunk），必须在 continue 前读取
+        if getattr(chunk, "usage", None):
+            prompt_tokens = getattr(chunk.usage, "prompt_tokens", 0)
+            completion_tokens = getattr(chunk.usage, "completion_tokens", 0)
+
+        delta = chunk.choices[0].delta if chunk.choices else None
+        if delta is None:
+            continue
+
+        # thinking 内容：回调输出，不收集进正文
+        reasoning = getattr(delta, "reasoning_content", None)
+        if reasoning and on_thinking_chunk is not None:
+            on_thinking_chunk(reasoning)
+
+        # 正文内容
+        if delta.content:
+            content_parts.append(delta.content)
+
+        # tool_calls 增量拼接
+        if delta.tool_calls:
+            for tc_delta in delta.tool_calls:
+                idx = tc_delta.index
+                if idx not in tool_calls_map:
+                    tool_calls_map[idx] = {
+                        "id": tc_delta.id or "",
+                        "type": "function",
+                        "function": {"name": "", "arguments": ""},
+                    }
+                if tc_delta.id:
+                    tool_calls_map[idx]["id"] = tc_delta.id
+                if tc_delta.function:
+                    if tc_delta.function.name:
+                        tool_calls_map[idx]["function"]["name"] += tc_delta.function.name
+                    if tc_delta.function.arguments:
+                        tool_calls_map[idx]["function"]["arguments"] += tc_delta.function.arguments
+
+    # 组装 tool_calls
+    tool_calls = None
+    if tool_calls_map:
+        tool_calls = [
+            SimpleNamespace(
+                id=tc["id"],
+                type="function",
+                function=SimpleNamespace(
+                    name=tc["function"]["name"],
+                    arguments=tc["function"]["arguments"],
+                ),
+            )
+            for tc in tool_calls_map.values()
+        ]
+
+    final_content = "".join(content_parts) or None
+    message = SimpleNamespace(content=final_content, tool_calls=tool_calls)
+    choice = SimpleNamespace(message=message)
+    usage = SimpleNamespace(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
     )
     return SimpleNamespace(choices=[choice], usage=usage)

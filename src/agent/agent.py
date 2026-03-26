@@ -23,8 +23,9 @@ from typing import Any, NamedTuple
 
 from src.agent.tools import get_tools, execute_tool, ToolResult
 from src.cli.skill_loader import SkillInfo, build_skill_catalog
-from src.llm.provider import chat
+from src.llm.provider import chat, call_with_thinking
 from src.memory.store import MemoryStore
+import src.config as _cfg
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,8 @@ class Agent:
         memory: MemoryStore | None = None,
         prompt_name: str = "",
         skills: dict[str, SkillInfo] | None = None,
+        thinking_enabled: bool | None = None,
+        thinking_budget: int | None = None,
     ) -> None:
         # 若传入 skills，提取 bodies，并将含 description 的 catalog 追加到 system_prompt
         self._skill_bodies: dict[str, str] = {}
@@ -117,6 +120,9 @@ class Agent:
         # 支持从外部传入 memory（便于测试 mock），默认使用模块级共享实例
         self._memory: MemoryStore = memory if memory is not None else _get_shared_memory()
         self.last_usage: TokenUsage | None = None  # 最近一次 run() 的 token 统计
+        # Extended Thinking 配置：优先使用传入参数，其次读 config
+        self.thinking_enabled: bool = thinking_enabled if thinking_enabled is not None else _cfg.THINKING_ENABLED
+        self.thinking_budget: int = thinking_budget if thinking_budget is not None else _cfg.THINKING_BUDGET
 
     def run(self, user_input: str) -> str:
         """
@@ -151,6 +157,15 @@ class Agent:
         tool_rounds = 0  # 已消耗的工具调用轮次计数
         _prompt_tokens = _comp_tokens = 0  # 本次 run() 各轮累计 token
 
+        # 思考过程流式回调：首个 chunk 先打头部，后续直接输出
+        _thinking_started: list[bool] = [False]
+
+        def _on_thinking_chunk(chunk: str) -> None:
+            if not _thinking_started[0]:
+                print("\n\U0001f4ad 思考中...\n", flush=True)
+                _thinking_started[0] = True
+            print(chunk, end="", flush=True)
+
         for iteration in range(1, self.max_iterations + 1):
             logger.info("[Agent] 第 %d 轮推理，messages 长度: %d", iteration, len(messages))
 
@@ -159,8 +174,19 @@ class Agent:
             if active_tools is None:
                 logger.warning("[Agent] 工具调用已达上限 %d 轮，强制生成最终回答", MAX_TOOL_ROUNDS)
 
-            # 调用 LLM（携带工具定义，或 None 时强制文本回答）
-            response = chat(messages, tools=active_tools)
+            # 调用 LLM：开启 thinking 时走流式 thinking 分支，否则普通 chat()
+            _thinking_started[0] = False
+            if self.thinking_enabled:
+                response = call_with_thinking(
+                    messages,
+                    budget_tokens=self.thinking_budget,
+                    tools=active_tools,
+                    on_thinking_chunk=_on_thinking_chunk,
+                )
+                if _thinking_started[0]:
+                    print("\n\n─── 思考结束 ───\n", flush=True)
+            else:
+                response = chat(messages, tools=active_tools)
             _u = getattr(response, "usage", None)
             if _u:
                 _prompt_tokens += getattr(_u, "prompt_tokens", 0)

@@ -30,6 +30,9 @@ CLI_COMMANDS: list[str] = [
     "/reload-prompts",
     "/reload-skills",
     "/save",
+    "/thinking",
+    "/thinking on",
+    "/thinking off",
     "/quit",
     "/exit",
 ]

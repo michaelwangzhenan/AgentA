@@ -18,7 +18,8 @@
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -31,6 +32,8 @@ class ProviderConfig:
     base_url: str
     api_key: str
     model: str
+    # 透传给 openai SDK 的额外请求体参数（如 enable_thinking、response_format 等）
+    extra_body: dict[str, Any] | None = None
 
 
 # 当前激活的 Provider，从环境变量读取，默认 kimi
@@ -64,10 +67,12 @@ PROVIDER_CONFIGS: dict[str, ProviderConfig] = {
         model="qwen2.5:7b",
     ),
     # ── 国内直连 ────────────────────────────────────────────────
+    # qwen3 支持 Extended Thinking，但非流式调用必须显式设 enable_thinking=False
     "qwen": ProviderConfig(
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         api_key=os.getenv("QWEN_API_KEY", ""),
-        model="qwen-plus",
+        model="qwen3-8b",  # 可升级为 qwen3-32b / qwen3-235b-a22b 提升效果
+        extra_body={"enable_thinking": False},
     ),
     "minimax": ProviderConfig(
         base_url="https://api.minimax.chat/v1",
@@ -160,6 +165,12 @@ RERANKER_MODEL: str = os.getenv(
 RERANKER_ENABLED: bool = os.getenv("RERANKER_ENABLED", "true").lower() == "true"
 # 召回窗口倍数：精排前取 top_k × N 条候选，默认 3
 RERANKER_RECALL_MULTIPLIER: int = int(os.getenv("RERANKER_RECALL_MULTIPLIER", "3"))
+
+# ── Extended Thinking 配置 ────────────────────────────────────────────────────
+# true 开启 Extended Thinking；目前仅 Claude 原生支持，其余 provider 静默降级
+THINKING_ENABLED: bool = os.getenv("THINKING_ENABLED", "false").lower() == "true"
+# thinking budget_tokens — 推荐：简单推理 1024~3000，复杂分析 8000~16000，AI Agent 32000+
+THINKING_BUDGET: int = int(os.getenv("THINKING_BUDGET", "8000"))
 
 
 def get_active_config() -> ProviderConfig:

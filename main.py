@@ -18,6 +18,7 @@ CLI 入口 —— 私有知识库 Agent 对话界面
     输入 /reload-prompts      重新扫描 advanced/prompts/ 目录，刷新自定义 Prompt 命令
     输入 /<prompt_name> [问题] 切换到指定自定义 Prompt 并重置 Agent，可附带首个问题
     输入 /save <文件名>    导出当前 session 完整对话到 history/<文件名>.md
+    输入 /thinking [on|off|budget N]  控制 Extended Thinking 模式（仅 Claude）
     输入 /quit 或 /exit 或 Ctrl+C 退出
 """
 
@@ -87,6 +88,9 @@ HELP_TEXT = """
   /<prompt_name> [问题]      切换到指定自定义 Prompt 并重置 Agent，可附带首个问题
   /<skill_name> [问题]       激活指定 Skill（注入 Skill 指令到当前会话），可附带首个问题
   /save <文件名>             导出当前 session 完整对话到 history/<文件名>.md
+  /thinking              查看 Extended Thinking 状态
+  /thinking on/off       开启/关闭 Extended Thinking（仅 Claude 有效）
+  /thinking budget <N>   设置 thinking budget tokens（默认 8000，不超过 32000）
   /quit                      退出程序
   /exit                      退出程序（同 /quit）
 
@@ -122,7 +126,7 @@ def _run_ingest(docs_dir: str | None = None, model: str | None = None) -> None:
     print(f"\n⏳ 正在扫描 {target_dir}")
     print(f"   Embedding 模型: {model_name}  →  collection: {collection_name}\n")
     try:
-        from rag.ingest import ingest_all
+        from src.rag.ingest import ingest_all
         ingest_all(docs_dir=target_dir, model=target_model)
         print()
     except Exception as e:
@@ -229,7 +233,12 @@ def main() -> None:
     if skills_map:
         print(f"🔧 已加载 Skills：{', '.join(skill_cmds)}\n")
 
-    agent = Agent(verbose=True, memory=memory, skills=skills_map or None)
+    # Extended Thinking 运行时状态（初始值从 config 读取）
+    thinking_enabled: bool = config.THINKING_ENABLED
+    thinking_budget: int = config.THINKING_BUDGET
+
+    agent = Agent(verbose=True, memory=memory, skills=skills_map or None,
+                  thinking_enabled=thinking_enabled, thinking_budget=thinking_budget)
     print(f"💬 当前 Session: {agent.session_id}\n")
 
     # 当前激活的 prompt 名称（None 表示使用默认提示符 "你"）
@@ -241,14 +250,17 @@ def main() -> None:
         complete_while_typing=False,  # 仅 Tab 触发，不干扰正常输入
     )
 
-    # Windows：清空控制台输入缓冲区，防止 activate.bat 等激活脚本产生的残留
-    # 输入事件被 prompt_toolkit 误读为用户首条输入
+    # Windows：清空控制台输入缓冲区，防止 VS Code 伪终端（ConPTY）把启动命令
+    # 注入 stdin，被 prompt_toolkit 误读为用户首条输入。
+    # FlushConsoleInputBuffer 仅对真实 Win32 控制台有效，ConPTY 下无效；
+    # msvcrt.kbhit/getwch 直接消费缓冲区按键，兼容 ConPTY。
     if sys.platform == "win32":
+        import time
+        time.sleep(0.05)  # 等待启动命令字符全部打入缓冲区
         try:
-            import ctypes
-            ctypes.windll.kernel32.FlushConsoleInputBuffer(
-                ctypes.windll.kernel32.GetStdHandle(-10)  # STD_INPUT_HANDLE
-            )
+            import msvcrt
+            while msvcrt.kbhit():
+                msvcrt.getwch()
         except Exception:
             pass
 
@@ -269,7 +281,8 @@ def main() -> None:
         # ── 内置命令处理 ──────────────────────────────────────────────────────
         cmd_lower = user_input.lower()
         cmd_parts = user_input.split(maxsplit=1)  # 保留原始大小写用于路径
-        match cmd_lower.split()[0] if cmd_lower.split() else "":
+        cmd_tokens = cmd_lower.split()
+        match cmd_tokens[0] if cmd_tokens else "":
             case "/quit" | "/exit":
                 print("👋 再见！")
                 memory.close()
@@ -301,7 +314,8 @@ def main() -> None:
                 continue
             case "/clear":
                 memory.clear(agent.session_id)
-                agent = Agent(verbose=True, memory=memory, skills=skills_map or None)
+                agent = Agent(verbose=True, memory=memory, skills=skills_map or None,
+                              thinking_enabled=thinking_enabled, thinking_budget=thinking_budget)
                 active_prompt_name = None
                 print(f"✅ 对话历史已清空，Agent 已重置。\n💬 新 Session: {agent.session_id}\n")
                 continue
@@ -327,6 +341,8 @@ def main() -> None:
                         skills=skills_map or None,
                         system_prompt=restored_prompt or SYSTEM_PROMPT,
                         prompt_name=saved_prompt or "",
+                        thinking_enabled=thinking_enabled,
+                        thinking_budget=thinking_budget,
                     )
                     history = memory.load(session_arg)
                     msg_count = len([m for m in history if m["role"] != "system"])
@@ -358,7 +374,8 @@ def main() -> None:
                     if confirm == "yes":
                         count = memory.clean_all_sessions()
                         # 当前 Agent 的历史也已被清除，重建一个新 session
-                        agent = Agent(verbose=True, memory=memory, skills=skills_map or None)
+                        agent = Agent(verbose=True, memory=memory, skills=skills_map or None,
+                                      thinking_enabled=thinking_enabled, thinking_budget=thinking_budget)
                         active_prompt_name = None
                         print(f"🗑️  已清空全部 {count} 个 session 记录。新 Session: {agent.session_id}\n")
                     else:
@@ -385,6 +402,8 @@ def main() -> None:
                     system_prompt=_base_prompt,
                     prompt_name=active_prompt_name or "",
                     skills=skills_map or None,
+                    thinking_enabled=thinking_enabled,
+                    thinking_budget=thinking_budget,
                 )
                 cmds_str = ', '.join(skill_cmds) if skill_cmds else '（无）'
                 print(f"🔄 Skills 已重新加载，共 {len(skill_cmds)} 个：{cmds_str}\n")
@@ -396,7 +415,31 @@ def main() -> None:
                 else:
                     _save_history(memory, agent.session_id, save_arg)
                 continue
-        cmd_name = cmd_lower.split()[0] if cmd_lower.split() else ""
+            case "/thinking":
+                think_arg = cmd_parts[1].strip().lower() if len(cmd_parts) > 1 else ""
+                think_tokens = think_arg.split()
+                match think_tokens[0] if think_tokens else "":
+                    case "on":
+                        thinking_enabled = True
+                        agent.thinking_enabled = True
+                        print(f"💭 Extended Thinking 已开启（budget={thinking_budget} tokens）。\n")
+                    case "off":
+                        thinking_enabled = False
+                        agent.thinking_enabled = False
+                        print("💭 Extended Thinking 已关闭\n")
+                    case "budget" if len(think_tokens) >= 2:
+                        try:
+                            thinking_budget = int(think_tokens[1])
+                            agent.thinking_budget = thinking_budget
+                            print(f"💭 Thinking budget 已设置为 {thinking_budget} tokens\n")
+                        except ValueError:
+                            print(f"❌ 无效数字：{think_tokens[1]!r}，用法: /thinking budget <整数>\n")
+                    case _:
+                        status = "开启" if thinking_enabled else "关闭"
+                        print(f"💭 Extended Thinking: {status}，budget={thinking_budget} tokens\n"
+                              f"用法: /thinking on | off | budget <N>\n")
+                continue
+        cmd_name = cmd_tokens[0] if cmd_tokens else ""
         if cmd_name in custom_prompts:
             question = user_input[len(cmd_name):].strip()
             active_prompt_name = cmd_name[1:]  # 去掉 / 前缀，如 "5g-expert"
@@ -406,6 +449,8 @@ def main() -> None:
                 system_prompt=custom_prompts[cmd_name],
                 prompt_name=active_prompt_name,
                 skills=skills_map or None,
+                thinking_enabled=thinking_enabled,
+                thinking_budget=thinking_budget,
             )
             print(f"🎭 已切换到 Prompt：{active_prompt_name}  (新 Session: {agent.session_id})\n")
             if question:
