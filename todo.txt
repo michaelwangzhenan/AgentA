@@ -148,10 +148,20 @@ ToDo List：
     .venv\Scripts\python -m pytest tests/test_agent.py         # Agent ReAct 循环
     .venv\Scripts\python -m pytest tests/test_memory.py        # 对话记忆持久化
     .venv\Scripts\python -m pytest tests/test_prompt_loader.py # 自定义 Prompt 加载
-25. 对话导出
-  实现/save <文件名>命令，把当前 session 完整对话记录存储到 history/文件名.txt
-26. 思考过程
+25. 对话导出 => Done
+  实现/save <文件名>命令，把当前 session 完整对话记录存储到 history/文件名.md
+26. 支持 Thinking
+  目标：
+    1. 增加 Extended Thinking 支持，是否开启用户可选
+    2. 代码框架可扩展，为兼容各种LLM 抽象 common 接口,如 def call_with_thinking(provider, prompt, budget=8000)
+      budget_tokens 推荐： 
+      简单推理: 1,024 ~ 3,000, 
+      复杂分析: 8,000 ~ 16,000
+      高难度Agent 任务: 32,000+
+    3. 思考过程流式输出
+    注意： thinking 内容不应该被用来做 prompt injection 的载体
+
 27. Agentic Search  / agent S
 
-
+28.Claude 4.6 新增：Adaptive Thinking
 -

@@ -17,13 +17,16 @@ CLI 入口 —— 私有知识库 Agent 对话界面
     输入 /clean-session       清空所有历史 session 的记录
     输入 /reload-prompts      重新扫描 advanced/prompts/ 目录，刷新自定义 Prompt 命令
     输入 /<prompt_name> [问题] 切换到指定自定义 Prompt 并重置 Agent，可附带首个问题
-    输入 /save <文件名>    导出当前 session 完整对话到 history/<文件名>.txt
+    输入 /save <文件名>    导出当前 session 完整对话到 history/<文件名>.md
     输入 /quit 或 /exit 或 Ctrl+C 退出
 """
 
 import logging
+import re
 import sys
 import warnings
+from datetime import datetime
+from pathlib import Path
 
 from dotenv import load_dotenv
 from prompt_toolkit import PromptSession
@@ -83,7 +86,7 @@ HELP_TEXT = """
   /reload-skills             重新扫描 advanced/skills/ 目录，刷新 Skill 列表
   /<prompt_name> [问题]      切换到指定自定义 Prompt 并重置 Agent，可附带首个问题
   /<skill_name> [问题]       激活指定 Skill（注入 Skill 指令到当前会话），可附带首个问题
-  /save <文件名>            导出当前 session 完整对话到 history/<文件名>.txt
+  /save <文件名>             导出当前 session 完整对话到 history/<文件名>.md
   /quit                      退出程序
   /exit                      退出程序（同 /quit）
 
@@ -128,10 +131,6 @@ def _run_ingest(docs_dir: str | None = None, model: str | None = None) -> None:
 
 def _save_history(memory: MemoryStore, session_id: str, filename: str) -> None:
     """将当前 session 的 user/assistant 对话导出到 history/<filename>.md。"""
-    import re
-    from datetime import datetime
-    from pathlib import Path
-
     msgs = [m for m in memory.load(session_id) if m["role"] in ("user", "assistant")]
     if not msgs:
         print("📭 当前 session 暂无对话历史，无可导出内容。\n")
@@ -166,8 +165,11 @@ def _save_history(memory: MemoryStore, session_id: str, filename: str) -> None:
         lines.append(content)
         lines.append("")
 
-    out_path.write_text("\n".join(lines), encoding="utf-8")
-    print(f"💾 对话已导出到 {out_path}（共 {len(msgs)} 条）\n")
+    try:
+        out_path.write_text("\n".join(lines), encoding="utf-8")
+        print(f"💾 对话已导出到 {out_path}（共 {len(msgs)} 条）\n")
+    except OSError as e:
+        print(f"❌ 导出失败: {e}\n")
 
 
 def _show_history(memory: MemoryStore, session_id: str) -> None:
