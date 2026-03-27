@@ -399,3 +399,158 @@ class TestCustomSystemPrompt:
         system_msg = captured_messages[0][0]
         assert system_msg["role"] == "system"
         assert system_msg["content"] == SYSTEM_PROMPT
+
+
+# ── thinking / token_usage / activate_skill 新增测试 ─────────────────────────
+
+class TestAgentThinkingInit:
+    """测试 thinking_enabled / thinking_budget 初始化参数"""
+
+    def test_thinking_defaults_from_config(self) -> None:
+        """未传参时，thinking_enabled / thinking_budget 应取 config 值。"""
+        import src.config as _cfg
+        agent = Agent()
+        assert agent.thinking_enabled == _cfg.THINKING_ENABLED
+        assert agent.thinking_budget == _cfg.THINKING_BUDGET
+
+    def test_thinking_explicit_true_overrides_config(self) -> None:
+        """显式传入 True 时，thinking_enabled 优先于 config。"""
+        agent = Agent(thinking_enabled=True, thinking_budget=16000)
+        assert agent.thinking_enabled is True
+        assert agent.thinking_budget == 16000
+
+    def test_thinking_explicit_false_overrides_config(self) -> None:
+        """显式传入 False 时，thinking_enabled 优先于 config。"""
+        agent = Agent(thinking_enabled=False, thinking_budget=1024)
+        assert agent.thinking_enabled is False
+        assert agent.thinking_budget == 1024
+
+    def test_last_usage_initially_none(self) -> None:
+        """初始化后 last_usage 应为 None。"""
+        agent = Agent()
+        assert agent.last_usage is None
+
+
+class TestTokenUsage:
+    """测试 run() 完成后 last_usage 的 token 统计行为"""
+
+    def test_last_usage_set_after_run(self) -> None:
+        """response.usage 正常时，last_usage 应被正确填充。"""
+        agent = Agent(verbose=False)
+        mock_resp = _make_text_response("答案")
+        mock_resp.usage = SimpleNamespace(prompt_tokens=100, completion_tokens=20)
+        with patch("src.agent.agent.chat", return_value=mock_resp):
+            agent.run("问题")
+        assert agent.last_usage is not None
+        assert agent.last_usage.prompt_tokens == 100
+        assert agent.last_usage.completion_tokens == 20
+        assert agent.last_usage.total_tokens == 120
+
+    def test_last_usage_none_when_no_usage_attribute(self) -> None:
+        """response 没有 usage 属性时，last_usage 应为 None。"""
+        agent = Agent(verbose=False)
+        with patch("src.agent.agent.chat", return_value=_make_text_response("答案")):
+            agent.run("问题")
+        assert agent.last_usage is None
+
+    def test_last_usage_accumulates_across_tool_rounds(self) -> None:
+        """多轮 LLM 调用的 token 数应累加到 last_usage。"""
+        agent = Agent(verbose=False)
+        call_count = 0
+
+        def mock_chat_with_usage(messages, tools=None, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            resp = (
+                _make_tool_call_response("search_knowledge", {"query": "q"})
+                if call_count == 1
+                else _make_text_response("最终回答")
+            )
+            resp.usage = SimpleNamespace(prompt_tokens=50, completion_tokens=10)
+            return resp
+
+        with patch("src.agent.agent.chat", side_effect=mock_chat_with_usage), \
+             patch("src.agent.agent.execute_tool",
+                   return_value=ToolResult(status="ok", content="结果")):
+            agent.run("跨轮次问题")
+
+        assert agent.last_usage is not None
+        assert agent.last_usage.prompt_tokens == 100   # 2 次 × 50
+        assert agent.last_usage.completion_tokens == 20  # 2 次 × 10
+        assert agent.last_usage.total_tokens == 120
+
+
+class TestAgentThinkingRun:
+    """测试 thinking_enabled 开关对 run() 内部分支的影响"""
+
+    def test_thinking_enabled_calls_call_with_thinking(self) -> None:
+        """thinking_enabled=True 时，run() 应调用 call_with_thinking 而非 chat。"""
+        agent = Agent(verbose=False, thinking_enabled=True, thinking_budget=4000)
+        mock_resp = _make_text_response("thinking回答")
+
+        with patch("src.agent.agent.call_with_thinking",
+                   return_value=mock_resp) as mock_cwt, \
+             patch("src.agent.agent.chat") as mock_chat:
+            agent.run("测试 thinking")
+
+        mock_cwt.assert_called_once()
+        mock_chat.assert_not_called()
+        # budget_tokens 应与初始化值一致
+        _, kwargs = mock_cwt.call_args
+        assert kwargs.get("budget_tokens") == 4000
+
+    def test_thinking_disabled_calls_regular_chat(self) -> None:
+        """thinking_enabled=False 时，run() 应调用 chat 而非 call_with_thinking。"""
+        agent = Agent(verbose=False, thinking_enabled=False)
+
+        with patch("src.agent.agent.chat",
+                   return_value=_make_text_response("普通回答")) as mock_chat, \
+             patch("src.agent.agent.call_with_thinking") as mock_cwt:
+            agent.run("普通问题")
+
+        mock_chat.assert_called_once()
+        mock_cwt.assert_not_called()
+
+
+class TestActivateSkill:
+    """测试 Agent.activate_skill() 方法"""
+
+    @staticmethod
+    def _make_skill_info(name: str, desc: str, body: str) -> Any:
+        from src.cli.skill_loader import SkillInfo
+        from pathlib import Path
+        return SkillInfo(name=name, description=desc,
+                         location=Path(f"/fake/{name}/SKILL.md"), body=body)
+
+    def test_activate_skill_injects_tag_into_system_prompt(self) -> None:
+        """首次激活时，system_prompt 应含 skill_content 标签。"""
+        info = self._make_skill_info("writer", "写作助手", "# 写作规范\n内容")
+        agent = Agent(skills={"writer": info}, verbose=False)
+        result = agent.activate_skill("writer", "# 写作规范\n内容")
+        assert result is True
+        assert '<skill_content name="writer">' in agent.system_prompt
+        assert "# 写作规范" in agent.system_prompt
+
+    def test_activate_skill_removes_from_skill_bodies(self) -> None:
+        """激活后 _skill_bodies 中不应再含该 skill。"""
+        info = self._make_skill_info("writer", "写作助手", "正文")
+        agent = Agent(skills={"writer": info}, verbose=False)
+        assert "writer" in agent._skill_bodies
+        agent.activate_skill("writer", "正文")
+        assert "writer" not in agent._skill_bodies
+
+    def test_activate_skill_idempotent_returns_false(self) -> None:
+        """已激活的 skill 再次激活应返回 False，system_prompt 不重复追加。"""
+        info = self._make_skill_info("writer", "写作助手", "正文")
+        agent = Agent(skills={"writer": info}, verbose=False)
+        assert agent.activate_skill("writer", "正文") is True
+        count_before = agent.system_prompt.count('<skill_content name="writer">')
+        assert agent.activate_skill("writer", "正文") is False
+        assert agent.system_prompt.count('<skill_content name="writer">') == count_before
+
+    def test_activate_unknown_skill_still_injects(self) -> None:
+        """不在初始 skills 中的 name 也能通过 activate_skill 注入（pop 安全忽略）。"""
+        agent = Agent(verbose=False)
+        result = agent.activate_skill("new_skill", "新内容")
+        assert result is True
+        assert '<skill_content name="new_skill">' in agent.system_prompt

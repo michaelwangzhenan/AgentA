@@ -5,7 +5,11 @@
     - config.py：Provider 配置加载、active config 获取
     - llm/provider.py：当前激活 Provider API 调用（普通对话 & 带 system prompt）
     - TestAllProviders：遍历全部 9 个 provider 的 key 完整性（单元）及 API 连通性（集成）
+    - TestProviderConfigExtraBody：extra_body 字段与 THINKING 配置
+    - TestCallWithThinking：call_with_thinking() 路由逻辑
 """
+
+from unittest.mock import patch
 
 import pytest
 import src.config as config
@@ -164,5 +168,98 @@ class TestAllProviders:
             reply = chat([{"role": "user", "content": "用一句话介绍你自己"}])
             assert isinstance(reply, str) and len(reply) > 0, \
                 f"[{provider}] 返回内容为空"
+        finally:
+            config.ACTIVE_PROVIDER = original
+
+
+# ── extra_body / thinking 配置新增测试 ───────────────────────────────────────
+
+class TestProviderConfigExtraBody:
+    """测试 ProviderConfig.extra_body 字段及 THINKING 相关配置"""
+
+    def test_qwen_config_has_enable_thinking_false(self) -> None:
+        """qwen provider 必须配置 extra_body={'enable_thinking': False}，
+        避免非流式调用返回 400 错误。"""
+        cfg = config.PROVIDER_CONFIGS["qwen"]
+        assert cfg.extra_body == {"enable_thinking": False}
+
+    def test_other_providers_have_no_extra_body(self) -> None:
+        """其余 provider 不需要 extra_body，应为 None。"""
+        for name in ("kimi", "deepseek", "openai", "claude", "glm", "minimax"):
+            cfg = config.PROVIDER_CONFIGS[name]
+            assert cfg.extra_body is None, f"[{name}] extra_body 应为 None"
+
+    def test_thinking_enabled_is_bool(self) -> None:
+        """THINKING_ENABLED 应为 bool 类型。"""
+        assert isinstance(config.THINKING_ENABLED, bool)
+
+    def test_thinking_budget_is_positive_int(self) -> None:
+        """THINKING_BUDGET 应为正整数。"""
+        assert isinstance(config.THINKING_BUDGET, int)
+        assert config.THINKING_BUDGET > 0
+
+
+class TestCallWithThinking:
+    """测试 call_with_thinking() 路由逻辑（不消耗真实 API）"""
+
+    def test_non_claude_non_qwen_falls_back_to_chat(self) -> None:
+        """非 claude / qwen provider 时，call_with_thinking 应静默降级为 chat()。"""
+        from src.llm.provider import call_with_thinking
+
+        original = config.ACTIVE_PROVIDER
+        config.ACTIVE_PROVIDER = "kimi"
+        try:
+            with patch("src.llm.provider.chat", return_value="fallback") as mock_chat:
+                result = call_with_thinking([{"role": "user", "content": "hi"}])
+            mock_chat.assert_called_once()
+            assert result == "fallback"
+        finally:
+            config.ACTIVE_PROVIDER = original
+
+    def test_claude_routes_to_claude_thinking(self) -> None:
+        """ACTIVE_PROVIDER == 'claude' 时，应调用 _chat_claude_thinking 分支。"""
+        from src.llm.provider import call_with_thinking
+
+        original = config.ACTIVE_PROVIDER
+        config.ACTIVE_PROVIDER = "claude"
+        try:
+            with patch("src.llm.provider._chat_claude_thinking",
+                       return_value="claude_resp") as mock_ct:
+                result = call_with_thinking([{"role": "user", "content": "hi"}],
+                                            budget_tokens=2000)
+            mock_ct.assert_called_once()
+            assert result == "claude_resp"
+        finally:
+            config.ACTIVE_PROVIDER = original
+
+    def test_qwen_routes_to_qwen_thinking(self) -> None:
+        """ACTIVE_PROVIDER == 'qwen' 时，应调用 _chat_qwen_thinking 分支。"""
+        from src.llm.provider import call_with_thinking
+
+        original = config.ACTIVE_PROVIDER
+        config.ACTIVE_PROVIDER = "qwen"
+        try:
+            with patch("src.llm.provider._chat_qwen_thinking",
+                       return_value="qwen_resp") as mock_qt:
+                result = call_with_thinking([{"role": "user", "content": "hi"}],
+                                            budget_tokens=4000)
+            mock_qt.assert_called_once()
+            assert result == "qwen_resp"
+        finally:
+            config.ACTIVE_PROVIDER = original
+
+    def test_tools_passed_to_fallback_chat(self) -> None:
+        """降级 chat() 调用时，tools 参数应透传。"""
+        from src.llm.provider import call_with_thinking
+
+        original = config.ACTIVE_PROVIDER
+        config.ACTIVE_PROVIDER = "deepseek"
+        dummy_tools = [{"type": "function", "function": {"name": "dummy"}}]
+        try:
+            with patch("src.llm.provider.chat", return_value="ok") as mock_chat:
+                call_with_thinking([{"role": "user", "content": "q"}],
+                                   tools=dummy_tools)
+            _, kwargs = mock_chat.call_args
+            assert kwargs.get("tools") == dummy_tools
         finally:
             config.ACTIVE_PROVIDER = original

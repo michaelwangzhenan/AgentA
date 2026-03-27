@@ -20,6 +20,7 @@ usage() {
   -memory     对话记忆持久化               (tests/test_memory.py)
   -prompt     自定义 Prompt 加载           (tests/test_prompt_loader.py)
   -skill      Skills 加载与激活            (tests/test_skill_loader.py)
+  -save       对话导出 _save_history       (tests/test_save_history.py)
 EOF
 }
 
@@ -46,6 +47,8 @@ case "$1" in
         $PYTEST tests/test_prompt_loader.py -v ;;
     -skill)
         $PYTEST tests/test_skill_loader.py -v ;;
+    -save)
+        $PYTEST tests/test_save_history.py -v ;;
     *)
         echo "❌ 未知参数: $1"
         echo ""

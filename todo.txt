@@ -150,7 +150,7 @@ ToDo List：
     .venv\Scripts\python -m pytest tests/test_prompt_loader.py # 自定义 Prompt 加载
 25. 对话导出 => Done
   实现/save <文件名>命令，把当前 session 完整对话记录存储到 history/文件名.md
-26. 支持 Thinking
+26. 支持 Thinking => Done
   目标：
     1. 增加 Extended Thinking 支持，是否开启用户可选
     2. 代码框架可扩展，为兼容各种LLM 抽象 common 接口,如 def call_with_thinking(provider, prompt, budget=8000)
