@@ -167,7 +167,7 @@ RERANKER_ENABLED: bool = os.getenv("RERANKER_ENABLED", "true").lower() == "true"
 RERANKER_RECALL_MULTIPLIER: int = int(os.getenv("RERANKER_RECALL_MULTIPLIER", "3"))
 
 # ── Extended Thinking 配置 ────────────────────────────────────────────────────
-# true 开启 Extended Thinking；目前仅 Claude 原生支持，其余 provider 静默降级
+# true 开启 Extended Thinking；目前 Claude（原生 SDK）和 Qwen3 支持，其余 provider 静默降级
 THINKING_ENABLED: bool = os.getenv("THINKING_ENABLED", "false").lower() == "true"
 # thinking budget_tokens — 推荐：简单推理 1024~3000，复杂分析 8000~16000，AI Agent 32000+
 THINKING_BUDGET: int = int(os.getenv("THINKING_BUDGET", "8000"))

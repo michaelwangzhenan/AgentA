@@ -161,7 +161,8 @@ ToDo List：
     3. 思考过程流式输出
     注意： thinking 内容不应该被用来做 prompt injection 的载体
 
-27. Agentic Search  / agent S
-
-28.Claude 4.6 新增：Adaptive Thinking
+27. Agentic Search vs RAG
+28. Claude 4.6 新增：Adaptive Thinking
+29. Harness Engineering Vs prompt/context
+30. agent S: a new agent
 -

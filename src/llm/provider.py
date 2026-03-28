@@ -192,11 +192,12 @@ def call_with_thinking(
     通用 Extended Thinking 入口。
 
     - Claude：走流式 thinking 分支，通过 on_thinking_chunk 回调实时输出思考过程。
+    - Qwen3：走流式 thinking 分支，thinking 内容位于 delta.reasoning_content。
     - 其他 provider：静默降级为普通 chat()，保持向后兼容。
 
     Args:
         messages: 对话历史（OpenAI 格式）。
-        budget_tokens: thinking 预算 tokens（仅 Claude 有效）。
+        budget_tokens: thinking 预算 tokens（Claude / Qwen3 有效）。
         tools: Function Calling 工具列表，可为 None。
         on_thinking_chunk: 每收到一段 thinking 文本时的回调，可为 None。
 

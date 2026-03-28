@@ -18,7 +18,7 @@ CLI 入口 —— 私有知识库 Agent 对话界面
     输入 /reload-prompts      重新扫描 advanced/prompts/ 目录，刷新自定义 Prompt 命令
     输入 /<prompt_name> [问题] 切换到指定自定义 Prompt 并重置 Agent，可附带首个问题
     输入 /save <文件名>    导出当前 session 完整对话到 history/<文件名>.md
-    输入 /thinking [on|off|budget N]  控制 Extended Thinking 模式（仅 Claude）
+    输入 /thinking [on|off|budget N]  控制 Extended Thinking 模式（Claude / Qwen3）
     输入 /quit 或 /exit 或 Ctrl+C 退出
 """
 
@@ -89,7 +89,7 @@ HELP_TEXT = """
   /<skill_name> [问题]       激活指定 Skill（注入 Skill 指令到当前会话），可附带首个问题
   /save <文件名>             导出当前 session 完整对话到 history/<文件名>.md
   /thinking              查看 Extended Thinking 状态
-  /thinking on/off       开启/关闭 Extended Thinking（仅 Claude 有效）
+  /thinking on/off       开启/关闭 Extended Thinking（Claude / Qwen3 有效，其余降级）
   /thinking budget <N>   设置 thinking budget tokens（默认 8000，不超过 32000）
   /quit                      退出程序
   /exit                      退出程序（同 /quit）
