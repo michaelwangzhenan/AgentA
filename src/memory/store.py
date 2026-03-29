@@ -89,8 +89,8 @@ class MemoryStore:
             )
             self._conn.commit()
             logger.info("MemoryStore: sessions 表已迁移添加 prompt_name 列")
-        except Exception:
-            # 列已存在（OperationalError: duplicate column name）或其他原因，均安全跳过
+        except sqlite3.OperationalError:
+            # 列已存在（duplicate column name），正常情况，安全跳过
             pass
         self._conn.commit()
 
