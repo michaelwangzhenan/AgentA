@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 import src.config as config
 
 if TYPE_CHECKING:
-    from src.rag.retriever import _Hit
+    from src.rag.retriever import Hit
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ def _get_cross_encoder() -> "CrossEncoder":  # type: ignore[name-defined]
     return _cross_encoder
 
 
-def rerank(query: str, hits: "list[_Hit]", top_k: int) -> "list[_Hit]":
+def rerank(query: str, hits: "list[Hit]", top_k: int) -> "list[Hit]":
     """
     使用 Cross-Encoder 对候选 hits 重新打分并按相关性降序排列。
 

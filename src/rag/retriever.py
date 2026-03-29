@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class _Hit:
+class Hit:
     """单条检索命中结果，用于跨 collection 排序。"""
     source: str
     document: str
@@ -44,7 +44,7 @@ def _query_collection(
     collection_name: str,
     query: str,
     top_k: int,
-) -> list[_Hit]:
+) -> list[Hit]:
     """
     查询单个 collection，返回命中列表。
 
@@ -74,12 +74,12 @@ def _query_collection(
         include=["documents", "metadatas", "distances"],
     )
 
-    hits: list[_Hit] = []
+    hits: list[Hit] = []
     docs = results["documents"][0] if results["documents"] else []       # type: ignore[index]
     metas = results["metadatas"][0] if results["metadatas"] else []      # type: ignore[index]
     dists = results["distances"][0] if results["distances"] else []      # type: ignore[index]
     for doc, meta, dist in zip(docs, metas, dists):
-        hits.append(_Hit(
+        hits.append(Hit(
             source=str(meta.get("source", "unknown")),
             document=doc,
             distance=float(dist),
@@ -88,7 +88,7 @@ def _query_collection(
     return hits
 
 
-def search(query: str, top_k: int = config.RAG_TOP_K) -> str:
+def search(query: str, top_k: int = config.RAG_TOP_K) -> list[Hit]:
     """
     在所有已入库的 collection 中检索最相关的 Top-K 文档片段。
 
@@ -117,7 +117,7 @@ def search(query: str, top_k: int = config.RAG_TOP_K) -> str:
     )
 
     # 每个 collection 各自检索 recall_k 条，结果按内部距离升序
-    per_collection: list[list[_Hit]] = []
+    per_collection: list[list[Hit]] = []
     for alias, (model_name, collection_name) in config.EMBEDDING_MODELS.items():
         hits = _query_collection(client, model_name, collection_name, query, recall_k)
         if hits:
@@ -126,16 +126,11 @@ def search(query: str, top_k: int = config.RAG_TOP_K) -> str:
             logger.info("  [%s] %s: %d 条命中", alias, collection_name, len(hits))
 
     if not per_collection:
-        return (
-            "知识库为空或尚未初始化。\n"
-            "请运行以下命令完成文档入库：\n"
-            "  python -m rag.ingest -m en   # 英文文档\n"
-            "  python -m rag.ingest -m zh   # 中文文档"
-        )
+        return []
 
     # Round-robin 交错合并：依次取每个 collection 的第 1、2、... 名
     # 避免跨模型距离不可比导致某个库被整体压制
-    candidates: list[_Hit] = []
+    candidates: list[Hit] = []
     iterators = [iter(bucket) for bucket in per_collection]
     while len(candidates) < recall_k and iterators:
         exhausted: list[int] = []
@@ -160,13 +155,32 @@ def search(query: str, top_k: int = config.RAG_TOP_K) -> str:
     else:
         top_hits = candidates[:top_k]
 
-    # 格式化输出，供 LLM 使用
+    return top_hits
+
+
+def format_search_results(hits: list[Hit]) -> str:
+    """
+    将检索命中列表格式化为 LLM 可消费的字符串。
+
+    Args:
+        hits: search() 返回的命中列表，为空时返回提示文本。
+
+    Returns:
+        格式化文本，每条包含序号、来源文件名、相似度和文档片段。
+    """
+    if not hits:
+        return (
+            "知识库为空或尚未初始化。\n"
+            "请运行以下命令完成文档入库：\n"
+            "  python -m rag.ingest -m en   # 英文文档\n"
+            "  python -m rag.ingest -m zh   # 中文文档"
+        )
+
     parts: list[str] = []
-    for i, hit in enumerate(top_hits, start=1):
+    for i, hit in enumerate(hits, start=1):
         similarity = round(1 - hit.distance, 4)
         parts.append(
             f"[{i}] 来源: {hit.source}（相似度: {similarity}，库: {hit.collection}）\n"
             f"{hit.document}"
         )
-
     return "\n\n---\n\n".join(parts)

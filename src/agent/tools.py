@@ -16,7 +16,7 @@ from typing import Any, Literal
 import requests
 from bs4 import BeautifulSoup
 
-from src.rag.retriever import search
+from src.rag.retriever import search, format_search_results
 
 logger = logging.getLogger(__name__)
 
@@ -162,12 +162,11 @@ def _tool_search_knowledge(query: str, top_k: int = 5) -> ToolResult:
         ToolResult：有命中结果 → status="ok"；知识库为空/无命中 → status="empty"。
     """
     top_k = min(max(1, top_k), 10)  # 限制在 1~10 之间
-    logger.info(f"[tool] search_knowledge: query={query!r}, top_k={top_k}")
-    raw = search(query, top_k=top_k)
-    # 通过是否含来源标记 "[1]" 判断有无命中（与文案解耦）
-    if "[1]" in raw:
-        return ToolResult(status="ok", content=raw)
-    return ToolResult(status="empty", content=raw)
+    logger.info("[tool] search_knowledge: query=%r, top_k=%d", query, top_k)
+    hits = search(query, top_k=top_k)
+    if hits:
+        return ToolResult(status="ok", content=format_search_results(hits))
+    return ToolResult(status="empty", content="知识库中未找到相关内容。")
 
 
 def _tool_fetch_url(url: str, max_chars: int = 3000) -> ToolResult:

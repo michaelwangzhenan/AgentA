@@ -161,7 +161,41 @@ ToDo List：
     3. 思考过程流式输出
     注意： thinking 内容不应该被用来做 prompt injection 的载体
 
-27. Agentic Search vs RAG
+27. 支持跨 session 记忆
+  需求：
+    1. 记忆写入
+      记忆提取：
+        - 每次对话结束时自动触发
+        - 对话中用户显式说"记住这个"时立即触发
+      提取的内容：
+        - 用户偏好（风格、格式、语言）
+        - 用户背景（职业、技术栈、项目上下文）
+        - 用户的明确指令（"不要用 bullet points"）
+        - 任务进度（未完成的工作、决策记录）
+        - 用户纠错记录（agent 犯过的错，避免重犯）
+    2. 记忆存储
+      存储格式：结构化 key-value 或带 tag 的文本条目，方便检索
+      存储位置： sqlite_db/user_character.db
+      版本/时间戳：每条记忆记录创建时间，支持过期或衰减
+    3. 记忆读取
+      触发时机：每次新 session 开始时自动加载
+      加载策略：不是全量加载，而是按相关性筛选（避免 context 污染）
+      注入位置：放入 context 的固定位置
+      容量控制：限制注入的记忆 token 数，防止挤压有效上下文
+    4. 记忆更新与删除
+      用户可以显式要求更新或删除某条记忆
+      支持覆盖旧记忆（同类信息去重，不重复堆积）
+      支持记忆过期策略（长时间未访问的低优先级记忆可清理）
+      记忆冲突时,新信息覆盖旧信息
+    5. 记忆的使用
+      Agent 在回答时应自然地运用记忆，而不是明说"根据我的记忆"
+      记忆不应影响 agent 的客观判断（不能因为记忆说"用户喜欢 X"就盲目迎合）
+      记忆内容需要做安全校验，防止用户注入恶意指令进记忆系统
+    6. 用户可见性与控制
+      用户可以查询"你记得关于我的什么"
+      用户可以手动编辑、删除记忆
+      记忆的存储和使用对用户透明
+
 28. Adaptive Thinking => Done
   目标：
     根据问题复杂度自动估算合适的 thinking budget_tokens，替代固定值：
@@ -174,6 +208,18 @@ ToDo List：
     · Agent.run() 当 thinking_adaptive=True 时调用 estimate_thinking_budget，结果传给 call_with_thinking
     · CLI：/thinking adaptive 开启；/thinking 状态显示自适应档位
     · .env.example 新增 THINKING_ADAPTIVE=false
-29. Harness Engineering Vs prompt/context
-30. agent S: a new agent
+
+
+29. 跨 session 记忆 enhancement
+    记忆提取: 对话中出现重要事实时实时触发
+    用户隔离：多用户场景下记忆必须按 user_id 严格隔离
+    隐身模式：用户可以关闭记忆功能（类似 Incognito 模式）， 从而不会读取、也不会写入任何记忆的对话
+
 -
+a. Agent S
+  一个 GUI/Computer-Use Agent, an open agentic framework that uses computers like a human
+b. Harness Engineering
+  prompt/context 的加强版
+c. Agentic Search
+  让 LLM 本身参与决策——它会思考"我需要搜什么"、执行搜索、判断"够了吗？"、必要时再搜
+  ReAct 模式（Reason → Act → Observe → Reason…）就是 Agentic Search 的典型实现方式

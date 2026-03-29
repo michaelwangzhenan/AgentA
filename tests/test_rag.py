@@ -12,7 +12,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 import src.config as config
 from src.rag.ingest import chunk_text
-from src.rag.retriever import _Hit, search
+from src.rag.retriever import Hit, search
 
 
 class TestChunkText:
@@ -90,41 +90,40 @@ class TestSearch:
     """测试向量检索（需要已完成入库，标记为 integration）"""
 
     @pytest.mark.integration
-    def test_search_returns_string(self) -> None:
+    def test_search_returns_list(self) -> None:
         result = search("RAG 技术", top_k=3)
-        assert isinstance(result, str)
+        assert isinstance(result, list)
         assert len(result) > 0
 
     @pytest.mark.integration
-    def test_search_result_format(self) -> None:
-        """检索结果应包含来源、相似度、库名称"""
+    def test_search_hit_has_fields(self) -> None:
+        """检索命中结果应包含 source、document、distance、collection 字段"""
         result = search("ChromaDB 向量数据库", top_k=2)
-        assert "来源:" in result
-        assert "相似度:" in result
-        assert "库:" in result
+        for hit in result:
+            assert hit.source
+            assert hit.document
+            assert isinstance(hit.distance, float)
+            assert hit.collection
 
     @pytest.mark.integration
     def test_search_top_k_limits_results(self) -> None:
         """返回的文档片段数量不应超过 top_k"""
         result = search("测试", top_k=2)
-        # 每个结果以 [N] 开头，top_k=2 时最多有 1 个 "\n[" 分隔符
-        count = result.count("\n[")
-        assert count <= 1
+        assert len(result) <= 2
 
     @pytest.mark.integration
     def test_search_irrelevant_query_still_returns_result(self) -> None:
         """即使问题不相关，也应返回最相近的结果（不返回空）"""
         result = search("火星上有生命吗", top_k=1)
-        assert isinstance(result, str)
-        assert len(result) > 0
+        assert isinstance(result, list)
 
 
 # ── 辅助函数 ──────────────────────────────────────────────────────────────────
 
-def _make_hits(n: int) -> list[_Hit]:
-    """构造 n 条虚拟 _Hit，source/document 带编号以便区分。"""
+def _make_hits(n: int) -> list[Hit]:
+    """构造 n 条虚拟 Hit，source/document 带编号以便区分。"""
     return [
-        _Hit(
+        Hit(
             source=f"doc{i}.txt",
             document=f"这是第 {i} 条候选文档片段，内容与查询的相关性各不相同。",
             distance=0.1 * i,
@@ -196,7 +195,7 @@ class TestReranker:
 
     def test_search_skips_reranker_when_disabled(self) -> None:
         """RERANKER_ENABLED=False 时，search() 不应调用 rerank()。"""
-        mock_hit = _Hit(
+        mock_hit = Hit(
             source="test.txt",
             document="测试内容",
             distance=0.2,
@@ -211,7 +210,8 @@ class TestReranker:
             result = search("任意问题", top_k=1)
 
         mock_rerank.assert_not_called()
-        assert "来源:" in result
+        assert len(result) == 1
+        assert result[0].source == "test.txt"
 
     @pytest.mark.integration
     def test_reranker_real_model_improves_ordering(self) -> None:
@@ -220,9 +220,9 @@ class TestReranker:
 
         query = "ChromaDB 向量数据库的存储路径"
         hits = [
-            _Hit(source="a.txt", document="今天天气很好，适合出门散步。", distance=0.1, collection="kb_test"),
-            _Hit(source="b.txt", document="ChromaDB 默认将数据持久化到本地磁盘路径。", distance=0.3, collection="kb_test"),
-            _Hit(source="c.txt", document="Python 列表推导式可以简化循环代码。", distance=0.2, collection="kb_test"),
+            Hit(source="a.txt", document="今天天气很好，适合出门散步。", distance=0.1, collection="kb_test"),
+            Hit(source="b.txt", document="ChromaDB 默认将数据持久化到本地磁盘路径。", distance=0.3, collection="kb_test"),
+            Hit(source="c.txt", document="Python 列表推导式可以简化循环代码。", distance=0.2, collection="kb_test"),
         ]
         result = rerank(query=query, hits=hits, top_k=2)
         assert result[0].source == "b.txt"
