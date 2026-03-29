@@ -404,26 +404,30 @@ class TestCustomSystemPrompt:
 # ── thinking / token_usage / activate_skill 新增测试 ─────────────────────────
 
 class TestAgentThinkingInit:
-    """测试 thinking_enabled / thinking_budget 初始化参数"""
+    """测试 ThinkingConfig 初始化行为"""
 
     def test_thinking_defaults_from_config(self) -> None:
-        """未传参时，thinking_enabled / thinking_budget 应取 config 值。"""
+        """未传参时，thinking_cfg 应取 config 默认值。"""
         import src.config as _cfg
         agent = Agent()
-        assert agent.thinking_enabled == _cfg.THINKING_ENABLED
-        assert agent.thinking_budget == _cfg.THINKING_BUDGET
+        assert agent.thinking_cfg.enabled == _cfg.THINKING_ENABLED
+        assert agent.thinking_cfg.budget == _cfg.THINKING_BUDGET
 
     def test_thinking_explicit_true_overrides_config(self) -> None:
-        """显式传入 True 时，thinking_enabled 优先于 config。"""
-        agent = Agent(thinking_enabled=True, thinking_budget=16000)
-        assert agent.thinking_enabled is True
-        assert agent.thinking_budget == 16000
+        """显式传入 ThinkingConfig 时，应优先于 config。"""
+        from src.agent.agent import ThinkingConfig
+        cfg = ThinkingConfig(enabled=True, budget=16000)
+        agent = Agent(thinking_config=cfg)
+        assert agent.thinking_cfg.enabled is True
+        assert agent.thinking_cfg.budget == 16000
 
     def test_thinking_explicit_false_overrides_config(self) -> None:
-        """显式传入 False 时，thinking_enabled 优先于 config。"""
-        agent = Agent(thinking_enabled=False, thinking_budget=1024)
-        assert agent.thinking_enabled is False
-        assert agent.thinking_budget == 1024
+        """显式传入 False 时，enabled 应为 False。"""
+        from src.agent.agent import ThinkingConfig
+        cfg = ThinkingConfig(enabled=False, budget=1024)
+        agent = Agent(thinking_config=cfg)
+        assert agent.thinking_cfg.enabled is False
+        assert agent.thinking_cfg.budget == 1024
 
     def test_last_usage_initially_none(self) -> None:
         """初始化后 last_usage 应为 None。"""
@@ -431,20 +435,22 @@ class TestAgentThinkingInit:
         assert agent.last_usage is None
 
     def test_thinking_adaptive_defaults_from_config(self) -> None:
-        """未传参时，thinking_adaptive 应取 config.THINKING_ADAPTIVE 值。"""
+        """未传参时，adaptive 应取 config.THINKING_ADAPTIVE 值。"""
         import src.config as _cfg
         agent = Agent()
-        assert agent.thinking_adaptive == _cfg.THINKING_ADAPTIVE
+        assert agent.thinking_cfg.adaptive == _cfg.THINKING_ADAPTIVE
 
     def test_thinking_adaptive_explicit_true_overrides_config(self) -> None:
-        """显式传入 True 时，thinking_adaptive 优先于 config。"""
-        agent = Agent(thinking_adaptive=True)
-        assert agent.thinking_adaptive is True
+        """显式传入 adaptive=True。"""
+        from src.agent.agent import ThinkingConfig
+        agent = Agent(thinking_config=ThinkingConfig(adaptive=True))
+        assert agent.thinking_cfg.adaptive is True
 
     def test_thinking_adaptive_explicit_false_overrides_config(self) -> None:
-        """显式传入 False 时，thinking_adaptive 优先于 config。"""
-        agent = Agent(thinking_adaptive=False)
-        assert agent.thinking_adaptive is False
+        """显式传入 adaptive=False。"""
+        from src.agent.agent import ThinkingConfig
+        agent = Agent(thinking_config=ThinkingConfig(adaptive=False))
+        assert agent.thinking_cfg.adaptive is False
 
 
 class TestTokenUsage:
@@ -497,11 +503,12 @@ class TestTokenUsage:
 
 
 class TestAgentThinkingRun:
-    """测试 thinking_enabled 开关对 run() 内部分支的影响"""
+    """测试 thinking_cfg.enabled 开关对 run() 内部分支的影响"""
 
     def test_thinking_enabled_calls_call_with_thinking(self) -> None:
-        """thinking_enabled=True 时，run() 应调用 call_with_thinking 而非 chat。"""
-        agent = Agent(verbose=False, thinking_enabled=True, thinking_budget=4000)
+        """thinking_cfg.enabled=True 时，run() 应调用 call_with_thinking 而非 chat。"""
+        from src.agent.agent import ThinkingConfig
+        agent = Agent(verbose=False, thinking_config=ThinkingConfig(enabled=True, budget=4000))
         mock_resp = _make_text_response("thinking回答")
 
         with patch("src.agent.agent.call_with_thinking",
@@ -516,8 +523,9 @@ class TestAgentThinkingRun:
         assert kwargs.get("budget_tokens") == 4000
 
     def test_thinking_disabled_calls_regular_chat(self) -> None:
-        """thinking_enabled=False 时，run() 应调用 chat 而非 call_with_thinking。"""
-        agent = Agent(verbose=False, thinking_enabled=False)
+        """thinking_cfg.enabled=False 时，run() 应调用 chat 而非 call_with_thinking。"""
+        from src.agent.agent import ThinkingConfig
+        agent = Agent(verbose=False, thinking_config=ThinkingConfig(enabled=False))
 
         with patch("src.agent.agent.chat",
                    return_value=_make_text_response("普通回答")) as mock_chat, \
@@ -528,9 +536,11 @@ class TestAgentThinkingRun:
         mock_cwt.assert_not_called()
 
     def test_adaptive_thinking_calls_estimate_budget(self) -> None:
-        """thinking_adaptive=True 时，run() 应调用 estimate_thinking_budget 估算 budget。"""
-        agent = Agent(verbose=False, thinking_enabled=True,
-                      thinking_budget=16000, thinking_adaptive=True)
+        """thinking_cfg.adaptive=True 时，run() 应调用 estimate_thinking_budget 估算 budget。"""
+        from src.agent.agent import ThinkingConfig
+        agent = Agent(verbose=False, thinking_config=ThinkingConfig(
+            enabled=True, budget=16000, adaptive=True
+        ))
 
         with patch("src.agent.agent.estimate_thinking_budget",
                    return_value=1500) as mock_est, \
@@ -545,8 +555,10 @@ class TestAgentThinkingRun:
 
     def test_adaptive_thinking_passes_estimated_budget(self) -> None:
         """adaptive 模式下，call_with_thinking 收到的 budget_tokens 应为估算值而非固定值。"""
-        agent = Agent(verbose=False, thinking_enabled=True,
-                      thinking_budget=32000, thinking_adaptive=True)
+        from src.agent.agent import ThinkingConfig
+        agent = Agent(verbose=False, thinking_config=ThinkingConfig(
+            enabled=True, budget=32000, adaptive=True
+        ))
         estimated = 1500
 
         with patch("src.agent.agent.estimate_thinking_budget",
@@ -559,9 +571,11 @@ class TestAgentThinkingRun:
         assert kwargs.get("budget_tokens") == estimated
 
     def test_non_adaptive_thinking_uses_fixed_budget(self) -> None:
-        """thinking_adaptive=False 时，不应调用 estimate_thinking_budget，budget 取固定值。"""
-        agent = Agent(verbose=False, thinking_enabled=True,
-                      thinking_budget=4000, thinking_adaptive=False)
+        """adaptive=False 时，不应调用 estimate_thinking_budget，budget 取固定值。"""
+        from src.agent.agent import ThinkingConfig
+        agent = Agent(verbose=False, thinking_config=ThinkingConfig(
+            enabled=True, budget=4000, adaptive=False
+        ))
 
         with patch("src.agent.agent.estimate_thinking_budget") as mock_est, \
              patch("src.agent.agent.call_with_thinking",

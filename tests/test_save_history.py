@@ -1,5 +1,5 @@
 """
-测试：main._save_history() 对话导出函数
+测试：handlers.save_history() 对话导出函数
 
 测试内容：
     - 空 session 不写文件，仅打印提示
@@ -18,12 +18,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
-# ── 辅助：动态导入 main._save_history，避免 main 模块中的副作用 ───────────────────
+# ── 辅助：动态导入 handlers.save_history ──────────────────────────────────────
 
 def _get_save_history():
-    """从 main 模块中直接取出 _save_history 函数引用。"""
-    import main as m
-    return m._save_history
+    """从 handlers 模块中取出 save_history 函数引用。"""
+    from src.cli import handlers
+    return handlers.save_history
 
 
 # ── 辅助：构造 mock MemoryStore ──────────────────────────────────────────────
@@ -52,7 +52,7 @@ class TestSaveHistoryEmpty:
         """空 session 不应创建 history/ 目录下的任何 .md 文件。"""
         _save_history = _get_save_history()
         mem = _mock_memory([])
-        with patch("main.Path", wraps=Path):
+        with patch("src.cli.handlers.Path", wraps=Path):
             _save_history(mem, "sess-1", "somefilename")
         # 确保当前工作目录中没有意外写入
         assert not list(tmp_path.glob("**/*.md"))

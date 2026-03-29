@@ -19,6 +19,7 @@ Agent 主控逻辑 —— ReAct（Reason + Act）循环
 import json
 import logging
 import uuid
+from dataclasses import dataclass
 from typing import Any, NamedTuple
 
 from src.agent.tools import get_tools, execute_tool, ToolResult
@@ -35,6 +36,23 @@ class TokenUsage(NamedTuple):
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
+
+
+@dataclass
+class ThinkingConfig:
+    """Extended Thinking 运行时配置，可被 Agent 与调用方共享同一实例。"""
+    enabled: bool = False
+    budget: int = 8_000
+    adaptive: bool = False
+
+    @classmethod
+    def from_config(cls) -> "ThinkingConfig":
+        """从全局 config 读取默认值创建实例。"""
+        return cls(
+            enabled=_cfg.THINKING_ENABLED,
+            budget=_cfg.THINKING_BUDGET,
+            adaptive=_cfg.THINKING_ADAPTIVE,
+        )
 
 # 模块级共享 MemoryStore 实例（单进程内所有 Agent 共享同一个 DB 连接）
 _shared_memory: MemoryStore | None = None
@@ -103,9 +121,7 @@ class Agent:
         memory: MemoryStore | None = None,
         prompt_name: str = "",
         skills: dict[str, SkillInfo] | None = None,
-        thinking_enabled: bool | None = None,
-        thinking_budget: int | None = None,
-        thinking_adaptive: bool | None = None,
+        thinking_config: ThinkingConfig | None = None,
     ) -> None:
         # 若传入 skills，提取 bodies，并将含 description 的 catalog 追加到 system_prompt
         self._skill_bodies: dict[str, str] = {}
@@ -121,11 +137,8 @@ class Agent:
         # 支持从外部传入 memory（便于测试 mock），默认使用模块级共享实例
         self._memory: MemoryStore = memory if memory is not None else _get_shared_memory()
         self.last_usage: TokenUsage | None = None  # 最近一次 run() 的 token 统计
-        # Extended Thinking 配置：优先使用传入参数，其次读 config
-        self.thinking_enabled: bool = thinking_enabled if thinking_enabled is not None else _cfg.THINKING_ENABLED
-        self.thinking_budget: int = thinking_budget if thinking_budget is not None else _cfg.THINKING_BUDGET
-        # Adaptive Thinking：自动估算每次调用所需 budget，thinking_budget 作为上限
-        self.thinking_adaptive: bool = thinking_adaptive if thinking_adaptive is not None else _cfg.THINKING_ADAPTIVE
+        # Extended Thinking 配置：共享同一 ThinkingConfig 实例，修改后无需重建 Agent
+        self.thinking_cfg: ThinkingConfig = thinking_config if thinking_config is not None else ThinkingConfig.from_config()
 
     def run(self, user_input: str) -> str:
         """
@@ -179,13 +192,13 @@ class Agent:
 
             # 调用 LLM：开启 thinking 时走流式 thinking 分支，否则普通 chat()
             _thinking_started[0] = False
-            if self.thinking_enabled:
+            if self.thinking_cfg.enabled:
                 effective_budget = (
-                    estimate_thinking_budget(messages, self.thinking_budget)
-                    if self.thinking_adaptive
-                    else self.thinking_budget
+                    estimate_thinking_budget(messages, self.thinking_cfg.budget)
+                    if self.thinking_cfg.adaptive
+                    else self.thinking_cfg.budget
                 )
-                if self.thinking_adaptive:
+                if self.thinking_cfg.adaptive:
                     logger.info(
                         "[Agent] Adaptive Thinking: 估算 budget=%d tokens",
                         effective_budget,

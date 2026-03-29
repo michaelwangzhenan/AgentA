@@ -23,19 +23,15 @@ CLI 入口 —— 私有知识库 Agent 对话界面
 """
 
 import logging
-import re
 import sys
 import warnings
-from datetime import datetime
-from pathlib import Path
-
 from dotenv import load_dotenv
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import InMemoryHistory
-
 from src.cli.tab_complete import make_completer
 from src.cli.prompt_loader import scan_prompts
 from src.cli.skill_loader import scan_skills, SkillInfo
+from src.cli import handlers
 
 # 消除 HuggingFace tokenizer 的 FutureWarning
 warnings.filterwarnings("ignore", category=FutureWarning, module="transformers")
@@ -54,167 +50,12 @@ for _noisy in ("httpx", "httpcore", "openai", "chromadb", "sentence_transformers
 
 from src.memory.store import MemoryStore
 import src.config as config
+from src.cli.ui import BANNER, HELP_TEXT
 
 
-# 自定义 Prompt 配置目录
-PROMPTS_DIR: str = "advanced/prompts"
-# Skills 目录
-SKILLS_DIR: str = "advanced/skills"
-
-BANNER = """
-╔══════════════════════════════════════════════╗
-║         私有知识库 Agent  v0.1               ║
-║  LLM: {provider:<38} ║
-║  输入 /help 查看命令列表                     ║
-╚══════════════════════════════════════════════╝
-""".format(provider=config.ACTIVE_PROVIDER)
-
-HELP_TEXT = """
-可用命令：
-  /help                      显示本帮助信息
-  /ingest                    扫描默认 docs/ 目录并入库（模型: .env EMBEDDING_MODEL）
-  /ingest <目录>             扫描指定目录，例：/ingest D:/mydata
-  /ingest <目录> -m zh       指定目录 + 中文模型（BAAI/bge-small-zh）
-  /ingest <目录> -m en       指定目录 + 英文模型（all-MiniLM-L6-v2）
-  /ingest -m zh              默认目录 + 中文模型
-  /clear                     清空当前 session 的对话历史并重置 Agent
-  /history                   查看当前 session 的历史对话摘要
-  /session                   列出所有历史 session
-  /session <id>              切换到指定 session 并恢复历史
-  /del-session <id>          彻底删除指定历史 session 的所有记录（不可恢复）
-  /clean-session             清空所有历史 session 的记录（不可恢复）
-  /reload-prompts            重新扫描 advanced/prompts/ 目录，刷新自定义 Prompt 命令
-  /reload-skills             重新扫描 advanced/skills/ 目录，刷新 Skill 列表
-  /<prompt_name> [问题]      切换到指定自定义 Prompt 并重置 Agent，可附带首个问题
-  /<skill_name> [问题]       激活指定 Skill（注入 Skill 指令到当前会话），可附带首个问题
-  /save <文件名>             导出当前 session 完整对话到 history/<文件名>.md
-  /thinking              查看 Extended Thinking 状态
-  /thinking on/off       开启/关闭 Extended Thinking（Claude / Qwen3 有效，其余降级）
-  /thinking adaptive     开启 Adaptive Thinking：自动按问题复杂度估算 budget
-  /thinking budget <N>   手动设置 thinking budget tokens（默认 8000，上限 32000）
-  /quit                      退出程序
-  /exit                      退出程序（同 /quit）
-
-模型别名：
-  en  →  all-MiniLM-L6-v2   英文/多语言
-  zh  →  BAAI/bge-small-zh   中文优化
-
-自定义 Prompt：
-  在 advanced/prompts/ 目录下放置 <名称>.prompt.md 文件即可。
-  文件名即命令名（如 5g-expert.prompt.md → /5g-expert），名称只允许字母、数字、- 和 _。
-
-Skills：
-  在 advanced/skills/<名称>/SKILL.md 放置符合 agentskills.io 规范的 Skill。
-  Agent 会自动发现并在合适时调用；也可用 /<skill_name> [问题] 手动激活。
-
-直接输入问题即可开始对话。
-"""
-
-
-def _run_ingest(docs_dir: str | None = None, model: str | None = None) -> None:
-    """在 CLI 中触发文档入库，可指定文档目录和 embedding 模型。"""
-    import os
-    target_dir = docs_dir or config.DOCS_DIR
-    target_model = model or config.DEFAULT_EMBEDDING_ALIAS
-    # 路径校验
-    if not os.path.exists(target_dir):
-        print(f"❌ 目录不存在: {target_dir}\n")
-        return
-    if not os.path.isdir(target_dir):
-        print(f"❌ 路径不是目录: {target_dir}\n")
-        return
-    model_name, collection_name = config.resolve_embedding(target_model)
-    print(f"\n⏳ 正在扫描 {target_dir}")
-    print(f"   Embedding 模型: {model_name}  →  collection: {collection_name}\n")
-    try:
-        from src.rag.ingest import ingest_all
-        ingest_all(docs_dir=target_dir, model=target_model)
-        print()
-    except Exception as e:
-        print(f"❌ 入库失败: {e}\n")
-
-
-def _save_history(memory: MemoryStore, session_id: str, filename: str) -> None:
-    """将当前 session 的 user/assistant 对话导出到 history/<filename>.md。"""
-    msgs = [m for m in memory.load(session_id) if m["role"] in ("user", "assistant")]
-    if not msgs:
-        print("📭 当前 session 暂无对话历史，无可导出内容。\n")
-        return
-
-    # 去掉用户传入的扩展名后再校验，统一追加 .md
-    stem = re.sub(r'\.(md|txt)$', '', filename, flags=re.IGNORECASE)
-    safe_name = re.sub(r'[^\w\-.]', '_', stem)
-    if not safe_name or safe_name.startswith('.'):
-        print(f"❌ 无效文件名：{filename!r}\n")
-        return
-
-    history_dir = Path("history")
-    history_dir.mkdir(exist_ok=True)
-    out_path = history_dir / f"{safe_name}.md"
-
-    lines: list[str] = [
-        f"# {safe_name}",
-        "",
-        f"- **Session**: `{session_id}`",
-        f"- **导出时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        f"- **消息数**: {len(msgs)}",
-        "",
-        "---",
-        "",
-    ]
-    for msg in msgs:
-        role_label = "你" if msg["role"] == "user" else "Agent"
-        content = (msg.get("content") or "").strip()
-        lines.append(f"## {role_label}")
-        lines.append("")
-        lines.append(content)
-        lines.append("")
-
-    try:
-        out_path.write_text("\n".join(lines), encoding="utf-8")
-        print(f"💾 对话已导出到 {out_path}（共 {len(msgs)} 条）\n")
-    except OSError as e:
-        print(f"❌ 导出失败: {e}\n")
-
-
-def _show_history(memory: MemoryStore, session_id: str) -> None:
-    """展示当前 session 的历史对话摘要（角色 + 内容前 60 字）。"""
-    msgs = [m for m in memory.load(session_id) if m["role"] in ("user", "assistant")]
-    if not msgs:
-        print("📭 当前 session 暂无对话历史。\n")
-        return
-    print(f"\n📋 Session {session_id} 历史摘要（共 {len(msgs)} 条）：")
-    for i, msg in enumerate(msgs, 1):
-        role_label = "你" if msg["role"] == "user" else "Agent"
-        content = (msg.get("content") or "").replace("\n", " ")
-        preview = content[:60] + ("…" if len(content) > 60 else "")
-        print(f"  [{i:02d}] {role_label}: {preview}")
-    print()
-
-
-def _list_sessions(memory: MemoryStore) -> None:
-    """列出所有历史 session。"""
-    sessions = memory.list_sessions()
-    if not sessions:
-        print("📭 暂无历史 session 记录。\n")
-        return
-    print(f"\n📚 历史 Session 列表（共 {len(sessions)} 个）：")
-    print(f"  {'ID':<10}  {'Create On':<19}  {'messages':<12}  {'Prompt':<16}  {'1st Question':<40}")
-    print(f"  {'-'*8:<10}  {'-'*19:<19}  {'-'*12:<12}  {'-'*16:<16}  {'-'*40}")
-    for s in sessions:
-        created = s["created_at"][:19].replace("T", " ")
-        sid_short = s["session_id"][:8]
-        prompt_label = s["prompt_name"] or "默认"
-        first_msg = (s["first_user_msg"] or "（无用户消息）")[:40]
-        print(f"  {sid_short:<10}  {created:<19}  {s['msg_count']:<12}  {prompt_label:<16}  {first_msg:<40}")
-    print()
-
-
-def _print_token_usage(agent: "Agent") -> None:
-    """若本次对话有 token 统计则打印，无统计时静默跳过。"""
-    if agent.last_usage:
-        u = agent.last_usage
-        print(f"  📊 Token：输入 {u.prompt_tokens} + 输出 {u.completion_tokens} = 合计 {u.total_tokens}\n")
+# 自定义 Prompt 配置目录 / Skills 目录（从 config 统一管理）
+PROMPTS_DIR: str = config.PROMPTS_DIR
+SKILLS_DIR: str = config.SKILLS_DIR
 
 
 def main() -> None:
@@ -223,7 +64,7 @@ def main() -> None:
 
     # 延迟导入重型依赖（chromadb / sentence-transformers），使 banner 能即时显示
     print("⏳ 正在初始化...", end="\r", flush=True)
-    from src.agent.agent import Agent, SYSTEM_PROMPT
+    from src.agent.agent import Agent, SYSTEM_PROMPT, ThinkingConfig
     print(" " * 30, end="\r", flush=True)
 
     # 共享 MemoryStore 实例，整个进程生命周期内复用
@@ -241,30 +82,10 @@ def main() -> None:
     if skills_map:
         print(f"🔧 已加载 Skills：{', '.join(skill_cmds)}\n")
 
-    # Extended Thinking 运行时状态（初始值从 config 读取）
-    thinking_enabled: bool = config.THINKING_ENABLED
-    thinking_budget: int = config.THINKING_BUDGET
-    thinking_adaptive: bool = config.THINKING_ADAPTIVE
+    # Extended Thinking 运行时配置（初始值从 config 读取）
+    thinking_cfg = ThinkingConfig.from_config()
 
-    def _make_agent(
-        system_prompt: str = SYSTEM_PROMPT,
-        prompt_name: str = "",
-        session_id: str | None = None,
-    ) -> Agent:
-        """用当前运行时状态创建 Agent，调用时自动捕获 thinking/skills/memory 最新值。"""
-        return Agent(
-            verbose=True,
-            memory=memory,
-            session_id=session_id,
-            system_prompt=system_prompt,
-            prompt_name=prompt_name,
-            skills=skills_map or None,
-            thinking_enabled=thinking_enabled,
-            thinking_budget=thinking_budget,
-            thinking_adaptive=thinking_adaptive,
-        )
-
-    agent = _make_agent()
+    agent = handlers.make_agent(memory, skills_map, thinking_cfg, SYSTEM_PROMPT)
     print(f"💬 当前 Session: {agent.session_id}\n")
 
     # 当前激活的 prompt 名称（None 表示使用默认提示符 "你"）
@@ -336,41 +157,24 @@ def main() -> None:
                     else:
                         i += 1  # 忽略未知标志
 
-                _run_ingest(docs_dir=docs_dir, model=model_alias)
+                handlers.run_ingest(docs_dir=docs_dir, model=model_alias)
                 continue
             case "/clear":
                 memory.clear(agent.session_id)
-                agent = _make_agent()
+                agent = handlers.make_agent(memory, skills_map, thinking_cfg, SYSTEM_PROMPT)
                 active_prompt_name = None
                 print(f"✅ 对话历史已清空，Agent 已重置。\n💬 新 Session: {agent.session_id}\n")
                 continue
             case "/history":
-                _show_history(memory, agent.session_id)
+                handlers.show_history(memory, agent.session_id)
                 continue
             case "/session":
                 session_arg = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""
-                if session_arg:
-                    # 先查 session 的 prompt_name，再恢复对应的 system_prompt
-                    sessions_info = {s["session_id"]: s for s in memory.list_sessions()}
-                    saved_prompt = sessions_info.get(session_arg, {}).get("prompt_name", "")
-                    active_prompt_name = saved_prompt or None
-                    restored_prompt = (
-                        custom_prompts.get(f"/{saved_prompt}")
-                        if saved_prompt and f"/{saved_prompt}" in custom_prompts
-                        else None
-                    )
-                    agent = _make_agent(
-                        system_prompt=restored_prompt or SYSTEM_PROMPT,
-                        prompt_name=saved_prompt or "",
-                        session_id=session_arg,
-                    )
-                    history = memory.load(session_arg)
-                    msg_count = len([m for m in history if m["role"] != "system"])
-                    prompt_hint = f"  Prompt: {active_prompt_name}" if active_prompt_name else ""
-                    print(f"✅ 已切换到 Session: {session_arg}（共 {msg_count} 条历史消息）{prompt_hint}\n")
-                else:
-                    # 列出所有历史 session
-                    _list_sessions(memory)
+                result = handlers.switch_session(
+                    memory, session_arg, custom_prompts, SYSTEM_PROMPT, skills_map, thinking_cfg
+                )
+                if result:
+                    agent, active_prompt_name = result
                 continue
             case "/del-session":
                 target_id = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""
@@ -394,7 +198,7 @@ def main() -> None:
                     if confirm == "yes":
                         count = memory.clean_all_sessions()
                         # 当前 Agent 的历史也已被清除，重建一个新 session
-                        agent = _make_agent()
+                        agent = handlers.make_agent(memory, skills_map, thinking_cfg, SYSTEM_PROMPT)
                         active_prompt_name = None
                         print(f"🗑️  已清空全部 {count} 个 session 记录。新 Session: {agent.session_id}\n")
                     else:
@@ -414,10 +218,9 @@ def main() -> None:
                     if active_prompt_name
                     else SYSTEM_PROMPT
                 )
-                agent = _make_agent(
-                    system_prompt=_base_prompt,
-                    prompt_name=active_prompt_name or "",
-                    session_id=agent.session_id,
+                agent = handlers.make_agent(
+                    memory, skills_map, thinking_cfg,
+                    _base_prompt, active_prompt_name or "", agent.session_id,
                 )
                 cmds_str = ', '.join(skill_cmds) if skill_cmds else '（无）'
                 print(f"🔄 Skills 已重新加载，共 {len(skill_cmds)} 个：{cmds_str}\n")
@@ -427,65 +230,25 @@ def main() -> None:
                 if not save_arg:
                     print("⚠️  请指定文件名，例：/save my-chat\n")
                 else:
-                    _save_history(memory, agent.session_id, save_arg)
+                    handlers.save_history(memory, agent.session_id, save_arg)
                 continue
             case "/thinking":
-                think_arg = cmd_parts[1].strip().lower() if len(cmd_parts) > 1 else ""
-                think_tokens = think_arg.split()
-                match think_tokens[0] if think_tokens else "":
-                    case "on":
-                        thinking_enabled = True
-                        agent.thinking_enabled = True
-                        adaptive_hint = "，自动 budget 已开启" if thinking_adaptive else ""
-                        print(f"💭 Extended Thinking 已开启（budget={thinking_budget} tokens{adaptive_hint}）。\n")
-                    case "off":
-                        thinking_enabled = False
-                        agent.thinking_enabled = False
-                        print("💭 Extended Thinking 已关闭\n")
-                    case "adaptive":
-                        thinking_enabled = True
-                        thinking_adaptive = True
-                        agent.thinking_enabled = True
-                        agent.thinking_adaptive = True
-                        print(
-                            f"🧠 Adaptive Thinking 已开启：将按问题复杂度自动估算 budget（上限 {thinking_budget} tokens）。\n"
-                            f"   三档：LOW 1 500 / MEDIUM 8 000 / HIGH 32 000\n"
-                        )
-                    case "budget" if len(think_tokens) >= 2:
-                        try:
-                            thinking_budget = int(think_tokens[1])
-                            agent.thinking_budget = thinking_budget
-                            print(f"💭 Thinking budget 已设置为 {thinking_budget} tokens\n")
-                        except ValueError:
-                            print(f"❌ 无效数字：{think_tokens[1]!r}，用法: /thinking budget <整数>\n")
-                    case _:
-                        status = "开启" if thinking_enabled else "关闭"
-                        adaptive_status = "✅ 开启" if thinking_adaptive else "❌ 关闭"
-                        print(
-                            f"💭 Extended Thinking: {status}，budget={thinking_budget} tokens\n"
-                            f"🧠 Adaptive Thinking: {adaptive_status}\n"
-                            f"用法: /thinking on | off | adaptive | budget <N>\n"
-                        )
+                think_tokens = (
+                    cmd_parts[1].strip().lower().split() if len(cmd_parts) > 1 else []
+                )
+                handlers.handle_thinking(thinking_cfg, think_tokens)
                 continue
         cmd_name = cmd_tokens[0] if cmd_tokens else ""
         if cmd_name in custom_prompts:
             question = user_input[len(cmd_name):].strip()
             active_prompt_name = cmd_name[1:]  # 去掉 / 前缀，如 "5g-expert"
-            agent = _make_agent(
-                system_prompt=custom_prompts[cmd_name],
-                prompt_name=active_prompt_name,
+            agent = handlers.make_agent(
+                memory, skills_map, thinking_cfg,
+                custom_prompts[cmd_name], active_prompt_name,
             )
             print(f"🎭 已切换到 Prompt：{active_prompt_name}  (新 Session: {agent.session_id})\n")
             if question:
-                print()
-                try:
-                    reply = agent.run(question)
-                    print(f"Agent: {reply}\n")
-                    _print_token_usage(agent)
-                except KeyboardInterrupt:
-                    print("\n⚠️  已中断当前回答。\n")
-                except Exception as e:
-                    print(f"❌ 出错了: {e}\n")
+                handlers.run_query(agent, question)
             continue
 
         # ── 用户显式 Skill 激活 ──────────────────────────────────────────────
@@ -499,27 +262,11 @@ def main() -> None:
             else:
                 print(f"🔧 Skill [{skill_name}] 已处于激活状态\n")
             if question:
-                print()
-                try:
-                    reply = agent.run(question)
-                    print(f"Agent: {reply}\n")
-                    _print_token_usage(agent)
-                except KeyboardInterrupt:
-                    print("\n⚠️  已中断当前回答。\n")
-                except Exception as e:
-                    print(f"❌ 出错了: {e}\n")
+                handlers.run_query(agent, question)
             continue
 
         # ── 正常问答 ──────────────────────────────────────────────────────────
-        print()
-        try:
-            reply = agent.run(user_input)
-            print(f"Agent: {reply}\n")
-            _print_token_usage(agent)
-        except KeyboardInterrupt:
-            print("\n⚠️  已中断当前回答。\n")
-        except Exception as e:
-            print(f"❌ 出错了: {e}\n")
+        handlers.run_query(agent, user_input)
 
 
 if __name__ == "__main__":

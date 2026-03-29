@@ -128,6 +128,11 @@ def resolve_embedding(model_alias: str) -> tuple[str, str]:
     safe_name = model_alias.split("/")[-1].replace(".", "_").replace("-", "_")
     return (model_alias, f"kb_{safe_name}")
 
+
+# ── CLI 目录 ──────────────────────────────────────────────────────────────────
+PROMPTS_DIR: str = "advanced/prompts"
+SKILLS_DIR: str = "advanced/skills"
+
 # 默认 (model_name, collection_name)，供未指定时使用
 DEFAULT_EMBEDDING_MODEL: str
 DEFAULT_COLLECTION: str
