@@ -94,6 +94,20 @@ class MemoryStore:
             pass
         self._conn.commit()
 
+    @staticmethod
+    def _row_to_message(row: sqlite3.Row) -> dict[str, Any]:
+        """将 SQLite 行对象转换为标准 OpenAI messages 格式的 dict。"""
+        msg: dict[str, Any] = {
+            "role": row["role"],
+            "content": row["content"] if row["content"] else "",
+        }
+        tool_calls = json.loads(row["tool_calls"])
+        if tool_calls:
+            msg["tool_calls"] = tool_calls
+        if row["tool_call_id"]:
+            msg["tool_call_id"] = row["tool_call_id"]
+        return msg
+
     # ── 核心接口 ──────────────────────────────────────────────────────────────
 
     def append(self, session_id: str, msg: dict[str, Any], prompt_name: str = "") -> None:
@@ -155,24 +169,7 @@ class MemoryStore:
             (session_id,),
         ).fetchall()
 
-        messages: list[dict[str, Any]] = []
-        for row in rows:
-            msg: dict[str, Any] = {"role": row["role"]}
-            if row["content"]:
-                msg["content"] = row["content"]
-            else:
-                msg["content"] = ""
-
-            tool_calls = json.loads(row["tool_calls"])
-            if tool_calls:
-                msg["tool_calls"] = tool_calls
-
-            if row["tool_call_id"]:
-                msg["tool_call_id"] = row["tool_call_id"]
-
-            messages.append(msg)
-
-        return messages
+        return [self._row_to_message(row) for row in rows]
 
     def load_last_n_messages(self, session_id: str, n: int) -> list[dict[str, Any]]:
         """
@@ -196,21 +193,7 @@ class MemoryStore:
             (session_id, n),
         ).fetchall()
 
-        messages: list[dict[str, Any]] = []
-        for row in reversed(rows):  # 还原时序
-            msg: dict[str, Any] = {"role": row["role"]}
-            msg["content"] = row["content"] if row["content"] else ""
-
-            tool_calls = json.loads(row["tool_calls"])
-            if tool_calls:
-                msg["tool_calls"] = tool_calls
-
-            if row["tool_call_id"]:
-                msg["tool_call_id"] = row["tool_call_id"]
-
-            messages.append(msg)
-
-        return messages
+        return [self._row_to_message(row) for row in reversed(rows)]
 
     def set_prompt_name(self, session_id: str, prompt_name: str) -> None:
         """

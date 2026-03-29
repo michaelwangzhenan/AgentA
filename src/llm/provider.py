@@ -19,6 +19,30 @@ import openai
 import src.config as config
 
 
+def _openai_call(
+    provider_cfg: config.ProviderConfig,
+    need_proxy: bool,
+    fn: Callable[[openai.OpenAI], Any],
+) -> Any:
+    """
+    创建 OpenAI 客户端并调用 fn(client)，按需注入 HTTP 代理。
+
+    代理模式下用 with 确保 httpx.Client 生命周期与 fn 调用绑定。
+    """
+    if need_proxy:
+        with httpx.Client(proxy=config.LLM_PROXY) as http_client:
+            client = openai.OpenAI(
+                api_key=provider_cfg.api_key,
+                base_url=provider_cfg.base_url or None,
+                http_client=http_client,
+            )
+            return fn(client)
+    return fn(openai.OpenAI(
+        api_key=provider_cfg.api_key,
+        base_url=provider_cfg.base_url or None,
+    ))
+
+
 def chat(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
@@ -58,22 +82,11 @@ def chat(
         kwargs["extra_body"] = provider_config.extra_body
 
     need_proxy = config.ACTIVE_PROVIDER in config.PROXIED_PROVIDERS and bool(config.LLM_PROXY)
-    if need_proxy:
-        with httpx.Client(proxy=config.LLM_PROXY) as http_client:
-            client = openai.OpenAI(
-                api_key=provider_config.api_key,
-                base_url=provider_config.base_url or None,
-                http_client=http_client,
-            )
-            response = client.chat.completions.create(**kwargs)
-    else:
-        client = openai.OpenAI(
-            api_key=provider_config.api_key,
-            base_url=provider_config.base_url or None,
-        )
-        response = client.chat.completions.create(**kwargs)
-
-    return response
+    return _openai_call(
+        provider_config,
+        need_proxy,
+        lambda client: client.chat.completions.create(**kwargs),
+    )
 
 
 def _chat_claude(
@@ -91,16 +104,7 @@ def _chat_claude(
 
     provider_config = config.get_active_config()
 
-    # 分离 system prompt 和对话历史（Anthropic API 要求分开传）
-    # 多条 system 消息拼接为一条，避免只保留最后一条导致前面内容丢失
-    system_parts: list[str] = []
-    filtered_messages: list[dict[str, Any]] = []
-    for msg in messages:
-        if msg["role"] == "system":
-            system_parts.append(msg["content"])
-        else:
-            filtered_messages.append(msg)
-    system_prompt = "\n\n".join(system_parts)
+    system_prompt, filtered_messages = _split_system_messages(messages)
 
     kwargs: dict[str, Any] = {
         "model": provider_config.model,
@@ -287,14 +291,7 @@ def _chat_claude_thinking(
 
     provider_config = config.get_active_config()
 
-    system_parts = []
-    filtered_messages: list[dict[str, Any]] = []
-    for msg in messages:
-        if msg["role"] == "system":
-            system_parts.append(msg["content"])
-        else:
-            filtered_messages.append(msg)
-    system_prompt = "\n\n".join(system_parts)
+    system_prompt, filtered_messages = _split_system_messages(messages)
 
     kwargs: dict[str, Any] = {
         "model": provider_config.model,
@@ -375,20 +372,11 @@ def _chat_qwen_thinking(
         kwargs["tool_choice"] = "auto"
 
     need_proxy = config.ACTIVE_PROVIDER in config.PROXIED_PROVIDERS and bool(config.LLM_PROXY)
-    if need_proxy:
-        with httpx.Client(proxy=config.LLM_PROXY) as http_client:
-            client = openai.OpenAI(
-                api_key=provider_config.api_key,
-                base_url=provider_config.base_url or None,
-                http_client=http_client,
-            )
-            return _run_qwen_thinking_stream(client, kwargs, on_thinking_chunk)
-    else:
-        client = openai.OpenAI(
-            api_key=provider_config.api_key,
-            base_url=provider_config.base_url or None,
-        )
-        return _run_qwen_thinking_stream(client, kwargs, on_thinking_chunk)
+    return _openai_call(
+        provider_config,
+        need_proxy,
+        lambda client: _run_qwen_thinking_stream(client, kwargs, on_thinking_chunk),
+    )
 
 
 def _run_qwen_thinking_stream(

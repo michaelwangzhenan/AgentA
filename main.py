@@ -210,6 +210,13 @@ def _list_sessions(memory: MemoryStore) -> None:
     print()
 
 
+def _print_token_usage(agent: "Agent") -> None:
+    """若本次对话有 token 统计则打印，无统计时静默跳过。"""
+    if agent.last_usage:
+        u = agent.last_usage
+        print(f"  📊 Token：输入 {u.prompt_tokens} + 输出 {u.completion_tokens} = 合计 {u.total_tokens}\n")
+
+
 def main() -> None:
     """CLI 主循环。"""
     print(BANNER)
@@ -239,9 +246,25 @@ def main() -> None:
     thinking_budget: int = config.THINKING_BUDGET
     thinking_adaptive: bool = config.THINKING_ADAPTIVE
 
-    agent = Agent(verbose=True, memory=memory, skills=skills_map or None,
-                  thinking_enabled=thinking_enabled, thinking_budget=thinking_budget,
-                  thinking_adaptive=thinking_adaptive)
+    def _make_agent(
+        system_prompt: str = SYSTEM_PROMPT,
+        prompt_name: str = "",
+        session_id: str | None = None,
+    ) -> Agent:
+        """用当前运行时状态创建 Agent，调用时自动捕获 thinking/skills/memory 最新值。"""
+        return Agent(
+            verbose=True,
+            memory=memory,
+            session_id=session_id,
+            system_prompt=system_prompt,
+            prompt_name=prompt_name,
+            skills=skills_map or None,
+            thinking_enabled=thinking_enabled,
+            thinking_budget=thinking_budget,
+            thinking_adaptive=thinking_adaptive,
+        )
+
+    agent = _make_agent()
     print(f"💬 当前 Session: {agent.session_id}\n")
 
     # 当前激活的 prompt 名称（None 表示使用默认提示符 "你"）
@@ -317,9 +340,7 @@ def main() -> None:
                 continue
             case "/clear":
                 memory.clear(agent.session_id)
-                agent = Agent(verbose=True, memory=memory, skills=skills_map or None,
-                              thinking_enabled=thinking_enabled, thinking_budget=thinking_budget,
-                              thinking_adaptive=thinking_adaptive)
+                agent = _make_agent()
                 active_prompt_name = None
                 print(f"✅ 对话历史已清空，Agent 已重置。\n💬 新 Session: {agent.session_id}\n")
                 continue
@@ -338,16 +359,10 @@ def main() -> None:
                         if saved_prompt and f"/{saved_prompt}" in custom_prompts
                         else None
                     )
-                    agent = Agent(
-                        verbose=True,
-                        session_id=session_arg,
-                        memory=memory,
-                        skills=skills_map or None,
+                    agent = _make_agent(
                         system_prompt=restored_prompt or SYSTEM_PROMPT,
                         prompt_name=saved_prompt or "",
-                        thinking_enabled=thinking_enabled,
-                        thinking_budget=thinking_budget,
-                        thinking_adaptive=thinking_adaptive,
+                        session_id=session_arg,
                     )
                     history = memory.load(session_arg)
                     msg_count = len([m for m in history if m["role"] != "system"])
@@ -379,9 +394,7 @@ def main() -> None:
                     if confirm == "yes":
                         count = memory.clean_all_sessions()
                         # 当前 Agent 的历史也已被清除，重建一个新 session
-                        agent = Agent(verbose=True, memory=memory, skills=skills_map or None,
-                                      thinking_enabled=thinking_enabled, thinking_budget=thinking_budget,
-                                      thinking_adaptive=thinking_adaptive)
+                        agent = _make_agent()
                         active_prompt_name = None
                         print(f"🗑️  已清空全部 {count} 个 session 记录。新 Session: {agent.session_id}\n")
                     else:
@@ -401,16 +414,10 @@ def main() -> None:
                     if active_prompt_name
                     else SYSTEM_PROMPT
                 )
-                agent = Agent(
-                    verbose=True,
-                    memory=memory,
-                    session_id=agent.session_id,
+                agent = _make_agent(
                     system_prompt=_base_prompt,
                     prompt_name=active_prompt_name or "",
-                    skills=skills_map or None,
-                    thinking_enabled=thinking_enabled,
-                    thinking_budget=thinking_budget,
-                    thinking_adaptive=thinking_adaptive,
+                    session_id=agent.session_id,
                 )
                 cmds_str = ', '.join(skill_cmds) if skill_cmds else '（无）'
                 print(f"🔄 Skills 已重新加载，共 {len(skill_cmds)} 个：{cmds_str}\n")
@@ -464,15 +471,9 @@ def main() -> None:
         if cmd_name in custom_prompts:
             question = user_input[len(cmd_name):].strip()
             active_prompt_name = cmd_name[1:]  # 去掉 / 前缀，如 "5g-expert"
-            agent = Agent(
-                verbose=True,
-                memory=memory,
+            agent = _make_agent(
                 system_prompt=custom_prompts[cmd_name],
                 prompt_name=active_prompt_name,
-                skills=skills_map or None,
-                thinking_enabled=thinking_enabled,
-                thinking_budget=thinking_budget,
-                thinking_adaptive=thinking_adaptive,
             )
             print(f"🎭 已切换到 Prompt：{active_prompt_name}  (新 Session: {agent.session_id})\n")
             if question:
@@ -480,9 +481,7 @@ def main() -> None:
                 try:
                     reply = agent.run(question)
                     print(f"Agent: {reply}\n")
-                    if agent.last_usage:
-                        u = agent.last_usage
-                        print(f"  📊 Token：输入 {u.prompt_tokens} + 输出 {u.completion_tokens} = 合计 {u.total_tokens}\n")
+                    _print_token_usage(agent)
                 except KeyboardInterrupt:
                     print("\n⚠️  已中断当前回答。\n")
                 except Exception as e:
@@ -504,9 +503,7 @@ def main() -> None:
                 try:
                     reply = agent.run(question)
                     print(f"Agent: {reply}\n")
-                    if agent.last_usage:
-                        u = agent.last_usage
-                        print(f"  📊 Token：输入 {u.prompt_tokens} + 输出 {u.completion_tokens} = 合计 {u.total_tokens}\n")
+                    _print_token_usage(agent)
                 except KeyboardInterrupt:
                     print("\n⚠️  已中断当前回答。\n")
                 except Exception as e:
@@ -518,9 +515,7 @@ def main() -> None:
         try:
             reply = agent.run(user_input)
             print(f"Agent: {reply}\n")
-            if agent.last_usage:
-                u = agent.last_usage
-                print(f"  📊 Token：输入 {u.prompt_tokens} + 输出 {u.completion_tokens} = 合计 {u.total_tokens}\n")
+            _print_token_usage(agent)
         except KeyboardInterrupt:
             print("\n⚠️  已中断当前回答。\n")
         except Exception as e:
