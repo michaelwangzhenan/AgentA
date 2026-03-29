@@ -182,6 +182,70 @@ def _wrap_anthropic_response(response: Any) -> Any:
 
 # ── Extended Thinking ────────────────────────────────────────────────────────
 
+# Adaptive Thinking 三档 budget（tokens）
+_BUDGET_LOW: int = 1_500     # 简单事实、短问（< 25 字符）
+_BUDGET_MEDIUM: int = 8_000  # 分析、解释、对比（默认档）
+_BUDGET_HIGH: int = 32_000   # 架构、规划、多步骤深度推理
+
+# 高复杂度关键词 → HIGH 档
+_HIGH_KEYWORDS: frozenset[str] = frozenset([
+    "设计", "架构", "规划", "深入", "详细分析", "多步骤",
+    "优化方案", "如何实现", "算法", "权衡", "对比分析",
+    "全面", "综合", "系统方案", "路线图",
+    "trade-off", "implement", "design", "architect",
+    "optimize", "strategy", "roadmap",
+])
+
+# 低复杂度关键词 → LOW 档
+_LOW_KEYWORDS: frozenset[str] = frozenset([
+    "什么是", "是什么", "定义", "谢谢", "好的", "知道了", "明白了",
+    "define", "what is", "who is", "thanks",
+])
+
+
+def estimate_thinking_budget(messages: list[dict[str, Any]], max_budget: int = 32_000) -> int:
+    """
+    根据对话中最后一条用户消息的内容自动估算合适的 thinking budget_tokens。
+
+    分三档（均不超过 max_budget）：
+        LOW    (1 500)  —— 短问或简单事实类
+        MEDIUM (8 000)  —— 分析、解释、对比（默认）
+        HIGH   (32 000) —— 架构、规划、多步骤深度推理
+
+    Args:
+        messages: 包含对话历史的 OpenAI 格式消息列表。
+        max_budget: thinking budget 上限，通常取 Agent.thinking_budget。
+
+    Returns:
+        估算出的 budget_tokens，已被 max_budget 截断。
+    """
+    # 取最后一条 user 消息作为复杂度评估依据
+    user_text = ""
+    for msg in reversed(messages):
+        if msg.get("role") == "user":
+            user_text = (msg.get("content") or "").strip()
+            break
+
+    text_lower = user_text.lower()
+
+    # 极短问题 → LOW
+    if len(user_text) < 25:
+        estimated = _BUDGET_LOW
+    # 含高复杂度关键词 → HIGH
+    elif any(kw in text_lower for kw in _HIGH_KEYWORDS):
+        estimated = _BUDGET_HIGH
+    # 含低复杂度关键词 → LOW
+    elif any(kw in text_lower for kw in _LOW_KEYWORDS):
+        estimated = _BUDGET_LOW
+    # 超长问题（多步骤描述）也升为 HIGH
+    elif len(user_text) > 200:
+        estimated = _BUDGET_HIGH
+    else:
+        estimated = _BUDGET_MEDIUM
+
+    return min(estimated, max_budget)
+
+
 def call_with_thinking(
     messages: list[dict[str, Any]],
     budget_tokens: int = 8000,

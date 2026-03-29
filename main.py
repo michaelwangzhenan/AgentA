@@ -18,7 +18,7 @@ CLI 入口 —— 私有知识库 Agent 对话界面
     输入 /reload-prompts      重新扫描 advanced/prompts/ 目录，刷新自定义 Prompt 命令
     输入 /<prompt_name> [问题] 切换到指定自定义 Prompt 并重置 Agent，可附带首个问题
     输入 /save <文件名>    导出当前 session 完整对话到 history/<文件名>.md
-    输入 /thinking [on|off|budget N]  控制 Extended Thinking 模式（Claude / Qwen3）
+    输入 /thinking [on|off|adaptive|budget N]  控制 Extended Thinking 模式（Claude / Qwen3）
     输入 /quit 或 /exit 或 Ctrl+C 退出
 """
 
@@ -90,7 +90,8 @@ HELP_TEXT = """
   /save <文件名>             导出当前 session 完整对话到 history/<文件名>.md
   /thinking              查看 Extended Thinking 状态
   /thinking on/off       开启/关闭 Extended Thinking（Claude / Qwen3 有效，其余降级）
-  /thinking budget <N>   设置 thinking budget tokens（默认 8000，不超过 32000）
+  /thinking adaptive     开启 Adaptive Thinking：自动按问题复杂度估算 budget
+  /thinking budget <N>   手动设置 thinking budget tokens（默认 8000，上限 32000）
   /quit                      退出程序
   /exit                      退出程序（同 /quit）
 
@@ -236,9 +237,11 @@ def main() -> None:
     # Extended Thinking 运行时状态（初始值从 config 读取）
     thinking_enabled: bool = config.THINKING_ENABLED
     thinking_budget: int = config.THINKING_BUDGET
+    thinking_adaptive: bool = config.THINKING_ADAPTIVE
 
     agent = Agent(verbose=True, memory=memory, skills=skills_map or None,
-                  thinking_enabled=thinking_enabled, thinking_budget=thinking_budget)
+                  thinking_enabled=thinking_enabled, thinking_budget=thinking_budget,
+                  thinking_adaptive=thinking_adaptive)
     print(f"💬 当前 Session: {agent.session_id}\n")
 
     # 当前激活的 prompt 名称（None 表示使用默认提示符 "你"）
@@ -315,7 +318,8 @@ def main() -> None:
             case "/clear":
                 memory.clear(agent.session_id)
                 agent = Agent(verbose=True, memory=memory, skills=skills_map or None,
-                              thinking_enabled=thinking_enabled, thinking_budget=thinking_budget)
+                              thinking_enabled=thinking_enabled, thinking_budget=thinking_budget,
+                              thinking_adaptive=thinking_adaptive)
                 active_prompt_name = None
                 print(f"✅ 对话历史已清空，Agent 已重置。\n💬 新 Session: {agent.session_id}\n")
                 continue
@@ -343,6 +347,7 @@ def main() -> None:
                         prompt_name=saved_prompt or "",
                         thinking_enabled=thinking_enabled,
                         thinking_budget=thinking_budget,
+                        thinking_adaptive=thinking_adaptive,
                     )
                     history = memory.load(session_arg)
                     msg_count = len([m for m in history if m["role"] != "system"])
@@ -375,7 +380,8 @@ def main() -> None:
                         count = memory.clean_all_sessions()
                         # 当前 Agent 的历史也已被清除，重建一个新 session
                         agent = Agent(verbose=True, memory=memory, skills=skills_map or None,
-                                      thinking_enabled=thinking_enabled, thinking_budget=thinking_budget)
+                                      thinking_enabled=thinking_enabled, thinking_budget=thinking_budget,
+                                      thinking_adaptive=thinking_adaptive)
                         active_prompt_name = None
                         print(f"🗑️  已清空全部 {count} 个 session 记录。新 Session: {agent.session_id}\n")
                     else:
@@ -404,6 +410,7 @@ def main() -> None:
                     skills=skills_map or None,
                     thinking_enabled=thinking_enabled,
                     thinking_budget=thinking_budget,
+                    thinking_adaptive=thinking_adaptive,
                 )
                 cmds_str = ', '.join(skill_cmds) if skill_cmds else '（无）'
                 print(f"🔄 Skills 已重新加载，共 {len(skill_cmds)} 个：{cmds_str}\n")
@@ -422,11 +429,21 @@ def main() -> None:
                     case "on":
                         thinking_enabled = True
                         agent.thinking_enabled = True
-                        print(f"💭 Extended Thinking 已开启（budget={thinking_budget} tokens）。\n")
+                        adaptive_hint = "，自动 budget 已开启" if thinking_adaptive else ""
+                        print(f"💭 Extended Thinking 已开启（budget={thinking_budget} tokens{adaptive_hint}）。\n")
                     case "off":
                         thinking_enabled = False
                         agent.thinking_enabled = False
                         print("💭 Extended Thinking 已关闭\n")
+                    case "adaptive":
+                        thinking_enabled = True
+                        thinking_adaptive = True
+                        agent.thinking_enabled = True
+                        agent.thinking_adaptive = True
+                        print(
+                            f"🧠 Adaptive Thinking 已开启：将按问题复杂度自动估算 budget（上限 {thinking_budget} tokens）。\n"
+                            f"   三档：LOW 1 500 / MEDIUM 8 000 / HIGH 32 000\n"
+                        )
                     case "budget" if len(think_tokens) >= 2:
                         try:
                             thinking_budget = int(think_tokens[1])
@@ -436,8 +453,12 @@ def main() -> None:
                             print(f"❌ 无效数字：{think_tokens[1]!r}，用法: /thinking budget <整数>\n")
                     case _:
                         status = "开启" if thinking_enabled else "关闭"
-                        print(f"💭 Extended Thinking: {status}，budget={thinking_budget} tokens\n"
-                              f"用法: /thinking on | off | budget <N>\n")
+                        adaptive_status = "✅ 开启" if thinking_adaptive else "❌ 关闭"
+                        print(
+                            f"💭 Extended Thinking: {status}，budget={thinking_budget} tokens\n"
+                            f"🧠 Adaptive Thinking: {adaptive_status}\n"
+                            f"用法: /thinking on | off | adaptive | budget <N>\n"
+                        )
                 continue
         cmd_name = cmd_tokens[0] if cmd_tokens else ""
         if cmd_name in custom_prompts:
@@ -451,6 +472,7 @@ def main() -> None:
                 skills=skills_map or None,
                 thinking_enabled=thinking_enabled,
                 thinking_budget=thinking_budget,
+                thinking_adaptive=thinking_adaptive,
             )
             print(f"🎭 已切换到 Prompt：{active_prompt_name}  (新 Session: {agent.session_id})\n")
             if question:

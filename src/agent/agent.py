@@ -23,7 +23,7 @@ from typing import Any, NamedTuple
 
 from src.agent.tools import get_tools, execute_tool, ToolResult
 from src.cli.skill_loader import SkillInfo, build_skill_catalog
-from src.llm.provider import chat, call_with_thinking
+from src.llm.provider import chat, call_with_thinking, estimate_thinking_budget
 from src.memory.store import MemoryStore
 import src.config as _cfg
 
@@ -105,6 +105,7 @@ class Agent:
         skills: dict[str, SkillInfo] | None = None,
         thinking_enabled: bool | None = None,
         thinking_budget: int | None = None,
+        thinking_adaptive: bool | None = None,
     ) -> None:
         # 若传入 skills，提取 bodies，并将含 description 的 catalog 追加到 system_prompt
         self._skill_bodies: dict[str, str] = {}
@@ -123,6 +124,8 @@ class Agent:
         # Extended Thinking 配置：优先使用传入参数，其次读 config
         self.thinking_enabled: bool = thinking_enabled if thinking_enabled is not None else _cfg.THINKING_ENABLED
         self.thinking_budget: int = thinking_budget if thinking_budget is not None else _cfg.THINKING_BUDGET
+        # Adaptive Thinking：自动估算每次调用所需 budget，thinking_budget 作为上限
+        self.thinking_adaptive: bool = thinking_adaptive if thinking_adaptive is not None else _cfg.THINKING_ADAPTIVE
 
     def run(self, user_input: str) -> str:
         """
@@ -177,9 +180,19 @@ class Agent:
             # 调用 LLM：开启 thinking 时走流式 thinking 分支，否则普通 chat()
             _thinking_started[0] = False
             if self.thinking_enabled:
+                effective_budget = (
+                    estimate_thinking_budget(messages, self.thinking_budget)
+                    if self.thinking_adaptive
+                    else self.thinking_budget
+                )
+                if self.thinking_adaptive:
+                    logger.info(
+                        "[Agent] Adaptive Thinking: 估算 budget=%d tokens",
+                        effective_budget,
+                    )
                 response = call_with_thinking(
                     messages,
-                    budget_tokens=self.thinking_budget,
+                    budget_tokens=effective_budget,
                     tools=active_tools,
                     on_thinking_chunk=_on_thinking_chunk,
                 )

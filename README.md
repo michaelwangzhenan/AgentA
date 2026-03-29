@@ -122,23 +122,5 @@ LLM_PROVIDER=claude     # Anthropic Claude
 > **代理配置**：国外 Provider 需在 `.env` 中设置 `LLM_PROXY=http://ip:port`，国内 Provider 自动直连，无需改动其他代码。
 
 ---
-
-
-## 测试
-
-```bash
-# 快速单元测试
-.venv\Scripts\python -m pytest -m "not integration" -v
-
-# 完整测试（含真实 API 调用和 ChromaDB 检索，需先完成入库）
-.venv\Scripts\python -m pytest
-
-# 按模块测试
-.venv\Scripts\python -m pytest tests/test_llm.py           # LLM 配置 & Provider
-.venv\Scripts\python -m pytest tests/test_parser.py        # 文档解析（7 种格式）
-.venv\Scripts\python -m pytest tests/test_rag.py           # 分块 & 双语检索 & Reranker
-.venv\Scripts\python -m pytest tests/test_tools.py         # 工具层（search/fetch）
-.venv\Scripts\python -m pytest tests/test_agent.py         # Agent ReAct 循环
-.venv\Scripts\python -m pytest tests/test_memory.py        # 对话记忆持久化
-.venv\Scripts\python -m pytest tests/test_prompt_loader.py # 自定义 Prompt 加载
-```
+## UT 测试
+使用 . t.sh 脚本

@@ -162,7 +162,18 @@ ToDo List：
     注意： thinking 内容不应该被用来做 prompt injection 的载体
 
 27. Agentic Search vs RAG
-28. Claude 4.6 新增：Adaptive Thinking
+28. Adaptive Thinking => Done
+  目标：
+    根据问题复杂度自动估算合适的 thinking budget_tokens，替代固定值：
+      · LOW    (1 500)  — 短问、简单事实类（< 25 字符，或含"什么是"等低复杂度词）
+      · MEDIUM (8 000)  — 分析、解释、对比（默认档）
+      · HIGH   (32 000) — 架构、规划、多步骤深度推理（含"设计/架构/规划"等词,或 > 200 字符）
+  实现：
+    · estimate_thinking_budget(messages, max_budget) — 在 provider.py 中
+    · Agent.__init__ 新增 thinking_adaptive: bool 参数，来自 config.THINKING_ADAPTIVE
+    · Agent.run() 当 thinking_adaptive=True 时调用 estimate_thinking_budget，结果传给 call_with_thinking
+    · CLI：/thinking adaptive 开启；/thinking 状态显示自适应档位
+    · .env.example 新增 THINKING_ADAPTIVE=false
 29. Harness Engineering Vs prompt/context
 30. agent S: a new agent
 -
