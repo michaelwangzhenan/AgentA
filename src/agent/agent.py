@@ -92,6 +92,10 @@ SYSTEM_PROMPT = """你是一个私有知识库智能助手。
 MAX_TOOL_ROUNDS: int = 8
 # 含最终回答在内的总推理轮次上限
 MAX_TOTAL_ROUNDS: int = 12
+# SQL 层粗粒度过滤倒数：每轮实际消息数受 tool_calls 数量影响，这个倍数保证不少化
+_HISTORY_FETCH_MULTIPLIER: int = 8
+# 工具结果预览截断长度
+_TOOL_PREVIEW_LEN: int = 100
 
 # search_knowledge 返回空结果时追加给 LLM 的引导提示
 TOOL_EMPTY_HINT: str = (
@@ -139,6 +143,15 @@ class Agent:
         self.last_usage: TokenUsage | None = None  # 最近一次 run() 的 token 统计
         # Extended Thinking 配置：共享同一 ThinkingConfig 实例，修改后无需重建 Agent
         self.thinking_cfg: ThinkingConfig = thinking_config if thinking_config is not None else ThinkingConfig.from_config()
+        # 本次 run() 流式 thinking 状态标志（实例变量，避免嵌套函数）
+        self._thinking_started: bool = False
+
+    def _on_thinking_chunk(self, chunk: str) -> None:
+        """思考过程流式回调，首个 chunk 先打印头部。"""
+        if not self._thinking_started:
+            print("\n\U0001f4ad 思考中...\n", flush=True)
+            self._thinking_started = True
+        print(chunk, end="", flush=True)
 
     def run(self, user_input: str) -> str:
         """
@@ -173,15 +186,6 @@ class Agent:
         tool_rounds = 0  # 已消耗的工具调用轮次计数
         _prompt_tokens = _comp_tokens = 0  # 本次 run() 各轮累计 token
 
-        # 思考过程流式回调：首个 chunk 先打头部，后续直接输出
-        _thinking_started: list[bool] = [False]
-
-        def _on_thinking_chunk(chunk: str) -> None:
-            if not _thinking_started[0]:
-                print("\n\U0001f4ad 思考中...\n", flush=True)
-                _thinking_started[0] = True
-            print(chunk, end="", flush=True)
-
         for iteration in range(1, self.max_iterations + 1):
             logger.info("[Agent] 第 %d 轮推理，messages 长度: %d", iteration, len(messages))
 
@@ -191,7 +195,7 @@ class Agent:
                 logger.warning("[Agent] 工具调用已达上限 %d 轮，强制生成最终回答", MAX_TOOL_ROUNDS)
 
             # 调用 LLM：开启 thinking 时走流式 thinking 分支，否则普通 chat()
-            _thinking_started[0] = False
+            self._thinking_started = False
             if self.thinking_cfg.enabled:
                 effective_budget = (
                     estimate_thinking_budget(messages, self.thinking_cfg.budget)
@@ -207,9 +211,9 @@ class Agent:
                     messages,
                     budget_tokens=effective_budget,
                     tools=active_tools,
-                    on_thinking_chunk=_on_thinking_chunk,
+                    on_thinking_chunk=self._on_thinking_chunk,
                 )
-                if _thinking_started[0]:
+                if self._thinking_started:
                     print("\n\n─── 思考结束 ───\n", flush=True)
             else:
                 response = chat(messages, tools=active_tools)
@@ -267,7 +271,7 @@ class Agent:
         每轮实际消息数受并行 tool_calls 数量影响），内存层再按 user 轮数精确截断。
         """
         # SQL 层粗粒度过滤：避免全量加载长历史 session（优化 F）
-        limit = self.max_history_turns * 8
+        limit = self.max_history_turns * _HISTORY_FETCH_MULTIPLIER
         history = [
             m for m in self._memory.load_last_n_messages(self.session_id, limit)
             if m["role"] != "system"
@@ -348,7 +352,7 @@ class Agent:
             result: ToolResult = execute_tool(tool_name, tool_args, self._skill_bodies)
 
             if self.verbose:
-                preview = result.content[:100].replace("\n", " ")
+                preview = result.content[:_TOOL_PREVIEW_LEN].replace("\n", " ")
                 logger.info("[Agent] 工具结果 [%s] 预览: %s...", result.status, preview)
 
             # DB 写入干净内容（无引导提示），避免污染历史

@@ -37,11 +37,6 @@ from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunct
 import src.config as config
 from src.rag.parser import SUPPORTED_EXTENSIONS, parse_file
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%H:%M:%S",
-)
 logger = logging.getLogger(__name__)
 
 
@@ -101,10 +96,10 @@ def ingest_all(
 
     docs_path = Path(docs_dir)
     if not docs_path.exists():
-        logger.error(f"文档目录不存在: {docs_path.resolve()}")
+        logger.error("文档目录不存在: %s", docs_path.resolve())
         return
 
-    logger.info(f"Embedding 模型: {model_name}  →  collection: {collection_name}")
+    logger.info("Embedding 模型: %s  →  collection: %s", model_name, collection_name)
 
     # 初始化 ChromaDB 客户端和 embedding 函数
     client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
@@ -123,24 +118,24 @@ def ingest_all(
     ]
 
     if not all_files:
-        logger.warning(f"未在 {docs_path} 中找到任何支持格式的文档")
+        logger.warning("未在 %s 中找到任何支持格式的文档", docs_path)
         return
 
-    logger.info(f"发现 {len(all_files)} 个文档，开始入库...")
+    logger.info("发现 %d 个文档，开始入库...", len(all_files))
 
     total_chunks = 0
     for file_path in all_files:
         try:
-            logger.info(f"  解析: {file_path.name}")
+            logger.info("  解析: %s", file_path.name)
             text = parse_file(file_path)
 
             if not text.strip():
-                logger.warning(f"  跳过（内容为空）: {file_path.name}")
+                logger.warning("  跳过（内容为空）: %s", file_path.name)
                 continue
 
             chunks = chunk_text(text)
             if not chunks:
-                logger.warning(f"  跳过（分块结果为空）: {file_path.name}")
+                logger.warning("  跳过（分块结果为空）: %s", file_path.name)
                 continue
 
             # 删除该文件在 ChromaDB 中的所有旧 chunks（防止文件缩短后残留过时数据）
@@ -150,7 +145,7 @@ def ingest_all(
             )
             if existing["ids"]:
                 collection.delete(ids=existing["ids"])
-                logger.info(f"  清除旧数据: {file_path.name} → 删除 {len(existing['ids'])} 条")
+                logger.info("  清除旧数据: %s → 删除 %d 条", file_path.name, len(existing["ids"]))
 
             # 写入新 chunks
             ids = [_make_chunk_id(str(file_path), i) for i in range(len(chunks))]
@@ -165,14 +160,14 @@ def ingest_all(
                 metadatas=metadatas,  # type: ignore[arg-type]
             )
 
-            logger.info(f"  入库: {file_path.name} → {len(chunks)} 块")
+            logger.info("  入库: %s → %d 块", file_path.name, len(chunks))
             total_chunks += len(chunks)
 
         except Exception as e:
-            logger.error(f"  失败: {file_path.name} — {e}")
+            logger.error("  失败: %s — %s", file_path.name, e)
 
-    logger.info(f"入库完成，共写入 {total_chunks} 个文本块，"
-                f"collection 当前总量: {collection.count()} 块")
+    logger.info("入库完成，共写入 %d 个文本块，collection 当前总量: %d 块",
+                total_chunks, collection.count())
 
 
 if __name__ == "__main__":

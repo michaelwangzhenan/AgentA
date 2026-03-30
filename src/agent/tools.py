@@ -20,6 +20,20 @@ from src.rag.retriever import search, format_search_results
 
 logger = logging.getLogger(__name__)
 
+# 搜索返回结果上限
+MAX_SEARCH_TOP_K: int = 10
+# fetch_url HTTP 请求超时秒数
+FETCH_URL_TIMEOUT: int = 15
+
+# fetch_url 支持的文本类 MIME 类型前缀
+_TEXT_TYPES: tuple[str, ...] = (
+    "text/", "application/json", "application/xml", "application/xhtml"
+)
+# 常见二进制文件魔术字节 —— 匹配则跳过该 URL
+_BINARY_MAGIC: tuple[bytes, ...] = (
+    b"PK\x03\x04", b"%PDF", b"\x89PNG", b"GIF8", b"\xff\xd8\xff"
+)
+
 
 # ── 工具结果结构体 ─────────────────────────────────────────────────────────────
 
@@ -161,7 +175,7 @@ def _tool_search_knowledge(query: str, top_k: int = 5) -> ToolResult:
     Returns:
         ToolResult：有命中结果 → status="ok"；知识库为空/无命中 → status="empty"。
     """
-    top_k = min(max(1, top_k), 10)  # 限制在 1~10 之间
+    top_k = min(max(1, top_k), MAX_SEARCH_TOP_K)  # 限制在 1~MAX_SEARCH_TOP_K 之间
     logger.info("[tool] search_knowledge: query=%r, top_k=%d", query, top_k)
     hits = search(query, top_k=top_k)
     if hits:
@@ -169,59 +183,51 @@ def _tool_search_knowledge(query: str, top_k: int = 5) -> ToolResult:
     return ToolResult(status="empty", content="知识库中未找到相关内容。")
 
 
-def _tool_fetch_url(url: str, max_chars: int = 3000) -> ToolResult:
+def _fetch_raw_response(url: str) -> "requests.Response | ToolResult":
     """
-    抓取网页正文内容，使用 BeautifulSoup 提取纯文本。
-
-    Args:
-        url: 目标网页 URL。
-        max_chars: 返回内容的最大字符数。
-
-    Returns:
-        网页正文纯文本（截断至 max_chars），抓取失败时返回错误说明。
+    发送 HTTP GET 请求，返回 Response 对象；任何错误提前返回 ToolResult。
+    同时校验 Content-Type 和魔术字节，拒绝二进制内容。
     """
-    logger.info(f"[tool] fetch_url: url={url!r}, max_chars={max_chars}")
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        )
+    }
+    try:
+        response = requests.get(url, headers=headers, timeout=FETCH_URL_TIMEOUT)
+        response.raise_for_status()
+    except requests.exceptions.Timeout:
+        return ToolResult(status="error", content=f"请求超时（{FETCH_URL_TIMEOUT}s），URL: {url}")
+    except requests.exceptions.HTTPError as e:
+        return ToolResult(status="error", content=f"HTTP {e.response.status_code}，URL: {url}")
+    except requests.exceptions.RequestException as e:
+        return ToolResult(status="error", content=f"网络请求失败 — {e}")
 
-    if not url.startswith(("http://", "https://")):
+    content_type = response.headers.get("Content-Type", "").lower().split(";")[0].strip()
+    if not any(content_type.startswith(t) for t in _TEXT_TYPES):
         return ToolResult(
             status="error",
-            content=f"URL 必须以 http:// 或 https:// 开头，收到：{url!r}",
+            content=f"不支持下载二进制文件（Content-Type: {content_type}）。请访问对应的 HTML 页面或文档索引。",
         )
+    if any(response.content.startswith(magic) for magic in _BINARY_MAGIC):
+        return ToolResult(
+            status="error",
+            content="响应内容为二进制文件（如 .zip/.pdf/.png 等），无法提取文本。请访问对应的 HTML 页面。",
+        )
+    return response
 
+
+def _extract_text_from_response(response: "requests.Response", max_chars: int) -> ToolResult:
+    """从 HTTP Response 中用 BeautifulSoup 提取正文纯文本，并截断至 max_chars。"""
     try:
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            )
-        }
-        response = requests.get(url, headers=headers, timeout=15)
-        response.raise_for_status()
-
-        # 二进制内容检测：Content-Type 非文本或魔术字节
-        content_type = response.headers.get("Content-Type", "").lower().split(";")[0].strip()
-        _TEXT_TYPES = ("text/", "application/json", "application/xml", "application/xhtml")
-        if not any(content_type.startswith(t) for t in _TEXT_TYPES):
-            return ToolResult(
-                status="error",
-                content=f"不支持下载二进制文件（Content-Type: {content_type}）。请访问对应的 HTML 页面或文档索引。",
-            )
-        _BINARY_MAGIC = (b"PK\x03\x04", b"%PDF", b"\x89PNG", b"GIF8", b"\xff\xd8\xff")
-        if any(response.content.startswith(magic) for magic in _BINARY_MAGIC):
-            return ToolResult(
-                status="error",
-                content=f"响应内容为二进制文件（如 .zip/.pdf/.png 等），无法提取文本。请访问对应的 HTML 页面。",
-            )
-
         response.encoding = response.apparent_encoding
-
         soup = BeautifulSoup(response.text, "lxml")
         for tag in soup(["script", "style", "nav", "footer", "aside", "header"]):
             tag.decompose()
 
         lines = (line.strip() for line in soup.get_text(separator="\n").splitlines())
-        # 合并连续空行
         result_lines: list[str] = []
         prev_blank = False
         for line in lines:
@@ -239,15 +245,33 @@ def _tool_fetch_url(url: str, max_chars: int = 3000) -> ToolResult:
         if not text:
             return ToolResult(status="empty", content="页面内容为空或无法提取正文。")
         return ToolResult(status="ok", content=text)
-
-    except requests.exceptions.Timeout:
-        return ToolResult(status="error", content=f"请求超时（15s），URL: {url}")
-    except requests.exceptions.HTTPError as e:
-        return ToolResult(status="error", content=f"HTTP {e.response.status_code}，URL: {url}")
-    except requests.exceptions.RequestException as e:
-        return ToolResult(status="error", content=f"网络请求失败 — {e}")
     except Exception as e:
         return ToolResult(status="error", content=f"解析页面失败 — {e}")
+
+
+def _tool_fetch_url(url: str, max_chars: int = 3000) -> ToolResult:
+    """
+    抓取网页正文内容，使用 BeautifulSoup 提取纯文本。
+
+    Args:
+        url: 目标网页 URL。
+        max_chars: 返回内容的最大字符数。
+
+    Returns:
+        网页正文纯文本（截断至 max_chars），抓取失败时返回错误说明。
+    """
+    logger.info("[tool] fetch_url: url=%r, max_chars=%d", url, max_chars)
+
+    if not url.startswith(("http://", "https://")):
+        return ToolResult(
+            status="error",
+            content=f"URL 必须以 http:// 或 https:// 开头，收到：{url!r}",
+        )
+
+    raw = _fetch_raw_response(url)
+    if isinstance(raw, ToolResult):
+        return raw
+    return _extract_text_from_response(raw, max_chars)
 
 
 def _tool_load_skill(name: str, skill_bodies: dict[str, str]) -> ToolResult:
@@ -261,7 +285,7 @@ def _tool_load_skill(name: str, skill_bodies: dict[str, str]) -> ToolResult:
     Returns:
         ToolResult：找到 → status="ok"；未找到 → status="error"。
     """
-    logger.info(f"[tool] load_skill: name={name!r}")
+    logger.info("[tool] load_skill: name=%r", name)
     body = skill_bodies.get(name)
     if body is None:
         return ToolResult(
@@ -292,7 +316,7 @@ def execute_tool(
         ToolResult：status 为 "ok"/"empty"/"error"，content 为工具输出内容。
         任何异常（含未知工具名）均被捕获，以 status="error" 返回，不向上抛出。
     """
-    logger.info(f"执行工具: {name}，参数: {json.dumps(args, ensure_ascii=False)}")
+    logger.info("执行工具: %s，参数: %s", name, json.dumps(args, ensure_ascii=False))
 
     try:
         match name:

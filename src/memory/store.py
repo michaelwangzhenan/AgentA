@@ -35,6 +35,8 @@ logger = logging.getLogger(__name__)
 
 # SQLite 文件路径，由 config.MEMORY_DB_PATH 决定（对应 .env 中的 MEMORY_DB_PATH）
 MEMORY_DB_PATH: str = config.MEMORY_DB_PATH
+# session 首条用户消息预览截断长度
+_FIRST_MSG_PREVIEW_LEN: int = 80
 
 
 class MemoryStore:
@@ -137,7 +139,7 @@ class MemoryStore:
             if not existing:
                 self._conn.execute(
                     "INSERT INTO sessions(session_id, created_at, first_user_msg, prompt_name) VALUES(?,?,?,?)",
-                    (session_id, now, content[:80] if role == "user" else "", prompt_name),
+                    (session_id, now, content[:_FIRST_MSG_PREVIEW_LEN] if role == "user" else "", prompt_name),
                 )
 
             # 追加消息

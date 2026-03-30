@@ -12,8 +12,12 @@ from typing import TYPE_CHECKING
 import src.config as config
 from src.memory.store import MemoryStore
 
+# 历史记录预览截断长度
+_HISTORY_PREVIEW_LEN: int = 60
+
 if TYPE_CHECKING:
     from src.agent.agent import Agent, ThinkingConfig
+    from src.cli.skill_loader import SkillInfo
 
 
 def run_ingest(docs_dir: str | None = None, model: str | None = None) -> None:
@@ -90,7 +94,7 @@ def show_history(memory: MemoryStore, session_id: str) -> None:
     for i, msg in enumerate(msgs, 1):
         role_label = "你" if msg["role"] == "user" else "Agent"
         content = (msg.get("content") or "").replace("\n", " ")
-        preview = content[:60] + ("…" if len(content) > 60 else "")
+        preview = content[:_HISTORY_PREVIEW_LEN] + ("…" if len(content) > _HISTORY_PREVIEW_LEN else "")
         print(f"  [{i:02d}] {role_label}: {preview}")
     print()
 
@@ -122,7 +126,7 @@ def print_token_usage(agent: "Agent") -> None:
 
 def make_agent(
     memory: MemoryStore,
-    skills_map: dict,
+    skills_map: "dict[str, SkillInfo]",
     thinking_cfg: "ThinkingConfig",
     system_prompt: str,
     prompt_name: str = "",
@@ -192,7 +196,7 @@ def switch_session(
     session_arg: str,
     custom_prompts: dict[str, str],
     default_system_prompt: str,
-    skills_map: dict,
+    skills_map: "dict[str, SkillInfo]",
     thinking_cfg: "ThinkingConfig",
 ) -> "tuple[Agent, str | None] | None":
     """切换到指定 session 并恢复对应 Prompt 上下文。

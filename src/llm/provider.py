@@ -108,7 +108,7 @@ def _chat_claude(
 
     kwargs: dict[str, Any] = {
         "model": provider_config.model,
-        "max_tokens": 4096,
+        "max_tokens": config.CLAUDE_MAX_TOKENS,
         "messages": filtered_messages,
         "temperature": temperature,
     }
@@ -137,7 +137,7 @@ def _convert_tools_to_anthropic(
     openai_tools: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """将 OpenAI Function Calling 格式的 tools 转换为 Anthropic tools 格式。"""
-    anthropic_tools = []
+    anthropic_tools: list[dict[str, Any]] = []
     for tool in openai_tools:
         func = tool["function"]
         anthropic_tools.append({

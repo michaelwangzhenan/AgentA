@@ -99,15 +99,24 @@ def main() -> None:
 
     # Windows：清空控制台输入缓冲区，防止 VS Code 伪终端（ConPTY）把启动命令
     # 注入 stdin，被 prompt_toolkit 误读为用户首条输入。
-    # FlushConsoleInputBuffer 仅对真实 Win32 控制台有效，ConPTY 下无效；
-    # msvcrt.kbhit/getwch 直接消费缓冲区按键，兼容 ConPTY。
+    # ConPTY 下 stdin 是命名管道，msvcrt.kbhit 无效，需用 PeekNamedPipe 排空。
     if sys.platform == "win32":
         import time
-        time.sleep(0.05)  # 等待启动命令字符全部打入缓冲区
+        time.sleep(0.2)  # 等待启动脚本字符全部进入缓冲区
         try:
-            import msvcrt
-            while msvcrt.kbhit():
-                msvcrt.getwch()
+            import os
+            import ctypes
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            h = kernel32.GetStdHandle(-10)  # STD_INPUT_HANDLE
+            # 真实 Win32 控制台：清空输入事件队列
+            kernel32.FlushConsoleInputBuffer(h)
+            # ConPTY 管道：逐段 peek + read 丢弃已到达字节
+            avail = ctypes.c_ulong(0)
+            while (
+                kernel32.PeekNamedPipe(h, None, 0, None, ctypes.byref(avail), None)
+                and avail.value > 0
+            ):
+                os.read(sys.stdin.fileno(), avail.value)
         except Exception:
             pass
 

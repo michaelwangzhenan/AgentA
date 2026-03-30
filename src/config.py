@@ -21,10 +21,6 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
-from dotenv import load_dotenv
-
-load_dotenv(override=True)  # override=True 确保 .env 覆盖系统环境变量
-
 
 @dataclass(frozen=True)
 class ProviderConfig:
@@ -158,8 +154,11 @@ LLM_PROXY: str = os.getenv("LLM_PROXY", "")
 PROXIED_PROVIDERS: frozenset[str] = frozenset({"openai", "grok", "claude"})
 
 # 文本分块配置
-CHUNK_SIZE: int = 600
-CHUNK_OVERLAP: int = 100
+CHUNK_SIZE: int = int(os.getenv("CHUNK_SIZE", "600"))
+CHUNK_OVERLAP: int = int(os.getenv("CHUNK_OVERLAP", "100"))
+
+# Claude 单次响应最大 output token 数
+CLAUDE_MAX_TOKENS: int = int(os.getenv("CLAUDE_MAX_TOKENS", "4096"))
 
 # ── Reranker 配置 ────────────────────────────────────────────────────────────
 # Cross-Encoder 模型，用于在 Bi-Encoder 召回结果上做二阶段精排
