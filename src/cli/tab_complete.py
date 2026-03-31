@@ -33,6 +33,9 @@ CLI_COMMANDS: list[str] = [
     "/thinking",
     "/thinking on",
     "/thinking off",
+    "/thinking adaptive",
+    "/memory",
+    "/memory clear",
     "/quit",
     "/exit",
 ]

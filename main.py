@@ -19,6 +19,9 @@ CLI 入口 —— 私有知识库 Agent 对话界面
     输入 /<prompt_name> [问题] 切换到指定自定义 Prompt 并重置 Agent，可附带首个问题
     输入 /save <文件名>    导出当前 session 完整对话到 history/<文件名>.md
     输入 /thinking [on|off|adaptive|budget N]  控制 Extended Thinking 模式（Claude / Qwen3）
+    输入 /memory            查看跨 session 用户记忆
+    输入 /memory del <id>   删除指定记忆条目
+    输入 /memory clear      清空全部用户记忆
     输入 /quit 或 /exit 或 Ctrl+C 退出
 """
 
@@ -28,10 +31,6 @@ import warnings
 from dotenv import load_dotenv
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import InMemoryHistory
-from src.cli.tab_complete import make_completer
-from src.cli.prompt_loader import scan_prompts
-from src.cli.skill_loader import scan_skills, SkillInfo
-from src.cli import handlers
 
 # 消除 HuggingFace tokenizer 的 FutureWarning
 warnings.filterwarnings("ignore", category=FutureWarning, module="transformers")
@@ -48,9 +47,18 @@ logging.basicConfig(
 for _noisy in ("httpx", "httpcore", "openai", "chromadb", "sentence_transformers"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 
+# src.* 模块必须在 load_dotenv() 之后导入，确保 src.config 读取到 .env 的值
+from src.cli.tab_complete import make_completer
+from src.cli.prompt_loader import scan_prompts
+from src.cli.skill_loader import scan_skills, SkillInfo
+from src.cli import handlers
 from src.memory.store import MemoryStore
 import src.config as config
 from src.cli.ui import BANNER, HELP_TEXT
+
+# 如果用户记忆功能开启，提前导入以备 main() 中直接使用
+if config.USER_MEMORY_ENABLED:
+    from src.memory.user_memory import UserMemoryStore
 
 
 # 自定义 Prompt 配置目录 / Skills 目录（从 config 统一管理）
@@ -85,7 +93,17 @@ def main() -> None:
     # Extended Thinking 运行时配置（初始值从 config 读取）
     thinking_cfg = ThinkingConfig.from_config()
 
-    agent = handlers.make_agent(memory, skills_map, thinking_cfg, SYSTEM_PROMPT)
+    # 跨 session 用户记忆（USER_MEMORY_ENABLED=false 时为 None，功能完全禁用）
+    user_memory = (
+        UserMemoryStore(config.USER_MEMORY_DB_PATH)
+        if config.USER_MEMORY_ENABLED
+        else None
+    )
+    if user_memory:
+        cnt = len(user_memory.load_all())
+        print(f"🧠 跨 session 记忆已加载（共 {cnt} 条）\n")
+
+    agent = handlers.make_agent(memory, skills_map, thinking_cfg, SYSTEM_PROMPT, user_memory=user_memory)
     print(f"💬 当前 Session: {agent.session_id}\n")
 
     # 当前激活的 prompt 名称（None 表示使用默认提示符 "你"）
@@ -170,7 +188,7 @@ def main() -> None:
                 continue
             case "/clear":
                 memory.clear(agent.session_id)
-                agent = handlers.make_agent(memory, skills_map, thinking_cfg, SYSTEM_PROMPT)
+                agent = handlers.make_agent(memory, skills_map, thinking_cfg, SYSTEM_PROMPT, user_memory=user_memory)
                 active_prompt_name = None
                 print(f"✅ 对话历史已清空，Agent 已重置。\n💬 新 Session: {agent.session_id}\n")
                 continue
@@ -180,7 +198,8 @@ def main() -> None:
             case "/session":
                 session_arg = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""
                 result = handlers.switch_session(
-                    memory, session_arg, custom_prompts, SYSTEM_PROMPT, skills_map, thinking_cfg
+                    memory, session_arg, custom_prompts, SYSTEM_PROMPT, skills_map,
+                    thinking_cfg, user_memory=user_memory
                 )
                 if result:
                     agent, active_prompt_name = result
@@ -207,7 +226,7 @@ def main() -> None:
                     if confirm == "yes":
                         count = memory.clean_all_sessions()
                         # 当前 Agent 的历史也已被清除，重建一个新 session
-                        agent = handlers.make_agent(memory, skills_map, thinking_cfg, SYSTEM_PROMPT)
+                        agent = handlers.make_agent(memory, skills_map, thinking_cfg, SYSTEM_PROMPT, user_memory=user_memory)
                         active_prompt_name = None
                         print(f"🗑️  已清空全部 {count} 个 session 记录。新 Session: {agent.session_id}\n")
                     else:
@@ -230,6 +249,7 @@ def main() -> None:
                 agent = handlers.make_agent(
                     memory, skills_map, thinking_cfg,
                     _base_prompt, active_prompt_name or "", agent.session_id,
+                    user_memory=user_memory,
                 )
                 cmds_str = ', '.join(skill_cmds) if skill_cmds else '（无）'
                 print(f"🔄 Skills 已重新加载，共 {len(skill_cmds)} 个：{cmds_str}\n")
@@ -247,6 +267,12 @@ def main() -> None:
                 )
                 handlers.handle_thinking(thinking_cfg, think_tokens)
                 continue
+            case "/memory":
+                if user_memory is None:
+                    print("⚠️  跨 session 记忆功能未启用（请在 .env 中设置 USER_MEMORY_ENABLED=true）\n")
+                else:
+                    handlers.handle_memory(user_memory, cmd_parts)
+                continue
         cmd_name = cmd_tokens[0] if cmd_tokens else ""
         if cmd_name in custom_prompts:
             question = user_input[len(cmd_name):].strip()
@@ -254,6 +280,7 @@ def main() -> None:
             agent = handlers.make_agent(
                 memory, skills_map, thinking_cfg,
                 custom_prompts[cmd_name], active_prompt_name,
+                user_memory=user_memory,
             )
             print(f"🎭 已切换到 Prompt：{active_prompt_name}  (新 Session: {agent.session_id})\n")
             if question:

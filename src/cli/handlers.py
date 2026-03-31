@@ -18,6 +18,7 @@ _HISTORY_PREVIEW_LEN: int = 60
 if TYPE_CHECKING:
     from src.agent.agent import Agent, ThinkingConfig
     from src.cli.skill_loader import SkillInfo
+    from src.memory.user_memory import UserMemoryStore
 
 
 def run_ingest(docs_dir: str | None = None, model: str | None = None) -> None:
@@ -131,6 +132,7 @@ def make_agent(
     system_prompt: str,
     prompt_name: str = "",
     session_id: str | None = None,
+    user_memory: "UserMemoryStore | None" = None,
 ) -> "Agent":
     """创建 Agent 实例，封装 CLI 层所需的标准参数。"""
     from src.agent.agent import Agent
@@ -142,6 +144,7 @@ def make_agent(
         prompt_name=prompt_name,
         skills=skills_map or None,
         thinking_config=thinking_cfg,
+        user_memory=user_memory,
     )
 
 
@@ -198,6 +201,7 @@ def switch_session(
     default_system_prompt: str,
     skills_map: "dict[str, SkillInfo]",
     thinking_cfg: "ThinkingConfig",
+    user_memory: "UserMemoryStore | None" = None,
 ) -> "tuple[Agent, str | None] | None":
     """切换到指定 session 并恢复对应 Prompt 上下文。
 
@@ -223,9 +227,58 @@ def switch_session(
         system_prompt=restored_prompt or default_system_prompt,
         prompt_name=saved_prompt or "",
         session_id=session_arg,
+        user_memory=user_memory,
     )
     history = memory.load(session_arg)
     msg_count = len([m for m in history if m["role"] != "system"])
     prompt_hint = f"  Prompt: {active_prompt_name}" if active_prompt_name else ""
     print(f"✅ 已切换到 Session: {session_arg}（共 {msg_count} 条历史消息）{prompt_hint}\n")
     return agent, active_prompt_name
+
+
+def handle_memory(user_memory: "UserMemoryStore", cmd_parts: list[str]) -> None:
+    """
+    处理 /memory 子命令：
+        /memory            — 展示全部记忆条目
+        /memory del <id>   — 删除指定 id 的记忆
+        /memory clear      — 清空全部记忆
+    """
+    from src.memory.user_memory import CATEGORY_LABELS
+
+    sub_tokens = cmd_parts[1].strip().lower().split() if len(cmd_parts) > 1 else []
+    sub_cmd = sub_tokens[0] if sub_tokens else ""
+
+    match sub_cmd:
+        case "":   # /memory — 展示全部
+            entries = user_memory.load_all()
+            if not entries:
+                print("📭 当前没有任何记忆条目。\n")
+                return
+            print(f"\n🧠 用户记忆（共 {len(entries)} 条）：\n")
+            for e in entries:
+                label = CATEGORY_LABELS.get(e["category"], e["category"])
+                ts = e["created_at"][:16].replace("T", " ")
+                print(f"  [{e['id']:3d}] [{label}] {e['key']}：{e['value']}")
+                print(f"         记录于 {ts}")
+            print()
+
+        case "del":   # /memory del <id>
+            if len(sub_tokens) < 2:
+                print("⚠️  请指定记忆 ID，例：/memory del 3\n")
+                return
+            try:
+                mid = int(sub_tokens[1])
+                deleted = user_memory.delete(mid)
+                if deleted:
+                    print(f"🗑️  记忆 {mid} 已删除。\n")
+                else:
+                    print(f"❌ 记忆 ID {mid} 不存在。\n")
+            except ValueError:
+                print(f"❌ 无效 ID：{sub_tokens[1]!r}，应为整数。\n")
+
+        case "clear":   # /memory clear
+            count = user_memory.clear()
+            print(f"🗑️  已清空全部 {count} 条记忆。\n")
+
+        case _:
+            print("⚠️  未知子命令。用法: /memory | /memory del <id> | /memory clear\n")

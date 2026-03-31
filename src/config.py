@@ -180,6 +180,16 @@ THINKING_BUDGET: int = int(os.getenv("THINKING_BUDGET", "8000"))
 # 仅在 THINKING_ENABLED=true 时生效。
 THINKING_ADAPTIVE: bool = os.getenv("THINKING_ADAPTIVE", "false").lower() == "true"
 
+# ── 跨 session 用户记忆配置 ──────────────────────────────────────────────────
+# true 开启跨 session 记忆功能；false 完全禁用（不读取也不写入）
+USER_MEMORY_ENABLED: bool = os.getenv("USER_MEMORY_ENABLED", "false").lower() == "true"
+# 用户记忆 SQLite 数据库路径（与对话历史独立存储）
+USER_MEMORY_DB_PATH: str = os.getenv("USER_MEMORY_DB_PATH", "./sqlite_db/user_memory.db")
+# 注入 system prompt 的记忆文本最大字符数（防止占用过多 context）
+USER_MEMORY_MAX_CHARS: int = int(os.getenv("USER_MEMORY_MAX_CHARS", "1500"))
+# true 每次对话结束后自动提取记忆（每轮额外一次 LLM 调用，默认关闭需手动开启）
+USER_MEMORY_AUTO_EXTRACT: bool = os.getenv("USER_MEMORY_AUTO_EXTRACT", "false").lower() == "true"
+
 
 def get_active_config() -> ProviderConfig:
     """获取当前激活的 Provider 配置，若不存在则抛出异常。"""

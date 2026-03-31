@@ -33,6 +33,9 @@ HELP_TEXT = """
   /thinking on/off       开启/关闭 Extended Thinking（Claude / Qwen3 有效，其余降级）
   /thinking adaptive     开启 Adaptive Thinking：自动按问题复杂度估算 budget
   /thinking budget <N>   手动设置 thinking budget tokens（默认 8000，上限 32000）
+  /memory                展示跨 session 用户记忆
+  /memory del <id>       删除指定记忆条目
+  /memory clear          清空全部用户记忆
   /quit                      退出程序
   /exit                      退出程序（同 /quit）
 

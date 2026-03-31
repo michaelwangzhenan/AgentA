@@ -77,15 +77,15 @@ ToDo List：
   目标： 支持本地 Ollama 模型，完全离线运行
 
 
-13. URL 批量导入
+[x]13. URL 批量导入
   目标： 支持通过配置文件批量爬取指定网页并入库
 
 
-14. 文档自动同步
+[x]14. 文档自动同步
   目标： 用 `watchdog` 监听 `docs/` 变化，自动增量入库
 
 
-15. API/SDK接口
+[x]15. API/SDK接口
   目标： 方便第三方系统集成
 
 
@@ -93,7 +93,7 @@ ToDo List：
   目标： 适合企业/团队场景
 
 
-17. 多语言支持
+[x]17. 多语言支持
   目标： 适应国际化需求
 
 
@@ -161,7 +161,7 @@ ToDo List：
     3. 思考过程流式输出
     注意： thinking 内容不应该被用来做 prompt injection 的载体
 
-27. 支持跨 session 记忆
+27. 支持跨 session 记忆 => Done
   需求：
     1. 记忆写入
       记忆提取：
@@ -195,6 +195,14 @@ ToDo List：
       用户可以查询"你记得关于我的什么"
       用户可以手动编辑、删除记忆
       记忆的存储和使用对用户透明
+  实现（src/memory/user_memory.py + agent.py + handlers.py + main.py）：
+    · UserMemoryStore：SQLite，5 类别(preference/background/instruction/task/correction)，upsert去重
+    · _sanitize()：8 种 injection 模式检测，500 字符上限
+    · should_extract_immediately()：关键词触发（"记住这个" 等 8 个）
+    · extract_memories()：LLM 结构化提取，返回 [{category,key,value}]
+    · Agent.run()：系统消息注入 <user_context>，final_answer 后触发提取
+    · CLI：/memory / /memory del <id> / /memory clear
+    · Config：USER_MEMORY_ENABLED / DB_PATH / MAX_CHARS / AUTO_EXTRACT（默认全 false）
 
 28. Adaptive Thinking => Done
   目标：
@@ -212,19 +220,10 @@ ToDo List：
 
 29. 跨 session 记忆 enhancement
     记忆提取: 对话中出现重要事实时实时触发
-    用户隔离：多用户场景下记忆必须按 user_id 严格隔离
+    用户隔离：多用户场景下记忆必须按 user_id 严格隔离 --> depends on 16. 
     隐身模式：用户可以关闭记忆功能（类似 Incognito 模式）， 从而不会读取、也不会写入任何记忆的对话
     记忆压缩：当context超过总预算85% 时，压缩记忆。15% 预留给response ?
 
-
-temp:
-  1. 给出 Minor 问题 m1-m7的 优化顺序和方案
-  2. 按方案进行实施，完成后列出修改项，并为每项进行一句话总结
-  3. 根据前面的要求重新全面 Review 代码。
-    添加要求：
-      - 单个文件不超过500行，
-      - 单个函数不超过100行
-      - 不要在函数内部定义函数
 
 -
 a. Agent S
