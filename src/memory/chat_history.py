@@ -39,7 +39,7 @@ MEMORY_DB_PATH: str = config.MEMORY_DB_PATH
 _FIRST_MSG_PREVIEW_LEN: int = 80
 
 
-class MemoryStore:
+class ChatHistory:
     """
     SQLite 对话记忆存储。
 
@@ -58,7 +58,7 @@ class MemoryStore:
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._create_tables()
-        logger.info("MemoryStore 初始化完成: %s", db_path)
+        logger.info("ChatHistory 初始化完成: %s", db_path)
 
     # ── 表结构初始化 ──────────────────────────────────────────────────────────
 
@@ -90,7 +90,7 @@ class MemoryStore:
                 "ALTER TABLE sessions ADD COLUMN prompt_name TEXT NOT NULL DEFAULT ''"
             )
             self._conn.commit()
-            logger.info("MemoryStore: sessions 表已迁移添加 prompt_name 列")
+            logger.info("ChatHistory: sessions 表已迁移添加 prompt_name 列")
         except sqlite3.OperationalError:
             # 列已存在（duplicate column name），正常情况，安全跳过
             pass
@@ -293,7 +293,7 @@ class MemoryStore:
         """关闭数据库连接。"""
         self._conn.close()
 
-    def __enter__(self) -> "MemoryStore":
+    def __enter__(self) -> "ChatHistory":
         return self
 
     def __exit__(self, *_: object) -> None:

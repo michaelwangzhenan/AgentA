@@ -1,28 +1,9 @@
 ﻿"""
 CLI 入口 —— 私有知识库 Agent 对话界面
 
-使用方式：
-    python main.py
-
 命令：
     输入问题后回车即可对话
-    输入 /help              查看帮助
-    输入 /ingest            重新扫描默认 docs/ 目录并入库（默认模型）
-    输入 /ingest <目录> [-m en|zh]  扫描指定目录，可选指定模型
-    输入 /clear             清空当前 session 的对话历史并重置 Agent
-    输入 /history           查看当前 session 的对话摘要
-    输入 /session           列出所有历史 session
-    输入 /session <id>      切换到指定 session 并恢复历史
-    输入 /del-session <id>   彻底删除指定历史 session 的所有记录
-    输入 /clean-session       清空所有历史 session 的记录
-    输入 /reload-prompts      重新扫描 advanced/prompts/ 目录，刷新自定义 Prompt 命令
-    输入 /<prompt_name> [问题] 切换到指定自定义 Prompt 并重置 Agent，可附带首个问题
-    输入 /save <文件名>    导出当前 session 完整对话到 history/<文件名>.md
-    输入 /thinking [on|off|adaptive|budget N]  控制 Extended Thinking 模式（Claude / Qwen3）
-    输入 /memory            查看跨 session 用户记忆
-    输入 /memory del <id>   删除指定记忆条目
-    输入 /memory clear      清空全部用户记忆
-    输入 /quit 或 /exit 或 Ctrl+C 退出
+    输入 /help  查看帮助
 """
 
 import logging
@@ -48,18 +29,17 @@ for _noisy in ("httpx", "httpcore", "openai", "chromadb", "sentence_transformers
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 
 # src.* 模块必须在 load_dotenv() 之后导入，确保 src.config 读取到 .env 的值
+from src.cli.ui import BANNER, HELP_TEXT
 from src.cli.tab_complete import make_completer
 from src.cli.prompt_loader import scan_prompts
 from src.cli.skill_loader import scan_skills, SkillInfo
 from src.cli import handlers
-from src.memory.store import MemoryStore
+from src.memory.chat_history import ChatHistory
 import src.config as config
-from src.cli.ui import BANNER, HELP_TEXT
 
 # 如果用户记忆功能开启，提前导入以备 main() 中直接使用
 if config.USER_MEMORY_ENABLED:
     from src.memory.user_memory import UserMemoryStore
-
 
 # 自定义 Prompt 配置目录 / Skills 目录（从 config 统一管理）
 PROMPTS_DIR: str = config.PROMPTS_DIR
@@ -72,11 +52,11 @@ def main() -> None:
 
     # 延迟导入重型依赖（chromadb / sentence-transformers），使 banner 能即时显示
     print("⏳ 正在初始化...", end="\r", flush=True)
-    from src.agent.agent import Agent, SYSTEM_PROMPT, ThinkingConfig
+    from src.agent.agent import SYSTEM_PROMPT, ThinkingConfig
     print(" " * 30, end="\r", flush=True)
 
-    # 共享 MemoryStore 实例，整个进程生命周期内复用
-    memory = MemoryStore()
+    # 共享 ChatHistory 实例，整个进程生命周期内复用
+    memory = ChatHistory()
 
     # 启动时扫描自定义 Prompt 目录
     custom_prompts: dict[str, str] = scan_prompts(PROMPTS_DIR)
@@ -118,25 +98,25 @@ def main() -> None:
     # Windows：清空控制台输入缓冲区，防止 VS Code 伪终端（ConPTY）把启动命令
     # 注入 stdin，被 prompt_toolkit 误读为用户首条输入。
     # ConPTY 下 stdin 是命名管道，msvcrt.kbhit 无效，需用 PeekNamedPipe 排空。
-    if sys.platform == "win32":
-        import time
-        time.sleep(0.2)  # 等待启动脚本字符全部进入缓冲区
-        try:
-            import os
-            import ctypes
-            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            h = kernel32.GetStdHandle(-10)  # STD_INPUT_HANDLE
-            # 真实 Win32 控制台：清空输入事件队列
-            kernel32.FlushConsoleInputBuffer(h)
-            # ConPTY 管道：逐段 peek + read 丢弃已到达字节
-            avail = ctypes.c_ulong(0)
-            while (
-                kernel32.PeekNamedPipe(h, None, 0, None, ctypes.byref(avail), None)
-                and avail.value > 0
-            ):
-                os.read(sys.stdin.fileno(), avail.value)
-        except Exception:
-            pass
+    # if sys.platform == "win32":
+    #     import time
+    #     time.sleep(0.2)  # 等待启动脚本字符全部进入缓冲区
+    #     try:
+    #         import os
+    #         import ctypes
+    #         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    #         h = kernel32.GetStdHandle(-10)  # STD_INPUT_HANDLE
+    #         # 真实 Win32 控制台：清空输入事件队列
+    #         kernel32.FlushConsoleInputBuffer(h)
+    #         # ConPTY 管道：逐段 peek + read 丢弃已到达字节
+    #         avail = ctypes.c_ulong(0)
+    #         while (
+    #             kernel32.PeekNamedPipe(h, None, 0, None, ctypes.byref(avail), None)
+    #             and avail.value > 0
+    #         ):
+    #             os.read(sys.stdin.fileno(), avail.value)
+    #     except Exception:
+    #         pass
 
     while True:
         try:

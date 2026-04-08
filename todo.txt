@@ -43,8 +43,11 @@ ToDo List：
     本项目 skills 目录： advanced/skills/
 
 
-6. MCP 工具服务器接入
-  目标： 接入 Model Context Protocol（MCP）标准，允许 Agent 调用外部 MCP Server 提供的工具，实现与第三方服务的标准化集成
+6. 支持 MCP
+  目标： 
+    支持MCP最新版标准： https://modelcontextprotocol.io/specification/2025-11-25
+    支持接入 local mcp server 来访问本地文件系统和工具 : https://modelcontextprotocol.io/docs/develop/connect-local-servers
+
 
 
 7. 用户自定义 Workflow
@@ -195,14 +198,6 @@ ToDo List：
       用户可以查询"你记得关于我的什么"
       用户可以手动编辑、删除记忆
       记忆的存储和使用对用户透明
-  实现（src/memory/user_memory.py + agent.py + handlers.py + main.py）：
-    · UserMemoryStore：SQLite，5 类别(preference/background/instruction/task/correction)，upsert去重
-    · _sanitize()：8 种 injection 模式检测，500 字符上限
-    · should_extract_immediately()：关键词触发（"记住这个" 等 8 个）
-    · extract_memories()：LLM 结构化提取，返回 [{category,key,value}]
-    · Agent.run()：系统消息注入 <user_context>，final_answer 后触发提取
-    · CLI：/memory / /memory del <id> / /memory clear
-    · Config：USER_MEMORY_ENABLED / DB_PATH / MAX_CHARS / AUTO_EXTRACT（默认全 false）
 
 28. Adaptive Thinking => Done
   目标：
@@ -217,14 +212,23 @@ ToDo List：
     · CLI：/thinking adaptive 开启；/thinking 状态显示自适应档位
     · .env.example 新增 THINKING_ADAPTIVE=false
 
-
 29. 跨 session 记忆 enhancement
     记忆提取: 对话中出现重要事实时实时触发
     用户隔离：多用户场景下记忆必须按 user_id 严格隔离 --> depends on 16. 
     隐身模式：用户可以关闭记忆功能（类似 Incognito 模式）， 从而不会读取、也不会写入任何记忆的对话
     记忆压缩：当context超过总预算85% 时，压缩记忆。15% 预留给response ?
 
+30. 支持 GraphRAG / Knowledge Graph
+  不再存储原始文本，而是把文档转化为实体-关系图谱：
+  文档 → 抽取实体和关系 → 知识图谱
+  问题 → 图上路径搜索 → 精确答案
+  核心优势： 擅长多跳推理（"A 的老板的老板是谁？"这类问题）
+  局限： 构建图谱成本高，动态更新难
 
+31. Harness 中可以实现的部分
+32. 支持sandbox
+33. Sub Agent 
+34. 
 -
 a. Agent S
   一个 GUI/Computer-Use Agent, an open agentic framework that uses computers like a human
@@ -233,3 +237,7 @@ b. Harness Engineering
 c. Agentic Search
   让 LLM 本身参与决策——它会思考"我需要搜什么"、执行搜索、判断"够了吗？"、必要时再搜
   ReAct 模式（Reason → Act → Observe → Reason…）就是 Agentic Search 的典型实现方式
+d. CoT
+  Chain of Thought: 让 LLM 本身一步一步地思考，而不是直接给出答案，如 CoT 的 prompt 示例：
+e. Plan and Execute
+  先整体规划（Plan），再按步骤执行（Execute）

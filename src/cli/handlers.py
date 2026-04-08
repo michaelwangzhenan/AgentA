@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import src.config as config
-from src.memory.store import MemoryStore
+from src.memory.chat_history import ChatHistory
 
 # 历史记录预览截断长度
 _HISTORY_PREVIEW_LEN: int = 60
@@ -43,7 +43,7 @@ def run_ingest(docs_dir: str | None = None, model: str | None = None) -> None:
         print(f"❌ 入库失败: {e}\n")
 
 
-def save_history(memory: MemoryStore, session_id: str, filename: str) -> None:
+def save_history(memory: ChatHistory, session_id: str, filename: str) -> None:
     """将当前 session 的 user/assistant 对话导出到 history/<filename>.md。"""
     msgs = [m for m in memory.load(session_id) if m["role"] in ("user", "assistant")]
     if not msgs:
@@ -85,7 +85,7 @@ def save_history(memory: MemoryStore, session_id: str, filename: str) -> None:
         print(f"❌ 导出失败: {e}\n")
 
 
-def show_history(memory: MemoryStore, session_id: str) -> None:
+def show_history(memory: ChatHistory, session_id: str) -> None:
     """展示当前 session 的历史对话摘要（角色 + 内容前 60 字）。"""
     msgs = [m for m in memory.load(session_id) if m["role"] in ("user", "assistant")]
     if not msgs:
@@ -100,7 +100,7 @@ def show_history(memory: MemoryStore, session_id: str) -> None:
     print()
 
 
-def list_sessions(memory: MemoryStore) -> None:
+def list_sessions(memory: ChatHistory) -> None:
     """列出所有历史 session。"""
     sessions = memory.list_sessions()
     if not sessions:
@@ -126,7 +126,7 @@ def print_token_usage(agent: "Agent") -> None:
 
 
 def make_agent(
-    memory: MemoryStore,
+    memory: ChatHistory,
     skills_map: "dict[str, SkillInfo]",
     thinking_cfg: "ThinkingConfig",
     system_prompt: str,
@@ -195,7 +195,7 @@ def handle_thinking(thinking_cfg: "ThinkingConfig", think_tokens: list[str]) -> 
 
 
 def switch_session(
-    memory: MemoryStore,
+    memory: ChatHistory,
     session_arg: str,
     custom_prompts: dict[str, str],
     default_system_prompt: str,

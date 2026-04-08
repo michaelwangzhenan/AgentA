@@ -2,7 +2,7 @@
 Agent 主控逻辑 —— ReAct（Reason + Act）循环
 
 执行流程：
-    1. 接收用户问题，从 MemoryStore 加载历史消息
+    1. 接收用户问题，从 ChatHistory 加载历史消息
     2. 拼接为 [system] + history + [user]，超长时自动截断
     3. 调用 LLM（携带工具定义）
     4. 若 LLM 返回 tool_calls → 执行工具 → 将结果追加到 messages → 继续循环
@@ -25,7 +25,7 @@ from typing import Any, NamedTuple
 from src.agent.tools import get_tools, execute_tool, ToolResult
 from src.cli.skill_loader import SkillInfo, build_skill_catalog
 from src.llm.provider import chat, call_with_thinking, estimate_thinking_budget
-from src.memory.store import MemoryStore
+from src.memory.chat_history import ChatHistory
 from src.memory.user_memory import (
     UserMemoryStore,
     should_extract_immediately,
@@ -59,19 +59,19 @@ class ThinkingConfig:
             adaptive=_cfg.THINKING_ADAPTIVE,
         )
 
-# 模块级共享 MemoryStore 实例（单进程内所有 Agent 共享同一个 DB 连接）
-_shared_memory: MemoryStore | None = None
+# 模块级共享 ChatHistory 实例（单进程内所有 Agent 共享同一个 DB 连接）
+_shared_memory: ChatHistory | None = None
 
 # 模块级共享 UserMemoryStore 实例（双检锁保护）
 _shared_user_memory: UserMemoryStore | None = None
 _shared_user_memory_lock = __import__("threading").Lock()
 
 
-def _get_shared_memory() -> MemoryStore:
-    """获取模块级共享 MemoryStore，首次调用时懒加载初始化。"""
+def _get_shared_memory() -> ChatHistory:
+    """获取模块级共享 ChatHistory，首次调用时懒加载初始化。"""
     global _shared_memory
     if _shared_memory is None:
-        _shared_memory = MemoryStore()
+        _shared_memory = ChatHistory()
     return _shared_memory
 
 
@@ -147,7 +147,7 @@ class Agent:
         verbose: bool = True,
         session_id: str | None = None,
         max_history_turns: int = 20,
-        memory: MemoryStore | None = None,
+        memory: ChatHistory | None = None,
         prompt_name: str = "",
         skills: dict[str, SkillInfo] | None = None,
         thinking_config: ThinkingConfig | None = None,
@@ -165,7 +165,7 @@ class Agent:
         self.max_history_turns = max_history_turns
         self._prompt_name = prompt_name
         # 支持从外部传入 memory（便于测试 mock），默认使用模块级共享实例
-        self._memory: MemoryStore = memory if memory is not None else _get_shared_memory()
+        self._memory: ChatHistory = memory if memory is not None else _get_shared_memory()
         self.last_usage: TokenUsage | None = None  # 最近一次 run() 的 token 统计
         # Extended Thinking 配置：共享同一 ThinkingConfig 实例，修改后无需重建 Agent
         self.thinking_cfg: ThinkingConfig = thinking_config if thinking_config is not None else ThinkingConfig.from_config()
@@ -187,7 +187,7 @@ class Agent:
         """
         执行完整的 ReAct 循环，返回最终回答文本。
 
-        会先从 MemoryStore 加载历史消息，拼接到当前轮对话后一起发送给 LLM。
+        会先从 ChatHistory 加载历史消息，拼接到当前轮对话后一起发送给 LLM。
         每轮工具调用和最终回答均实时写入 SQLite。
 
         Args:
@@ -307,7 +307,7 @@ class Agent:
 
     def _load_truncated_history(self) -> list[dict[str, Any]]:
         """
-        从 MemoryStore 加载历史，并按 max_history_turns 截断。
+        从 ChatHistory 加载历史，并按 max_history_turns 截断。
 
         截断策略：保留最近 N 轮，一轮以 user 消息为起点计数。
         system 消息不计入轮数，在 run() 中单独拼接。
