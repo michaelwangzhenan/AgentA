@@ -259,7 +259,7 @@ class TestAgentMemoryIntegration:
     def test_second_run_includes_first_turn_in_messages(self, tmp_path: Path) -> None:
         """第二次 run() 时 messages 应包含第一轮的 user + assistant 历史。"""
         store = ChatHistory(db_path=str(tmp_path / "agent_test.db"))
-        agent = Agent(verbose=False, session_id="integ-001", memory=store)
+        agent = Agent(verbose=False, session_id="integ-001", chat_history=store)
 
         captured_messages: list[list[dict]] = []
 
@@ -285,7 +285,7 @@ class TestAgentMemoryIntegration:
         """新建 Agent 实例（模拟重启），历史应从 DB 中恢复。"""
         db_path = str(tmp_path / "persist_test.db")
         store1 = ChatHistory(db_path=db_path)
-        agent1 = Agent(verbose=False, session_id="persist-session", memory=store1)
+        agent1 = Agent(verbose=False, session_id="persist-session", chat_history=store1)
 
         with patch("src.agent.agent.chat", return_value=self._make_text_response("第一轮回答")):
             agent1.run("第一轮问题")
@@ -299,7 +299,7 @@ class TestAgentMemoryIntegration:
             captured.append(list(messages))
             return self._make_text_response("第二轮回答")
 
-        agent2 = Agent(verbose=False, session_id="persist-session", memory=store2)
+        agent2 = Agent(verbose=False, session_id="persist-session", chat_history=store2)
         with patch("src.agent.agent.chat", side_effect=mock_chat2):
             agent2.run("第二轮问题")
 
@@ -323,7 +323,7 @@ class TestHistoryTruncation:
         """当历史超过 max_history_turns 时，传给 LLM 的 messages 数量应受限。"""
         store = ChatHistory(db_path=str(tmp_path / "trunc_test.db"))
         # max_history_turns=2：只保留最近 2 轮
-        agent = Agent(verbose=False, session_id="trunc-session", memory=store, max_history_turns=2)
+        agent = Agent(verbose=False, session_id="trunc-session", chat_history=store, max_history_turns=2)
 
         captured: list[list[dict]] = []
 

@@ -7,7 +7,7 @@ CLI Tab 补全模块
 使用方式：
     from cli.tab_complete import CLI_COMMANDS, make_completer
 
-    prompt_session = PromptSession(completer=make_completer(memory, custom_prompts))
+    prompt_session = PromptSession(completer=make_completer(chat_history, custom_prompts))
 """
 
 from collections.abc import Sequence
@@ -42,7 +42,7 @@ CLI_COMMANDS: list[str] = [
 
 
 def make_completer(
-    memory: ChatHistory,
+    chat_history: ChatHistory,
     custom_prompts: dict[str, str] | None = None,
     custom_skills: Sequence[str] | None = None,
 ) -> WordCompleter:
@@ -53,14 +53,14 @@ def make_completer(
     确保新建/删除 session 后补全列表即时更新。
 
     Args:
-        memory: 当前进程共享的 ChatHistory 实例。
+        chat_history: 当前进程共享的 ChatHistory 实例。
         custom_prompts: scan_prompts() 返回的 {"/cmd": "内容"} 映射，可为 None。
         custom_skills: skill 命令名称列表（如 ["/example-skill"]），可为 None。
 
     Returns:
         WordCompleter，可直接赋给 PromptSession.completer。
     """
-    session_list = memory.list_sessions()
+    session_list = chat_history.list_sessions()
     prompt_cmds: list[str] = list(custom_prompts.keys()) if custom_prompts else []
     skill_cmds: list[str] = list(custom_skills) if custom_skills else []
 

@@ -43,9 +43,9 @@ def run_ingest(docs_dir: str | None = None, model: str | None = None) -> None:
         print(f"❌ 入库失败: {e}\n")
 
 
-def save_history(memory: ChatHistory, session_id: str, filename: str) -> None:
+def save_history(chat_history: ChatHistory, session_id: str, filename: str) -> None:
     """将当前 session 的 user/assistant 对话导出到 history/<filename>.md。"""
-    msgs = [m for m in memory.load(session_id) if m["role"] in ("user", "assistant")]
+    msgs = [m for m in chat_history.load(session_id) if m["role"] in ("user", "assistant")]
     if not msgs:
         print("📭 当前 session 暂无对话历史，无可导出内容。\n")
         return
@@ -85,9 +85,9 @@ def save_history(memory: ChatHistory, session_id: str, filename: str) -> None:
         print(f"❌ 导出失败: {e}\n")
 
 
-def show_history(memory: ChatHistory, session_id: str) -> None:
+def show_history(chat_history: ChatHistory, session_id: str) -> None:
     """展示当前 session 的历史对话摘要（角色 + 内容前 60 字）。"""
-    msgs = [m for m in memory.load(session_id) if m["role"] in ("user", "assistant")]
+    msgs = [m for m in chat_history.load(session_id) if m["role"] in ("user", "assistant")]
     if not msgs:
         print("📭 当前 session 暂无对话历史。\n")
         return
@@ -100,9 +100,9 @@ def show_history(memory: ChatHistory, session_id: str) -> None:
     print()
 
 
-def list_sessions(memory: ChatHistory) -> None:
+def list_sessions(chat_history: ChatHistory) -> None:
     """列出所有历史 session。"""
-    sessions = memory.list_sessions()
+    sessions = chat_history.list_sessions()
     if not sessions:
         print("📭 暂无历史 session 记录。\n")
         return
@@ -126,7 +126,7 @@ def print_token_usage(agent: "Agent") -> None:
 
 
 def make_agent(
-    memory: ChatHistory,
+    chat_history: ChatHistory,
     skills_map: "dict[str, SkillInfo]",
     thinking_cfg: "ThinkingConfig",
     system_prompt: str,
@@ -138,7 +138,7 @@ def make_agent(
     from src.agent.agent import Agent
     return Agent(
         verbose=True,
-        memory=memory,
+        chat_history=chat_history,
         session_id=session_id,
         system_prompt=system_prompt,
         prompt_name=prompt_name,
@@ -195,7 +195,7 @@ def handle_thinking(thinking_cfg: "ThinkingConfig", think_tokens: list[str]) -> 
 
 
 def switch_session(
-    memory: ChatHistory,
+    chat_history: ChatHistory,
     session_arg: str,
     custom_prompts: dict[str, str],
     default_system_prompt: str,
@@ -209,10 +209,10 @@ def switch_session(
         (新 Agent, active_prompt_name)；若无 session_arg 则列出列表并返回 None。
     """
     if not session_arg:
-        list_sessions(memory)
+        list_sessions(chat_history)
         return None
 
-    sessions_info = {s["session_id"]: s for s in memory.list_sessions()}
+    sessions_info = {s["session_id"]: s for s in chat_history.list_sessions()}
     saved_prompt = sessions_info.get(session_arg, {}).get("prompt_name", "")
     active_prompt_name: str | None = saved_prompt or None
     restored_prompt = (
@@ -221,7 +221,7 @@ def switch_session(
         else None
     )
     agent = make_agent(
-        memory=memory,
+        chat_history=chat_history,
         skills_map=skills_map,
         thinking_cfg=thinking_cfg,
         system_prompt=restored_prompt or default_system_prompt,
@@ -229,7 +229,7 @@ def switch_session(
         session_id=session_arg,
         user_memory=user_memory,
     )
-    history = memory.load(session_arg)
+    history = chat_history.load(session_arg)
     msg_count = len([m for m in history if m["role"] != "system"])
     prompt_hint = f"  Prompt: {active_prompt_name}" if active_prompt_name else ""
     print(f"✅ 已切换到 Session: {session_arg}（共 {msg_count} 条历史消息）{prompt_hint}\n")

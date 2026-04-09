@@ -60,19 +60,19 @@ class ThinkingConfig:
         )
 
 # 模块级共享 ChatHistory 实例（单进程内所有 Agent 共享同一个 DB 连接）
-_shared_memory: ChatHistory | None = None
+_chat_history: ChatHistory | None = None
 
 # 模块级共享 UserMemoryStore 实例（双检锁保护）
 _shared_user_memory: UserMemoryStore | None = None
 _shared_user_memory_lock = __import__("threading").Lock()
 
 
-def _get_shared_memory() -> ChatHistory:
+def _get_shared_chat_history() -> ChatHistory:
     """获取模块级共享 ChatHistory，首次调用时懒加载初始化。"""
-    global _shared_memory
-    if _shared_memory is None:
-        _shared_memory = ChatHistory()
-    return _shared_memory
+    global _chat_history
+    if _chat_history is None:
+        _chat_history = ChatHistory()
+    return _chat_history
 
 
 def _get_shared_user_memory() -> UserMemoryStore | None:
@@ -147,7 +147,7 @@ class Agent:
         verbose: bool = True,
         session_id: str | None = None,
         max_history_turns: int = 20,
-        memory: ChatHistory | None = None,
+        chat_history: ChatHistory | None = None,
         prompt_name: str = "",
         skills: dict[str, SkillInfo] | None = None,
         thinking_config: ThinkingConfig | None = None,
@@ -164,8 +164,10 @@ class Agent:
         self.session_id: str = session_id or str(uuid.uuid4())
         self.max_history_turns = max_history_turns
         self._prompt_name = prompt_name
-        # 支持从外部传入 memory（便于测试 mock），默认使用模块级共享实例
-        self._memory: ChatHistory = memory if memory is not None else _get_shared_memory()
+        # 支持从外部传入 chat_history（便于测试 mock），默认使用模块级共享实例
+        self._chat_history: ChatHistory = (
+            chat_history if chat_history is not None else _get_shared_chat_history()
+        )
         self.last_usage: TokenUsage | None = None  # 最近一次 run() 的 token 统计
         # Extended Thinking 配置：共享同一 ThinkingConfig 实例，修改后无需重建 Agent
         self.thinking_cfg: ThinkingConfig = thinking_config if thinking_config is not None else ThinkingConfig.from_config()
@@ -220,7 +222,7 @@ class Agent:
         ]
 
         # 将当前轮用户输入写入 DB，并在首次创建 session 时带入 prompt_name
-        self._memory.append(
+        self._chat_history.append(
             self.session_id,
             {"role": "user", "content": user_input},
             prompt_name=self._prompt_name,
@@ -277,7 +279,7 @@ class Agent:
             if final_answer.strip():
                 logger.info("[Agent] 第 %d 轮得到最终回答，退出循环", iteration)
                 # 将最终回答写入 DB
-                self._memory.append(
+                self._chat_history.append(
                     self.session_id,
                     {"role": "assistant", "content": final_answer.strip()},
                 )
@@ -318,7 +320,7 @@ class Agent:
         # SQL 层粗粒度过滤：避免全量加载长历史 session（优化 F）
         limit = self.max_history_turns * _HISTORY_FETCH_MULTIPLIER
         history = [
-            m for m in self._memory.load_last_n_messages(self.session_id, limit)
+            m for m in self._chat_history.load_last_n_messages(self.session_id, limit)
             if m["role"] != "system"
         ]
 
@@ -381,7 +383,7 @@ class Agent:
         """
         assistant_msg = self._assistant_message(message)
         messages.append(assistant_msg)
-        self._memory.append(self.session_id, assistant_msg)
+        self._chat_history.append(self.session_id, assistant_msg)
 
         for tool_call in message.tool_calls:
             tool_name = tool_call.function.name
@@ -407,7 +409,7 @@ class Agent:
                 "tool_call_id": tool_call.id,
                 "content": db_content,
             }
-            self._memory.append(self.session_id, db_msg)
+            self._chat_history.append(self.session_id, db_msg)
 
             # 当前轮 messages 注入含引导提示的版本，引导 LLM 下一步决策
             llm_content = db_content
@@ -483,7 +485,7 @@ class Agent:
         # 显式触发 / AUTO_EXTRACT 时，都加载最近若干轮历史供 LLM 理解上下文
         # 显式触发时使用宽松 prompt；AUTO_EXTRACT 时使用严格 prompt（由 context_history 是否为空区分）
         context_history = ""
-        recent = self._memory.load_last_n_messages(self.session_id, n=10)
+        recent = self._chat_history.load_last_n_messages(self.session_id, n=10)
         turns = [
             m for m in recent
             if m.get("role") in ("user", "assistant") and m.get("content")

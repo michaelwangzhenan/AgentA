@@ -16,7 +16,8 @@ from prompt_toolkit.history import InMemoryHistory
 # 消除 HuggingFace tokenizer 的 FutureWarning
 warnings.filterwarnings("ignore", category=FutureWarning, module="transformers")
 
-load_dotenv(override=True)  # override=True 确保 .env 覆盖系统环境变量
+# override=True 确保 .env 覆盖系统环境变量
+load_dotenv(override=True) 
 
 # 设置日志：INFO 级别，显示文件名、行号和时间
 logging.basicConfig(
@@ -24,6 +25,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(filename)s:%(lineno)d - %(message)s",
     datefmt="%H:%M:%S",
 )
+
 # 关闭第三方库的冗余日志
 for _noisy in ("httpx", "httpcore", "openai", "chromadb", "sentence_transformers"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
@@ -51,12 +53,11 @@ def main() -> None:
     print(BANNER)
 
     # 延迟导入重型依赖（chromadb / sentence-transformers），使 banner 能即时显示
-    print("⏳ 正在初始化...", end="\r", flush=True)
+    print("⏳ 正在初始化...", end="\r", flush=True) 
     from src.agent.agent import SYSTEM_PROMPT, ThinkingConfig
-    print(" " * 30, end="\r", flush=True)
 
     # 共享 ChatHistory 实例，整个进程生命周期内复用
-    memory = ChatHistory()
+    chat_history = ChatHistory()
 
     # 启动时扫描自定义 Prompt 目录
     custom_prompts: dict[str, str] = scan_prompts(PROMPTS_DIR)
@@ -83,7 +84,7 @@ def main() -> None:
         cnt = len(user_memory.load_all())
         print(f"🧠 跨 session 记忆已加载（共 {cnt} 条）\n")
 
-    agent = handlers.make_agent(memory, skills_map, thinking_cfg, SYSTEM_PROMPT, user_memory=user_memory)
+    agent = handlers.make_agent(chat_history, skills_map, thinking_cfg, SYSTEM_PROMPT, user_memory=user_memory)
     print(f"💬 当前 Session: {agent.session_id}\n")
 
     # 当前激活的 prompt 名称（None 表示使用默认提示符 "你"）
@@ -91,7 +92,7 @@ def main() -> None:
 
     prompt_session: PromptSession[str] = PromptSession(
         history=InMemoryHistory(),
-        completer=make_completer(memory, custom_prompts, list(skill_cmds.keys())),
+        completer=make_completer(chat_history, custom_prompts, list(skill_cmds.keys())),
         complete_while_typing=False,  # 仅 Tab 触发，不干扰正常输入
     )
 
@@ -121,12 +122,12 @@ def main() -> None:
     while True:
         try:
             # 每轮刷新补全器，确保新建/删除的 session id 即时出现
-            prompt_session.completer = make_completer(memory, custom_prompts, list(skill_cmds.keys()))
+            prompt_session.completer = make_completer(chat_history, custom_prompts, list(skill_cmds.keys()))
             input_label = f"{active_prompt_name}: " if active_prompt_name else "你: "
             user_input = prompt_session.prompt(input_label).strip()
         except (KeyboardInterrupt, EOFError):
             print("\n\n👋 再见！")
-            memory.close()
+            chat_history.close()
             sys.exit(0)
 
         if not user_input:
@@ -139,7 +140,7 @@ def main() -> None:
         match cmd_tokens[0] if cmd_tokens else "":
             case "/quit" | "/exit":
                 print("👋 再见！")
-                memory.close()
+                chat_history.close()
                 sys.exit(0)
             case "/help":
                 print(HELP_TEXT)
@@ -167,18 +168,18 @@ def main() -> None:
                 handlers.run_ingest(docs_dir=docs_dir, model=model_alias)
                 continue
             case "/clear":
-                memory.clear(agent.session_id)
-                agent = handlers.make_agent(memory, skills_map, thinking_cfg, SYSTEM_PROMPT, user_memory=user_memory)
+                chat_history.clear(agent.session_id)
+                agent = handlers.make_agent(chat_history, skills_map, thinking_cfg, SYSTEM_PROMPT, user_memory=user_memory)
                 active_prompt_name = None
                 print(f"✅ 对话历史已清空，Agent 已重置。\n💬 新 Session: {agent.session_id}\n")
                 continue
             case "/history":
-                handlers.show_history(memory, agent.session_id)
+                handlers.show_history(chat_history, agent.session_id)
                 continue
             case "/session":
                 session_arg = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""
                 result = handlers.switch_session(
-                    memory, session_arg, custom_prompts, SYSTEM_PROMPT, skills_map,
+                    chat_history, session_arg, custom_prompts, SYSTEM_PROMPT, skills_map,
                     thinking_cfg, user_memory=user_memory
                 )
                 if result:
@@ -191,22 +192,22 @@ def main() -> None:
                 elif target_id == agent.session_id:
                     print("⚠️  不能删除当前活跃 session，请先用 /session <id> 切换到其他 session 后再删除。\n")
                 else:
-                    deleted = memory.delete_session(target_id)
+                    deleted = chat_history.delete_session(target_id)
                     if deleted:
                         print(f"🗑️  Session {target_id} 已彻底删除。\n")
                     else:
                         print(f"❌ Session {target_id} 不存在。\n")
                 continue
             case "/clean-session":
-                sessions = memory.list_sessions()
+                sessions = chat_history.list_sessions()
                 if not sessions:
                     print("📭 暂无历史 session 记录，无需清空。\n")
                 else:
                     confirm = input(f"⚠️  即将清空全部 {len(sessions)} 个 session 记录（不可恢复），确认请输入 yes：").strip().lower()
                     if confirm == "yes":
-                        count = memory.clean_all_sessions()
+                        count = chat_history.clean_all_sessions()
                         # 当前 Agent 的历史也已被清除，重建一个新 session
-                        agent = handlers.make_agent(memory, skills_map, thinking_cfg, SYSTEM_PROMPT, user_memory=user_memory)
+                        agent = handlers.make_agent(chat_history, skills_map, thinking_cfg, SYSTEM_PROMPT, user_memory=user_memory)
                         active_prompt_name = None
                         print(f"🗑️  已清空全部 {count} 个 session 记录。新 Session: {agent.session_id}\n")
                     else:
@@ -227,7 +228,7 @@ def main() -> None:
                     else SYSTEM_PROMPT
                 )
                 agent = handlers.make_agent(
-                    memory, skills_map, thinking_cfg,
+                    chat_history, skills_map, thinking_cfg,
                     _base_prompt, active_prompt_name or "", agent.session_id,
                     user_memory=user_memory,
                 )
@@ -239,7 +240,7 @@ def main() -> None:
                 if not save_arg:
                     print("⚠️  请指定文件名，例：/save my-chat\n")
                 else:
-                    handlers.save_history(memory, agent.session_id, save_arg)
+                    handlers.save_history(chat_history, agent.session_id, save_arg)
                 continue
             case "/thinking":
                 think_tokens = (
@@ -258,7 +259,7 @@ def main() -> None:
             question = user_input[len(cmd_name):].strip()
             active_prompt_name = cmd_name[1:]  # 去掉 / 前缀，如 "5g-expert"
             agent = handlers.make_agent(
-                memory, skills_map, thinking_cfg,
+                chat_history, skills_map, thinking_cfg,
                 custom_prompts[cmd_name], active_prompt_name,
                 user_memory=user_memory,
             )

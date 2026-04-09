@@ -51,7 +51,7 @@ class ChatHistory:
         初始化存储，自动创建数据库文件和表结构。
 
         Args:
-            db_path: SQLite 文件路径，默认 ./memory.db（与 chroma_db 同级）。
+            db_path: SQLite 文件路径，默认 ./sqlite_db/chat_history.db。
         """
         self._db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -84,16 +84,6 @@ class ChatHistory:
                 prompt_name   TEXT NOT NULL DEFAULT ''
             );
         """)
-        # 老库迁移兼容：若 sessions 表已存在但缺少 prompt_name 列，则动态添加
-        try:
-            self._conn.execute(
-                "ALTER TABLE sessions ADD COLUMN prompt_name TEXT NOT NULL DEFAULT ''"
-            )
-            self._conn.commit()
-            logger.info("ChatHistory: sessions 表已迁移添加 prompt_name 列")
-        except sqlite3.OperationalError:
-            # 列已存在（duplicate column name），正常情况，安全跳过
-            pass
         self._conn.commit()
 
     @staticmethod
