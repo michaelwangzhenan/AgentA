@@ -13,11 +13,8 @@ BANNER = """
 HELP_TEXT = """
 可用命令：
   /help                      显示本帮助信息
-  /ingest                    扫描默认 docs/ 目录并入库（模型: .env EMBEDDING_MODEL）
-  /ingest <目录>             扫描指定目录，例：/ingest D:/mydata
-  /ingest <目录> -m zh       指定目录 + 中文模型（BAAI/bge-small-zh）
-  /ingest <目录> -m en       指定目录 + 英文模型（all-MiniLM-L6-v2）
-  /ingest -m zh              默认目录 + 中文模型
+  /ingest                    使用默认模型扫描默认目录入库
+  /ingest <目录> -m <模型>   指定目录和模型（zh/en）入库
   /clear                     清空当前 session 的对话历史并重置 Agent
   /history                   查看当前 session 的历史对话摘要
   /session                   列出所有历史 session

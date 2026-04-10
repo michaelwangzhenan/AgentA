@@ -168,35 +168,3 @@ def ingest_all(
 
     logger.info("入库完成，共写入 %d 个文本块，collection 当前总量: %d 块",
                 total_chunks, collection.count())
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        description="私有知识库文档入库工具",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-模型别名:
-  en  →  all-MiniLM-L6-v2   英文/多语言（默认）
-  zh  →  BAAI/bge-small-zh   中文优化
-
-示例:
-  python -m rag.ingest
-  python -m rag.ingest --model zh
-  python -m rag.ingest -d ./docs_zh -m zh
-  python -m rag.ingest -d ./docs_en -m en
-""",
-    )
-    parser.add_argument(
-        "-d", "--docs-dir",
-        default=config.DOCS_DIR,
-        help=f"文档目录路径（默认: {config.DOCS_DIR}）",
-    )
-    parser.add_argument(
-        "-m", "--model",
-        default=config.DEFAULT_EMBEDDING_ALIAS,
-        help="embedding 模型别名：en / zh，或完整模型名（默认: %(default)s）",
-    )
-    args = parser.parse_args()
-    ingest_all(docs_dir=args.docs_dir, model=args.model)

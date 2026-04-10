@@ -7,7 +7,6 @@ CLI 入口 —— 私有知识库 Agent 对话界面
 """
 
 import logging
-import sys
 import warnings
 from dotenv import load_dotenv
 from prompt_toolkit import PromptSession
@@ -96,52 +95,26 @@ def main() -> None:
         complete_while_typing=False,  # 仅 Tab 触发，不干扰正常输入
     )
 
-    # Windows：清空控制台输入缓冲区，防止 VS Code 伪终端（ConPTY）把启动命令
-    # 注入 stdin，被 prompt_toolkit 误读为用户首条输入。
-    # ConPTY 下 stdin 是命名管道，msvcrt.kbhit 无效，需用 PeekNamedPipe 排空。
-    # if sys.platform == "win32":
-    #     import time
-    #     time.sleep(0.2)  # 等待启动脚本字符全部进入缓冲区
-    #     try:
-    #         import os
-    #         import ctypes
-    #         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    #         h = kernel32.GetStdHandle(-10)  # STD_INPUT_HANDLE
-    #         # 真实 Win32 控制台：清空输入事件队列
-    #         kernel32.FlushConsoleInputBuffer(h)
-    #         # ConPTY 管道：逐段 peek + read 丢弃已到达字节
-    #         avail = ctypes.c_ulong(0)
-    #         while (
-    #             kernel32.PeekNamedPipe(h, None, 0, None, ctypes.byref(avail), None)
-    #             and avail.value > 0
-    #         ):
-    #             os.read(sys.stdin.fileno(), avail.value)
-    #     except Exception:
-    #         pass
-
     while True:
         try:
-            # 每轮刷新补全器，确保新建/删除的 session id 即时出现
+            # 每轮刷新补全器，确保新建/删除的 session id 即时更新
             prompt_session.completer = make_completer(chat_history, custom_prompts, list(skill_cmds.keys()))
             input_label = f"{active_prompt_name}: " if active_prompt_name else "你: "
             user_input = prompt_session.prompt(input_label).strip()
         except (KeyboardInterrupt, EOFError):
-            print("\n\n👋 再见！")
-            chat_history.close()
-            sys.exit(0)
-
+            print("👋 再见1！")
+            handlers.quit_sys(chat_history, user_memory)
+            
         if not user_input:
             continue
 
         # ── 内置命令处理 ──────────────────────────────────────────────────────
-        cmd_lower = user_input.lower()
-        cmd_parts = user_input.split(maxsplit=1)  # 保留原始大小写用于路径
-        cmd_tokens = cmd_lower.split()
-        match cmd_tokens[0] if cmd_tokens else "":
+        cmd_parts = user_input.split(maxsplit=1) # input 分割为命 令名和参数
+        cmd_name = cmd_parts[0].lower() if cmd_parts else ""
+        match cmd_name:
             case "/quit" | "/exit":
-                print("👋 再见！")
-                chat_history.close()
-                sys.exit(0)
+                print("👋 再见2！")
+                handlers.quit_sys(chat_history, user_memory)
             case "/help":
                 print(HELP_TEXT)
                 continue
@@ -246,7 +219,7 @@ def main() -> None:
                 think_tokens = (
                     cmd_parts[1].strip().lower().split() if len(cmd_parts) > 1 else []
                 )
-                handlers.handle_thinking(thinking_cfg, think_tokens)
+                handlers.handle_thinking_cfg(thinking_cfg, think_tokens)
                 continue
             case "/memory":
                 if user_memory is None:
@@ -254,7 +227,8 @@ def main() -> None:
                 else:
                     handlers.handle_memory(user_memory, cmd_parts)
                 continue
-        cmd_name = cmd_tokens[0] if cmd_tokens else ""
+        
+        # ── 用户显式 Prompt 切换 ──────────────────────────────────────────────
         if cmd_name in custom_prompts:
             question = user_input[len(cmd_name):].strip()
             active_prompt_name = cmd_name[1:]  # 去掉 / 前缀，如 "5g-expert"

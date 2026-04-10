@@ -101,7 +101,7 @@ MEMORY_DB_PATH: str = os.getenv("MEMORY_DB_PATH", "./sqlite_db/chat_history.db")
 # 别名格式：{ 别名: (模型名称, collection名称) }
 EMBEDDING_MODELS: dict[str, tuple[str, str]] = {
     "en": ("all-MiniLM-L6-v2", "kb_en"),       # 英文/多语言，384维
-    "zh": ("BAAI/bge-small-zh", "kb_zh"),        # 中文优化，512维
+    "zh": ("BAAI/bge-small-zh", "kb_zh"),      # 中文优化，512维
 }
 
 # 默认 embedding 别名，可通过 .env 中的 EMBEDDING_MODEL 覆盖（填别名 en/zh，或直接填模型名）

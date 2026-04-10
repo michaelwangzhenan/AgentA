@@ -277,7 +277,7 @@ class ChatHistory:
                GROUP BY s.session_id
                ORDER BY s.created_at DESC""",
         ).fetchall()
-        return [dict(row) for row in rows]
+        return [dict[str, Any](row) for row in rows]
 
     def close(self) -> None:
         """关闭数据库连接。"""

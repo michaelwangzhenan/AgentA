@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 import src.config as config
 from src.memory.chat_history import ChatHistory
+from src.memory.user_memory import UserMemoryStore
 
 # 历史记录预览截断长度
 _HISTORY_PREVIEW_LEN: int = 60
@@ -18,8 +19,14 @@ _HISTORY_PREVIEW_LEN: int = 60
 if TYPE_CHECKING:
     from src.agent.agent import Agent, ThinkingConfig
     from src.cli.skill_loader import SkillInfo
-    from src.memory.user_memory import UserMemoryStore
 
+
+def quit_sys(chat_history: ChatHistory, user_memory: UserMemoryStore | None) -> None:
+    import sys
+    chat_history.close()
+    if user_memory is not None:
+        user_memory.close()
+    sys.exit(0)
 
 def run_ingest(docs_dir: str | None = None, model: str | None = None) -> None:
     """在 CLI 中触发文档入库，可指定文档目录和 embedding 模型。"""
@@ -118,13 +125,6 @@ def list_sessions(chat_history: ChatHistory) -> None:
     print()
 
 
-def print_token_usage(agent: "Agent") -> None:
-    """若本次对话有 token 统计则打印，无统计时静默跳过。"""
-    if agent.last_usage:
-        u = agent.last_usage
-        print(f"  📊 Token：输入 {u.prompt_tokens} + 输出 {u.completion_tokens} = 合计 {u.total_tokens}\n")
-
-
 def make_agent(
     chat_history: ChatHistory,
     skills_map: "dict[str, SkillInfo]",
@@ -148,20 +148,27 @@ def make_agent(
     )
 
 
+def _print_token_usage(agent: "Agent") -> None:
+    """若本次对话有 token 统计则打印，无统计时静默跳过。"""
+    if agent.last_usage:
+        u = agent.last_usage
+        print(f"  📊 Token：输入 {u.prompt_tokens} + 输出 {u.completion_tokens} = 合计 {u.total_tokens}\n")
+
+
 def run_query(agent: "Agent", question: str) -> None:
     """执行一次问答并打印结果，捕获中断和运行时异常。"""
     print()
     try:
         reply = agent.run(question)
         print(f"Agent: {reply}\n")
-        print_token_usage(agent)
+        _print_token_usage(agent)
     except KeyboardInterrupt:
         print("\n⚠️  已中断当前回答。\n")
     except Exception as e:
         print(f"❌ 出错了: {e}\n")
 
 
-def handle_thinking(thinking_cfg: "ThinkingConfig", think_tokens: list[str]) -> None:
+def handle_thinking_cfg(thinking_cfg: "ThinkingConfig", think_tokens: list[str]) -> None:
     """处理 /thinking 子命令，直接修改 thinking_cfg 状态并打印结果。"""
     match think_tokens[0] if think_tokens else "":
         case "on":
