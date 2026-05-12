@@ -225,9 +225,31 @@ ToDo List：
   局限： 构建图谱成本高，动态更新难
 
 31. Harness 中可以实现的部分
+  LLM 直接返回文本 → 输出最终回答，评价回答，决定是否继续提问 => 建立反馈机制，让 AI 能自我检查和修正。
 32. 支持sandbox
 33. Sub Agent
 34. 结合 systemInsight/walle
+35. SYSTEM_PROMPT 从文件读入
+36. Arch Refine
+  一个企业级 RAG 系统，数据量100万文档，如何设计索引和检索架构？
+  Agent系统如何保证可靠性？工具调用失败怎么处理？
+  多Agent协作的数据流如何设计，避免上下文爆炸？
+  → 实践：加入3GPP文档场景，遇到真实规模问题
+  → 输出：能画出完整的 AI 系统架构图并解释每个决策
+37. 使用 LangChain 实现
+  【现状摘要】核心在 `src/agent/agent.py` 手写 ReAct：`chat()`/`call_with_thinking()` + OpenAI 格式 tools；`src/agent/tools.py` 提供 JSON Schema 与 `execute_tool`；`src/memory/chat_history.py` 持久化每轮 user/assistant/tool；`src/llm/provider.py` 多厂商（OpenAI 兼容 / Claude / Qwen）与 Extended Thinking。
+  【目标界定】先定范围：A) 仅把「模型调用 + 工具绑定」换成 LangChain，自管循环与 DB；B) 用 `create_tool_calling_agent` + `AgentExecutor`（或 LangGraph）接管循环；C) RAG/向量库也迁到 `langchain-chroma` 等。A 改动最小，B/C 收益大但测试与行为对齐成本高。
+  【依赖】`requirements.txt` 增加 `langchain-core`、`langchain`（或拆 `langchain-openai` / `langchain-anthropic` 等），与现有 `openai`/`anthropic` 版本对齐；评估是否保留直连 SDK 作 fallback。
+  【模型层】用 `ChatOpenAI`（`base_url`+`api_key` 映射现有 `config` 各 provider）或 `ChatAnthropic` 对应 Claude；将 `extra_body`、代理（`httpx`）等与 LC 客户端构造对齐。Extended Thinking：查 `langchain-anthropic`/厂商是否暴露 thinking；若无则保留 `call_with_thinking` 为 Runnable 包装或「非 LC 分支」。
+  【工具层】把 `TOOLS`/`load_skill` 转为 `@tool` / `StructuredTool`，内部仍调用现有 `execute_tool` 与 RAG，避免重复实现抓取与 Chroma 逻辑。动态 `skill_bodies` 与 `activate_skill` 需在每轮或绑定 Runnable 时更新 tools 列表（与当前「去枚举防重复 load_skill」行为一致）。
+  【Agent 循环】若用 `AgentExecutor`：用 `max_iterations`/`handle_parsing_errors` 对齐 `MAX_TOTAL_ROUNDS`/`MAX_TOOL_ROUNDS`（后者需在 tool 上限后移除 tools 或 middleware 强制文本，与现逻辑一致）。若用 LangGraph：用节点显式复刻「写 DB 用干净 tool 内容、内存 messages 带 TOOL_EMPTY_HINT」的分叉，最易保持与 SQLite 历史一致。
+  【历史与 Session】保留 `ChatHistory` 为真源时：在每轮前后做 `dict` ↔ `BaseMessage` 转换，或实现自定义 `BaseChatMessageHistory` 读写 SQLite；评估 `trim_messages` 替代 `_load_truncated_history`，并保留 `_collect_skill_pairs` 防孤立 tool 消息。若改用 LangGraph checkpointer，需迁移或双写 session 模型。
+  【用户记忆】`<user_context>` 注入与 `extract_memories` 可保留在链外：pre-hook 拼 system、post-hook 调现有 `extract_memories`；或拆成 LC Runnable 前后步骤。
+  【CLI / handlers】`handlers.make_agent`/`run_query` 改为构造 LC Agent/Graph 或 Facade，对外仍暴露 `run(user_input)->str` 与 `session_id`、`activate_skill`、`last_usage`（usage 从 LC 回调或 response_metadata 汇总）。
+  【测试】`tests/test_agent.py` 大量 patch `chat`：改为 mock `bind_tools` 的 fake LLM、或 LangGraph 状态机单测；补集成测确认 tool 轮次上限与 DB 写入与现行为一致。
+  【风险与顺序】厂商特性（thinking、tool_choice、流式）与 LC 抽象不完全对齐 → 建议 PoC：单 provider + 两工具 + 历史截断 + 一轮迁移测试通过后再扩多厂商与 thinking。
+
+38. 使用 Auto-GPT 实现
 -
 a. Agent S
   一个 GUI/Computer-Use Agent, an open agentic framework that uses computers like a human
@@ -240,3 +262,6 @@ d. CoT
   Chain of Thought: 让 LLM 本身一步一步地思考，而不是直接给出答案，如 CoT 的 prompt 示例：
 e. Plan and Execute
   先整体规划（Plan），再按步骤执行（Execute）
+f. happy horse/ see dance/ nano banana
+g. Hermes Agent
+-

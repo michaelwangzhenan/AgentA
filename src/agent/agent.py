@@ -8,12 +8,6 @@ Agent 主控逻辑 —— ReAct（Reason + Act）循环
     4. 若 LLM 返回 tool_calls → 执行工具 → 将结果追加到 messages → 继续循环
     5. 若 LLM 直接返回文本 → 输出最终回答，退出循环
     6. 超过最大迭代次数时强制退出，防止死循环
-
-使用方式：
-    from agent.agent import Agent
-    agent = Agent(session_id="my-session")
-    reply = agent.run("什么是 RAG？")
-    print(reply)
 """
 
 import json
