@@ -47,6 +47,86 @@ ToDo List：
   目标： 
     支持MCP最新版标准： https://modelcontextprotocol.io/specification/2025-11-25
     支持接入 local mcp server 来访问本地文件系统和工具 : https://modelcontextprotocol.io/docs/develop/connect-local-servers
+    支持 MCP 最新版标准（2025-11-25）：接入 local/remote MCP Server，将其工具集无缝融入 Agent ReAct 循环。
+    对外表现：MCP 工具与本地工具（search_knowledge/fetch_url）无差别，LLM 通过同一套 function calling 调用。
+
+  【设计原则】
+    · 向后兼容：MCP_ENABLED=false 时现有行为零变化，不引入额外依赖加载。
+    · 无侵入：不改造 Agent ReAct 核心循环逻辑，仅扩展 tools 来源与 execute_tool 路由。
+    · 配置驱动：通过 YAML 声明式配置 MCP Server（stdio / SSE），支持热重载。
+
+  【模块设计】src/mcp/
+    1. config.py —— 配置解析
+       · 读取 advanced/mcp/servers.yaml（或 .env 中 MCP_SERVERS_CONFIG 指定路径）。
+       · 单服务器字段：name, transport(stdio|sse), command/args(env 可注入), url, timeout。
+       · 环境变量占位符支持（如 ${BING_API_KEY}），在解析时替换。
+
+    2. client.py —— MCP 客户端封装
+       · 基于官方 mcp Python SDK（pip install mcp）。
+       · 统一抽象：McpClient 封装 stdio 子进程（StdioServerParameters + ClientSession）
+         或 SSE 长连接（HttpMcpTransport）。
+       · 暴露同步化 API：list_tools()、call_tool(name, arguments) → 内部用 asyncio.run 或
+         后台事件循环包裹异步 SDK 接口，避免重构整个项目为 async。
+       · 生命周期管理：connect() / disconnect() / health_check()；进程退出时自动清理子进程。
+
+    3. adapter.py —— 格式适配器
+       · mcp_tool_to_openai(mcp_tool) → OpenAI Function Calling JSON Schema。
+       · 名称隔离：MCP 工具名加前缀 "mcp_{server_name}_{tool_name}"，防止与本地工具冲突。
+       · 反向映射：维护 {prefixed_name: (server_name, original_name)}，供 execute_tool 路由。
+
+    4. manager.py —— 多服务器聚合管理
+       · MCPManager 持有 {server_name: McpClient} 字典。
+       · aggregate_tools() → 收集所有 server 的 tools，经 adapter 转换后统一返回列表。
+       · dispatch_tool(prefixed_name, args) → 解析前缀，路由到对应 client.call_tool()。
+       · 启动时并行连接所有 server，失败时记录 warning 但不阻断主程序（某 server 挂了仅该 server 工具不可用）。
+
+  【现有代码改造点】
+    1. requirements.txt：新增 mcp（官方 Python SDK）。
+    2. src/config.py：
+       · MCP_ENABLED: bool（默认 false）
+       · MCP_SERVERS_CONFIG: str（默认 advanced/mcp/servers.yaml）
+       · MCP_TOOL_TIMEOUT: int（默认 30s）
+    3. src/agent/tools.py：
+       · get_tools(skill_bodies, mcp_tools=None) → 若传入 mcp_tools，追加到 tools 列表尾部。
+       · execute_tool(name, args, skill_bodies, mcp_manager=None) → match case 增加 "mcp_*" 分支，
+         调用 mcp_manager.dispatch_tool()；ToolResult 包装保持不变。
+    4. src/agent/agent.py：
+       · Agent.__init__ 新增可选参数 mcp_manager: MCPManager | None。
+       · run() 中：active_tools = get_tools(self._skill_bodies, self._mcp_manager.aggregate_tools() if self._mcp_manager else None)。
+    5. src/cli/handlers.py & main.py：
+       · main() 启动时：若 MCP_ENABLED，初始化 MCPManager 并 connect_all()；传入 make_agent。
+       · 新增 /mcp 命令：
+         /mcp list    — 列出各 server 状态及可用工具
+         /mcp reload  — 断开并重新读取配置、重连 server
+       · make_agent() 签名增加 mcp_manager 参数并透传给 Agent。
+    6. advanced/mcp/ 目录：
+       · .gitkeep + servers.yaml.example（示例配置本地 filesystem mcp server）。
+
+  【风险与应对】
+    · 异步冲突：mcp SDK 重度依赖 asyncio，而项目整体为同步代码。
+      应对：在 McpClient 内部隔离事件循环（专用线程 + asyncio.new_event_loop() 或
+      asyncio.run() 包裹单条调用），对外保持同步接口。
+    · 工具名冲突：多个 MCP server 可能出现同名工具。
+      应对：adapter.py 强制加 "mcp_{server_name}_" 前缀；LLM 侧通过 description 区分语义。
+    · 超时/死锁：local stdio server（如 filesystem）可能挂起。
+      应对：call_tool 增加 timeout（信号或 concurrent.futures.ThreadPoolExecutor）；
+      超时时返回 ToolResult(status="error", content="MCP tool timeout")。
+    · 上下文污染：MCP 工具返回内容过大挤占 LLM 上下文。
+      应对：参考现有 fetch_url max_chars 截断策略，在 adapter 或 manager 层统一限制 MCP 结果长度。
+
+  【测试】tests/test_mcp.py
+    · Mock McpClient（不启动真实子进程），测试 adapter 格式转换正确性。
+    · 测试 execute_tool 路由：传入 mcp_ 前缀名时正确调用 manager.dispatch_tool。
+    · 测试 MCPManager 聚合：多 server 同名工具前缀隔离。
+    · 测试配置解析：环境变量注入、缺字段容错。
+    · 集成测试（optional）：启动官方 filesystem mcp server，测试 list_directory 工具端到端。
+
+  【实现顺序】
+    ① 引入 mcp SDK，搭好 src/mcp/ 目录骨架（config + adapter + client stub）。
+    ② 实现 adapter 与单 client stdio 连接，对接本地 filesystem mcp server 跑通单工具调用。
+    ③ 实现 manager 聚合与 agent/tools.py 改造，使 MCP 工具参与 ReAct 循环。
+    ④ 添加 CLI /mcp 命令与热重载。
+    ⑤ 补全 tests/test_mcp.py，更新 .env.example 与文档。
 
 
 7. 用户自定义 Workflow
@@ -77,7 +157,6 @@ ToDo List：
 
 12. Ollama
   目标： 支持本地 Ollama 模型，完全离线运行
-
 
 [x]13. URL 批量导入
   目标： 支持通过配置文件批量爬取指定网页并入库
