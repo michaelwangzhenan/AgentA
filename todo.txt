@@ -338,7 +338,7 @@ c. Agentic Search
   让 LLM 本身参与决策——它会思考"我需要搜什么"、执行搜索、判断"够了吗？"、必要时再搜
   ReAct 模式（Reason → Act → Observe → Reason…）就是 Agentic Search 的典型实现方式
 d. CoT
-  Chain of Thought: 让 LLM 本身一步一步地思考，而不是直接给出答案，如 CoT 的 prompt 示例：
+  Chain of Thought: 让 LLM 本身一步一步地思考，而不是直接给出答案，如 CoT 的 prompt 示例
 e. Plan and Execute
   先整体规划（Plan），再按步骤执行（Execute）
 f. happy horse/ see dance/ nano banana
