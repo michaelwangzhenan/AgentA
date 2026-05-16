@@ -134,7 +134,22 @@ def make_agent(
     session_id: str | None = None,
     user_memory: "UserMemoryStore | None" = None,
 ) -> "Agent":
-    """创建 Agent 实例，封装 CLI 层所需的标准参数。"""
+    imp = config.IMP_METHOD
+    if imp == "AUTOGPT":
+        print("AUTOGPT not yet implemented. Set IMP_METHOD to PYTHON or LANGCHAIN.")
+        raise SystemExit(1)
+    if imp == "LANGCHAIN":
+        from src.agent.lc_agent import LangChainAgent
+        return LangChainAgent(
+            verbose=True,
+            chat_history=chat_history,
+            session_id=session_id,
+            system_prompt=system_prompt,
+            prompt_name=prompt_name,
+            skills=skills_map or None,
+            thinking_config=thinking_cfg,
+            user_memory=user_memory,
+        )
     from src.agent.agent import Agent
     return Agent(
         verbose=True,

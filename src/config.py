@@ -201,3 +201,6 @@ def get_active_config() -> ProviderConfig:
             f"支持的值为: {supported}"
         )
     return config
+
+# Agent 实现方式: PYTHON | LANGCHAIN | AUTOGPT
+IMP_METHOD: str = os.getenv('IMP_METHOD', 'PYTHON').upper()

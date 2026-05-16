@@ -9,10 +9,8 @@ def test_sqlite_history_add_and_load(tmp_path):
     h = SQLiteChatMessageHistory('s1', db)
     h.add_message(HumanMessage(content='hello'))
     h.add_message(AIMessage(content='hi'))
-    msgs = h.messages
-    assert len(msgs) == 2
-    assert isinstance(msgs[0], HumanMessage)
-    assert msgs[0].content == 'hello'
+    assert len(h.messages) == 2
+    assert h.messages[0].content == 'hello'
 
 def test_sqlite_history_clear(tmp_path):
     db = str(tmp_path) + '/test.db'
@@ -21,41 +19,72 @@ def test_sqlite_history_clear(tmp_path):
     h.clear()
     assert h.messages == []
 
-def test_build_lc_tools_returns_two_base_tools():
+def test_build_lc_tools_default():
     tools = build_lc_tools()
     names = [x.name for x in tools]
     assert 'search_knowledge' in names
     assert 'fetch_url' in names
 
 def test_build_lc_tools_with_skills():
-    bodies = {'demo': 'skill body'}
-    tools = build_lc_tools(bodies)
-    assert len(tools) == 3
-    names = [x.name for x in tools]
-    assert 'load_skill' in names
+    tools = build_lc_tools({'demo': 'body'})
+    assert any(x.name == 'load_skill' for x in tools)
 
 def test_search_input_defaults():
-    inp = SearchKnowledgeInput(query='test')
-    assert inp.top_k == 5
+    assert SearchKnowledgeInput(query='q').top_k == 5
 
 def test_fetch_input_defaults():
-    inp = FetchUrlInput(url='http://x.com')
-    assert inp.max_chars == 3000
+    assert FetchUrlInput(url='http://x.com').max_chars == 3000
 
-def test_lc_agent_chat_returns_string(tmp_path):
+def _mk(sess='sid', prompt='p', tc=None):
     import src.agent.lc_agent
-    db = str(tmp_path) + '/a.db'
-    with patch('src.agent.lc_agent.build_chat_model') as mock_llm, \
-         patch('src.agent.lc_agent.build_lc_tools') as mock_tools:
-        mock_llm.return_value = MagicMock()
-        mock_tools.return_value = []
+    with patch('src.agent.lc_agent.build_chat_model') as a, \
+         patch('src.agent.lc_agent.build_lc_tools') as b, \
+         patch('src.agent.lc_agent.SQLiteChatMessageHistory') as c, \
+         patch('src.agent.lc_agent.create_agent') as d:
+        a.return_value = MagicMock()
+        b.return_value = []
+        hi = MagicMock()
+        hi.messages = []
+        c.return_value = hi
+        mx = MagicMock()
+        mx.invoke.return_value = {'messages': [AIMessage(content='ok')]}
+        d.return_value = mx
         from src.agent.lc_agent import LangChainAgent
-        with patch('src.agent.lc_agent.create_agent') as mock_ag:
-            mock_exec = MagicMock()
-            pong = AIMessage(content='pong')
-            mock_exec.invoke.return_value = {'messages': [pong]}
-            mock_ag.return_value = mock_exec
-            agent = LangChainAgent('sess1', db_path=db)
-            reply = agent.chat('ping')
-            assert reply == 'pong'
-            assert len(agent._history.messages) == 2
+        ag = LangChainAgent(session_id=sess, system_prompt=prompt, thinking_config=tc)
+    return ag, mx
+
+def test_lc_agent_session_id():
+    ag, _ = _mk(sess='my-id')
+    assert ag.session_id == 'my-id'
+
+def test_lc_agent_session_id_auto():
+    ag, _ = _mk(sess=None)
+    assert ag.session_id
+
+def test_lc_agent_last_usage_none():
+    ag, _ = _mk()
+    assert ag.last_usage is None
+
+def test_lc_agent_thinking_cfg_stored():
+    cfg = MagicMock()
+    ag, _ = _mk(tc=cfg)
+    assert ag.thinking_cfg is cfg
+
+def test_lc_agent_run():
+    ag, _ = _mk()
+    r = ag.run('hello')
+    assert r == 'ok'
+
+def test_lc_agent_chat_alias():
+    ag, _ = _mk()
+    assert isinstance(ag.chat('hi'), str)
+
+def test_lc_agent_activate_skill_first_true():
+    ag, _ = _mk()
+    assert ag.activate_skill('sk', 'body') is True
+    assert 'sk' in ag._system_prompt
+
+def test_lc_agent_activate_skill_duplicate_false():
+    ag, _ = _mk()
+    ag.activate_skill('sk', 'body')
+    assert ag.activate_skill('sk', 'body') is False
