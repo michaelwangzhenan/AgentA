@@ -368,3 +368,29 @@ python-dotenv
 > - `lxml` 是 BeautifulSoup 解析 HTML 的推荐后端，比默认的 `html.parser` 更稳定，需显式安装。
 > - 所有 LLM Provider（Gemini、OpenAI、Ollama）均通过 `openai` SDK 调用，因为它们兼容 OpenAI 接口格式。Claude 原生 API 格式与 OpenAI 不同，有两种接入方式：①通过 AWS Bedrock / Google Vertex AI 的 OpenAI 兼容接口调用；②直接安装 `anthropic` SDK 在 `provider.py` 中单独适配。本项目 Phase 7 采用方式②，需额外安装 `anthropic` 库。
 ---
+
+
+---
+
+## 九、LangChain 集成实现计划（Phase 9）
+
+### 目标
+使用 LangChain 框架接管 Agent ReAct 循环与工具绑定，保持原有功能不变，
+新增 LangChainAgent 作为 Agent 的 LangChain 版本。
+
+### 实施范围（Option B：AgentExecutor 接管循环）
+- LLM 层：ChatOpenAI / ChatAnthropic 替换直接 SDK 调用
+- 工具层：StructuredTool 包装现有工具函数
+- Agent 循环：create_tool_calling_agent + AgentExecutor 替代手写 ReAct 循环
+- 历史层：SQLiteChatMessageHistory 适配 BaseChatMessageHistory 接口
+- Extended Thinking：暂不支持（LangChain 抽象不完整）
+
+### 新增文件
+- lc_provider.py : ChatModel 工厂
+- lc_tools.py    : StructuredTool 封装
+- lc_history.py  : SQLite 历史适配器
+- lc_agent.py    : AgentExecutor 驱动的 Agent
+- test_lc_agent.py : 单元测试
+
+### 依赖新增
+- langchain-core, langchain, langchain-openai, langchain-anthropic

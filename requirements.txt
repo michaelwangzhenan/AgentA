@@ -33,5 +33,12 @@ pyyaml
 # Environment variables
 python-dotenv
 
+
+# LangChain integration (Phase 9)
+langchain-core
+langchain
+langchain-openai
+langchain-anthropic
+
 # Testing
 pytest
