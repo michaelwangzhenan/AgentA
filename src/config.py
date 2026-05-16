@@ -204,3 +204,9 @@ def get_active_config() -> ProviderConfig:
 
 # Agent 实现方式: PYTHON | LANGCHAIN | AUTOGPT
 IMP_METHOD: str = os.getenv('IMP_METHOD', 'PYTHON').upper()
+
+# ── Auto-GPT 配置 ─────────────────────────────────────────────────────────────
+# 单次规划阶段最多生成几个子任务（Plan 阶段）
+AUTOGPT_MAX_PLAN_TASKS: int = int(os.getenv('AUTOGPT_MAX_PLAN_TASKS', '6'))
+# 每个子任务迷你 ReAct 子循环最多调用几轮工具（Execute 阶段）
+AUTOGPT_MAX_TASK_TOOL_ROUNDS: int = int(os.getenv('AUTOGPT_MAX_TASK_TOOL_ROUNDS', '4'))
