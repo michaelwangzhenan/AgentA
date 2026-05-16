@@ -308,7 +308,63 @@ ToDo List：
 32. 支持sandbox
 33. Sub Agent
 34. 结合 systemInsight/walle
-35. SYSTEM_PROMPT 从文件读入
+35. 支持SYSTEM_PROMPT 从文件读入
+  目标：允许用户通过环境变量指定文件路径，让 Agent 默认 System Prompt 从文件读取，无需修改源代码。
+
+  【优先级链】
+    /prompt 命令（当前 session 覆盖）> 文件读取（本次新增）> agent.py 硬编码（最终屜底）
+
+  【配置设计】
+    src/config.py 新增：
+      SYSTEM_PROMPT_FILE: str = os.getenv("SYSTEM_PROMPT_FILE", "")
+      · 默认为空字符串（未配置时完全不触发文件读取，向后兼容）
+      · 用户在 .env 中设置 SYSTEM_PROMPT_FILE=advanced/system_prompt.md 即可启用
+    .env.example 新增（注释状态）：
+      # SYSTEM_PROMPT_FILE=advanced/system_prompt.md
+
+  【文件读取函数】
+    位置：src/cli/prompt_loader.py（与现有 load_prompt_file() 同域）
+    函数签名：load_system_prompt(file_path: str) -> str | None
+    行为规范：
+      · file_path 为空字符串 → 直接返回 None（不触发文件读取）
+      · 文件不存在 → logging.warning + 返回 None（fallback 到硬编码）
+      · 文件内容为空 → logging.warning + 返回 None（fallback 到硬编码）
+      · 编码或读取错误 → except (OSError, ValueError) + logging.warning + 返回 None
+      · 成功 → 返回去除首尾空白后的字符串
+    相对路径：相对于 cwd（项目根目录）
+
+  【调用时机】
+    main.py 启动时一次性读取（与 scan_prompts 保持一致）：
+      default_system_prompt = load_system_prompt(config.SYSTEM_PROMPT_FILE) or SYSTEM_PROMPT
+    · 不放在 config.py（避免模块加载时 IO 副作用，logging 未就绪时 warning 会被吞）
+    · 不放在 make_agent()（避免多次调用重复读文件）
+
+  【各文件改动清单】
+    src/config.py             新增 SYSTEM_PROMPT_FILE 变量（1 行）
+    src/cli/prompt_loader.py  新增 load_system_prompt() 函数
+    main.py                   启动时调用 load_system_prompt()，替换 SYSTEM_PROMPT 引用
+    src/agent/agent.py        不改动，SYSTEM_PROMPT 常量保留作最终屜底
+    src/cli/handlers.py       不改动，make_agent/switch_session 接口无需变化
+    .env.example              新增注释示例配置项
+    advanced/system_prompt.md  新建（不放在 prompts/ 下避免被 scan_prompts 误识别）
+
+  【测试方案】
+    新增 tests/test_system_prompt_loader.py，覆盖以下场景：
+      · SYSTEM_PROMPT_FILE 为空 → 返回 None，不读文件
+      · 文件存在且有内容 → 返回正确字符串
+      · 文件不存在 → 返回 None，打印 warning
+      · 文件内容为空全空白 → 返回 None，打印 warning
+      · UnicodeDecodeError → 返回 None，打印 warning
+      · OSError → 返回 None，打印 warning
+      · 相对路径正确 resolve 到 cwd
+
+  【实现步骤】
+    1. src/config.py 新增 SYSTEM_PROMPT_FILE 配置项
+    2. src/cli/prompt_loader.py 新增 load_system_prompt() 函数
+    3. main.py 替换 SYSTEM_PROMPT 引用为 load_system_prompt() 的结果
+    4. .env.example 新增注释配置项
+    5. 新建 advanced/system_prompt.md
+    6. 新增 tests/test_system_prompt_loader.py
 36. Arch Refine
   一个企业级 RAG 系统，数据量100万文档，如何设计索引和检索架构？
   Agent系统如何保证可靠性？工具调用失败怎么处理？
