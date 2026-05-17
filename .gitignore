@@ -63,3 +63,6 @@ desktop.ini
 *.code-workspace
 *.exe
 
+# ── Chainlit ────────────────────────────────────────────────────
+.chainlit/translations/
+.files
