@@ -5,15 +5,16 @@
 支持重复运行（upsert），文档更新后重新运行即可，不会重复入库。
 不同 embedding 模型使用独立的 ChromaDB collection，互不干扰。
 
-使用方式：
-    python -m rag.ingest                          # 默认目录 + 默认模型（en）
-    python -m rag.ingest --model zh               # 使用中文模型
-    python -m rag.ingest --docs-dir ./docs_zh --model zh
-    python -m rag.ingest -d ./docs_en -m en
+使用方式（独立脚本入口，等价于 main.py 里的 /ingest 交互命令）：
+    python -m src.rag.ingest                              # 默认目录 + 默认模型
+    python -m src.rag.ingest --model zh                   # 使用中文模型
+    python -m src.rag.ingest --docs-dir ./docs_zh --model zh
+    python -m src.rag.ingest -d ./docs_en -m en
 
-模型别名：
+模型别名（详见 src/config.py EMBEDDING_MODELS）：
     en  →  all-MiniLM-L6-v2  （英文/多语言，collection: kb_en）
     zh  →  BAAI/bge-small-zh  （中文优化，  collection: kb_zh）
+    m3  →  BAAI/bge-m3        （多语言单库，collection: kb_m3）
 """
 
 # 必须在所有 huggingface/transformers 相关库 import 之前设置环境变量
@@ -317,3 +318,45 @@ def ingest_all(
         "入库完成：新增/更新 %d 块，跳过未变 %d 个文件，collection 当前总量: %d 块",
         total_chunks, skipped_unchanged, collection.count(),
     )
+
+
+def _build_arg_parser() -> "argparse.ArgumentParser":
+    """构造独立 CLI 入口的 argparse；与文件 docstring 中的示例保持一致。"""
+    import argparse
+    p = argparse.ArgumentParser(
+        prog="python -m src.rag.ingest",
+        description=(
+            "扫描 docs 目录并入库到 ChromaDB（与 main.py 里的 /ingest 命令等价）。"
+            "支持 upsert，重复运行不会产生重复 chunk。"
+        ),
+    )
+    p.add_argument(
+        "-d", "--docs-dir",
+        default=config.DOCS_DIR,
+        help=f"文档目录路径（默认 {config.DOCS_DIR}）",
+    )
+    p.add_argument(
+        "-m", "--model",
+        default=config.DEFAULT_EMBEDDING_ALIAS,
+        help=(
+            "embedding 模型别名（en/zh/m3，详见 src/config.py EMBEDDING_MODELS）；"
+            f"默认 {config.DEFAULT_EMBEDDING_ALIAS}（来自 .env EMBEDDING_MODEL）"
+        ),
+    )
+    return p
+
+
+def _main(argv: "list[str] | None" = None) -> int:
+    """脚本入口；解析参数后调 ingest_all。"""
+    args = _build_arg_parser().parse_args(argv)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+    )
+    ingest_all(docs_dir=args.docs_dir, model=args.model)
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(_main())

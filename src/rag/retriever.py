@@ -149,7 +149,7 @@ def _query_collection(
         )
     except NotFoundError:
         logger.warning(
-            "collection '%s' 不存在，跳过。请先运行: python -m rag.ingest -m %s",
+            "collection '%s' 不存在，跳过。请先运行: python -m src.rag.ingest -m %s",
             collection_name,
             collection_name.removeprefix("kb_"),
         )
@@ -483,8 +483,8 @@ def format_search_results(hits: list[Hit]) -> str:
         return (
             "知识库为空或尚未初始化。\n"
             "请运行以下命令完成文档入库：\n"
-            "  python -m rag.ingest -m en   # 英文文档\n"
-            "  python -m rag.ingest -m zh   # 中文文档"
+            "  python -m src.rag.ingest -m en   # 英文文档\n"
+            "  python -m src.rag.ingest -m zh   # 中文文档"
         )
 
     parts: list[str] = []
