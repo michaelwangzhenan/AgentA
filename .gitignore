@@ -13,6 +13,12 @@ docs/
 docs_zh/
 # ChromaDB 向量索引（自动生成）
 chroma_db/
+# BM25 倒排索引（自动生成，Iter-2）
+bm25_index/
+
+# RAG 评估报告 / 自定义黄金集（自动生成 / 个人数据，Iter-5）
+reports/
+evaluation/rag/golden.json
 
 # 对话历史数据库目录（自动生成）
 sqlite_db/
