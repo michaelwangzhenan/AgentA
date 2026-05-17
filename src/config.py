@@ -142,7 +142,10 @@ CHROMA_COLLECTION: str = DEFAULT_COLLECTION
 DOCS_DIR: str = os.getenv("DOCS_DIR", "./docs")
 
 # RAG 检索返回的最大文档片段数
-RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "5"))
+# Iter-2 默认从 5 提升到 8：枚举/对比类问题 5 条往往不够；当前 LLM 上下文 8K~32K 富裕。
+RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "8"))
+# 同一来源文件最多保留几条 chunk（避免一个长文档霸屏）；<=0 表示不去重
+RAG_K_PER_SOURCE: int = int(os.getenv("RAG_K_PER_SOURCE", "3"))
 
 # HTTP 代理配置
 # 格式示例：http://10.144.1.10:8080
@@ -182,6 +185,19 @@ RAG_DENSE_MIN_SCORE: float = float(os.getenv("RAG_DENSE_MIN_SCORE", "0.30"))
 #   ms-marco MiniLM 输出 raw logit，区间 [-10, 10]，建议阈值 -3 ~ 0）。
 # 默认 0.0：保守不过滤，迁移到 bge-reranker 后可上调。
 RAG_RERANK_MIN_SCORE: float = float(os.getenv("RAG_RERANK_MIN_SCORE", "0.0"))
+
+# ── BM25 + RRF 混合检索配置 ──────────────────────────────────────────────────
+# 开启后 retriever 会同时跑 dense（向量）与 sparse（BM25 关键词）召回，并用
+# Reciprocal Rank Fusion 融合排名；对专有名词/缩写/版本号等"低 embedding 区分度"
+# 的查询命中率显著优于纯 dense。
+BM25_ENABLED: bool = os.getenv("BM25_ENABLED", "true").lower() == "true"
+# BM25 Okapi 经典超参：k1 控制 term frequency 饱和度（1.2~2.0），b 控制文档长度归一化（0~1）
+BM25_K1: float = float(os.getenv("BM25_K1", "1.5"))
+BM25_B: float = float(os.getenv("BM25_B", "0.75"))
+# RRF 融合常数 k，论文推荐 60；越大越平滑（rank 之间差异被压制），越小越极端
+RRF_K: int = int(os.getenv("RRF_K", "60"))
+# BM25 索引存储目录；为空则与 CHROMA_DB_PATH 同级，保持工程目录干净
+BM25_INDEX_DIR: str = os.getenv("BM25_INDEX_DIR", "")
 
 # ── Extended Thinking 配置 ────────────────────────────────────────────────────
 # true 开启 Extended Thinking；目前 Claude（原生 SDK）和 Qwen3 支持，其余 provider 静默降级

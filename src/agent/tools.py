@@ -118,20 +118,37 @@ TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "search_knowledge",
             "description": (
-                "搜索私有知识库，返回与问题最相关的文档片段。"
+                "搜索私有知识库（dense 向量 + BM25 关键词 混合检索），返回与问题最相关的文档片段。"
                 "当问题可能在已导入的本地文档中有答案时，优先调用此工具。"
+                "查询写法建议："
+                "①优先使用包含专有名词/术语/版本号的简短关键词查询（如 '3GPP TS 38.211 PRACH'），"
+                "BM25 对此类术语命中显著优于自然语言；"
+                "②口语化表达请同时尝试术语化改写（'5G 基站' → 'gNB'）；"
+                "③多义/复合问题拆成多个子查询分别调用本工具；"
+                "④对'列举/对比/汇总'类问题请把 top_k 设为 10。"
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "用于检索的自然语言查询语句，尽量与用户问题语义相近。",
+                        "description": "用于检索的自然语言或关键词查询语句，尽量与用户问题语义相近。",
                     },
                     "top_k": {
                         "type": "integer",
-                        "description": "返回的最大文档片段数，默认为 5，最大不超过 10。",
-                        "default": 5,
+                        "description": "返回的最大文档片段数，默认为 8，最大不超过 10；枚举/对比类问题建议设为 10。",
+                        "default": 8,
+                    },
+                    "where": {
+                        "type": "object",
+                        "description": (
+                            "可选 metadata 过滤条件，按入库 metadata 字段精筛。"
+                            "支持字段：lang('zh'/'en'/'mixed')、ext('.pdf'/'.docx'/...)、"
+                            "filename、source（相对路径）、page_no（int）、heading_path（字符串包含）。"
+                            "等值用 {字段: 值}；多值用 {字段: {\"$in\": [...]}}。"
+                            "示例：{\"lang\": \"zh\"}、{\"ext\": {\"$in\": [\".pdf\", \".docx\"]}}。"
+                            "明确知道答案语种或文档类型时使用此参数可大幅提升命中质量。"
+                        ),
                     },
                 },
                 "required": ["query"],
@@ -248,20 +265,32 @@ def _tool_web_search(query: str, num: int = 5) -> ToolResult:
     return ToolResult(status="ok", content="\n\n".join(lines))
 
 
-def _tool_search_knowledge(query: str, top_k: int = 5) -> ToolResult:
+def _tool_search_knowledge(
+    query: str,
+    top_k: int = 8,
+    where: dict | None = None,
+) -> ToolResult:
     """
-    调用 RAG 检索层，返回格式化的文档片段字符串。
+    调用 RAG 检索层（dense + BM25 混合），返回格式化的文档片段字符串。
 
     Args:
         query: 检索查询语句。
-        top_k: 返回的最大片段数。
+        top_k: 返回的最大片段数（1~MAX_SEARCH_TOP_K，超出会截断）。
+        where: 可选 metadata 过滤子句，透传给 retriever，支持 ChromaDB 等值/$in/$ne 算子。
 
     Returns:
         ToolResult：有命中结果 → status="ok"；知识库为空/无命中 → status="empty"。
     """
     top_k = min(max(1, top_k), MAX_SEARCH_TOP_K)  # 限制在 1~MAX_SEARCH_TOP_K 之间
-    logger.info("[tool] search_knowledge: query=%r, top_k=%d", query, top_k)
-    hits = search(query, top_k=top_k)
+    if where is not None and not isinstance(where, dict):
+        # LLM 偶尔会把 where 当成字符串传过来，宽松处理：直接忽略
+        logger.warning("[tool] search_knowledge: where 非 dict，已忽略：%r", where)
+        where = None
+    logger.info(
+        "[tool] search_knowledge: query=%r, top_k=%d, where=%s",
+        query, top_k, where or "{}",
+    )
+    hits = search(query, top_k=top_k, where=where)
     if hits:
         return ToolResult(status="ok", content=format_search_results(hits))
     return ToolResult(status="empty", content="知识库中未找到相关内容。")
@@ -458,7 +487,8 @@ def execute_tool(
             case "search_knowledge":
                 return _tool_search_knowledge(
                     query=args["query"],
-                    top_k=args.get("top_k", 5),
+                    top_k=args.get("top_k", 8),
+                    where=args.get("where"),
                 )
             case "web_search":
                 return _tool_web_search(

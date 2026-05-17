@@ -166,8 +166,13 @@ def _parse_text(path: Path) -> str:
 
 
 def _parse_html(path: Path) -> str:
-    """解析 .html / .htm：用 BeautifulSoup 提取正文，去除脚本和样式标签。"""
-    from bs4 import BeautifulSoup
+    """
+    解析 .html / .htm：用 BeautifulSoup 提取正文，去除脚本/样式/导航/页脚标签。
+
+    结构保留：将 h1~h6 标签替换为 Markdown 风格 "# 标题" 行，下游 splitter 据此切段
+    并注入 heading_path metadata。
+    """
+    from bs4 import BeautifulSoup, NavigableString
 
     html = _parse_text(path)
     soup = BeautifulSoup(html, "lxml")
@@ -175,6 +180,18 @@ def _parse_html(path: Path) -> str:
     # 移除不需要的标签
     for tag in soup(["script", "style", "head", "nav", "footer", "aside"]):
         tag.decompose()
+
+    # h1~h6 → Markdown 标题；用 NavigableString 替换确保 get_text 正常提取
+    for h_tag in soup.find_all(re.compile(r"^h[1-6]$")):
+        try:
+            level = int(h_tag.name[1])
+        except (TypeError, ValueError):
+            continue
+        title = h_tag.get_text(" ", strip=True)
+        if not title:
+            h_tag.decompose()
+            continue
+        h_tag.replace_with(NavigableString(f"\n{'#' * level} {title}\n"))
 
     # 提取纯文本，保留段落间空行
     lines = (line.strip() for line in soup.get_text(separator="\n").splitlines())
@@ -193,54 +210,97 @@ def _parse_html(path: Path) -> str:
 
 
 def _parse_pdf(path: Path) -> str:
-    """解析 .pdf：用 pypdf 逐页提取文本，页间用换行分隔。"""
+    """
+    解析 .pdf：用 pypdf 逐页提取文本，每页前插入 [[PAGE:N]] 锚点供 splitter 识别。
+
+    page_number 取 1-based 页码，便于人工定位与 metadata 落库。
+    """
     from pypdf import PdfReader
 
     reader = PdfReader(str(path))
     pages: list[str] = []
-    for page in reader.pages:
+    for idx, page in enumerate(reader.pages, start=1):
         text = page.extract_text() or ""
         text = text.strip()
-        if text:
-            pages.append(text)
+        if not text:
+            continue
+        pages.append(f"[[PAGE:{idx}]]\n{text}")
 
     return "\n\n".join(pages).strip()
 
 
 def _parse_docx(path: Path) -> str:
-    """解析 .docx：提取所有段落文本，保留段落换行。"""
+    """
+    解析 .docx：按段落顺序提取文本；识别 "Heading 1"~"Heading 9" 样式的段落为
+    Markdown 标题（前缀 #~#########），下游 splitter 据此切段并注入 heading_path。
+    """
     from docx import Document
 
     doc = Document(str(path))
-    paragraphs = [para.text.strip() for para in doc.paragraphs if para.text.strip()]
+    paragraphs: list[str] = []
+    for para in doc.paragraphs:
+        text = (para.text or "").strip()
+        if not text:
+            continue
+        style_name = ""
+        try:
+            style_name = (para.style.name or "") if para.style else ""
+        except Exception:
+            style_name = ""
+        m = re.match(r"^Heading\s+([1-9])$", style_name)
+        if m:
+            level = int(m.group(1))
+            paragraphs.append(f"{'#' * level} {text}")
+        else:
+            paragraphs.append(text)
     return "\n\n".join(paragraphs).strip()
 
 
 def _parse_pptx(path: Path) -> str:
-    """解析 .pptx：遍历所有 slide 的所有 shape，提取文本框内容。"""
+    """
+    解析 .pptx：每张 slide 前插入 [[PAGE:N]] 锚点 + "[Slide N]" 字面（向后兼容）；
+    若 slide 含 title placeholder，再以 "## <title>" 形式注入 Markdown 标题。
+    """
     from pptx import Presentation
 
     prs = Presentation(str(path))
     slides_text: list[str] = []
 
     for slide_idx, slide in enumerate(prs.slides, start=1):
-        texts: list[str] = []
+        # 优先识别 title placeholder
+        slide_title = ""
+        try:
+            title_shape = slide.shapes.title  # type: ignore[union-attr]
+            if title_shape is not None and title_shape.has_text_frame:
+                slide_title = (title_shape.text_frame.text or "").strip()
+        except Exception:
+            slide_title = ""
+
+        body_lines: list[str] = []
         for shape in slide.shapes:
-            if shape.has_text_frame:
-                for para in shape.text_frame.paragraphs:  # type: ignore[union-attr]
-                    line = "".join(run.text for run in para.runs).strip()
-                    if line:
-                        texts.append(line)
-        if texts:
-            slides_text.append(f"[Slide {slide_idx}]\n" + "\n".join(texts))
+            if not shape.has_text_frame:
+                continue
+            for para in shape.text_frame.paragraphs:  # type: ignore[union-attr]
+                line = "".join(run.text for run in para.runs).strip()
+                if line and line != slide_title:
+                    body_lines.append(line)
+
+        if not (slide_title or body_lines):
+            continue
+
+        block_lines: list[str] = [f"[[PAGE:{slide_idx}]]", f"[Slide {slide_idx}]"]
+        if slide_title:
+            block_lines.append(f"## {slide_title}")
+        block_lines.extend(body_lines)
+        slides_text.append("\n".join(block_lines))
 
     return "\n\n".join(slides_text).strip()
 
 
 def _parse_xlsx(path: Path) -> str:
     """
-    解析 .xlsx：遍历所有 sheet 的所有行，
-    每行转为 '列1 | 列2 | 列3 ...' 格式，便于语义检索。
+    解析 .xlsx：每个 sheet 用 "# Sheet: <name>" 作 Markdown 标题（供 splitter 切段），
+    同时保留 "[Sheet: <name>]" 字面（向后兼容）；行内单元格用 " | " 分隔。
     """
     import openpyxl
 
@@ -251,11 +311,15 @@ def _parse_xlsx(path: Path) -> str:
         rows_text: list[str] = []
         for row in sheet.iter_rows(values_only=True):
             cells = [str(cell).strip() if cell is not None else "" for cell in row]
-            # 跳过全空行
             if any(cells):
                 rows_text.append(" | ".join(cells))
         if rows_text:
-            sheets_text.append(f"[Sheet: {sheet.title}]\n" + "\n".join(rows_text))
+            block = (
+                f"# Sheet: {sheet.title}\n"
+                f"[Sheet: {sheet.title}]\n"
+                + "\n".join(rows_text)
+            )
+            sheets_text.append(block)
 
     wb.close()
     return "\n\n".join(sheets_text).strip()

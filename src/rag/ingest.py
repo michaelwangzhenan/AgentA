@@ -36,6 +36,7 @@ from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunct
 
 import src.config as config
 from src.rag.parser import SUPPORTED_EXTENSIONS, parse_file
+from src.rag.splitter import split_structured
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,11 @@ _HNSW_SPACE: str = "cosine"
 
 def chunk_text(text: str, size: int = config.CHUNK_SIZE, overlap: int = config.CHUNK_OVERLAP) -> list[str]:
     """
-    将文档文本按 size 字符分块，相邻块之间有 overlap 字符重叠。
+    [向后兼容] 将文档文本按 size 字符分块，相邻块之间有 overlap 字符重叠。
+
+    本函数保留了"按字符等步长滑动"的语义，仅供老调用方与现有单元测试使用。
+    新代码（含 ingest_all 自身）请使用 src.rag.splitter.split_structured，
+    它能识别 [[PAGE:N]] 与 Markdown 标题，产出带 heading_path / page_no 的 Chunk。
 
     Args:
         text: 待分块的原始文本。
@@ -227,8 +232,8 @@ def ingest_all(
                 collection.delete(ids=existing_ids)
                 logger.info("  清除旧数据: %s → 删除 %d 条", rel_path, len(existing_ids))
 
-            chunks = chunk_text(text)
-            if not chunks:
+            structured = split_structured(text, config.CHUNK_SIZE, config.CHUNK_OVERLAP)
+            if not structured:
                 logger.warning("  跳过（分块结果为空）: %s", rel_path)
                 continue
 
@@ -239,9 +244,12 @@ def ingest_all(
             lang = _detect_lang(text)
             ext = file_path.suffix.lower()
 
-            ids = [_make_chunk_id(doc_id, i) for i in range(len(chunks))]
-            metadatas = [
-                {
+            ids: list[str] = [_make_chunk_id(doc_id, i) for i in range(len(structured))]
+            documents: list[str] = [c.text for c in structured]
+            metadatas: list[dict] = []
+            for i, c in enumerate(structured):
+                # ChromaDB metadata 不接受 None，缺失字段直接不写键
+                md: dict = {
                     "doc_id": doc_id,
                     "source": rel_path,            # 完整相对路径（含子目录），不再用 filename 做去重键
                     "filename": file_path.name,    # 兼容老字段，仅作展示
@@ -250,19 +258,57 @@ def ingest_all(
                     "mtime": mtime,
                     "content_sha1": content_hash,
                     "chunk_index": i,
-                    "chunk_total": len(chunks),
+                    "chunk_total": len(structured),
+                    "line_start": int(c.line_start or 0),
+                    "line_end": int(c.line_end or 0),
                 }
-                for i in range(len(chunks))
-            ]
+                if c.heading_path:
+                    # heading_path 用 " > " 拼接，便于在 LLM 工具结果里直接展示给用户
+                    md["heading_path"] = " > ".join(c.heading_path)
+                if c.page_no is not None:
+                    md["page_no"] = int(c.page_no)
+                metadatas.append(md)
 
             collection.upsert(
                 ids=ids,
-                documents=chunks,
+                documents=documents,
                 metadatas=metadatas,  # type: ignore[arg-type]
             )
 
-            logger.info("  入库: %s → %d 块 (lang=%s)", rel_path, len(chunks), lang)
-            total_chunks += len(chunks)
+            # 同步写入 BM25 倒排索引（如启用）；与 Chroma 共享 ids 保证融合时可对齐
+            if config.BM25_ENABLED:
+                try:
+                    from src.rag.bm25_index import (
+                        BM25Index,
+                        get_index_path,
+                        save_index,
+                    )
+
+                    bm25_path = get_index_path(collection_name)
+                    bm25 = BM25Index.load_or_new(collection_name, bm25_path)
+                    # 替换该 doc_id 下所有旧 chunk（先删后写）
+                    bm25.delete_by_doc_id(doc_id)
+                    bm25.upsert(ids=ids, documents=documents, metadatas=metadatas)
+                    save_index(bm25, bm25_path)
+                    logger.info("  BM25 索引已更新: %s → %d 块", rel_path, len(documents))
+                except Exception as e:  # 失败不影响 dense 入库主流程
+                    logger.warning("  BM25 索引更新失败（已跳过）: %s — %s", rel_path, e)
+
+            page_info = (
+                f", pages={sum(1 for c in structured if c.page_no is not None)}"
+                if any(c.page_no is not None for c in structured)
+                else ""
+            )
+            heading_info = (
+                f", headings={sum(1 for c in structured if c.heading_path)}"
+                if any(c.heading_path for c in structured)
+                else ""
+            )
+            logger.info(
+                "  入库: %s → %d 块 (lang=%s%s%s)",
+                rel_path, len(documents), lang, page_info, heading_info,
+            )
+            total_chunks += len(documents)
 
         except Exception as e:
             logger.error("  失败: %s — %s", file_path.name, e)
