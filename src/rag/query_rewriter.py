@@ -49,6 +49,16 @@ _HYDE_PROMPT = (
     "假设性答案："
 )
 
+_TRANSLATE_PROMPT = (
+    "把下面这条信息检索 query 准确翻译为 {target_lang_label}。\n"
+    "要求：\n"
+    "1. 严格保留专有名词、缩写、版本号、命令名（如 gNB、3GPP TS 38.211、PRACH）；\n"
+    "2. 不要加任何前缀、后缀、引号、括注、解释；\n"
+    "3. 只输出一行翻译结果。\n\n"
+    "原 query：{query}\n\n"
+    "翻译："
+)
+
 
 # ── LLM 调用封装 ─────────────────────────────────────────────────────────────
 
@@ -155,15 +165,63 @@ def hyde_query(query: str) -> str:
     return _cached_hyde(query.strip())
 
 
+# ── 跨语言翻译轴（Iter-5） ──────────────────────────────────────────────────
+
+
+def detect_query_lang(text: str) -> str:
+    """
+    简单启发：CJK 字符占比 > 30% 视为 'zh'，否则 'en'。
+    返回值用于决定翻译目标方向（zh→en 或 en→zh）。
+    """
+    if not text:
+        return "en"
+    cjk = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
+    return "zh" if cjk / max(len(text), 1) > 0.3 else "en"
+
+
+_LANG_LABELS: dict[str, str] = {"en": "English（英文）", "zh": "中文"}
+
+
+@lru_cache(maxsize=256)
+def _cached_translate(query: str, target_lang: str) -> str:
+    label = _LANG_LABELS.get(target_lang, target_lang)
+    text = _call_llm(_TRANSLATE_PROMPT.format(target_lang_label=label, query=query))
+    if not text:
+        return ""
+    # 翻译应为单行；LLM 偶尔会多打一行解释，取首行即可
+    first = text.splitlines()[0].strip()
+    return first
+
+
+def translate_query(query: str, target_lang: str) -> str:
+    """
+    把 query 翻译成 target_lang（'zh' 或 'en'）。
+
+    禁用 / 输入为空 / 目标语种非 zh|en / LLM 失败时返回空字符串。
+    """
+    if not config.RAG_TRANSLATE_QUERY_ENABLED:
+        return ""
+    if target_lang not in ("zh", "en"):
+        return ""
+    if not query or not query.strip():
+        return ""
+    return _cached_translate(query.strip(), target_lang)
+
+
 # ── 一站式入口 ───────────────────────────────────────────────────────────────
 
 
 def expand_queries(query: str) -> list[str]:
     """
-    生成"原 query + multi-query 改写 + 可选 HyDE 答案"的去重列表。
+    生成"原 query + multi-query 改写 + 可选 HyDE 答案 + 可选翻译版"的去重列表。
+
+    Iter-5：当 RAG_TRANSLATE_QUERY_ENABLED=true 时，自动探测原 query 语种，
+    让 LLM 翻译成另一种语言追加进列表。这条翻译版会同时让 dense 检索与 BM25
+    都能在另一语种 collection 上拿到候选，是中英混合知识库的关键召回轴。
 
     返回的列表第 0 个永远是原 query，便于调用方在主链路中保留原意。
-    Multi-query 与 HyDE 任一失败都不影响其他来源；全部失败时退化为只有原 query。
+    任一来源（multi-query / HyDE / translate）失败都不影响其他；全部失败时
+    退化为只有原 query。
     """
     seen: set[str] = set()
     expanded: list[str] = []
@@ -184,6 +242,17 @@ def expand_queries(query: str) -> list[str]:
     if hyde:
         _add(hyde)
 
+    if config.RAG_TRANSLATE_QUERY_ENABLED:
+        src_lang = detect_query_lang(query)
+        target_lang = "en" if src_lang == "zh" else "zh"
+        translated = translate_query(query, target_lang)
+        if translated:
+            _add(translated)
+            logger.info(
+                "[QueryRewriter] 已追加翻译版 [%s→%s]: %s",
+                src_lang, target_lang, translated[:60],
+            )
+
     return expanded
 
 
@@ -191,3 +260,4 @@ def clear_cache() -> None:
     """便于测试 / 调优时清空 LRU 缓存。"""
     _cached_multi_query.cache_clear()
     _cached_hyde.cache_clear()
+    _cached_translate.cache_clear()

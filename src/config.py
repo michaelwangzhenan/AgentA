@@ -129,6 +129,39 @@ def resolve_embedding(model_alias: str) -> tuple[str, str]:
     return (model_alias, f"kb_{safe_name}")
 
 
+# ── 启用中的 embedding 列表（Iter-5） ─────────────────────────────────────────
+# retriever 默认会遍历 EMBEDDING_MODELS 中所有别名查询；当我们想在 m3 单库与
+# en/zh 双库间干净切换、或暂时禁用某个 collection 做对比实验时，必须能控制
+# "实际启用哪些 alias"，而不是改动 EMBEDDING_MODELS 全局表。
+#
+# 配置方式（.env）：
+#   RAG_ACTIVE_EMBEDDINGS=en,zh   # 默认：双语种双库（向后兼容）
+#   RAG_ACTIVE_EMBEDDINGS=m3      # 切到 bge-m3 单库（需先 ingest --model m3）
+#   RAG_ACTIVE_EMBEDDINGS=en      # 仅英文库（消融实验）
+RAG_ACTIVE_EMBEDDINGS: list[str] = [
+    a.strip() for a in os.getenv("RAG_ACTIVE_EMBEDDINGS", "en,zh").split(",") if a.strip()
+]
+
+
+def iter_active_embeddings() -> list[tuple[str, str, str]]:
+    """
+    返回当前启用的 embedding 列表 [(alias, model_name, collection_name), ...]，
+    按 RAG_ACTIVE_EMBEDDINGS 的顺序过滤。retriever / warm_up / 评估等遍历点都
+    应通过本函数取列表，而不是直接遍历 EMBEDDING_MODELS。
+
+    若 RAG_ACTIVE_EMBEDDINGS 配置错误（全部别名未知），回退到 EMBEDDING_MODELS
+    全部条目，避免启动时 retriever 完全无库可查。
+    """
+    items: list[tuple[str, str, str]] = []
+    for alias in RAG_ACTIVE_EMBEDDINGS:
+        if alias in EMBEDDING_MODELS:
+            model_name, coll = EMBEDDING_MODELS[alias]
+            items.append((alias, model_name, coll))
+    if items:
+        return items
+    return [(alias, mn, c) for alias, (mn, c) in EMBEDDING_MODELS.items()]
+
+
 # ── CLI 目录 ──────────────────────────────────────────────────────────────────
 PROMPTS_DIR: str = "advanced/prompts"
 SKILLS_DIR: str = "advanced/skills"
@@ -184,6 +217,27 @@ RERANKER_RECALL_MULTIPLIER: int = int(os.getenv("RERANKER_RECALL_MULTIPLIER", "3
 # 低于此阈值的 chunk 直接丢弃，避免低质量片段污染 LLM 上下文。
 # 设为 0 或负数则禁用阈值过滤（向后兼容）。
 RAG_DENSE_MIN_SCORE: float = float(os.getenv("RAG_DENSE_MIN_SCORE", "0.30"))
+
+# Iter-5：按 model 校准的 dense 阈值。不同模型的 cosine 相似度分布差异显著：
+#   all-MiniLM-L6-v2 同主题对 ~0.40-0.60，正确阈值约 0.25
+#   BAAI/bge-small-zh 训练目标更紧 ~0.55-0.85，正确阈值约 0.40
+#   BAAI/bge-m3       介于两者之间 ~0.45-0.75，正确阈值约 0.35
+# 全局 RAG_DENSE_MIN_SCORE=0.30 对 MiniLM 偏紧（误杀好结果）、对 bge-zh 偏松
+# （放进噪声），双库联合命中率被拉低。本字典优先级高于全局值；命中其中一个
+# alias 时用本字典，找不到时回退到全局 RAG_DENSE_MIN_SCORE。
+RAG_DENSE_MIN_SCORE_PER_MODEL: dict[str, float] = {
+    "en": float(os.getenv("RAG_DENSE_MIN_SCORE_EN", "0.25")),
+    "zh": float(os.getenv("RAG_DENSE_MIN_SCORE_ZH", "0.40")),
+    "m3": float(os.getenv("RAG_DENSE_MIN_SCORE_M3", "0.35")),
+}
+
+
+def min_dense_score_for_collection(collection_name: str) -> float:
+    """根据 collection 名反查对应 alias，返回 per-model 阈值；找不到则用全局值。"""
+    for alias, (_model, coll) in EMBEDDING_MODELS.items():
+        if coll == collection_name and alias in RAG_DENSE_MIN_SCORE_PER_MODEL:
+            return RAG_DENSE_MIN_SCORE_PER_MODEL[alias]
+    return RAG_DENSE_MIN_SCORE
 # Cross-Encoder 精排后的最低相关性分（不同 reranker 输出尺度不同：
 #   bge-reranker-base / v2-m3 输出 sigmoid 概率，约 [0, 1]，建议阈值 0.30~0.50；
 #   ms-marco MiniLM 输出 raw logit，区间 [-10, 10]，建议阈值 -3 ~ 0）。
@@ -222,6 +276,12 @@ RAG_REWRITE_MAX_QUERIES: int = int(os.getenv("RAG_REWRITE_MAX_QUERIES", "3"))
 # 开启 HyDE：让 LLM 先产出"假设性答案"，把答案也作为 embedding 检索 query；
 # 适合 query 与文档词汇分布差异大的场景（口语 → 文档术语），但每轮多花 1 次 LLM 调用，默认关。
 RAG_HYDE_ENABLED: bool = os.getenv("RAG_HYDE_ENABLED", "false").lower() == "true"
+
+# Iter-5：跨语言翻译轴。开启后 expand_queries 会探测原 query 语种（zh/en），
+# 让 LLM 翻译成另一种语言再追加进检索 query 列表。
+# 解决场景："用中文问 3GPP 术语，英文文档库 dense 命中差 / BM25 跨语言失效"。
+# 每次查询多 1 次 LLM 调用，但对中英混合知识库收益显著；翻译失败静默降级。
+RAG_TRANSLATE_QUERY_ENABLED: bool = os.getenv("RAG_TRANSLATE_QUERY_ENABLED", "true").lower() == "true"
 
 # ── Extended Thinking 配置 ────────────────────────────────────────────────────
 # true 开启 Extended Thinking；目前 Claude（原生 SDK）和 Qwen3 支持，其余 provider 静默降级

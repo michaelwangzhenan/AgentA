@@ -83,7 +83,7 @@ def warm_up() -> None:
     使用场景：服务进程启动时调用一次；Web UI 在 chat 开始前调用以避免首查卡顿。
     任一模型加载失败仅记录 warning，不抛异常。
     """
-    for alias, (model_name, _coll) in config.EMBEDDING_MODELS.items():
+    for alias, model_name, _coll in config.iter_active_embeddings():
         try:
             _get_embedding_fn(model_name)
             logger.info("[Retriever] embedding 模型已预热 [%s]: %s", alias, model_name)
@@ -357,9 +357,10 @@ def search(
     per_query_k = max(top_k, recall_k // n_q)
 
     # 每个 collection 内部对每条 query 跑 dense + BM25，所有 ranking 一并 RRF 融合，
-    # 再跨 collection round-robin
+    # 再跨 collection round-robin。Iter-5 起用 iter_active_embeddings() 取启用列表，
+    # 支持 RAG_ACTIVE_EMBEDDINGS env var 在双库 / 单库 / 消融实验间切换而不改代码。
     per_collection_fused: list[list[Hit]] = []
-    for alias, (model_name, collection_name) in config.EMBEDDING_MODELS.items():
+    for alias, model_name, collection_name in config.iter_active_embeddings():
         rankings: list[list[Hit]] = []
         dense_total = 0
         bm25_total = 0
@@ -415,23 +416,29 @@ def search(
         if not iterators:
             break
 
-    # Dense 阈值过滤：仅对"纯 dense 命中"应用，BM25 加持的 chunk 不被 dense 阈值剔除。
-    # score 缺失（如外部 mock）时回退到 1 - distance，保持向后兼容。
-    min_dense = config.RAG_DENSE_MIN_SCORE
-    if min_dense > 0:
-        before = len(candidates)
-
+    # Dense 阈值过滤（Iter-5：per-model）：仅对"纯 dense 命中"应用，BM25 加持的
+    # chunk 不被 dense 阈值剔除。每条 hit 按 hit.collection 反查对应 alias 的
+    # RAG_DENSE_MIN_SCORE_PER_MODEL；找不到则回退到全局 RAG_DENSE_MIN_SCORE。
+    # 这样 all-MiniLM (~0.25) 与 bge-zh (~0.40) 各自校准，不再互相干扰。
+    before = len(candidates)
+    any_filter_active = config.RAG_DENSE_MIN_SCORE > 0 or any(
+        v > 0 for v in config.RAG_DENSE_MIN_SCORE_PER_MODEL.values()
+    )
+    if any_filter_active:
         def _keep(h: Hit) -> bool:
             if "bm25" in h.retrievers:
                 return True
+            threshold = config.min_dense_score_for_collection(h.collection)
+            if threshold <= 0:
+                return True
             dense_like_score = (1.0 - h.distance) if h.distance else (h.score or 0.0)
-            return dense_like_score >= min_dense
+            return dense_like_score >= threshold
 
         candidates = [h for h in candidates if _keep(h)]
         if before != len(candidates):
             logger.info(
-                "Dense 阈值过滤：%d → %d（min_score=%.3f，BM25 命中豁免）",
-                before, len(candidates), min_dense,
+                "Dense 阈值过滤（per-model）：%d → %d（BM25 命中豁免）",
+                before, len(candidates),
             )
 
     if not candidates:
