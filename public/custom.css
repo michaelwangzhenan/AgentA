@@ -1,0 +1,244 @@
+/*
+ Force Chainlit Settings panel to open from LEFT side.
+ Note:
+ - Selectors include "right" because we are overriding the default right-side panel.
+ - We target multiple possible DOM shapes used by different Chainlit builds.
+*/
+
+/* Radix Sheet/Dialog variants */
+[data-side="right"][data-state],
+[role="dialog"][data-side="right"],
+[data-radix-dialog-content][data-side="right"] {
+  left: 0 !important;
+  right: auto !important;
+  border-right: 1px solid hsl(var(--border)) !important;
+  border-left: none !important;
+}
+
+/* Closed/open animation direction */
+[data-side="right"][data-state="closed"] {
+  transform: translateX(-100%) !important;
+}
+[data-side="right"][data-state="open"] {
+  transform: translateX(0) !important;
+}
+
+/*
+ Fallback for builds where class-based right anchoring is used
+ (e.g. fixed right-0 panel classes without data-side attrs).
+*/
+[class*="fixed"][class*="right-0"][class*="z-50"] {
+  left: 0 !important;
+  right: auto !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   AgentA Custom Left Sidebar
+═══════════════════════════════════════════════════════════════ */
+
+#agenta-sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100vh;
+  width: 220px;
+  background: hsl(var(--background));
+  border-right: 1px solid hsl(var(--border));
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.08);
+}
+
+#agenta-sidebar.collapsed {
+  width: 52px;
+}
+
+/* ── Header ─────────────────────────────────────────────────── */
+.agenta-sb-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px 0 14px;
+  height: 56px;
+  border-bottom: 1px solid hsl(var(--border));
+  flex-shrink: 0;
+}
+
+.agenta-sb-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.agenta-sb-logo-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.agenta-sb-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: hsl(var(--foreground));
+  white-space: nowrap;
+  overflow: hidden;
+  opacity: 1;
+  max-width: 140px;
+  transition: opacity 0.18s, max-width 0.22s;
+}
+
+#agenta-sidebar.collapsed .agenta-sb-title {
+  opacity: 0;
+  max-width: 0;
+}
+
+/* ── Toggle button ──────────────────────────────────────────── */
+.agenta-sb-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: hsl(var(--muted-foreground));
+  padding: 6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.agenta-sb-toggle:hover {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+
+.agenta-sb-toggle svg {
+  transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#agenta-sidebar.collapsed .agenta-sb-toggle svg {
+  transform: rotate(180deg);
+}
+
+/* ── Section label ──────────────────────────────────────────── */
+.agenta-sb-section-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: hsl(var(--muted-foreground));
+  padding: 14px 14px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  opacity: 1;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+
+#agenta-sidebar.collapsed .agenta-sb-section-label {
+  opacity: 0;
+}
+
+/* ── Nav ────────────────────────────────────────────────────── */
+.agenta-sb-nav {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 6px;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.agenta-sb-nav::-webkit-scrollbar {
+  width: 4px;
+}
+.agenta-sb-nav::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 2px;
+}
+
+/* ── Action buttons ─────────────────────────────────────────── */
+.agenta-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 8px 9px 10px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  border-radius: 7px;
+  color: hsl(var(--foreground));
+  transition: background 0.13s;
+  white-space: nowrap;
+  overflow: hidden;
+  min-height: 40px;
+  margin-bottom: 2px;
+}
+
+.agenta-btn:hover {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+
+.agenta-btn:active {
+  filter: brightness(0.9);
+}
+
+.agenta-btn-icon {
+  font-size: 15px;
+  flex-shrink: 0;
+  width: 22px;
+  text-align: center;
+  line-height: 1;
+}
+
+.agenta-btn-label {
+  font-size: 13px;
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 1;
+  max-width: 150px;
+  transition: opacity 0.15s, max-width 0.22s;
+}
+
+#agenta-sidebar.collapsed .agenta-btn-label {
+  opacity: 0;
+  max-width: 0;
+}
+
+/* ── Divider ────────────────────────────────────────────────── */
+.agenta-sb-divider {
+  height: 1px;
+  background: hsl(var(--border));
+  margin: 6px 10px;
+  flex-shrink: 0;
+}
+
+/* ── Toast feedback ─────────────────────────────────────────── */
+.agenta-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: hsl(var(--foreground));
+  color: hsl(var(--background));
+  font-size: 13px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  z-index: 9999;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.agenta-toast.show {
+  opacity: 1;
+}

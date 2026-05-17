@@ -14,6 +14,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass
+from collections.abc import Callable
 from typing import Any, NamedTuple
 
 from src.agent.tools import get_tools, execute_tool, ToolResult
@@ -147,6 +148,7 @@ class Agent:
         skills: dict[str, SkillInfo] | None = None,
         thinking_config: ThinkingConfig | None = None,
         user_memory: UserMemoryStore | None = None,
+        on_thinking_chunk: Callable[[str], None] | None = None,
     ) -> None:
         # 若传入 skills，提取 bodies，并将含 description 的 catalog 追加到 system_prompt
         self._skill_bodies: dict[str, str] = {}
@@ -168,6 +170,8 @@ class Agent:
         self.thinking_cfg: ThinkingConfig = thinking_config if thinking_config is not None else ThinkingConfig.from_config()
         # 本次 run() 流式 thinking 状态标志（实例变量，避免嵌套函数）
         self._thinking_started: bool = False
+        # 可注入 thinking 输出回调（Web UI 可替换为流式推送；CLI 默认 stdout）
+        self._thinking_chunk_callback: Callable[[str], None] | None = on_thinking_chunk
         # 跨 session 用户记忆：支持从外部传入（便于测试 mock），默认使用模块共享实例
         self._user_memory: UserMemoryStore | None = (
             user_memory if user_memory is not None else _get_shared_user_memory()
@@ -175,10 +179,18 @@ class Agent:
 
     def _on_thinking_chunk(self, chunk: str) -> None:
         """思考过程流式回调，首个 chunk 先打印头部。"""
+        if self._thinking_chunk_callback is not None:
+            self._thinking_started = True
+            self._thinking_chunk_callback(chunk)
+            return
         if not self._thinking_started:
             print("\n\U0001f4ad 思考中...\n", flush=True)
             self._thinking_started = True
         print(chunk, end="", flush=True)
+
+    def set_thinking_callback(self, callback: Callable[[str], None] | None) -> None:
+        """运行时更新 thinking 流式回调。传 None 时恢复 CLI 默认 stdout。"""
+        self._thinking_chunk_callback = callback
 
     def run(self, user_input: str) -> str:
         """
@@ -253,7 +265,7 @@ class Agent:
                     tools=active_tools,
                     on_thinking_chunk=self._on_thinking_chunk,
                 )
-                if self._thinking_started:
+                if self._thinking_started and self._thinking_chunk_callback is None:
                     print("\n\n─── 思考结束 ───\n", flush=True)
             else:
                 response = chat(messages, tools=active_tools)
