@@ -271,7 +271,13 @@ def _tool_search_knowledge(
     where: dict | None = None,
 ) -> ToolResult:
     """
-    调用 RAG 检索层（dense + BM25 混合），返回格式化的文档片段字符串。
+    调用 RAG 检索层（dense + BM25 混合 + Iter-3 query 改写/HyDE），
+    返回格式化的文档片段字符串。
+
+    检索前会按 .env 开关做 query 扩展：
+      - RAG_QUERY_REWRITE_ENABLED=true（默认）：让 LLM 生成 N 条同义改写；
+      - RAG_HYDE_ENABLED=true：让 LLM 生成 1~2 句假设性答案作为额外检索 query。
+      原 query 永远在扩展列表中第 0 位；扩展失败时静默退化为单 query 路径。
 
     Args:
         query: 检索查询语句。
@@ -281,16 +287,35 @@ def _tool_search_knowledge(
     Returns:
         ToolResult：有命中结果 → status="ok"；知识库为空/无命中 → status="empty"。
     """
-    top_k = min(max(1, top_k), MAX_SEARCH_TOP_K)  # 限制在 1~MAX_SEARCH_TOP_K 之间
+    top_k = min(max(1, top_k), MAX_SEARCH_TOP_K)
     if where is not None and not isinstance(where, dict):
         # LLM 偶尔会把 where 当成字符串传过来，宽松处理：直接忽略
         logger.warning("[tool] search_knowledge: where 非 dict，已忽略：%r", where)
         where = None
-    logger.info(
-        "[tool] search_knowledge: query=%r, top_k=%d, where=%s",
-        query, top_k, where or "{}",
-    )
-    hits = search(query, top_k=top_k, where=where)
+
+    # Iter-3：multi-query / HyDE 扩展。失败时 expand_queries 返回 [query]，无副作用。
+    expanded_queries: list[str]
+    try:
+        from src.rag.query_rewriter import expand_queries
+        expanded_queries = expand_queries(query)
+    except Exception as e:
+        logger.warning("[tool] search_knowledge: query 扩展失败，已降级为单 query — %s", e)
+        expanded_queries = [query]
+
+    if len(expanded_queries) > 1:
+        logger.info(
+            "[tool] search_knowledge: query=%r → 扩展 %d 条（含原 query），top_k=%d, where=%s",
+            query, len(expanded_queries), top_k, where or "{}",
+        )
+        for i, q in enumerate(expanded_queries):
+            logger.info("    [%d] %s", i, q)
+    else:
+        logger.info(
+            "[tool] search_knowledge: query=%r, top_k=%d, where=%s",
+            query, top_k, where or "{}",
+        )
+
+    hits = search(query, top_k=top_k, where=where, queries=expanded_queries)
     if hits:
         return ToolResult(status="ok", content=format_search_results(hits))
     return ToolResult(status="empty", content="知识库中未找到相关内容。")

@@ -285,15 +285,22 @@ def search(
     query: str,
     top_k: int = config.RAG_TOP_K,
     where: dict | None = None,
+    queries: list[str] | None = None,
 ) -> list[Hit]:
     """
     在所有已入库的 collection 中检索最相关的 Top-K 文档片段。
 
+    支持两种调用模式：
+      · 单 query（向后兼容，queries=None）：用 query 同时跑 dense + BM25 → RRF 融合；
+      · 多 query（Iter-3，queries=[原query, 改写1, 改写2, ...]）：每条 query 各跑一次
+        dense + BM25，所有 ranking 一起 RRF 融合，召回更鲁棒。
+
     Args:
-        query:  用户的自然语言问题。
-        top_k:  最终返回上限，默认读 config.RAG_TOP_K。
-        where:  可选 metadata 过滤子句（透传给 chroma 与 BM25），如
-                {"lang": "zh"} 或 {"ext": {"$in": [".pdf", ".md"]}}。
+        query:    用户的自然语言问题（即使提供 queries 也保留它作为兜底/日志用）。
+        top_k:    最终返回上限，默认读 config.RAG_TOP_K。
+        where:    可选 metadata 过滤子句（透传给 chroma 与 BM25）。
+        queries:  可选的多 query 列表（来自 query_rewriter.expand_queries）；
+                  非空时本参数完全覆盖 query 的检索行为，query 仅用于日志。
 
     Returns:
         Hit 列表，按融合后/精排后 score 降序，长度 ≤ top_k；空列表表示无命中。
@@ -307,33 +314,56 @@ def search(
         else top_k
     )
 
-    # 每个 collection 内部做 dense + BM25 → RRF 融合，再跨 collection round-robin
+    # 多 query 时每条 query 单独召回的窗口要适当收缩，避免候选总量爆炸：
+    #   per_query_k = max(top_k, recall_k // n_queries)
+    # 这样总候选量 ~ recall_k，与单 query 路径量级一致；RRF 融合天然对齐多次命中。
+    effective_queries: list[str] = []
+    if queries:
+        for q in queries:
+            qs = (q or "").strip()
+            if qs and qs not in effective_queries:
+                effective_queries.append(qs)
+    if not effective_queries:
+        effective_queries = [query]
+    n_q = max(len(effective_queries), 1)
+    per_query_k = max(top_k, recall_k // n_q)
+
+    # 每个 collection 内部对每条 query 跑 dense + BM25，所有 ranking 一并 RRF 融合，
+    # 再跨 collection round-robin
     per_collection_fused: list[list[Hit]] = []
     for alias, (model_name, collection_name) in config.EMBEDDING_MODELS.items():
-        dense_hits = _query_collection(
-            client, model_name, collection_name, query, recall_k, where=where,
-        )
-        if dense_hits:
-            dense_hits.sort(key=lambda h: h.distance)
+        rankings: list[list[Hit]] = []
+        dense_total = 0
+        bm25_total = 0
+        for q in effective_queries:
+            dense_hits = _query_collection(
+                client, model_name, collection_name, q, per_query_k, where=where,
+            )
+            if dense_hits:
+                dense_hits.sort(key=lambda h: h.distance)
+                rankings.append(dense_hits)
+                dense_total += len(dense_hits)
+            bm25_hits = _query_bm25(collection_name, q, per_query_k, where=where)
+            if bm25_hits:
+                rankings.append(bm25_hits)
+                bm25_total += len(bm25_hits)
 
-        bm25_hits = _query_bm25(collection_name, query, recall_k, where=where)
-        # bm25_hits 已按 BM25 score 降序
-
-        if not dense_hits and not bm25_hits:
+        if not rankings:
             continue
 
-        if dense_hits and bm25_hits:
-            fused = _rrf_fuse([dense_hits, bm25_hits], k=config.RRF_K)
+        if len(rankings) == 1:
+            fused = rankings[0]
             logger.info(
-                "  [%s] %s: dense=%d, bm25=%d → fused=%d",
-                alias, collection_name, len(dense_hits), len(bm25_hits), len(fused),
+                "  [%s] %s: 单 ranking %d 条（n_queries=%d）",
+                alias, collection_name, len(fused), n_q,
             )
-        elif dense_hits:
-            fused = dense_hits
-            logger.info("  [%s] %s: dense=%d (无 BM25 索引)", alias, collection_name, len(dense_hits))
         else:
-            fused = bm25_hits
-            logger.info("  [%s] %s: bm25=%d (dense 无命中)", alias, collection_name, len(bm25_hits))
+            fused = _rrf_fuse(rankings, k=config.RRF_K)
+            logger.info(
+                "  [%s] %s: rankings=%d (dense=%d, bm25=%d, n_queries=%d) → fused=%d",
+                alias, collection_name, len(rankings),
+                dense_total, bm25_total, n_q, len(fused),
+            )
 
         per_collection_fused.append(fused)
 

@@ -199,6 +199,16 @@ RRF_K: int = int(os.getenv("RRF_K", "60"))
 # BM25 索引存储目录；为空则与 CHROMA_DB_PATH 同级，保持工程目录干净
 BM25_INDEX_DIR: str = os.getenv("BM25_INDEX_DIR", "")
 
+# ── Query 改写 / Multi-Query / HyDE 配置（Iter-3） ───────────────────────────
+# 开启后，_tool_search_knowledge 在调用 retriever.search 前会让 LLM 生成 N 条同义改写，
+# 与原 query 一起送入检索；命中通过 RRF 自然合并。改写失败时静默降级为只用原 query。
+RAG_QUERY_REWRITE_ENABLED: bool = os.getenv("RAG_QUERY_REWRITE_ENABLED", "true").lower() == "true"
+# 单次 multi-query 最多生成几条改写（不含原 query），1~5；上调会增加 LLM token 与延迟
+RAG_REWRITE_MAX_QUERIES: int = int(os.getenv("RAG_REWRITE_MAX_QUERIES", "3"))
+# 开启 HyDE：让 LLM 先产出"假设性答案"，把答案也作为 embedding 检索 query；
+# 适合 query 与文档词汇分布差异大的场景（口语 → 文档术语），但每轮多花 1 次 LLM 调用，默认关。
+RAG_HYDE_ENABLED: bool = os.getenv("RAG_HYDE_ENABLED", "false").lower() == "true"
+
 # ── Extended Thinking 配置 ────────────────────────────────────────────────────
 # true 开启 Extended Thinking；目前 Claude（原生 SDK）和 Qwen3 支持，其余 provider 静默降级
 THINKING_ENABLED: bool = os.getenv("THINKING_ENABLED", "false").lower() == "true"
