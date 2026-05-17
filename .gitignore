@@ -61,4 +61,5 @@ dist/
 Thumbs.db
 desktop.ini
 *.code-workspace
+*.exe
 

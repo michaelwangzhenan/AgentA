@@ -10,12 +10,10 @@
 (function () {
   function isSettingsPanel(el) {
     if (!el || !(el instanceof HTMLElement)) return false;
+    // Only match Chainlit's settings drawer — NOT other dialogs like
+    // "Create New Chat" which also contains "confirm" / "reset" text.
     const text = (el.textContent || "").toLowerCase();
-    return (
-      text.includes("settings panel") ||
-      text.includes("confirm") ||
-      text.includes("reset")
-    );
+    return text.includes("settings panel");
   }
 
   function forceLeft(el) {
@@ -309,6 +307,129 @@
   }
   setTimeout(scanButtons, 600);
   setTimeout(scanButtons, 2000);
+})();
+
+/* ═══════════════════════════════════════════════════════════════
+   Part 5 — Settings button toggle: click again while panel is
+   open to close it (equivalent to pressing Escape / Cancel).
+
+   Detection re-uses exactly the same heuristic as Part 1:
+   the settings panel contains "settings panel", "confirm", or
+   "reset" text — whichever selector holds that text and is
+   currently visible is considered the open panel.
+═══════════════════════════════════════════════════════════════ */
+(function () {
+  /* ── Same heuristic as Part 1's isSettingsPanel() ─────────── */
+  function looksLikeSettings(el) {
+    const t = (el.textContent || "").toLowerCase();
+    return (
+      t.includes("settings panel") ||
+      t.includes("confirm") ||
+      t.includes("reset")
+    );
+  }
+
+  /* ── Return the settings panel element if it is visible ────── */
+  function getOpenPanel() {
+    const candidates = document.querySelectorAll(
+      '[role="dialog"], [data-side], .fixed'
+    );
+    for (const el of candidates) {
+      if (!looksLikeSettings(el)) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) return el; // visible on screen
+    }
+    return null;
+  }
+
+  /* ── Dismiss the panel ────────────────────────────────────── */
+  function closePanel(panel) {
+    // Radix Sheet / Dialog responds to native Escape on the element
+    panel.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Escape",
+        keyCode: 27,
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    // Belt-and-suspenders: also fire on document
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Escape",
+        keyCode: 27,
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    // Last-resort: click the × button inside the panel
+    setTimeout(() => {
+      if (!getOpenPanel()) return; // already closed
+      const x =
+        panel.querySelector('[aria-label="Close"]') ||
+        panel.querySelector('button[aria-label="close"]') ||
+        Array.from(panel.querySelectorAll("button")).find((b) =>
+          /close|cancel|取消/i.test(b.textContent + b.getAttribute("aria-label"))
+        );
+      if (x) x.click();
+    }, 60);
+  }
+
+  /* ── Attach toggle once per settings button ────────────────── */
+  function attachToggle(btn) {
+    if (btn._agentaSettingsToggle) return;
+    btn._agentaSettingsToggle = true;
+    btn.addEventListener(
+      "click",
+      function (e) {
+        const panel = getOpenPanel();
+        if (panel) {
+          // Panel visible → eat click, close panel
+          e.stopImmediatePropagation();
+          e.preventDefault();
+          closePanel(panel);
+        }
+        // Panel not visible → let event reach React, which opens it
+      },
+      true // ← capture phase: fires before React's bubble-phase handler
+    );
+  }
+
+  /* ── Locate the settings button (same position logic as Part 4) */
+  function scanForSettingsBtn() {
+    const allBtns = Array.from(document.querySelectorAll("button")).filter(
+      (b) => !b.closest("#agenta-sidebar")
+    );
+    const readmeIdx = allBtns.findIndex((b) =>
+      (b.getAttribute("aria-label") || b.getAttribute("title") || b.textContent)
+        .toLowerCase()
+        .includes("readme")
+    );
+    const themeIdx = allBtns.findIndex((b) =>
+      (b.getAttribute("aria-label") || b.getAttribute("title") || "")
+        .toLowerCase()
+        .includes("theme")
+    );
+    if (readmeIdx !== -1 && themeIdx !== -1 && themeIdx > readmeIdx) {
+      for (let i = readmeIdx + 1; i < themeIdx; i++) {
+        attachToggle(allBtns[i]);
+      }
+    }
+  }
+
+  /* ── Boot ─────────────────────────────────────────────────── */
+  const mo = new MutationObserver(scanForSettingsBtn);
+  function start() {
+    scanForSettingsBtn();
+    mo.observe(document.body, { childList: true, subtree: true });
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", start);
+  } else {
+    start();
+  }
+  setTimeout(scanForSettingsBtn, 600);
+  setTimeout(scanForSettingsBtn, 2000);
 })();
 
 /* ═══════════════════════════════════════════════════════════════
