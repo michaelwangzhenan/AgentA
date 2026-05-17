@@ -221,6 +221,12 @@
   flex-shrink: 0;
 }
 
+
+/* ── New-chat confirm dialog — above custom sidebar ─────────── */
+#new-chat-dialog {
+  z-index: 9999 !important;
+}
+
 /* ── Toast feedback ─────────────────────────────────────────── */
 .agenta-toast {
   position: fixed;

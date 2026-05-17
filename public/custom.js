@@ -196,3 +196,48 @@
     layoutObserver.observe(document.body, { childList: true });
   });
 })();
+
+/* ═══════════════════════════════════════════════════════════════
+   Part 3 — Raise z-index on Chainlit dialogs so they sit above
+   the custom sidebar (z-index 300).
+   Positioning is handled entirely by CSS in custom.css to avoid
+   fighting Tailwind / Radix inline-style reconciliation.
+═══════════════════════════════════════════════════════════════ */
+(function () {
+  const watched = new WeakSet();
+
+  function raiseZIndex(el) {
+    if (!(el instanceof HTMLElement)) return;
+    if (el.id === "agenta-sidebar") return;
+    if (watched.has(el)) return;
+    watched.add(el);
+    el.style.setProperty("z-index", "9999", "important");
+  }
+
+  const domObserver = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      for (const node of m.addedNodes) {
+        if (!(node instanceof HTMLElement)) continue;
+        if (node.matches('[role="dialog"], [role="alertdialog"]')) {
+          raiseZIndex(node);
+        }
+        node
+          .querySelectorAll('[role="dialog"], [role="alertdialog"]')
+          .forEach(raiseZIndex);
+      }
+    }
+  });
+
+  function start() {
+    domObserver.observe(document.body, { childList: true, subtree: true });
+    document
+      .querySelectorAll('[role="dialog"], [role="alertdialog"]')
+      .forEach(raiseZIndex);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", start);
+  } else {
+    start();
+  }
+})();
