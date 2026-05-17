@@ -1,0 +1,23 @@
+[
+  {
+    "query": "什么是 RAG？",
+    "expected_keywords": ["RAG", "Retrieval-Augmented Generation", "检索增强"],
+    "expected_source_contains": "readme",
+    "note": "示例：基础概念问答；任一关键词在 chunk 文本中出现即记 keyword_hit。"
+  },
+  {
+    "query": "ChromaDB 向量数据库的存储路径",
+    "expected_keywords": ["ChromaDB", "chroma_db", "向量"],
+    "note": "示例：技术细节问答；不强制 source 匹配，仅看关键词。"
+  },
+  {
+    "query": "私有知识库智能助手有哪些工具",
+    "expected_keywords": ["search_knowledge", "web_search", "fetch_url"],
+    "expected_source_contains": "readme"
+  },
+  {
+    "query": "如何启动这个项目",
+    "expected_keywords": ["python", "main.py", "chainlit"],
+    "note": "示例：操作步骤问答；可缺省 expected_source。"
+  }
+]

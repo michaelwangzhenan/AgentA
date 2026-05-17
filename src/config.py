@@ -102,6 +102,10 @@ MEMORY_DB_PATH: str = os.getenv("MEMORY_DB_PATH", "./sqlite_db/chat_history.db")
 EMBEDDING_MODELS: dict[str, tuple[str, str]] = {
     "en": ("all-MiniLM-L6-v2", "kb_en"),       # 英文/多语言，384维
     "zh": ("BAAI/bge-small-zh", "kb_zh"),      # 中文优化，512维
+    # Iter-4：多语言单模型选项；BAAI/bge-m3 在 100+ 语种 / 中英 / 跨语言 上均强于
+    # 上面双小模型方案。设置 EMBEDDING_MODEL=m3 重新 ingest，可用单 collection 取代
+    # 上面 en/zh 双库（首次会下载 ~568MB）。
+    "m3": ("BAAI/bge-m3", "kb_m3"),            # 多语言（dense），1024维
 }
 
 # 默认 embedding 别名，可通过 .env 中的 EMBEDDING_MODEL 覆盖（填别名 en/zh，或直接填模型名）
@@ -198,6 +202,16 @@ BM25_B: float = float(os.getenv("BM25_B", "0.75"))
 RRF_K: int = int(os.getenv("RRF_K", "60"))
 # BM25 索引存储目录；为空则与 CHROMA_DB_PATH 同级，保持工程目录干净
 BM25_INDEX_DIR: str = os.getenv("BM25_INDEX_DIR", "")
+
+# ── PDF OCR 兜底（Iter-4） ──────────────────────────────────────────────────
+# 当 PDF 文本层提取的"平均每页字符数"低于阈值时，自动尝试 OCR（rapidocr-onnxruntime）。
+# 处理扫描版 / 图片版 PDF。若 rapidocr-onnxruntime 与 pymupdf 未安装，本功能静默禁用。
+RAG_OCR_FALLBACK_ENABLED: bool = os.getenv("RAG_OCR_FALLBACK_ENABLED", "true").lower() == "true"
+# 平均每页字符数小于此阈值时触发 OCR（默认 50：纯文本 PDF 通常每页数百到数千字符，
+# 扫描版往往每页 < 30 字符甚至 0）
+RAG_OCR_TRIGGER_CHARS_PER_PAGE: int = int(os.getenv("RAG_OCR_TRIGGER_CHARS_PER_PAGE", "50"))
+# OCR 渲染 DPI；越大越清晰但越慢（200 是质量/速度平衡点）
+RAG_OCR_DPI: int = int(os.getenv("RAG_OCR_DPI", "200"))
 
 # ── Query 改写 / Multi-Query / HyDE 配置（Iter-3） ───────────────────────────
 # 开启后，_tool_search_knowledge 在调用 retriever.search 前会让 LLM 生成 N 条同义改写，

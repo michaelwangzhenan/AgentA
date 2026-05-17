@@ -15,6 +15,7 @@ Reranker 模块 —— Cross-Encoder 二阶段精排
 
 import logging
 import math
+import threading
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -25,19 +26,37 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# 模块级懒加载缓存，避免每次调用都重新加载模型
-_cross_encoder: "CrossEncoder | None" = None  # type: ignore[name-defined]
+# 模块级懒加载缓存：按 model_name 索引，运行时切换 RERANKER_MODEL 时也能复用旧实例（Iter-4）。
+# 使用 RLock 确保多线程首查不会重复加载（防止 SentenceTransformer 内部状态被并发污染）。
+_cross_encoder_cache: "dict[str, CrossEncoder]" = {}  # type: ignore[name-defined]
+_cross_encoder_lock = threading.RLock()
 
 
 def _get_cross_encoder() -> "CrossEncoder":  # type: ignore[name-defined]
-    """懒加载 CrossEncoder，首次调用时初始化，后续复用同一实例。"""
-    global _cross_encoder
-    if _cross_encoder is None:
-        from sentence_transformers import CrossEncoder
-        logger.info("[Reranker] 加载 CrossEncoder 模型: %s", config.RERANKER_MODEL)
-        _cross_encoder = CrossEncoder(config.RERANKER_MODEL)
-        logger.info("[Reranker] CrossEncoder 加载完成")
-    return _cross_encoder
+    """懒加载 CrossEncoder，按当前 config.RERANKER_MODEL 取实例，多次调用复用。"""
+    name = config.RERANKER_MODEL
+    ce = _cross_encoder_cache.get(name)
+    if ce is not None:
+        return ce
+    with _cross_encoder_lock:
+        ce = _cross_encoder_cache.get(name)
+        if ce is None:
+            from sentence_transformers import CrossEncoder
+            logger.info("[Reranker] 加载 CrossEncoder 模型: %s", name)
+            ce = CrossEncoder(name)
+            _cross_encoder_cache[name] = ce
+            logger.info("[Reranker] CrossEncoder 加载完成")
+    return ce
+
+
+def warm_up() -> None:
+    """主动触发 CrossEncoder 预加载，避免首次检索时延抖动。失败仅警告。"""
+    if not config.RERANKER_ENABLED:
+        return
+    try:
+        _get_cross_encoder()
+    except Exception as e:
+        logger.warning("[Reranker] 预热失败 %s: %s", config.RERANKER_MODEL, e)
 
 
 def _normalize_score(raw: float) -> float:

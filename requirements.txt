@@ -25,6 +25,14 @@ openpyxl
 beautifulsoup4
 lxml
 
+# Iter-4 可选：增强 PDF 解析
+# pymupdf 文本/表格质量优于 pypdf，且能渲染图片喂给 OCR；
+# rapidocr-onnxruntime 在扫描版/图片版 PDF 字符密度过低时自动兜底（CPU only / 中英）。
+# 不安装时 parser 自动退回 pypdf，且 RAG_OCR_FALLBACK_ENABLED 静默禁用。
+# pymupdf
+# pdfplumber
+# rapidocr-onnxruntime
+
 # Web scraping
 requests
 

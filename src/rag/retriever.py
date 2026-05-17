@@ -26,6 +26,7 @@ for _key in ("HF_ENDPOINT", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE"):
         os.environ[_key] = _val
 
 import logging
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -59,14 +60,41 @@ def _query_prefix_for(model_name: str) -> str:
 
 # ── Embedding function 进程级缓存 ────────────────────────────────────────────
 _embedding_fn_cache: dict[str, SentenceTransformerEmbeddingFunction] = {}
+_embedding_fn_lock = threading.RLock()
 
 
 def _get_embedding_fn(model_name: str) -> SentenceTransformerEmbeddingFunction:
+    """懒加载 embedding function，多次调用复用同一实例；线程安全。"""
     fn = _embedding_fn_cache.get(model_name)
-    if fn is None:
-        fn = SentenceTransformerEmbeddingFunction(model_name=model_name)
-        _embedding_fn_cache[model_name] = fn
+    if fn is not None:
+        return fn
+    with _embedding_fn_lock:
+        fn = _embedding_fn_cache.get(model_name)
+        if fn is None:
+            fn = SentenceTransformerEmbeddingFunction(model_name=model_name)
+            _embedding_fn_cache[model_name] = fn
     return fn
+
+
+def warm_up() -> None:
+    """
+    主动触发所有已配置 embedding 模型 + reranker 的加载，避免首次检索时延抖动。
+
+    使用场景：服务进程启动时调用一次；Web UI 在 chat 开始前调用以避免首查卡顿。
+    任一模型加载失败仅记录 warning，不抛异常。
+    """
+    for alias, (model_name, _coll) in config.EMBEDDING_MODELS.items():
+        try:
+            _get_embedding_fn(model_name)
+            logger.info("[Retriever] embedding 模型已预热 [%s]: %s", alias, model_name)
+        except Exception as e:
+            logger.warning("[Retriever] embedding 预热失败 [%s] %s: %s", alias, model_name, e)
+    if config.RERANKER_ENABLED:
+        try:
+            from src.rag.reranker import warm_up as _rerank_warm_up
+            _rerank_warm_up()
+        except Exception as e:
+            logger.warning("[Retriever] reranker 预热失败: %s", e)
 
 
 @dataclass

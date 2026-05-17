@@ -211,22 +211,173 @@ def _parse_html(path: Path) -> str:
 
 def _parse_pdf(path: Path) -> str:
     """
-    解析 .pdf：用 pypdf 逐页提取文本，每页前插入 [[PAGE:N]] 锚点供 splitter 识别。
+    解析 .pdf：多 backend 递降 fallback + 扫描版自动 OCR（Iter-4）。
 
-    page_number 取 1-based 页码，便于人工定位与 metadata 落库。
+    流程：
+      1. 文本层提取按优先级 pymupdf(fitz) → pdfplumber → pypdf 顺序尝试，
+         任一可用且产出非空即返回。pymupdf 文本质量与速度显著优于 pypdf，
+         pdfplumber 对带表格/分栏的复杂排版处理更精细。
+      2. 提取完成后检测"平均每页字符数"，低于 config.RAG_OCR_TRIGGER_CHARS_PER_PAGE
+         时认为是扫描版/图片版 PDF，调用 rapidocr-onnxruntime 对全文 OCR。
+      3. 三个 PDF 库与 rapidocr-onnxruntime 全部按软依赖处理；缺哪个都不报错，
+         仅在日志里提示用户安装。任何一层成功即采用其结果。
+
+    所有页前都会插入 "[[PAGE:N]]" 锚点供 splitter 识别。
     """
-    from pypdf import PdfReader
+    pages = _pdf_extract_text_pages(path)
+    if pages:
+        total_chars = sum(len(t) for _, t in pages)
+        avg = total_chars / max(len(pages), 1)
+        # 文本密度过低 → 大概率扫描版；尝试 OCR 兜底
+        if (
+            _cfg().RAG_OCR_FALLBACK_ENABLED
+            and avg < _cfg().RAG_OCR_TRIGGER_CHARS_PER_PAGE
+        ):
+            logger.info(
+                "[parser] PDF 文本密度极低（%.1f 字符/页 < 阈值 %d），尝试 OCR fallback",
+                avg, _cfg().RAG_OCR_TRIGGER_CHARS_PER_PAGE,
+            )
+            ocr_pages = _pdf_ocr_pages(path)
+            if ocr_pages:
+                pages = ocr_pages
+    elif _cfg().RAG_OCR_FALLBACK_ENABLED:
+        # 文本层完全提不出来 → 整本扫描；唯一可行的就是 OCR
+        logger.info("[parser] 所有 PDF 后端均无文本，尝试 OCR fallback")
+        pages = _pdf_ocr_pages(path)
 
-    reader = PdfReader(str(path))
-    pages: list[str] = []
-    for idx, page in enumerate(reader.pages, start=1):
-        text = page.extract_text() or ""
-        text = text.strip()
-        if not text:
+    if not pages:
+        return ""
+
+    return "\n\n".join(f"[[PAGE:{n}]]\n{t.strip()}" for n, t in pages if t.strip()).strip()
+
+
+def _cfg():
+    """延迟拿 src.config，避免循环引用与导入顺序问题。"""
+    import src.config as _c
+    return _c
+
+
+def _pdf_extract_text_pages(path: Path) -> list[tuple[int, str]]:
+    """按优先级尝试 pymupdf → pdfplumber → pypdf 三个文本提取后端。"""
+    for backend in (_pdf_pymupdf, _pdf_pdfplumber, _pdf_pypdf):
+        try:
+            pages = backend(path)
+        except ImportError:
+            continue   # 该后端未安装，下一个
+        except Exception as e:
+            logger.warning("[parser] PDF 后端 %s 解析失败: %s", backend.__name__, e)
             continue
-        pages.append(f"[[PAGE:{idx}]]\n{text}")
+        if pages:
+            logger.debug("[parser] PDF 解析使用后端: %s（%d 页）",
+                         backend.__name__, len(pages))
+            return pages
+    return []
 
-    return "\n\n".join(pages).strip()
+
+def _pdf_pymupdf(path: Path) -> list[tuple[int, str]]:
+    """pymupdf (fitz)：最快、文本质量最佳。"""
+    import fitz  # PyMuPDF, 软依赖
+    pages: list[tuple[int, str]] = []
+    doc = fitz.open(str(path))
+    try:
+        for idx, page in enumerate(doc, start=1):
+            text = (page.get_text() or "").strip()
+            if text:
+                pages.append((idx, text))
+    finally:
+        doc.close()
+    return pages
+
+
+def _pdf_pdfplumber(path: Path) -> list[tuple[int, str]]:
+    """pdfplumber：擅长表格/分栏。"""
+    import pdfplumber  # 软依赖
+    pages: list[tuple[int, str]] = []
+    with pdfplumber.open(str(path)) as pdf:
+        for idx, page in enumerate(pdf.pages, start=1):
+            try:
+                text = (page.extract_text() or "").strip()
+            except Exception:
+                text = ""
+            if text:
+                pages.append((idx, text))
+    return pages
+
+
+def _pdf_pypdf(path: Path) -> list[tuple[int, str]]:
+    """pypdf：兜底（项目原依赖，必定可用）。"""
+    from pypdf import PdfReader
+    reader = PdfReader(str(path))
+    pages: list[tuple[int, str]] = []
+    for idx, page in enumerate(reader.pages, start=1):
+        text = (page.extract_text() or "").strip()
+        if text:
+            pages.append((idx, text))
+    return pages
+
+
+def _pdf_ocr_pages(path: Path) -> list[tuple[int, str]]:
+    """
+    rapidocr-onnxruntime + pymupdf 渲染图片做 OCR。
+
+    依赖均为软依赖，缺任一直接返回空列表；外层会保留文本层结果（如有）。
+    """
+    try:
+        from rapidocr_onnxruntime import RapidOCR
+    except ImportError:
+        logger.info(
+            "[parser] rapidocr-onnxruntime 未安装，无法 OCR 扫描版 PDF。"
+            "如需启用：pip install rapidocr-onnxruntime"
+        )
+        return []
+    try:
+        import fitz  # PyMuPDF 用于把 PDF 渲染成图片
+    except ImportError:
+        logger.info(
+            "[parser] pymupdf 未安装，无法将 PDF 渲染为图片喂给 OCR。"
+            "如需启用：pip install pymupdf"
+        )
+        return []
+
+    cfg = _cfg()
+    try:
+        ocr = RapidOCR()
+    except Exception as e:
+        logger.warning("[parser] RapidOCR 初始化失败：%s", e)
+        return []
+
+    pages: list[tuple[int, str]] = []
+    doc = fitz.open(str(path))
+    page_count = 0
+    try:
+        page_count = len(doc) if hasattr(doc, "__len__") else 0
+        for idx, page in enumerate(doc, start=1):
+            try:
+                pix = page.get_pixmap(dpi=cfg.RAG_OCR_DPI)
+                img_bytes = pix.tobytes("png")
+                result, _ = ocr(img_bytes)
+            except Exception as e:
+                logger.warning("[parser] OCR 第 %d 页失败：%s", idx, e)
+                continue
+            if not result:
+                continue
+            # rapidocr 返回 [(box, text, score), ...]
+            page_text = "\n".join(
+                item[1] for item in result if item and len(item) >= 2 and item[1]
+            )
+            page_text = page_text.strip()
+            if page_text:
+                pages.append((idx, page_text))
+    finally:
+        doc.close()
+
+    if pages:
+        total = sum(len(t) for _, t in pages)
+        logger.info(
+            "[parser] OCR 完成：%d 页有效 / 共 %d 页，总字符数 %d",
+            len(pages), page_count or len(pages), total,
+        )
+    return pages
 
 
 def _parse_docx(path: Path) -> str:
