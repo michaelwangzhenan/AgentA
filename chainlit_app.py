@@ -53,16 +53,6 @@ logger = logging.getLogger(__name__)
 PROMPTS_DIR: str = config.PROMPTS_DIR
 SKILLS_DIR: str = config.SKILLS_DIR
 
-SIDEBAR_ACTION_SWITCHES: dict[str, str] = {
-    "action_clear": "清空对话",
-    "action_clean_all": "清空全部会话",
-    "action_history": "历史摘要",
-    "action_sessions": "会话列表",
-    "action_reload_prompts": "重载 Prompts",
-    "action_reload_skills": "重载 Skills",
-    "action_memory": "查看记忆",
-}
-
 
 class AppState:
     """Chainlit 会话运行时状态（避免 dataclass 在部分运行时触发反射异常）。"""
@@ -138,15 +128,7 @@ def _make_agent(state: AppState, session_id: str | None = None) -> Any:
 
 
 def _get_actions() -> list[cl.Action]:
-    return [
-        cl.Action(name="clear_chat", label="清空对话", payload={}),
-        cl.Action(name="clean_sessions_prompt", label="清空全部会话", payload={}),
-        cl.Action(name="show_history", label="历史摘要", payload={}),
-        cl.Action(name="list_sessions", label="会话列表", payload={}),
-        cl.Action(name="reload_prompts", label="重载 Prompts", payload={}),
-        cl.Action(name="reload_skills", label="重载 Skills", payload={}),
-        cl.Action(name="show_memory", label="查看记忆", payload={}),
-    ]
+    return []
 
 
 def _parse_ingest_args(raw_args: str) -> tuple[str | None, str | None]:
@@ -166,14 +148,10 @@ def _parse_ingest_args(raw_args: str) -> tuple[str | None, str | None]:
     return docs_dir, model_alias
 
 
-def _runtime_settings_widgets(
-    state: AppState,
-    action_states: dict[str, bool] | None = None,
-) -> list[Any]:
+def _runtime_settings_widgets(state: AppState) -> list[Any]:
     if Select is None or Switch is None or Slider is None or TextInput is None:
         return []
     providers = sorted(config.PROVIDER_CONFIGS.keys())
-    states = action_states or {}
     widgets: list[Any] = [
         Select(
             id="provider",
@@ -207,15 +185,6 @@ def _runtime_settings_widgets(
             initial_value=state.ingest_model_alias if state.ingest_model_alias in config.EMBEDDING_MODELS else config.DEFAULT_EMBEDDING_ALIAS,
         ),
     ]
-    for action_id, label in SIDEBAR_ACTION_SWITCHES.items():
-        widgets.append(
-            Switch(
-                id=action_id,
-                label=label,
-                initial=bool(states.get(action_id, False)),
-                description="打开即执行，执行后自动复位。",
-            )
-        )
     return widgets
 
 
@@ -224,52 +193,13 @@ async def _send_collected(title: str, collector: _OutputCollector, actions: list
     await cl.Message(content=f"**{title}**\n\n```text\n{text}\n```", actions=actions or []).send()
 
 
-async def _send_settings(
-    state: AppState,
-    action_states: dict[str, bool] | None = None,
-) -> None:
-    widgets = _runtime_settings_widgets(
-        state,
-        action_states=action_states,
-    )
+async def _send_settings(state: AppState) -> None:
+    widgets = _runtime_settings_widgets(state)
     if not widgets:
         await cl.Message(content="当前 Chainlit 版本不支持 ChatSettings 控件，已跳过设置面板。").send()
         return
     await cl.ChatSettings(widgets).send()
 
-
-async def _run_sidebar_action(state: AppState, action: str) -> bool:
-    """执行侧栏快捷操作。"""
-    mapping: dict[str, str] = {
-        "clear": "/clear",
-        "history": "/history",
-        "sessions": "/session",
-        "reload_prompts": "/reload-prompts",
-        "reload_skills": "/reload-skills",
-        "memory": "/memory",
-        "clean_all": "/clean-session yes",
-    }
-    cmd = mapping.get(action)
-    if not cmd:
-        return False
-    return await _handle_command(state, cmd)
-
-
-def _picked_sidebar_actions(settings: dict[str, Any]) -> list[str]:
-    mapping = {
-        "action_clear": "clear",
-        "action_clean_all": "clean_all",
-        "action_history": "history",
-        "action_sessions": "sessions",
-        "action_reload_prompts": "reload_prompts",
-        "action_reload_skills": "reload_skills",
-        "action_memory": "memory",
-    }
-    picked: list[str] = []
-    for sid, action in mapping.items():
-        if bool(settings.get(sid, False)):
-            picked.append(action)
-    return picked
 
 
 async def _stream_agent_reply(state: AppState, user_input: str) -> str:
@@ -551,8 +481,6 @@ async def on_settings_update(settings: dict[str, Any]) -> None:
     if isinstance(model_alias, str) and model_alias in config.EMBEDDING_MODELS:
         state.ingest_model_alias = model_alias
 
-    picked_actions = _picked_sidebar_actions(settings)
-
     _set_state(state)
     await cl.Message(
         content=(
@@ -564,11 +492,6 @@ async def on_settings_update(settings: dict[str, Any]) -> None:
             f"\n- rag_top_k: `{config.RAG_TOP_K}`"
         ),
     ).send()
-
-    if picked_actions:
-        for action in picked_actions:
-            await _run_sidebar_action(state, action)
-        await _send_settings(state, action_states={k: False for k in SIDEBAR_ACTION_SWITCHES})
 
 
 @cl.action_callback("clear_chat")

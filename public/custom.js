@@ -52,15 +52,7 @@
   const SIDEBAR_W_COLLAPSED = 52;
   const STORAGE_KEY = "agenta-sidebar-collapsed";
 
-  const ACTIONS = [
-    { label: "清空对话",     icon: "🗑️" },
-    { label: "清空全部会话", icon: "⚠️" },
-    { label: "历史摘要",     icon: "📜" },
-    { label: "会话列表",     icon: "📋" },
-    { label: "重载 Prompts", icon: "🔄" },
-    { label: "重载 Skills",  icon: "🔧" },
-    { label: "查看记忆",     icon: "🧠" },
-  ];
+  const ACTIONS = [];
 
   /* ── Find & click last visible Chainlit action button ──────── */
   function clickChainlitAction(label) {
