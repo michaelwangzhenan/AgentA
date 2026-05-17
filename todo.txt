@@ -429,7 +429,7 @@ ToDo List：
   【多层防御（Defense in Depth）】单一防线不可靠，将以上方法组合使用；同时在系统层面限制 Agent 进程的 OS 权限（沙箱、网络隔离），即使注入成功也限制实际危害范围。
 40. 实践：加入3GPP文档场景，遇到真实规模问题
 41. A2A 协议？
-42. RAG 命中优化
+42. RAG 命中优化 => Done
   ── 现状（src/rag/ ingest.py · retriever.py · reranker.py · parser.py + config.py + agent/tools.py）
     召回链路：用户问题 → search_knowledge 工具 → 对所有 collection（en/zh）按内部距离取
       top_k × RECALL_MULTIPLIER → round-robin 交错合并 → CrossEncoder 精排 → 截 top_k → format。
@@ -580,7 +580,235 @@ ToDo List：
     Iter-3 后多轮 / 口语化问题召回率 +10pp 以上；
     Iter-4 后扫描版 PDF 与跨语言场景从"基本不可用"变为可用。
 
+  —— 项目实施要点
+    Iter-1（修 bug + 立竿见影）—— commit 50f19b1
+      ▸ src/rag/ingest.py
+        · _doc_id_from_relpath：用 SHA1(rel_path) 作 doc_id 取代 filename，
+          解决 P0-1 同名文件互相覆盖（docs/readme.txt 与 docs_zh/readme.txt）。
+        · _open_collection：显式 metadata={"hnsw:space": "cosine"}；
+          已有 collection 距离空间不一致时自动 drop 重建（修 P0-8）。
+        · 入库 metadata 扩到：doc_id / source(rel_path) / filename / ext / lang /
+          mtime / content_sha1 / chunk_index / chunk_total（修 P1-3）。
+      ▸ src/rag/parser.py
+        · _clean_extracted_text：>5 次出现的短行视为页眉页脚剔除；
+          去 "Copyright ... All rights reserved" / "1 / 32" 等模板（修 P1-7）。
+      ▸ src/rag/retriever.py
+        · _query_prefix_for(model_name)：BGE/e5 等模型 query 加规范前缀，
+          document 不加（非对称检索，修 P0-4 第一步）。
+        · Hit 加 score / metadata；dense 阶段按 RAG_DENSE_MIN_SCORE 过滤。
+        · _embedding_fn_cache：进程级 LRU 缓存，避免每次重建 embedding fn。
+      ▸ src/rag/reranker.py
+        · 默认 RERANKER_MODEL=BAAI/bge-reranker-base（多语言，修 P0-5）。
+        · _normalize_score：raw logit/score → [0,1] 概率；按 RAG_RERANK_MIN_SCORE
+          阈值过滤（修 P1-2）。
+      ▸ src/config.py
+        · 新增 RAG_DENSE_MIN_SCORE=0.30 / RAG_RERANK_MIN_SCORE=0.0。
 
+    Iter-2（结构化 + 混合检索）—— commit 3bc21ac
+      ▸ src/rag/splitter.py（新文件）
+        · Chunk dataclass：text + heading_path + page_no + line_start/end。
+        · _split_into_atoms + _greedy_pack：递归按 \n\n → \n → 句号 → 字符
+          逐级回退，保留语义边界（修 P0-2）。
+        · split_structured：识别 [[PAGE:N]] 与 Markdown # 标题，
+          为每个 chunk 注入"父级标题面包屑"以保留上下文。
+      ▸ src/rag/parser.py
+        · _parse_pdf 在每页前插 [[PAGE:N]]；
+        · _parse_docx：Heading 1~9 → Markdown # 标题；
+        · _parse_pptx：插 [[PAGE:N]] + ## 幻灯片标题；
+        · _parse_xlsx：插 # Sheet: <name>；
+        · _parse_html：h1~h6 → Markdown # 标题。
+      ▸ src/rag/bm25_index.py（新文件）
+        · 自实现 BM25 Okapi，无外部依赖（不引入 rank_bm25）。
+        · tokenize：英文按空白 + 简单停用词，中文按 bigram。
+        · 进程级缓存 + RLock + pickle 持久化 + dirty flag 懒重算。
+      ▸ src/rag/retriever.py
+        · _query_bm25 + _rrf_fuse：dense + BM25 RRF 融合（修 P0-6）。
+        · Hit 加 id / retrievers；_dedupe_by_source 单 source 最多 K_PER_SOURCE 条（修 P1-4）。
+      ▸ src/rag/ingest.py
+        · 调 splitter.split_structured 替代 chunk_text；
+        · 与 ChromaDB upsert 同步更新 BM25 索引，保持一致性。
+      ▸ src/agent/tools.py
+        · search_knowledge 描述加 best practice 引导（修 P2-3）；
+        · 新增 where 参数透传到 chroma where 子句；
+        · 默认 top_k 5 → 8。
+      ▸ src/config.py
+        · RAG_TOP_K 5 → 8；新增 RAG_K_PER_SOURCE=3 / BM25_ENABLED=true /
+          BM25_K1=1.5 / BM25_B=0.75 / RRF_K=60 / BM25_INDEX_DIR。
+
+    Iter-3（query 端增强）—— commit 6fbb30d
+      ▸ src/rag/query_rewriter.py（新文件）
+        · multi_query：LLM 生成 N 条同义改写（默认 3 条）；
+        · hyde_query：LLM 生成假设性答案，"答案"也作 embedding 查询；
+        · expand_queries：原 query + multi-query + HyDE 去重合并；
+        · LRU 缓存 + 失败静默降级（不影响主流程，修 P0-7）。
+      ▸ src/rag/retriever.py
+        · search 新增 queries 参数；多 query 各跑 dense+bm25 后 RRF 融合，
+          per_query_k 自动控制总候选数。
+      ▸ src/agent/tools.py
+        · _tool_search_knowledge 调 expand_queries 后传给 retriever.search。
+      ▸ src/agent/agent.py
+        · SYSTEM_PROMPT 重写：query 准备四步（A 代词消解 / B 术语化 /
+          C 拆子查询 / D where 过滤），多轮检索策略（先 1~2 次换角度
+          再 web_search），引用要求（source/章节/页号，修 P1-5）。
+      ▸ src/config.py
+        · 新增 RAG_QUERY_REWRITE_ENABLED=true / RAG_REWRITE_MAX_QUERIES=3 /
+          RAG_HYDE_ENABLED=false（开启后每次多花 1 次 LLM 调用）。
+
+    Iter-4（基建 + 评估）—— commit ba58024
+      ▸ src/rag/parser.py
+        · _parse_pdf 重写为多后端递降：pymupdf > pdfplumber > pypdf；
+          所有新依赖软 import，缺包静默降级到 pypdf（修 P0-3 文本层）。
+        · _pdf_ocr_pages：文本密度 < RAG_OCR_TRIGGER_CHARS_PER_PAGE 时
+          用 rapidocr-onnxruntime 兜底 OCR 扫描版 PDF（修 P0-3 OCR）。
+      ▸ src/config.py
+        · EMBEDDING_MODELS 加 m3 → (BAAI/bge-m3, kb_m3)，可用
+          EMBEDDING_MODEL=m3 切到单一多语种模型（修 P0-4 重构方案）；
+        · 新增 RAG_OCR_FALLBACK_ENABLED / RAG_OCR_TRIGGER_CHARS_PER_PAGE=50 /
+          RAG_OCR_DPI=200。
+      ▸ src/rag/reranker.py
+        · _cross_encoder_cache: dict[model_name] + RLock，运行时切换
+          RERANKER_MODEL 也复用旧实例（修 P2-2）；
+        · 新增 warm_up() 显式预热接口。
+      ▸ src/rag/retriever.py
+        · _embedding_fn_cache 加 RLock；新增 warm_up() 一次性预热全部
+          embedding 模型 + reranker，避免首查抖动。
+      ▸ evaluation/rag/{eval.py, golden.example.json, __init__.py}（新目录）
+        · 评估指标 hit_source@k / hit_keyword@k / hit_either@k / MRR；
+        · 命令：python -m evaluation.rag.eval [--golden ... --k ...
+          --no-rewriter --no-rerank --json out.json --quiet]（实现 P2-1）。
+      ▸ requirements.txt
+        · 增加可选依赖注释：pymupdf / pdfplumber / rapidocr-onnxruntime。
+
+
+
+43. RAG 效果评估
+
+  ── 为什么要做（不做的代价）
+    Iter-1~4 改了一堆代码但没有客观证据证明命中率真的提升；某些配置甚至
+    可能在局部场景变差（如 RAG_DENSE_MIN_SCORE=0.30 把弱相关但有用的
+    chunk 滤掉）。没有评估集 = 永远发现不了回归，更无法回答"哪一项改动
+    真正有效，要不要保留？"——所有调参都退化为靠直觉。
+
+  ── 方法论：黄金集 + 离线评估
+    1. 黄金集（Golden Set / Eval Set）
+       人工编写的"问答-期望命中"对照表。每条 item 字段：
+         · query                      用户实际会问的问题
+         · expected_keywords          OR 关系；任一在命中 chunk 文本中出现 → keyword_hit
+         · expected_source            可选；精确匹配 hit.source（含相对路径）
+         · expected_source_contains   可选；子串匹配 hit.source（更宽松）
+         · note                       可选；自描述备注，不参与评估
+       规模 20~50 条，覆盖：
+         · 高频问题；
+         · 易漏召回（专有名词、缩写、版本号、命令名、错误码）；
+         · 跨文档对比 / 枚举类（"列出所有 ..."）；
+         · 多轮 / 口语化提问（"它支持哪些 ...？"）；
+         · 中英混合 / 跨语言。
+       格式参考 evaluation/rag/golden.example.json，写到 evaluation/rag/golden.json。
+
+    2. 评估指标（top-K 默认 = RAG_TOP_K=8）
+       hit_source@k    top-K 中命中 expected_source(_contains) 的样本占比
+       hit_keyword@k   top-K chunk 里出现 expected_keywords 任一词的样本占比
+       hit_either@k    上述任一命中（最宽松，反映"是否召回到相关内容"）
+       MRR             第一次命中位置的倒数平均（衡量"早命中"程度）
+                       MRR=1.0 → 永远命中第一条；0.5 → 平均命中第二条
+
+    3. 基线对比（baseline）
+       同一份黄金集在不同代码版本（或不同配置）上各跑一次，把 4 项指标
+       存为 JSON，横向对比即可量化每一轮的真实增量。
+
+  ── 工程入库结构（评估前必读）
+    本工程默认用"双 collection 双语种"模式：
+      docs/     英文资料  →  ingest --model en  →  collection kb_en (all-MiniLM-L6-v2)
+      docs_zh/  中文资料  →  ingest --model zh  →  collection kb_zh (BAAI/bge-small-zh)
+    关键事实（src/rag/ingest.py:175 + src/rag/retriever.py:362）：
+      · ingest_all(model=...) 一次只灌一个 collection，所以 "完整入库 = 跑 2 次"。
+      · retriever.search 默认遍历 config.EMBEDDING_MODELS 中所有别名
+        （即同时查 kb_en + kb_zh + kb_m3），各 collection 取 top-K 后 RRF 融合。
+      · 因此评估必须把所有"启用中"的 collection 都灌满，否则空库会拉低分数。
+    入库的两种等价入口（任选其一）：
+      A) 交互式（main.py 启动后输入）：/ingest <目录> -m <模型>
+         适合手动操作，但无法在 baseline 脚本里 chain。
+      B) 独立脚本入口：python -m src.rag.ingest --docs-dir <目录> --model <模型>
+         适合 baseline / CI / PowerShell function。下面 helper 与命令均用 B。
+    Iter-4 新增的 m3 别名是另一种方案：单一多语言模型 (BAAI/bge-m3) 把中英都灌
+    到 kb_m3 一个集合，跟 en/zh 双库做对比；详见下面"消融实验 → 测 m3 单库"。
+
+  ── 操作步骤
+    准备工作（一次性）：
+      编辑 evaluation/rag/golden.json
+      （基于 golden.example.json 改成自己的真实问题，规模 20~50 条；每条 query
+       的语种应与 expected_source 所在目录一致——en 问题对 docs/，zh 问题对 docs_zh/）
+
+    定义一个 helper（PowerShell function，让步骤紧凑、避免笔误）：
+      function Reingest-Bilingual {
+          # 清空旧库，避免不同 Iter 的 schema/分块/索引格式互相污染
+          Remove-Item -Recurse -Force chroma_db, bm25_index -ErrorAction SilentlyContinue
+          python -m src.rag.ingest --docs-dir docs    --model en    # 英文 → kb_en
+          python -m src.rag.ingest --docs-dir docs_zh --model zh    # 中文 → kb_zh
+      }
+
+    一次性跑 Iter-0 → Iter-4 baseline 对照（commit 倒回去依次跑）：
+      git stash                                          # 保存未提交改动
+      mkdir reports                                      # 存评估结果
+
+      git checkout 1fe5582; Reingest-Bilingual; python -m evaluation.rag.eval --json reports/iter0.json
+      git checkout 50f19b1; Reingest-Bilingual; python -m evaluation.rag.eval --json reports/iter1.json
+      git checkout 3bc21ac; Reingest-Bilingual; python -m evaluation.rag.eval --json reports/iter2.json
+      git checkout 6fbb30d; Reingest-Bilingual; python -m evaluation.rag.eval --json reports/iter3.json
+      git checkout ba58024; Reingest-Bilingual; python -m evaluation.rag.eval --json reports/iter4.json
+
+      git checkout main; git stash pop
+
+      注 1：每次切 commit 都要先清空 chroma_db / bm25_index 再 ingest 双语种，
+            因为切分策略 / metadata schema / embedding 维度 / BM25 索引格式
+            在不同 Iter 下不同，沿用旧库会得到错误结论。
+      注 2：Iter-0 / Iter-1 没有 BM25 索引，bm25_index 目录不会生成；不影响。
+      注 3：每次切 commit 后 src/config.py 也跟着变；ReIngest-Bilingual 必须
+            在 checkout 之后再调用，使用的是当前 commit 的 ingest 实现。
+
+      最后读 reports/iter*.json 拼出对比表，看每轮 vs Iter-0 的 +pp。
+
+    日常回归（任何检索/分块/embedding 改动后）：
+      python -m evaluation.rag.eval --json reports/before.json   # 改动前
+      <改代码；动到分块/解析/embedding 时必须 Reingest-Bilingual>
+      python -m evaluation.rag.eval --json reports/after.json    # 改动后
+      diff 两份 JSON 看升降；指标下降 → 回退或继续改。
+
+    消融实验（A/B 单一开关，验证某项是否真有效）：
+      ── 关单一开关，无需重灌：
+      python -m evaluation.rag.eval --no-rewriter        # 关 query 改写
+      python -m evaluation.rag.eval --no-rerank          # 关 reranker
+      python -m evaluation.rag.eval --k 5                # 看 top_k 曲线
+      $env:RERANKER_MODEL="cross-encoder/ms-marco-MiniLM-L-6-v2"
+        python -m evaluation.rag.eval                    # 多语言 vs 英文 reranker
+
+      ── 测 bge-m3 单库（与 en/zh 双库对比，需重灌）：
+      Remove-Item -Recurse -Force chroma_db, bm25_index -ErrorAction SilentlyContinue
+      python -m src.rag.ingest --docs-dir docs    --model m3    # 中英都灌到 kb_m3
+      python -m src.rag.ingest --docs-dir docs_zh --model m3
+      ⚠ 重要：临时把 src/config.py 的 EMBEDDING_MODELS 中 en/zh 两行注释掉
+        只留 m3，否则 retriever 还会去查空的 kb_en / kb_zh，结果偏低且不公平。
+      python -m evaluation.rag.eval --json reports/m3.json
+      跑完恢复 EMBEDDING_MODELS 三项以及双语种入库，避免影响后续日常使用。
+
+  ── 看输出怎么用（结果解读）
+    hit_source@k 偏低 / hit_keyword@k 还行
+      → 召回到了相关内容但不是期望那个文件 → 同名覆盖未净化 / 分块碎裂
+    两者都低，且 miss 案例集中在某类问题（如表格 / 跨文档对比）
+      → 解析层（parser / splitter）短板，下一轮专项改这类
+    hit_either@k 高 + MRR 低
+      → 命中了但排序差 → 调 reranker / score 阈值 / RRF k / per_source 去重
+    逐条详情里看 "实际 top-3 source"
+      → 直接看 retriever 误召回了什么，定位是 dense 还是 BM25 的问题
+
+  ── 进阶（后续可选）
+    · CI 集成：每次 PR 合并前自动 eval 与 main 指标对比，回归即拒绝合并；
+    · 黄金集分级：每条加 tag（factoid / enum / multi-hop / acronym），
+      分组看哪类问题改进最大、哪类还卡住；
+    · 端到端答案评估：用 LLM-as-Judge 评最终回答而非 chunk，覆盖
+      "召回 → 生成"全链路。需要另一套评估脚本，超出 retriever 范畴。
+
+44. Web UI 优化
 
 99. 画出完整的 AI 系统架构图并解释每个决策
 
