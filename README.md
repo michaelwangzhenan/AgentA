@@ -124,3 +124,92 @@ LLM_PROVIDER=claude     # Anthropic Claude
 ---
 ## UT 测试
 使用 . t.sh 脚本
+
+## RAG评估
+
+把"是否真的命中"用数字说话，避免调参靠直觉。流程是 **黄金集 + 离线评估**：人工写 20~50 条「问题-期望命中」对照表，脚本自动跑检索并统计 4 项指标（hit_source@k / hit_keyword@k / hit_either@k / MRR）。
+
+### 1. 准备黄金集
+
+参考 `evaluation/rag/golden.example.json` 改成自己的 `evaluation/rag/golden.json`（私有数据，已 gitignore）。每条 item：
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `query` | ✓ | 用户实际会问的问题 |
+| `expected_keywords` | – | OR 关系：任一在命中 chunk 里出现即记 keyword_hit |
+| `expected_source` / `expected_source_contains` | – | 精确 / 子串匹配 hit.source |
+| `note` | – | 自描述备注，不参与评估 |
+
+### 2. 一行起跑
+
+```powershell
+# 默认：清库 → 双语种 ingest → eval → 落 JSON 报告
+python -m evaluation.rag.run_eval --label v1
+```
+
+默认 ingest 路径（可用 `--en-dir` / `--zh-dir` 覆盖）：
+
+| 模型 | 目录 | collection |
+|------|------|------------|
+| en   | `../pursue`         | `kb_en` |
+| zh   | `../pursue/resume`  | `kb_zh` |
+
+报告输出到 `reports/v1-<时间戳>.json`，控制台末尾打印一行：
+
+```
+RESULT[v1] items=35 k=8 hit_source@k=51.43% hit_keyword@k=68.57% hit_either@k=74.29% MRR=0.4231
+```
+
+### 3. 多 commit baseline 对比（量化各 Iter 增量）
+
+```powershell
+git stash
+git checkout 1fe5582; python -m evaluation.rag.run_eval --label iter0   # 未优化基线
+git checkout 50f19b1; python -m evaluation.rag.run_eval --label iter1
+git checkout 3bc21ac; python -m evaluation.rag.run_eval --label iter2
+git checkout 6fbb30d; python -m evaluation.rag.run_eval --label iter3
+git checkout 944f52d; python -m evaluation.rag.run_eval --label iter4
+git checkout 35813bc; python -m evaluation.rag.run_eval --label iter5
+git checkout main; git stash pop
+```
+
+每次切 commit 后必须重新 ingest（脚本默认会清库），因为切分策略 / metadata schema / embedding 维度 / BM25 索引格式在不同 Iter 下不同。
+
+### 4. 消融实验（库已就绪，跳过 ingest 节省时间）
+
+```powershell
+python -m evaluation.rag.run_eval --skip-ingest --no-rewriter --label no-rewriter   # 关 query 改写
+python -m evaluation.rag.run_eval --skip-ingest --no-rerank   --label no-rerank     # 关 reranker
+python -m evaluation.rag.run_eval --skip-ingest --k 5         --label k5            # 看 top_k 曲线
+```
+
+### 5. m3 单库 vs en/zh 双库（Iter-5 引入）
+
+```powershell
+$env:RAG_ACTIVE_EMBEDDINGS = "m3"
+python -m evaluation.rag.run_eval `
+    --en-dir ../pursue --zh-dir ../pursue/resume `
+    --en-model m3 --zh-model m3 --label m3-single
+$env:RAG_ACTIVE_EMBEDDINGS = "en,zh"      # 跑完恢复
+```
+
+### 6. 结果解读速查
+
+| 现象 | 可能原因 / 下一步 |
+|------|-------------------|
+| `hit_source@k` 低、`hit_keyword@k` 还行 | 召回到了相关内容但不是期望文件 → 同名覆盖 / 分块碎裂 |
+| 两者都低，集中在某类问题（如表格 / 跨文档对比） | 解析层（parser/splitter）短板 |
+| `hit_either@k` 高、MRR 低 | 命中了但排序差 → 调 reranker / score 阈值 / RRF k |
+| 英文 query miss 多 | Iter-5 翻译轴未生效 → 检查 LLM provider / `RAG_TRANSLATE_QUERY_ENABLED` |
+
+逐条 `RESULT` 详情看 `reports/<label>-<ts>.json` 的 `cases[]` 字段；每条带 `top_sources`，可直接定位 retriever 误召回了哪些文件。
+
+### 其他实用参数
+
+```powershell
+python -m evaluation.rag.run_eval --help        # 查看完整参数
+python -m evaluation.rag.run_eval --dry-run     # 只打印将执行的命令，不实际跑
+python -m evaluation.rag.run_eval --no-clean    # 不清空 chroma_db / bm25_index
+```
+
+更详细的方法论与背景见 `todo.txt` 的 "43. RAG 效果评估" 章节。
