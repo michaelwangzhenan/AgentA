@@ -162,13 +162,26 @@ CLAUDE_MAX_TOKENS: int = int(os.getenv("CLAUDE_MAX_TOKENS", "4096"))
 
 # ── Reranker 配置 ────────────────────────────────────────────────────────────
 # Cross-Encoder 模型，用于在 Bi-Encoder 召回结果上做二阶段精排
+# 默认改为 BAAI/bge-reranker-base（中英双语，中文场景显著优于 ms-marco MiniLM）。
+# 多语言/混合语种推荐换为 BAAI/bge-reranker-v2-m3（更准但更大）。
 RERANKER_MODEL: str = os.getenv(
-    "RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    "RERANKER_MODEL", "BAAI/bge-reranker-base"
 )
 # true 开启二阶段精排；false 跳过精排，直接使用 round-robin 结果（向后兼容）
 RERANKER_ENABLED: bool = os.getenv("RERANKER_ENABLED", "true").lower() == "true"
 # 召回窗口倍数：精排前取 top_k × N 条候选，默认 3
 RERANKER_RECALL_MULTIPLIER: int = int(os.getenv("RERANKER_RECALL_MULTIPLIER", "3"))
+
+# ── RAG 召回质量阈值 ─────────────────────────────────────────────────────────
+# Dense 检索后按 cosine 相似度（= 1 - distance，cosine 空间下 ∈ [-1, 1]）过滤；
+# 低于此阈值的 chunk 直接丢弃，避免低质量片段污染 LLM 上下文。
+# 设为 0 或负数则禁用阈值过滤（向后兼容）。
+RAG_DENSE_MIN_SCORE: float = float(os.getenv("RAG_DENSE_MIN_SCORE", "0.30"))
+# Cross-Encoder 精排后的最低相关性分（不同 reranker 输出尺度不同：
+#   bge-reranker-base / v2-m3 输出 sigmoid 概率，约 [0, 1]，建议阈值 0.30~0.50；
+#   ms-marco MiniLM 输出 raw logit，区间 [-10, 10]，建议阈值 -3 ~ 0）。
+# 默认 0.0：保守不过滤，迁移到 bge-reranker 后可上调。
+RAG_RERANK_MIN_SCORE: float = float(os.getenv("RAG_RERANK_MIN_SCORE", "0.0"))
 
 # ── Extended Thinking 配置 ────────────────────────────────────────────────────
 # true 开启 Extended Thinking；目前 Claude（原生 SDK）和 Qwen3 支持，其余 provider 静默降级

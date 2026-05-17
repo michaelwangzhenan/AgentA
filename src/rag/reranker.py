@@ -14,6 +14,8 @@ Reranker 模块 —— Cross-Encoder 二阶段精排
 """
 
 import logging
+import math
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import src.config as config
@@ -38,6 +40,26 @@ def _get_cross_encoder() -> "CrossEncoder":  # type: ignore[name-defined]
     return _cross_encoder
 
 
+def _normalize_score(raw: float) -> float:
+    """
+    将 cross-encoder 原始输出归一化到 [0, 1] 概率分，方便阈值过滤与展示。
+
+    - BGE-reranker 系列输出已经接近 sigmoid 概率（且本身经过 sigmoid 训练），
+      但在不同实现下 predict() 可能返回 logit；统一过一遍 sigmoid 总是安全的：
+      raw 已经在 [0, 1] 时再 sigmoid 一次会进一步压向 [0.5, 0.73]，仍保单调，
+      仅影响阈值刻度，不影响排序。
+    - ms-marco MiniLM 等输出 raw logit（区间约 [-10, 10]），sigmoid 后落入 [0, 1]。
+    """
+    try:
+        if raw >= 0:
+            return 1.0 / (1.0 + math.exp(-raw))
+        # 数值稳定写法（避免 raw 极小时 math.exp(-raw) 溢出）
+        ex = math.exp(raw)
+        return ex / (1.0 + ex)
+    except (OverflowError, ValueError):
+        return 0.0 if raw < 0 else 1.0
+
+
 def rerank(query: str, hits: "list[Hit]", top_k: int) -> "list[Hit]":
     """
     使用 Cross-Encoder 对候选 hits 重新打分并按相关性降序排列。
@@ -47,11 +69,12 @@ def rerank(query: str, hits: "list[Hit]", top_k: int) -> "list[Hit]":
 
     Args:
         query:  用户的自然语言问题。
-        hits:   Bi-Encoder 召回的候选 _Hit 列表。
+        hits:   Bi-Encoder 召回的候选 Hit 列表。
         top_k:  最终期望返回的条数。
 
     Returns:
-        经 Cross-Encoder 重新排序后截取的 top_k 条 _Hit 列表（分数越高越靠前）。
+        经 Cross-Encoder 重新排序并截取的 top_k 条 Hit 列表（分数越高越靠前）。
+        每条 Hit 的 .score 字段会被覆盖为归一化后的精排分。
     """
     if len(hits) <= top_k:
         logger.info("[Reranker] 候选数 %d ≤ top_k %d，跳过精排直接透传", len(hits), top_k)
@@ -63,17 +86,25 @@ def rerank(query: str, hits: "list[Hit]", top_k: int) -> "list[Hit]":
     pairs: list[tuple[str, str]] = [(query, hit.document) for hit in hits]
     raw = model.predict(pairs)
     # 真实 CrossEncoder 返回 numpy ndarray，mock 可能直接返回 list，统一转换
-    scores: list[float] = raw.tolist() if hasattr(raw, "tolist") else list(raw)
+    raw_scores: list[float] = [float(x) for x in (raw.tolist() if hasattr(raw, "tolist") else raw)]
+    norm_scores: list[float] = [_normalize_score(s) for s in raw_scores]
 
-    # 按分数降序排列，截取 top_k 条
-    ranked = sorted(zip(scores, hits), key=lambda x: x[0], reverse=True)
-    result = [hit for _, hit in ranked[:top_k]]
+    # 按归一化分数降序排列，截取 top_k 条；同时把分数写回 Hit.score
+    indexed = sorted(
+        zip(norm_scores, raw_scores, hits),
+        key=lambda x: x[0],
+        reverse=True,
+    )
+    result: list["Hit"] = []
+    for norm, _raw, hit in indexed[:top_k]:
+        # dataclass replace 保持向后兼容：旧消费方读 distance 仍 OK
+        result.append(replace(hit, score=norm))
 
     logger.info(
-        "[Reranker] 从 %d 候选精排至 %d 条，最高分: %.4f，最低分: %.4f",
+        "[Reranker] 从 %d 候选精排至 %d 条，最高分: %.4f，最低分: %.4f（已归一化到 [0,1]）",
         len(hits),
         len(result),
-        ranked[0][0],
-        ranked[len(result) - 1][0],
+        indexed[0][0],
+        indexed[len(result) - 1][0],
     )
     return result

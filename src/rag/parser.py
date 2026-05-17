@@ -8,13 +8,98 @@
       本模块只处理本地文件。
 """
 
+import logging
+import re
+from collections import Counter
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 # 支持的文件扩展名集合
 SUPPORTED_EXTENSIONS: frozenset[str] = frozenset(
     {".md", ".txt", ".html", ".htm", ".pdf", ".docx", ".pptx", ".xlsx"}
 )
+
+
+# ── 解析后内容清洗 ────────────────────────────────────────────────────────────
+# 目的：去除 PDF/Word/PPT 等长文档常见的"模板噪声"——页眉页脚、版权声明、纯页码、
+# PPT 母版水印等。这些片段会大量重复进入向量库，污染相似度计算并稀释命中率。
+
+# 满足以下任一条件即被视为"模板/页脚噪声"：
+#   1. 整行只有数字、日期、版权字符（©/® 等）
+#   2. 整行匹配典型页码模式（"1 / 32" 或 "Page 5 of 10"）
+#   3. 整行匹配典型版权/保留声明（不限语种）
+_NOISE_LINE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^\s*\d+\s*$"),                                # 纯页码
+    re.compile(r"^\s*[-–—•·]+\s*\d+\s*[-–—•·]+\s*$"),          # "- 12 -" / "— 12 —"
+    re.compile(r"^\s*page\s+\d+\s*(of\s+\d+)?\s*$", re.I),      # Page 5 / Page 5 of 10
+    re.compile(r"^\s*\d+\s*[/／]\s*\d+\s*$"),                    # 1/32 / 1／32
+    re.compile(r"©|®|™"),                                       # 含版权符号
+    re.compile(r"copyright|all\s+rights\s+reserved", re.I),     # 英文版权
+    re.compile(r"版权所有|保留所有权利|未经.*授权.*禁止"),      # 中文版权
+)
+
+# 短行重复阈值：一份文档中重复出现 ≥ N 次的短行（≤ MAX_LEN 字符）视为页眉页脚/水印
+_NOISE_REPEAT_THRESHOLD: int = 5
+_NOISE_MAX_LEN: int = 80
+
+
+def _is_noise_line(line: str) -> bool:
+    """单行级别的噪声检测（不需要全文上下文，纯规则）。"""
+    s = line.strip()
+    if not s:
+        return False
+    return any(p.search(s) for p in _NOISE_LINE_PATTERNS)
+
+
+def _clean_extracted_text(text: str) -> str:
+    """
+    解析层最后一步：去除模板/页脚类噪声，避免污染向量库。
+
+    清洗策略：
+      1. 整行规则匹配：纯页码、页码模式、版权声明 → 直接丢弃。
+      2. 跨页重复：在长文档中重复出现 ≥ _NOISE_REPEAT_THRESHOLD 次的"短行"
+         （length ≤ _NOISE_MAX_LEN）视为页眉页脚/水印 → 丢弃。
+      3. 多余空行折叠为最多一个空行（避免 chunk 中出现大段空白）。
+    """
+    if not text or not text.strip():
+        return ""
+
+    raw_lines = text.splitlines()
+
+    # Pass 1: 统计短行重复次数
+    short_line_counts: Counter[str] = Counter()
+    for line in raw_lines:
+        s = line.strip()
+        if 0 < len(s) <= _NOISE_MAX_LEN:
+            short_line_counts[s] += 1
+
+    repeated_noise: set[str] = {
+        s for s, n in short_line_counts.items() if n >= _NOISE_REPEAT_THRESHOLD
+    }
+
+    # Pass 2: 应用规则 + 重复短行 + 空行折叠
+    cleaned: list[str] = []
+    prev_blank = False
+    dropped = 0
+    for line in raw_lines:
+        stripped = line.strip()
+        if not stripped:
+            if not prev_blank:
+                cleaned.append("")
+                prev_blank = True
+            continue
+        if _is_noise_line(stripped) or stripped in repeated_noise:
+            dropped += 1
+            continue
+        cleaned.append(stripped)
+        prev_blank = False
+
+    if dropped > 0:
+        logger.debug("[parser] 清洗丢弃噪声行 %d 条", dropped)
+
+    return "\n".join(cleaned).strip()
 
 
 def parse_file(file_path: str | Path) -> str:
@@ -46,20 +131,23 @@ def parse_file(file_path: str | Path) -> str:
 
     match suffix:
         case ".md" | ".txt":
-            return _parse_text(path)
+            raw = _parse_text(path)
         case ".html" | ".htm":
-            return _parse_html(path)
+            raw = _parse_html(path)
         case ".pdf":
-            return _parse_pdf(path)
+            raw = _parse_pdf(path)
         case ".docx":
-            return _parse_docx(path)
+            raw = _parse_docx(path)
         case ".pptx":
-            return _parse_pptx(path)
+            raw = _parse_pptx(path)
         case ".xlsx":
-            return _parse_xlsx(path)
+            raw = _parse_xlsx(path)
         case _:
             # 理论上不会到这里，frozenset 已经过滤
             raise ValueError(f"未处理的格式: '{suffix}'")
+
+    # 统一过一遍模板/页脚噪声清洗，避免污染下游 chunk → embedding
+    return _clean_extracted_text(raw)
 
 
 # ── 各格式解析实现 ────────────────────────────────────────────────────────────
