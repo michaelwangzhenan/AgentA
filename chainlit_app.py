@@ -8,11 +8,16 @@ Chainlit Web UI 入口（与现有 CLI 并行）。
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import warnings
 from typing import Any
 
 import chainlit as cl
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
 from dotenv import load_dotenv
 
 try:
@@ -52,6 +57,34 @@ logger = logging.getLogger(__name__)
 
 PROMPTS_DIR: str = config.PROMPTS_DIR
 SKILLS_DIR: str = config.SKILLS_DIR
+
+
+# ── Intercept /api/agenta/* before Chainlit's SPA catch-all ───────────────
+# Middleware runs before route dispatch, so it bypasses the SPA wildcard route.
+
+class _AgentAApiMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path == "/api/agenta/sessions":
+            ch = ChatHistory()
+            try:
+                rows = await asyncio.to_thread(ch.list_sessions)
+                return Response(
+                    content=json.dumps(rows, ensure_ascii=False),
+                    media_type="application/json",
+                )
+            except Exception as exc:
+                return Response(
+                    content=json.dumps({"error": str(exc)}),
+                    status_code=500,
+                    media_type="application/json",
+                )
+            finally:
+                await asyncio.to_thread(ch.close)
+        return await call_next(request)
+
+
+from chainlit.server import app as _cl_server  # noqa: E402
+_cl_server.add_middleware(_AgentAApiMiddleware)
 
 
 class AppState:
@@ -202,20 +235,28 @@ async def _send_settings(state: AppState) -> None:
 
 
 
-async def _stream_agent_reply(state: AppState, user_input: str) -> str:
+async def _stream_agent_reply(state: AppState, user_input: str) -> tuple[str, cl.Message]:
     """
-    线程桥接运行 agent.run，并将 thinking chunk 流式输出到 Chainlit。
+    线程桥接运行 agent.run，将 thinking chunk 和正文 token 均流式推送到 Chainlit。
+
+    Returns:
+        (answer, answer_msg): 最终回答字符串 和 已发送的流式回答消息对象。
+        调用方可在 answer_msg 上附加 actions 后 update()。
     """
     loop = asyncio.get_running_loop()
-    queue: asyncio.Queue[str | None] = asyncio.Queue()
+    thinking_queue: asyncio.Queue[str | None] = asyncio.Queue()
+    token_queue: asyncio.Queue[str | None] = asyncio.Queue()
 
     def thinking_callback(chunk: str) -> None:
-        loop.call_soon_threadsafe(queue.put_nowait, chunk)
+        loop.call_soon_threadsafe(thinking_queue.put_nowait, chunk)
+
+    def token_callback(chunk: str) -> None:
+        loop.call_soon_threadsafe(token_queue.put_nowait, chunk)
 
     async def consume_thinking() -> None:
         msg: cl.Message | None = None
         while True:
-            token = await queue.get()
+            token = await thinking_queue.get()
             if token is None:
                 break
             if msg is None:
@@ -225,18 +266,43 @@ async def _stream_agent_reply(state: AppState, user_input: str) -> str:
         if msg is not None:
             await msg.update()
 
+    # 预建答案消息，流式写入 token
+    answer_msg = cl.Message(content="")
+    await answer_msg.send()
+    token_received = False
+
+    async def consume_tokens() -> None:
+        nonlocal token_received
+        while True:
+            token = await token_queue.get()
+            if token is None:
+                break
+            token_received = True
+            await answer_msg.stream_token(token)
+
     if hasattr(state.agent, "set_thinking_callback"):
         state.agent.set_thinking_callback(thinking_callback)
+    if hasattr(state.agent, "set_token_callback"):
+        state.agent.set_token_callback(token_callback)
 
-    consumer_task = asyncio.create_task(consume_thinking())
+    thinking_task = asyncio.create_task(consume_thinking())
+    token_task = asyncio.create_task(consume_tokens())
     try:
         answer = await asyncio.to_thread(state.agent.run, user_input)
     finally:
         if hasattr(state.agent, "set_thinking_callback"):
             state.agent.set_thinking_callback(None)
-        loop.call_soon_threadsafe(queue.put_nowait, None)
-        await consumer_task
-    return answer
+        if hasattr(state.agent, "set_token_callback"):
+            state.agent.set_token_callback(None)
+        loop.call_soon_threadsafe(thinking_queue.put_nowait, None)
+        loop.call_soon_threadsafe(token_queue.put_nowait, None)
+        await thinking_task
+        await token_task
+
+    # 若 provider 不支持流式（token_received=False），直接填充完整答案
+    if not token_received:
+        answer_msg.content = answer
+    return answer, answer_msg
 
 
 async def _handle_command(state: AppState, user_input: str) -> bool:
@@ -362,8 +428,8 @@ async def _handle_command(state: AppState, user_input: str) -> bool:
             actions=_get_actions(),
         ).send()
         if question:
-            answer = await _stream_agent_reply(state, question)
-            await cl.Message(content=answer).send()
+            answer, answer_msg = await _stream_agent_reply(state, question)
+            await answer_msg.update()
         return True
 
     # Skill 手动激活命令
@@ -374,8 +440,8 @@ async def _handle_command(state: AppState, user_input: str) -> bool:
         text = f"🔧 Skill [{skill_name}] 已激活（注入当前会话）" if activated else f"🔧 Skill [{skill_name}] 已处于激活状态"
         await cl.Message(content=text, actions=_get_actions()).send()
         if question:
-            answer = await _stream_agent_reply(state, question)
-            await cl.Message(content=answer).send()
+            answer, answer_msg = await _stream_agent_reply(state, question)
+            await answer_msg.update()
         return True
 
     return False
@@ -436,8 +502,9 @@ async def on_message(message: cl.Message) -> None:
         return
 
     before_tools = [m for m in state.chat_history.load(state.agent.session_id) if m.get("role") == "tool"]
-    answer = await _stream_agent_reply(state, user_input)
-    await cl.Message(content=answer, actions=_get_actions()).send()
+    answer, answer_msg = await _stream_agent_reply(state, user_input)
+    answer_msg.actions = _get_actions()
+    await answer_msg.update()
 
     after_tools = [m for m in state.chat_history.load(state.agent.session_id) if m.get("role") == "tool"]
     new_tools = after_tools[len(before_tools):]

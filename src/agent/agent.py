@@ -172,6 +172,8 @@ class Agent:
         self._thinking_started: bool = False
         # 可注入 thinking 输出回调（Web UI 可替换为流式推送；CLI 默认 stdout）
         self._thinking_chunk_callback: Callable[[str], None] | None = on_thinking_chunk
+        # 可注入正文 token 流式回调（Web UI 可替换为流式推送；CLI 默认 None 即非流式）
+        self._token_chunk_callback: Callable[[str], None] | None = None
         # 跨 session 用户记忆：支持从外部传入（便于测试 mock），默认使用模块共享实例
         self._user_memory: UserMemoryStore | None = (
             user_memory if user_memory is not None else _get_shared_user_memory()
@@ -191,6 +193,10 @@ class Agent:
     def set_thinking_callback(self, callback: Callable[[str], None] | None) -> None:
         """运行时更新 thinking 流式回调。传 None 时恢复 CLI 默认 stdout。"""
         self._thinking_chunk_callback = callback
+
+    def set_token_callback(self, callback: Callable[[str], None] | None) -> None:
+        """运行时更新正文 token 流式回调。传 None 时切换为非流式（一次性返回）。"""
+        self._token_chunk_callback = callback
 
     def run(self, user_input: str) -> str:
         """
@@ -264,11 +270,12 @@ class Agent:
                     budget_tokens=effective_budget,
                     tools=active_tools,
                     on_thinking_chunk=self._on_thinking_chunk,
+                    on_token_chunk=self._token_chunk_callback,
                 )
                 if self._thinking_started and self._thinking_chunk_callback is None:
                     print("\n\n─── 思考结束 ───\n", flush=True)
             else:
-                response = chat(messages, tools=active_tools)
+                response = chat(messages, tools=active_tools, on_token_chunk=self._token_chunk_callback)
             _u = getattr(response, "usage", None)
             if _u:
                 _prompt_tokens += getattr(_u, "prompt_tokens", 0)

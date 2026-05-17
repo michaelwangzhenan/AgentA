@@ -51,28 +51,38 @@
   const STORAGE_KEY = "agenta-sidebar-collapsed";
 
   const ACTIONS = [
-    { label: "清空对话",     icon: "🗑️" },
-    { label: "清空全部会话", icon: "⚠️" },
-    { label: "历史摘要",     icon: "📜" },
-    { label: "会话列表",     icon: "📋" },
-    { label: "重载 Prompts", icon: "🔄" },
-    { label: "重载 Skills",  icon: "🔧" },
-    { label: "查看记忆",     icon: "🧠" },
+    { label: "清空对话",     icon: "🗑️", cmd: "/clear" },
+    { label: "清空全部会话", icon: "⚠️", cmd: "/clean-session yes" },
+    { label: "历史摘要",     icon: "📜", cmd: "/history" },
+    { label: "会话列表",     icon: "📋", cmd: "/session" },
+    { label: "重载 Prompts", icon: "🔄", cmd: "/reload-prompts" },
+    { label: "重载 Skills",  icon: "🔧", cmd: "/reload-skills" },
+    { label: "查看记忆",     icon: "🧠", cmd: "/memory" },
   ];
 
-  /* ── Find & click last visible Chainlit action button ──────── */
-  function clickChainlitAction(label) {
-    const allBtns = Array.from(document.querySelectorAll("button"));
-    // Filter to buttons whose text matches and are visible in DOM
-    const matches = allBtns.filter(
-      (b) => b.textContent.trim() === label && b.offsetParent !== null
-    );
-    if (matches.length) {
-      matches[matches.length - 1].click();
-      showToast("✓ " + label);
-    } else {
-      showToast("⚠️ 未找到操作按钮，请先发送一条消息");
+  /* ── Submit a slash-command via the chat input ──────────────── */
+  function sendCommand(cmd, label) {
+    const textarea = document.querySelector("textarea");
+    if (!textarea) {
+      showToast("⚠️ 未找到输入框");
+      return;
     }
+    // Use the native HTMLTextAreaElement setter so React detects the change
+    const nativeSetter = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value"
+    ).set;
+    nativeSetter.call(textarea, cmd);
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    textarea.focus();
+
+    // Give React one tick to sync state, then press Enter to submit
+    setTimeout(() => {
+      textarea.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", keyCode: 13, bubbles: true, cancelable: true })
+      );
+      showToast("▶ " + label);
+    }, 30);
   }
 
   /* ── Toast notification ─────────────────────────────────────── */
@@ -122,9 +132,72 @@
           </button>`
         ).join("")}
       </nav>
+
+      <div class="agenta-sb-divider"></div>
+      <div class="agenta-sb-section-label agenta-recents-label">
+        <span>Recents</span>
+      </div>
+      <nav class="agenta-sb-nav agenta-recents-nav" id="agenta-recents-nav">
+        <span class="agenta-recents-empty">加载中…</span>
+      </nav>
     `;
 
     return div;
+  }
+
+  /* ── Recents: fetch sessions from backend ───────────────────── */
+  let _activeSessionId = null;   // tracks which session is currently active
+
+  function _timeAgo(isoStr) {
+    if (!isoStr) return "";
+    const d = new Date(isoStr.replace(" ", "T"));
+    if (isNaN(d)) return isoStr.slice(0, 10);
+    const diff = (Date.now() - d.getTime()) / 1000;
+    if (diff < 60)   return "刚刚";
+    if (diff < 3600) return Math.floor(diff / 60) + " 分钟前";
+    if (diff < 86400) return Math.floor(diff / 3600) + " 小时前";
+    return Math.floor(diff / 86400) + " 天前";
+  }
+
+  function renderRecents(sessions) {
+    const nav = document.getElementById("agenta-recents-nav");
+    if (!nav) return;
+    if (!sessions.length) {
+      nav.innerHTML = '<span class="agenta-recents-empty">暂无历史会话</span>';
+      return;
+    }
+    nav.innerHTML = sessions.map((s) => {
+      const title = s.first_user_msg
+        ? s.first_user_msg.slice(0, 36) + (s.first_user_msg.length > 36 ? "…" : "")
+        : s.session_id.slice(0, 8) + "…";
+      const time  = _timeAgo(s.created_at);
+      const active = s.session_id === _activeSessionId ? " active" : "";
+      return `<button class="agenta-recent-item${active}"
+                      data-sid="${s.session_id}"
+                      title="${s.session_id}">
+        <span class="agenta-recent-title">${title}</span>
+        <span class="agenta-recent-time">${time}</span>
+      </button>`;
+    }).join("");
+
+    nav.querySelectorAll(".agenta-recent-item").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const sid = btn.getAttribute("data-sid");
+        _activeSessionId = sid;
+        renderRecents(sessions); // re-render to update active class
+        sendCommand("/session " + sid, "切换会话");
+      });
+    });
+  }
+
+  function fetchAndRenderRecents() {
+    fetch("/api/agenta/sessions")
+      .then((r) => r.json())
+      .then((data) => renderRecents(Array.isArray(data) ? data : []))
+      .catch(() => {
+        const nav = document.getElementById("agenta-recents-nav");
+        if (nav) nav.innerHTML = '<span class="agenta-recents-empty">⚠ 无法加载</span>';
+      });
   }
 
   /* ── Apply / sync layout padding ───────────────────────────── */
@@ -164,9 +237,15 @@
     // Action buttons
     sidebar.querySelectorAll(".agenta-btn").forEach((btn) => {
       btn.addEventListener("click", () => {
-        clickChainlitAction(btn.getAttribute("data-label"));
+        const label = btn.getAttribute("data-label");
+        const action = ACTIONS.find((a) => a.label === label);
+        if (action) sendCommand(action.cmd, action.label);
       });
     });
+
+    // Load Recents immediately, then refresh every 30 s
+    fetchAndRenderRecents();
+    setInterval(fetchAndRenderRecents, 30_000);
 
     applyLayout(collapsed);
   }
@@ -474,5 +553,89 @@
     document.addEventListener("DOMContentLoaded", start);
   } else {
     start();
+  }
+})();
+
+/* ═══════════════════════════════════════════════════════════════
+   Part 4 — Toggle the Settings panel on repeated button clicks.
+   Chainlit's settings button only opens the panel; clicking it
+   again while it's open has no effect. We intercept the click in
+   capture phase: if the panel is already open, stop propagation
+   (prevents React's open handler) and dispatch Escape instead
+   (which Radix Sheet listens for globally to close itself).
+═══════════════════════════════════════════════════════════════ */
+(function () {
+  // Detect whether the settings Sheet/panel is currently open.
+  function isSettingsOpen() {
+    // Radix Sheet sets data-state="open" on the content element.
+    // The settings panel also has data-side (forced left by Part 1).
+    return !!(
+      document.querySelector('[data-state="open"][data-side]') ||
+      document.querySelector('[data-state="open"][role="dialog"][id*="setting"]') ||
+      document.querySelector('[data-state="open"][aria-label*="setting" i]')
+    );
+  }
+
+  // Find Chainlit's settings gear button (SettingsIcon in the header).
+  function findSettingsBtn() {
+    return Array.from(document.querySelectorAll("button")).find((btn) => {
+      const title = (
+        btn.title ||
+        btn.getAttribute("aria-label") ||
+        btn.getAttribute("aria-describedby") ||
+        ""
+      ).toLowerCase();
+      // Also check any SVG <title> inside the button
+      const svgTitle = (btn.querySelector("title")?.textContent || "").toLowerCase();
+      return title.includes("setting") || svgTitle.includes("setting");
+    });
+  }
+
+  // Close the open settings panel by pressing Escape (Radix global listener).
+  function pressEscape() {
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Escape",
+        code: "Escape",
+        keyCode: 27,
+        which: 27,
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+  }
+
+  let attached = false;
+
+  function attachToggle() {
+    if (attached) return;
+    const btn = findSettingsBtn();
+    if (!btn) return;
+    attached = true;
+
+    // Capture phase: runs before React's delegated bubble-phase handler.
+    btn.addEventListener(
+      "click",
+      (e) => {
+        if (!isSettingsOpen()) return; // panel closed → let click open it normally
+        // Panel is open → stop the click from reaching React's handler,
+        // then close via Escape.
+        e.stopImmediatePropagation();
+        pressEscape();
+      },
+      true // capture
+    );
+  }
+
+  // Try to attach immediately, then retry until the button is rendered.
+  function tryAttach() {
+    attachToggle();
+    if (!attached) setTimeout(tryAttach, 500);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", tryAttach);
+  } else {
+    tryAttach();
   }
 })();

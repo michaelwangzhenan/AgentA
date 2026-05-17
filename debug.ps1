@@ -16,7 +16,7 @@ if (-not $env:VIRTUAL_ENV) {
 
 # Start Chainlit in a new window
 Write-Host "[1/3] Starting Chainlit on port $Port ..." -ForegroundColor Cyan
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "chainlit run $App --port $Port"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "& '.\.venv\Scripts\Activate.ps1'; chainlit run $App --port $Port"
 
 # Wait for port to be ready
 Write-Host "[2/3] Waiting for localhost:$Port ..." -ForegroundColor Gray

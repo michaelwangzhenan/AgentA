@@ -47,6 +47,7 @@ def chat(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
     temperature: float = 0.7,
+    on_token_chunk: Callable[[str], None] | None = None,
 ) -> Any:
     """
     统一 LLM 调用入口。
@@ -55,6 +56,7 @@ def chat(
         messages: 对话历史，格式遵循 OpenAI messages 规范。
         tools: Function Calling 工具列表（JSON Schema 格式），为 None 时走普通对话。
         temperature: 采样温度，0.0 ~ 1.0，越低越确定性。
+        on_token_chunk: 每收到一段正文 token 时的回调，为 None 时走非流式。
 
     Returns:
         始终返回完整的 ChatCompletion response 对象，供 Agent 读取 choices 和 usage。
@@ -64,12 +66,10 @@ def chat(
         anthropic.APIError: ACTIVE_PROVIDER 为 'claude' 时，原生 SDK 调用失败时抛出。
     """
     if config.ACTIVE_PROVIDER == "claude":
-        return _chat_claude(messages, tools, temperature)
+        return _chat_claude(messages, tools, temperature, on_token_chunk)
 
     provider_config = config.get_active_config()
 
-    # 对国外 provider（openai / grok）注入 HTTP 代理；国内 provider（kimi / deepseek / ollama）直连
-    # claude 走独立分支，不在此处处理
     kwargs: dict[str, Any] = {
         "model": provider_config.model,
         "messages": messages,
@@ -82,6 +82,15 @@ def chat(
         kwargs["extra_body"] = provider_config.extra_body
 
     need_proxy = config.ACTIVE_PROVIDER in config.PROXIED_PROVIDERS and bool(config.LLM_PROXY)
+
+    if on_token_chunk is not None:
+        kwargs["stream"] = True
+        return _openai_call(
+            provider_config,
+            need_proxy,
+            lambda client: _run_openai_stream(client, kwargs, on_token_chunk),
+        )
+
     return _openai_call(
         provider_config,
         need_proxy,
@@ -89,16 +98,86 @@ def chat(
     )
 
 
+def _run_openai_stream(
+    client: Any,
+    kwargs: dict[str, Any],
+    on_token_chunk: Callable[[str], None],
+) -> Any:
+    """OpenAI 兼容协议流式调用，逐 token 回调并返回与非流式相同结构的 response 对象。"""
+    from types import SimpleNamespace
+
+    content_parts: list[str] = []
+    tool_calls_map: dict[int, dict[str, Any]] = {}
+    prompt_tokens = completion_tokens = 0
+
+    stream = client.chat.completions.create(**kwargs)
+    for chunk in stream:
+        if getattr(chunk, "usage", None):
+            prompt_tokens = getattr(chunk.usage, "prompt_tokens", 0) or 0
+            completion_tokens = getattr(chunk.usage, "completion_tokens", 0) or 0
+
+        if not chunk.choices:
+            continue
+        delta = chunk.choices[0].delta
+
+        if getattr(delta, "content", None):
+            content_parts.append(delta.content)
+            on_token_chunk(delta.content)
+
+        if getattr(delta, "tool_calls", None):
+            for tc_delta in delta.tool_calls:
+                idx = tc_delta.index
+                if idx not in tool_calls_map:
+                    tool_calls_map[idx] = {
+                        "id": tc_delta.id or "",
+                        "type": "function",
+                        "function": {"name": "", "arguments": ""},
+                    }
+                if tc_delta.id:
+                    tool_calls_map[idx]["id"] = tc_delta.id
+                if tc_delta.function:
+                    if tc_delta.function.name:
+                        tool_calls_map[idx]["function"]["name"] += tc_delta.function.name
+                    if tc_delta.function.arguments:
+                        tool_calls_map[idx]["function"]["arguments"] += tc_delta.function.arguments
+
+    tool_calls = None
+    if tool_calls_map:
+        tool_calls = [
+            SimpleNamespace(
+                id=tc["id"],
+                type="function",
+                function=SimpleNamespace(
+                    name=tc["function"]["name"],
+                    arguments=tc["function"]["arguments"],
+                ),
+            )
+            for tc in (tool_calls_map[k] for k in sorted(tool_calls_map))
+        ]
+
+    final_content = "".join(content_parts) or None
+    message = SimpleNamespace(content=final_content, tool_calls=tool_calls)
+    choice = SimpleNamespace(message=message)
+    usage = SimpleNamespace(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+    )
+    return SimpleNamespace(choices=[choice], usage=usage)
+
+
 def _chat_claude(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None,
     temperature: float,
+    on_token_chunk: Callable[[str], None] | None = None,
 ) -> Any:
     """
     Claude 原生 SDK 调用分支（anthropic 库）。
 
     将 OpenAI 格式的 messages/tools 适配为 Anthropic API 格式后调用，
     返回值统一包装为与 OpenAI response 结构兼容的对象，供上层统一处理。
+    当 on_token_chunk 非 None 时走流式调用，逐 token 回调。
     """
     import anthropic
 
@@ -115,22 +194,31 @@ def _chat_claude(
     if system_prompt:
         kwargs["system"] = system_prompt
     if tools:
-        # 将 OpenAI tools 格式转换为 Anthropic 格式
         kwargs["tools"] = _convert_tools_to_anthropic(tools)
 
-    # Claude 也是国外服务，同样支持 HTTP 代理；用 with 确保连接正确关闭
+    def _do_call(client: Any) -> Any:
+        if on_token_chunk is not None:
+            with client.messages.stream(**kwargs) as stream:
+                for event in stream:
+                    if getattr(event, "type", None) == "content_block_delta":
+                        delta = getattr(event, "delta", None)
+                        if delta and getattr(delta, "type", None) == "text_delta":
+                            text = getattr(delta, "text", "")
+                            if text:
+                                on_token_chunk(text)
+                return _wrap_anthropic_response(stream.get_final_message())
+        response = client.messages.create(**kwargs)
+        return _wrap_anthropic_response(response)
+
     if config.LLM_PROXY:
         with httpx.Client(proxy=config.LLM_PROXY) as http_client:
             client = anthropic.Anthropic(
                 api_key=provider_config.api_key,
                 http_client=http_client,
             )
-            response = client.messages.create(**kwargs)
-    else:
-        client = anthropic.Anthropic(api_key=provider_config.api_key)
-        response = client.messages.create(**kwargs)
-
-    return _wrap_anthropic_response(response)
+            return _do_call(client)
+    client = anthropic.Anthropic(api_key=provider_config.api_key)
+    return _do_call(client)
 
 
 def _convert_tools_to_anthropic(
@@ -255,6 +343,7 @@ def call_with_thinking(
     budget_tokens: int = 8000,
     tools: list[dict[str, Any]] | None = None,
     on_thinking_chunk: Callable[[str], None] | None = None,
+    on_token_chunk: Callable[[str], None] | None = None,
 ) -> Any:
     """
     通用 Extended Thinking 入口。
@@ -268,16 +357,17 @@ def call_with_thinking(
         budget_tokens: thinking 预算 tokens（Claude / Qwen3 有效）。
         tools: Function Calling 工具列表，可为 None。
         on_thinking_chunk: 每收到一段 thinking 文本时的回调，可为 None。
+        on_token_chunk: 每收到一段正文 token 时的回调，可为 None。
 
     Returns:
         与 chat() 相同格式的 response 对象。
     """
     if config.ACTIVE_PROVIDER == "claude":
-        return _chat_claude_thinking(messages, budget_tokens, tools, on_thinking_chunk)
+        return _chat_claude_thinking(messages, budget_tokens, tools, on_thinking_chunk, on_token_chunk)
     if config.ACTIVE_PROVIDER == "qwen":
-        return _chat_qwen_thinking(messages, budget_tokens, tools, on_thinking_chunk)
+        return _chat_qwen_thinking(messages, budget_tokens, tools, on_thinking_chunk, on_token_chunk)
     # 其他 provider 静默降级，thinking 不可用
-    return chat(messages, tools=tools)
+    return chat(messages, tools=tools, on_token_chunk=on_token_chunk)
 
 
 def _chat_claude_thinking(
@@ -285,6 +375,7 @@ def _chat_claude_thinking(
     budget_tokens: int,
     tools: list[dict[str, Any]] | None,
     on_thinking_chunk: Callable[[str], None] | None,
+    on_token_chunk: Callable[[str], None] | None = None,
 ) -> Any:
     """Claude 原生 Extended Thinking 流式调用。"""
     import anthropic
@@ -312,10 +403,10 @@ def _chat_claude_thinking(
                 api_key=provider_config.api_key,
                 http_client=http_client,
             )
-            final = _run_thinking_stream(client, kwargs, on_thinking_chunk)
+            final = _run_thinking_stream(client, kwargs, on_thinking_chunk, on_token_chunk)
     else:
         client = anthropic.Anthropic(api_key=provider_config.api_key)
-        final = _run_thinking_stream(client, kwargs, on_thinking_chunk)
+        final = _run_thinking_stream(client, kwargs, on_thinking_chunk, on_token_chunk)
 
     return _wrap_anthropic_response(final)
 
@@ -324,9 +415,10 @@ def _run_thinking_stream(
     client: Any,
     kwargs: dict[str, Any],
     on_thinking_chunk: Callable[[str], None] | None,
+    on_token_chunk: Callable[[str], None] | None = None,
 ) -> Any:
     """
-    以流式方式驱动 Claude thinking 调用，通过回调逐块输出思考过程。
+    以流式方式驱动 Claude thinking 调用，通过回调逐块输出思考过程和正文 token。
 
     thinking 内容仅通过回调透传给调用方（打印到终端），不写入返回值，
     不进入 messages 历史，防止 prompt injection。
@@ -334,12 +426,17 @@ def _run_thinking_stream(
     with client.messages.stream(**kwargs) as stream:
         for event in stream:
             event_type = getattr(event, "type", None)
-            if event_type == "content_block_delta" and on_thinking_chunk is not None:
+            if event_type == "content_block_delta":
                 delta = getattr(event, "delta", None)
-                if delta and getattr(delta, "type", None) == "thinking_delta":
-                    thinking_text = getattr(delta, "thinking", "")
-                    if thinking_text:
-                        on_thinking_chunk(thinking_text)
+                if delta:
+                    if on_thinking_chunk is not None and getattr(delta, "type", None) == "thinking_delta":
+                        thinking_text = getattr(delta, "thinking", "")
+                        if thinking_text:
+                            on_thinking_chunk(thinking_text)
+                    elif on_token_chunk is not None and getattr(delta, "type", None) == "text_delta":
+                        text = getattr(delta, "text", "")
+                        if text:
+                            on_token_chunk(text)
         return stream.get_final_message()
 
 
@@ -348,6 +445,7 @@ def _chat_qwen_thinking(
     budget_tokens: int,
     tools: list[dict[str, Any]] | None,
     on_thinking_chunk: Callable[[str], None] | None,
+    on_token_chunk: Callable[[str], None] | None = None,
 ) -> Any:
     """
     Qwen3 Extended Thinking 流式调用。
@@ -375,7 +473,7 @@ def _chat_qwen_thinking(
     return _openai_call(
         provider_config,
         need_proxy,
-        lambda client: _run_qwen_thinking_stream(client, kwargs, on_thinking_chunk),
+        lambda client: _run_qwen_thinking_stream(client, kwargs, on_thinking_chunk, on_token_chunk),
     )
 
 
@@ -383,6 +481,7 @@ def _run_qwen_thinking_stream(
     client: Any,
     kwargs: dict[str, Any],
     on_thinking_chunk: Callable[[str], None] | None,
+    on_token_chunk: Callable[[str], None] | None = None,
 ) -> Any:
     """
     消费 Qwen3 流式响应，分离 reasoning_content（thinking）和 content（正文），
@@ -415,6 +514,8 @@ def _run_qwen_thinking_stream(
         # 正文内容
         if delta.content:
             content_parts.append(delta.content)
+            if on_token_chunk is not None:
+                on_token_chunk(delta.content)
 
         # tool_calls 增量拼接
         if delta.tool_calls:

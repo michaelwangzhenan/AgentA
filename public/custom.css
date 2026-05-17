@@ -249,6 +249,85 @@
   opacity: 1;
 }
 
+/* ── Recents section ─────────────────────────────────────────── */
+.agenta-recents-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.agenta-recents-nav {
+  flex: 1;
+  overflow-y: auto;
+  padding-top: 2px;
+}
+
+.agenta-recents-empty {
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  padding: 6px 10px;
+  display: block;
+}
+
+.agenta-recent-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 7px 10px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  border-radius: 7px;
+  color: hsl(var(--foreground));
+  transition: background 0.13s;
+  white-space: nowrap;
+  overflow: hidden;
+  min-height: 44px;
+  margin-bottom: 1px;
+}
+
+.agenta-recent-item:hover {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+
+.agenta-recent-item.active {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+
+.agenta-recent-title {
+  font-size: 12.5px;
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+  line-height: 1.35;
+}
+
+.agenta-recent-time {
+  font-size: 10px;
+  color: hsl(var(--muted-foreground));
+  font-weight: 400;
+}
+
+.agenta-recent-item.active .agenta-recent-time {
+  color: hsl(var(--accent-foreground) / 0.7);
+}
+
+/* hide text in collapsed sidebar */
+#agenta-sidebar.collapsed .agenta-recent-title,
+#agenta-sidebar.collapsed .agenta-recent-time,
+#agenta-sidebar.collapsed .agenta-recents-label span,
+#agenta-sidebar.collapsed .agenta-recents-empty {
+  opacity: 0;
+  max-width: 0;
+  overflow: hidden;
+}
+
 /* ── Header-button hover tooltip ────────────────────────────── */
 #agenta-hdr-tip {
   position: fixed;
