@@ -5,7 +5,8 @@
 
 工具列表：
     - search_knowledge : 搜索私有知识库（ChromaDB 向量检索）
-    - fetch_url        : 实时抓取网页内容（用于知识库无法覆盖的问题）
+    - web_search       : 通过 Serper.dev 搜索互联网，返回真实 URL 列表及摘要
+    - fetch_url        : 抓取网页正文；SPA 页面自动 fallback 到 Jina Reader
 """
 
 import json
@@ -16,6 +17,7 @@ from typing import Any, Literal
 import requests
 from bs4 import BeautifulSoup
 
+import src.config as _cfg
 from src.rag.retriever import search, format_search_results
 
 logger = logging.getLogger(__name__)
@@ -24,6 +26,12 @@ logger = logging.getLogger(__name__)
 MAX_SEARCH_TOP_K: int = 10
 # fetch_url HTTP 请求超时秒数
 FETCH_URL_TIMEOUT: int = 15
+# Jina Reader 额外超时（云端渲染 SPA 需要更长时间）
+JINA_EXTRA_TIMEOUT: int = 20
+# web_search 单次最大结果数上限
+WEB_SEARCH_MAX_NUM: int = 10
+# SPA 判定阈值：正文字符数低于此值时触发 Jina fallback
+_SPA_MIN_CONTENT_CHARS: int = 200
 
 # fetch_url 支持的文本类 MIME 类型前缀
 _TEXT_TYPES: tuple[str, ...] = (
@@ -133,13 +141,38 @@ TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "web_search",
+            "description": (
+                "通过互联网搜索引擎查找信息，返回真实网页 URL 及内容摘要列表。"
+                "当知识库无法回答问题，或需要获取最新资讯时，优先调用此工具，"
+                "再根据返回的 URL 调用 fetch_url 获取详情。"
+                "不要凭空猜测 URL，应先通过此工具搜索确认。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "搜索关键词，尽量简洁明确，支持中英文。",
+                    },
+                    "num": {
+                        "type": "integer",
+                        "description": "返回结果条数，默认 5，最多 10。",
+                        "default": 5,
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "fetch_url",
             "description": (
                 "抓取指定网页的正文内容并返回纯文本。"
-                "当问题需要实时信息、或知识库中没有相关内容时调用此工具。"
-                "选择 URL 时优先访问国内可达网站，"
-                "如 xinhuanet.com、people.com.cn、baidu.com、zhihu.com、segmentfault.com、csdn.net 等，"
-                "国内无法满足需求时再尝试国外网站。"
+                "必须使用通过 web_search 或知识库返回的真实 URL，不得凭空猜测。"
+                "对于动态渲染的 SPA 页面，工具会自动通过 Jina Reader 兜底，无需手动处理。"
             ),
             "parameters": {
                 "type": "object",
@@ -162,6 +195,57 @@ TOOLS: list[dict[str, Any]] = [
 
 
 # ── 工具实现 ──────────────────────────────────────────────────────────────────
+
+
+def _tool_web_search(query: str, num: int = 5) -> ToolResult:
+    """
+    通过 Serper.dev 搜索引擎执行网络搜索，返回真实 URL 列表及摘要。
+
+    Args:
+        query: 搜索关键词。
+        num: 期望返回的结果条数（最多 WEB_SEARCH_MAX_NUM）。
+
+    Returns:
+        ToolResult：有结果 → status="ok"；无结果 → status="empty"；请求失败 → status="error"。
+    """
+    api_key = _cfg.SERPAPI_API_KEY
+    if not api_key:
+        return ToolResult(
+            status="error",
+            content="未配置 SERPAPI_API_KEY，无法使用 web_search 工具。请在 .env 中设置该变量。",
+        )
+
+    num = min(max(1, num), WEB_SEARCH_MAX_NUM)
+    logger.info("[tool] web_search: query=%r, num=%d", query, num)
+
+    try:
+        resp = requests.post(
+            "https://google.serper.dev/search",
+            headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
+            json={"q": query, "num": num, "hl": "zh-cn", "gl": "cn"},
+            timeout=FETCH_URL_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except requests.exceptions.Timeout:
+        return ToolResult(status="error", content=f"搜索请求超时（{FETCH_URL_TIMEOUT}s）")
+    except requests.exceptions.RequestException as e:
+        return ToolResult(status="error", content=f"搜索请求失败 — {e}")
+    except Exception as e:
+        return ToolResult(status="error", content=f"解析搜索结果失败 — {e}")
+
+    organic = data.get("organic", [])
+    if not organic:
+        return ToolResult(status="empty", content="搜索未返回任何结果，请尝试换一种关键词。")
+
+    lines: list[str] = []
+    for i, item in enumerate(organic[:num], 1):
+        title = item.get("title", "(无标题)")
+        link = item.get("link", "")
+        snippet = item.get("snippet", "")
+        lines.append(f"[{i}] {title}\n    URL: {link}\n    摘要: {snippet}")
+
+    return ToolResult(status="ok", content="\n\n".join(lines))
 
 
 def _tool_search_knowledge(query: str, top_k: int = 5) -> ToolResult:
@@ -249,12 +333,56 @@ def _extract_text_from_response(response: "requests.Response", max_chars: int) -
         return ToolResult(status="error", content=f"解析页面失败 — {e}")
 
 
+def _is_likely_spa(text: str, html: str = "") -> bool:
+    """
+    判断页面是否可能是 SPA 空壳（JS 渲染后才有内容）。
+
+    启发式规则：
+      - 提取的正文字符数极少（< _SPA_MIN_CONTENT_CHARS）
+      - HTML 中含典型 SPA 根挂载点（#app / #root）
+    """
+    if len(text.strip()) < _SPA_MIN_CONTENT_CHARS:
+        return True
+    if html and ('<div id="app"' in html or '<div id="root"' in html):
+        return True
+    return False
+
+
+def _fetch_via_jina(url: str, max_chars: int) -> ToolResult:
+    """
+    通过 Jina Reader (r.jina.ai) 云端渲染 SPA 并返回 Markdown 正文。
+
+    Jina 会在服务端执行 JS 后返回纯文本 / Markdown，适合绕过 SPA 问题。
+    超时时间比普通 fetch 更长（FETCH_URL_TIMEOUT + JINA_EXTRA_TIMEOUT）。
+    """
+    jina_url = f"https://r.jina.ai/{url}"
+    logger.info("[tool] fetch_url: SPA detected → Jina Reader fallback: %r", jina_url)
+    try:
+        resp = requests.get(
+            jina_url,
+            headers={"Accept": "text/markdown", "User-Agent": "Mozilla/5.0"},
+            timeout=FETCH_URL_TIMEOUT + JINA_EXTRA_TIMEOUT,
+        )
+        resp.raise_for_status()
+        text = resp.text.strip()
+    except requests.exceptions.RequestException as e:
+        return ToolResult(status="error", content=f"Jina Reader 请求失败 — {e}")
+
+    if not text:
+        return ToolResult(status="empty", content="Jina Reader 返回内容为空。")
+
+    if len(text) > max_chars:
+        text = text[:max_chars] + f"\n\n[内容已截断，原文共 {len(text)} 字符]"
+    return ToolResult(status="ok", content=f"[via Jina Reader]\n{text}")
+
+
 def _tool_fetch_url(url: str, max_chars: int = 3000) -> ToolResult:
     """
     抓取网页正文内容，使用 BeautifulSoup 提取纯文本。
+    若检测到 SPA 空壳（内容过少或含 #app/#root 挂载点），自动 fallback 到 Jina Reader。
 
     Args:
-        url: 目标网页 URL。
+        url: 目标网页 URL，必须来自 web_search 或知识库，不得凭空猜测。
         max_chars: 返回内容的最大字符数。
 
     Returns:
@@ -271,7 +399,14 @@ def _tool_fetch_url(url: str, max_chars: int = 3000) -> ToolResult:
     raw = _fetch_raw_response(url)
     if isinstance(raw, ToolResult):
         return raw
-    return _extract_text_from_response(raw, max_chars)
+
+    result = _extract_text_from_response(raw, max_chars)
+
+    # SPA fallback：正文过短或含典型 SPA 根挂载点时，改用 Jina Reader
+    if result.status in ("ok", "empty") and _is_likely_spa(result.content, raw.text):
+        return _fetch_via_jina(url, max_chars)
+
+    return result
 
 
 def _tool_load_skill(name: str, skill_bodies: dict[str, str]) -> ToolResult:
@@ -324,6 +459,11 @@ def execute_tool(
                 return _tool_search_knowledge(
                     query=args["query"],
                     top_k=args.get("top_k", 5),
+                )
+            case "web_search":
+                return _tool_web_search(
+                    query=args["query"],
+                    num=args.get("num", 5),
                 )
             case "fetch_url":
                 return _tool_fetch_url(

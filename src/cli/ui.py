@@ -6,9 +6,10 @@ BANNER = """
 ╔══════════════════════════════════════════════╗
 ║         私有知识库 Agent  v0.1               ║
 ║  LLM: {provider:<38} ║
+║  实现: {method:<38} ║
 ║  输入 /help 查看命令列表                     ║
 ╚══════════════════════════════════════════════╝
-""".format(provider=config.ACTIVE_PROVIDER)
+""".format(provider=config.ACTIVE_PROVIDER, method=config.IMP_METHOD)
 
 HELP_TEXT = """
 可用命令：

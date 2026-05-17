@@ -210,3 +210,7 @@ IMP_METHOD: str = os.getenv('IMP_METHOD', 'PYTHON').upper()
 AUTOGPT_MAX_PLAN_TASKS: int = int(os.getenv('AUTOGPT_MAX_PLAN_TASKS', '6'))
 # 每个子任务迷你 ReAct 子循环最多调用几轮工具（Execute 阶段）
 AUTOGPT_MAX_TASK_TOOL_ROUNDS: int = int(os.getenv('AUTOGPT_MAX_TASK_TOOL_ROUNDS', '4'))
+
+# ── 网络搜索配置 ──────────────────────────────────────────────────────────────
+# Serper.dev API Key（用于 web_search 工具；在 .env 中配置 SERPAPI_API_KEY）
+SERPAPI_API_KEY: str = os.getenv('SERPAPI_API_KEY', '')
