@@ -147,9 +147,8 @@ ToDo List：
   目标： 支持多个 Agent 协同工作，共享知识和任务，提高整体效率
 
 
-10. Web UI
-  目标： 接入 Gradio 或 Streamlit，提供图形界面
-
+10. Web UI => Done
+  目标： 使用chainlit，提供图形界面
 
 11. 支持企业级向量数据库
   目标： 支持接入企业级向量数据库，如 Pinecone、Weaviate 等，提高数据存储和检索能力
@@ -430,6 +429,158 @@ ToDo List：
   【多层防御（Defense in Depth）】单一防线不可靠，将以上方法组合使用；同时在系统层面限制 Agent 进程的 OS 权限（沙箱、网络隔离），即使注入成功也限制实际危害范围。
 40. 实践：加入3GPP文档场景，遇到真实规模问题
 41. A2A 协议？
+42. RAG 命中优化
+  ── 现状（src/rag/ ingest.py · retriever.py · reranker.py · parser.py + config.py + agent/tools.py）
+    召回链路：用户问题 → search_knowledge 工具 → 对所有 collection（en/zh）按内部距离取
+      top_k × RECALL_MULTIPLIER → round-robin 交错合并 → CrossEncoder 精排 → 截 top_k → format。
+    入库链路：扫描 docs/* → parse_file（按格式提取纯文本） → chunk_text（按字符硬切 600/100）
+      → SentenceTransformer embedding → ChromaDB upsert（metadata 仅 {source, chunk_index}）。
+
+  ── 已识别的命中率瓶颈（按"影响面 × 易复现度"排序）
+  【P0-1 同名文件互相覆盖（数据丢失）】
+    src/rag/ingest.py:142  `where={"source": file_path.name}` 只用文件名做 upsert 去重，
+    docs/readme.txt 与 docs_zh/readme.txt 同名时后入库者会删除前者所有 chunks，知识库实际"少东西"。
+    chunk_id 又用完整路径 hash，删除条件 ≠ 写入条件，幂等性破裂。
+    →  把 metadata 改为 {"source": str(rel_path), "filename": name, "ext": suffix, "doc_id": sha1(rel_path),
+       "mtime": st_mtime, "content_sha1": sha1(text)}；upsert 用 doc_id 而非 filename 过滤。
+
+  【P0-2 字符级硬切 chunk，破坏语义单元】
+    src/rag/ingest.py:43 `chunk_text(text, 600, 100)` 按字符数硬切，完全无视段落/标题/句号。
+    PDF/Word 中"小节标题 + 正文 + 例子"会被随意切断；3GPP/技术规范类文档（嵌套多级编号、表格、公式）
+    切分后 chunk 既无章节锚点也无完整语义，向量化后相似度被噪声拉低。
+    →  实现 RecursiveCharacterTextSplitter（按 \n\n → \n → 句号 → 字符 逐级回退）；
+       Markdown 用 MarkdownHeaderTextSplitter 先按 H1~H4 切再二次分块；
+       每个 chunk 头部注入"父级标题面包屑"（## 第 5 章 / ### 5.2 物理层结构）以保留上下文。
+       chunk 大小同时记录字符数与近似 token 数，避免中英文差异。
+
+  【P0-3 PDF 解析能力薄弱（影响 docs/2026-03-11 DWA live training_Presentation.pdf 这类）】
+    src/rag/parser.py:107 仅用 pypdf.extract_text()，对扫描版 PDF（无文本层）输出空字符串；
+    对含表格/分栏的 PDF 文本顺序错乱；不带 OCR 兜底；没有页码 metadata。
+    →  优先级：pdfplumber/pymupdf（fitz）→ 文本层质量优于 pypdf，且能拿到 page_number、bbox；
+       检测"提取字符数 / 页数 < 阈值"时 fallback 到 OCR（rapidocr-onnxruntime / paddleocr，
+       无外部依赖）；每页生成独立 chunk 集合并写入 page_no metadata。
+
+  【P0-4 Embedding 模型与 query 形态不匹配】
+    config.py:103 `BAAI/bge-small-zh` 中文小模型，且代码 **没有按 BGE 规范** 给 query 加前缀
+    "为这个句子生成表示以用于检索相关文章："；非对称检索任务召回率显著偏低。
+    en 用 all-MiniLM-L6-v2（384 维），对中文几乎无效，但因为 round-robin 仍会注入候选集。
+    →  中文升级到 BAAI/bge-base-zh-v1.5 或多语言 BAAI/bge-m3（同时支持 dense+sparse+colbert）；
+       在 retriever 里实现 model-aware query 包装：query 前加规范前缀，document 不加（非对称）；
+       或者用一个多语言模型（bge-m3 / multilingual-e5-base）取代双 collection 架构，简化合并。
+
+  【P0-5 CrossEncoder reranker 是英文专用，反而把中文 chunk 排到后面】
+    config.py:166 默认 `cross-encoder/ms-marco-MiniLM-L-6-v2` 仅在英文 MS MARCO 上训练；
+    对中文 query/doc pair 的打分基本是噪声，精排后顺序往往比召回还差。
+    →  默认改为 `BAAI/bge-reranker-v2-m3`（多语言、效果接近 SOTA）或
+       `BAAI/bge-reranker-base`（速度更快，CPU 可承受）；
+       提供一个 .env 开关 RERANKER_LANG=zh|en|multi，按知识库语言自动选模型。
+
+  【P0-6 缺少混合检索（BM25 + Dense）】
+    专有名词/缩写/版本号（如 "3GPP TS 38.211"、"gNB"、"NR FR2"、命令名/API 名/错误码）embedding
+    几乎学不到分布，纯向量召回率极低；这是技术文档场景"知识库里有但搜不到"的最常见原因。
+    →  在 ChromaDB 旁建 BM25 索引（rank_bm25 库本地实现，或 chroma 0.5+ 自带 sparse 模式）；
+       检索时同时跑 dense.top_k 与 bm25.top_k，用 RRF（Reciprocal Rank Fusion，k=60）融合排名；
+       BM25 对短关键词查询权重略高，dense 对长自然语言查询权重略高（按 query 长度自动加权）。
+
+  【P0-7 无 query 改写 / 多查询，单次召回上限低】
+    Agent 直接把用户原问题塞进 search_knowledge.query；多轮对话中"它支持哪些子载波间隔？"中的
+    "它"无法解析；专业问题中口语化表达与文档术语不一致（如"5G 基站" vs "gNB"）。
+    →  在 _tool_search_knowledge 内加一层 query 预处理：
+         a. 用 LLM 做共指消解（last_user_turn + history → 改写后的独立 query）；
+         b. Multi-Query：让 LLM 生成 3 条同义改写（不同措辞、术语扩展）；
+         c. HyDE：让 LLM 先猜一个简短的假设性答案，把"答案"也作为 embedding 查询；
+       对每条改写 query 各跑一次 dense+bm25，最后 RRF 合并去重。
+       关闭开关：RAG_QUERY_REWRITE_ENABLED（默认 true）+ RAG_HYDE_ENABLED（默认 false，需多花一次 LLM 调用）。
+
+  【P0-8 ChromaDB 距离空间未显式声明】
+    ingest.py:109 `client.get_or_create_collection(...)` 没有指定 metadata={"hnsw:space": "cosine"}，
+    默认是 squared L2；BGE / e5 / GTE 等模型均按余弦相似度训练，使用 L2 排序会与训练目标错位。
+    retriever 中 `1 - distance` 在 L2 下也无几何意义。
+    →  显式 metadata={"hnsw:space": "cosine", "hnsw:M": 32, "hnsw:construction_ef": 200}；
+       已存在的 collection 需重建（脚本：drop & re-ingest），写一次性迁移命令。
+
+  【P1-1 round-robin 合并稀释优质 hit】
+    retriever.py:131 不同模型距离不可比 → round-robin 解决"压制"问题，但当某 collection 命中很差
+    时仍会强行塞 1 条进候选集，挤掉另一库的真正好结果；且没有任何质量阈值过滤。
+    →  推荐方案：升级到统一多语言模型后，不再 round-robin（单一空间直接全局排序）；
+       过渡方案：保留 round-robin 但加 per-collection 最大距离阈值 + RRF 融合，
+       而非简单交错；同时给每个 hit 计算 "min-max normalized score" 以便后续阈值化。
+
+  【P1-2 命中阈值缺失，低质量 chunk 被当成结果】
+    retriever 没有最低相似度过滤，无论多差都进 LLM 上下文；
+    tools.py 中 search_knowledge 只在"零命中"时才返回 status=empty 触发 web_search 兜底；
+    实际场景中常见的是"命中了 5 条但都不相关"——LLM 反而被误导编造答案。
+    →  在 reranker 之后做 score-based 过滤：保留 score ≥ RAG_MIN_SCORE（默认 0.3，按模型校准）；
+       若过滤后为空 → status=empty，让 SYSTEM_PROMPT 引导 LLM 走 web_search；
+       在 format_search_results 里同时打印归一化分，便于排查。
+
+  【P1-3 Metadata 极度稀少，无法精细召回 / 引用】
+    现有 metadata 只有 source 和 chunk_index。无法按"文档类型/语言/章节/页码"做筛选；
+    无法在回答中给出"第 X 页 第 Y 节"这类精准引用，用户难以验证。
+    →  入库时落多字段：rel_path / filename / ext / lang（auto-detect: langdetect）/ heading_path
+       (["chapter", "section", "subsection"]) / page_no / line_range / mtime / content_sha1。
+       search_knowledge 增加可选参数 filter（如 {"ext": "pdf", "lang": "zh"}），
+       将其透传到 chroma 的 where 子句；让 LLM 主动按文档范围检索。
+
+  【P1-4 Top-K 偏低 + 上下文窗口未利用满】
+    config.py:145 RAG_TOP_K=5；对"列举/对比/汇总"类问题（如"列出该协议所有可选参数"），
+    5 条远远不够；当前 LLM 上下文已是 8K~32K，预算非常充裕。
+    →  默认提升至 8；同时在 search_knowledge 工具 schema 提示 LLM"对枚举/对比类问题用 top_k=10"；
+       reranker 之后再做"按 source 去重"——同一文档最多保留 K_PER_SOURCE=3 条，避免被一个文档霸屏。
+
+  【P1-5 SYSTEM_PROMPT 没有引导多轮检索 / query 改写】
+    src/agent/agent.py:88 当前策略是"search_knowledge 一次失败 → 立刻 web_search"，
+    没有"换关键词重试 search_knowledge"分支；模型会过早放弃私有知识库。
+    →  改写为：第 1 次原问题；第 2 次去停用词/拆专有名词；第 3 次同义改写；都失败再走 web_search；
+       并在 prompt 里给一两个 few-shot 示例（"5G 基站" → 改写为 "gNB" / "NR base station"）。
+
+  【P1-6 Reranker 候选数 = top_k × 3，可能不够】
+    config.py:171 RERANKER_RECALL_MULTIPLIER=3 → 召回 15 条；reranker 真正的价值在 30~50 候选时才明显。
+    →  默认提升至 5（即 top_k=8 时召回 40），CPU 推理 < 200ms 仍可接受；按 .env 可调。
+
+  【P1-7 解析阶段没有内容清洗】
+    PDF 的页眉页脚、自动生成目录、PPT 母版水印、Excel 空表头、HTML 中残留的"导航/版权"
+    都会被 chunk 化进入向量库，污染相似度。
+    →  parser 增加 _clean(text) 阶段：去重复行（>5 次出现的短行视为模板/页眉页脚）、
+       去高频干扰串（"Copyright ... All rights reserved"、页码 "1 / 32" 模式）；
+       记录原始与清洗后字符数到日志，便于调优。
+
+  【P2-1 没有评估集 / 召回率指标】
+    无 hit@k / MRR / NDCG，所有调参都凭直觉。
+    →  在 evaluation/rag/ 下放 20~50 条黄金对（query, expected_doc_id, expected_chunk_keywords）；
+       提供 `python -m evaluation.rag.eval` 跑回归；任何检索改动前后跑一次比较。
+
+  【P2-2 模型加载未做进程级缓存】
+    retriever._query_collection 每次调用都新建 SentenceTransformerEmbeddingFunction()，
+    依赖 chromadb 内部 cache；多 collection 时首查抖动明显。
+    →  提供 module-level _embedding_fn_cache: dict[model_name, EmbeddingFunction]；
+       reranker 已经做了懒加载，retriever 也照同样模式做。
+
+  【P2-3 search_knowledge 工具描述未引导写好 query】
+    src/agent/tools.py:127 描述只有"自然语言查询语句"，缺少 best practice。
+    →  description 补充："优先使用包含专有名词/术语的简短关键词查询；
+       多义问题拆成多个子查询分别调用；时间敏感问题加年份/版本号"。
+
+  ── 实施路线图（建议分 4 个迭代）
+    Iter-1（修 bug + 立竿见影，1~2 天）：
+      P0-1 修同名覆盖、P0-8 cosine 距离、P1-2 score 阈值、P0-5 换多语言 reranker、
+      P1-7 解析清洗、P0-4 BGE query 前缀。
+    Iter-2（结构化 + 混合检索，2~3 天）：
+      P0-2 RecursiveSplitter + Markdown 标题切分、P1-3 丰富 metadata、P0-6 BM25 + RRF、
+      P1-4 提 top_k + 按 source 去重。
+    Iter-3（query 端增强，2~3 天）：
+      P0-7 query 改写/HyDE、P1-5 prompt 引导多轮检索、P2-3 工具描述强化。
+    Iter-4（基建 + 评估，1~2 天）：
+      P0-3 PDF 升级 + OCR、P0-4 升级 bge-m3 / 单一多语言模型重构、P2-1 黄金集与回归脚本、
+      P2-2 模型缓存。
+
+  ── 预期效果（基于经验值，需用 P2-1 黄金集验证）
+    Iter-1 后 hit@5 +10~20pp（主要来自 score 阈值与中文 reranker）；
+    Iter-2 后 hit@5 再 +15~25pp（结构化分块 + BM25 对术语类问题命中显著提升）；
+    Iter-3 后多轮 / 口语化问题召回率 +10pp 以上；
+    Iter-4 后扫描版 PDF 与跨语言场景从"基本不可用"变为可用。
+
+
 
 99. 画出完整的 AI 系统架构图并解释每个决策
 
