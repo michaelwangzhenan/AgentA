@@ -52,7 +52,15 @@
   const SIDEBAR_W_COLLAPSED = 52;
   const STORAGE_KEY = "agenta-sidebar-collapsed";
 
-  const ACTIONS = [];
+  const ACTIONS = [
+    { label: "清空对话",     icon: "🗑️" },
+    { label: "清空全部会话", icon: "⚠️" },
+    { label: "历史摘要",     icon: "📜" },
+    { label: "会话列表",     icon: "📋" },
+    { label: "重载 Prompts", icon: "🔄" },
+    { label: "重载 Skills",  icon: "🔧" },
+    { label: "查看记忆",     icon: "🧠" },
+  ];
 
   /* ── Find & click last visible Chainlit action button ──────── */
   function clickChainlitAction(label) {
@@ -187,6 +195,120 @@
   document.addEventListener("DOMContentLoaded", () => {
     layoutObserver.observe(document.body, { childList: true });
   });
+})();
+
+/* ═══════════════════════════════════════════════════════════════
+   Part 4 — Hover tooltips for the three top-right header buttons
+   (Readme, Settings, Theme) — styled to match the "New Chat" tip.
+
+   DOM observations (Chainlit 1.x):
+   • Readme  → aria-label="Readme"  (or button text "Readme")
+   • Settings→ NO aria-label at all  → located by adjacency
+   • Theme   → aria-label or title = "Toggle theme"
+═══════════════════════════════════════════════════════════════ */
+(function () {
+  /* ── Shared tooltip element ───────────────────────────────── */
+  let tipEl = null;
+  let hideTimer = null;
+
+  function ensureTip() {
+    if (tipEl) return tipEl;
+    tipEl = document.createElement("div");
+    tipEl.id = "agenta-hdr-tip";
+    document.body.appendChild(tipEl);
+    return tipEl;
+  }
+
+  function showTip(btn, text) {
+    clearTimeout(hideTimer);
+    const t = ensureTip();
+    t.textContent = text;
+    t.classList.add("visible");
+    const r = btn.getBoundingClientRect();
+    t.style.left = Math.round(r.left + r.width / 2) + "px";
+    t.style.top  = Math.round(r.bottom + 8) + "px";
+  }
+
+  function hideTip() {
+    hideTimer = setTimeout(() => {
+      if (tipEl) tipEl.classList.remove("visible");
+    }, 80);
+  }
+
+  /* ── Attach listeners once per button ────────────────────── */
+  function patchBtn(btn, label) {
+    if (btn._agentaHdrTip) return;
+    btn._agentaHdrTip = label;          // store the label for adjacency pass
+    btn.addEventListener("mouseenter", () => showTip(btn, label));
+    btn.addEventListener("mouseleave", hideTip);
+    btn.addEventListener("click",      hideTip);
+  }
+
+  /* ── Helper: any accessible name on a button ─────────────── */
+  function btnName(btn) {
+    return (
+      btn.getAttribute("aria-label") ||
+      btn.getAttribute("title") ||
+      btn.textContent.trim()
+    ).toLowerCase();
+  }
+
+  function scanButtons() {
+    const allBtns = Array.from(document.querySelectorAll("button"))
+      .filter((b) => !b.closest("#agenta-sidebar")); // skip our own sidebar
+
+    /* Pass 1 — label / title / text matching */
+    allBtns.forEach((btn) => {
+      if (btn._agentaHdrTip) return;
+      const name = btnName(btn);
+      if (name === "readme" || name.includes("readme")) {
+        patchBtn(btn, "Readme");
+      } else if (
+        name.includes("theme") ||
+        name.includes("toggle theme") ||
+        name.includes("dark mode") ||
+        name.includes("light mode")
+      ) {
+        patchBtn(btn, "切换主题");
+      } else if (name.includes("setting")) {
+        patchBtn(btn, "设置");
+      }
+    });
+
+    /* Pass 2 — positional fallback for Settings
+       The Settings button has no accessible name in Chainlit 1.x.
+       It sits immediately between the Readme button and the
+       Toggle theme button in document order. */
+    const readmeIdx = allBtns.findIndex(
+      (b) => b._agentaHdrTip === "Readme"
+    );
+    const themeIdx = allBtns.findIndex(
+      (b) => b._agentaHdrTip === "切换主题"
+    );
+    if (readmeIdx !== -1 && themeIdx !== -1 && themeIdx > readmeIdx) {
+      for (let i = readmeIdx + 1; i < themeIdx; i++) {
+        if (!allBtns[i]._agentaHdrTip) {
+          patchBtn(allBtns[i], "设置");
+        }
+      }
+    }
+  }
+
+  /* ── Boot ─────────────────────────────────────────────────── */
+  const mo = new MutationObserver(scanButtons);
+
+  function start() {
+    scanButtons();
+    mo.observe(document.body, { childList: true, subtree: true });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", start);
+  } else {
+    start();
+  }
+  setTimeout(scanButtons, 600);
+  setTimeout(scanButtons, 2000);
 })();
 
 /* ═══════════════════════════════════════════════════════════════
