@@ -50,54 +50,53 @@ class Chunk:
 # ── 第 1 层：纯文本递归分块 ────────────────────────────────────────────────────
 
 
+def _split_by_sep(text: str, sep: str) -> list[str] | None:
+    """
+    用 sep 切分 text 并保留分隔符；返回切分后的 piece 列表。
+
+    防递归死循环关键：若 sep 仅出现在文本末尾（split 后只有一个非空 part + 末尾空串），
+    把 sep 加回 piece 会等于原 text，递归调用栈不会收敛 → RecursionError。
+    本函数检测到该情形（有效 piece 数 < 2）时返回 None，让调用方 fall through 到下一级 sep。
+    """
+    if sep not in text:
+        return None
+    parts = text.split(sep)
+    pieces: list[str] = []
+    for i, p in enumerate(parts):
+        if not p:
+            continue
+        # 该 part 后面在原文里跟着 sep 的当且仅当它不是最后一个 part
+        piece = p + sep if i < len(parts) - 1 else p
+        pieces.append(piece)
+    if len(pieces) < 2:
+        return None
+    return pieces
+
+
 def _split_into_atoms(text: str, chunk_size: int) -> list[str]:
     """
     按语义边界把文本递归拆成不超过 chunk_size 的"原子单元"。
 
     优先级：段落（\\n\\n） > 行（\\n） > 中文/英文句号 > 空格 > 字符。
     每一级都保留分隔符，避免拼回时丢失语义边界。最后一级是字符级硬切（兜底）。
+
+    所有分支都走 _split_by_sep，遇到"sep 仅在末尾出现一次"等无法实际切短文本的情形
+    会自动跳到下一级 sep，防止递归不收敛。
     """
     if len(text) <= chunk_size:
         return [text]
 
-    # 段落
-    if "\n\n" in text:
-        parts = text.split("\n\n")
+    # 段落 → 行 → 中英文断句 → 空格，依次尝试；任何一级能真正切分（≥ 2 个有效 piece）就用它。
+    for sep in ("\n\n", "\n", "。", "！", "？", "；", ". ", "! ", "? ", " "):
+        pieces = _split_by_sep(text, sep)
+        if pieces is None:
+            continue
         result: list[str] = []
-        for i, p in enumerate(parts):
-            piece = p + "\n\n" if i < len(parts) - 1 else p
+        for piece in pieces:
             result.extend(_split_into_atoms(piece, chunk_size))
         return result
 
-    # 行
-    if "\n" in text:
-        parts = text.split("\n")
-        result = []
-        for i, p in enumerate(parts):
-            piece = p + "\n" if i < len(parts) - 1 else p
-            result.extend(_split_into_atoms(piece, chunk_size))
-        return result
-
-    # 中英文断句标点（保留分隔符）
-    for sep in ("。", "！", "？", "；", ". ", "! ", "? "):
-        if sep in text:
-            parts = text.split(sep)
-            result = []
-            for i, p in enumerate(parts):
-                piece = p + sep if i < len(parts) - 1 else p
-                result.extend(_split_into_atoms(piece, chunk_size))
-            return result
-
-    # 空格
-    if " " in text:
-        parts = text.split(" ")
-        result = []
-        for i, p in enumerate(parts):
-            piece = p + " " if i < len(parts) - 1 else p
-            result.extend(_split_into_atoms(piece, chunk_size))
-        return result
-
-    # 字符级兜底（无任何分隔符）
+    # 字符级兜底（无任何分隔符 / 所有 sep 都仅在末尾出现一次）
     return [text[i : i + chunk_size] for i in range(0, len(text), chunk_size)]
 
 

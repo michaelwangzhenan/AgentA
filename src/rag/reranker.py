@@ -99,7 +99,19 @@ def rerank(query: str, hits: "list[Hit]", top_k: int) -> "list[Hit]":
         logger.info("[Reranker] 候选数 %d ≤ top_k %d，跳过精排直接透传", len(hits), top_k)
         return hits
 
-    model = _get_cross_encoder()
+    # 优雅降级：模型加载失败（本地无缓存 + TRANSFORMERS_OFFLINE=1 / 网络不可达 / 模型名错误）
+    # 不应让整条检索链崩溃。降级为不精排，直接截取召回前 top_k 条。
+    try:
+        model = _get_cross_encoder()
+    except Exception as e:  # noqa: BLE001 — 模型加载层异常种类繁多，统一兜底
+        logger.warning(
+            "[Reranker] 加载模型 %r 失败，本次降级为不精排（直接返回召回前 %d 条）。"
+            "若需启用精排请检查：1) 模型名拼写；2) 本地已缓存或可联网下载；"
+            "3) 关闭 TRANSFORMERS_OFFLINE，或切换 RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2。"
+            " 原始错误: %s",
+            config.RERANKER_MODEL, top_k, e,
+        )
+        return hits[:top_k]
 
     # 构造 (query, document) 对，批量送入 CrossEncoder
     pairs: list[tuple[str, str]] = [(query, hit.document) for hit in hits]

@@ -133,6 +133,41 @@ def _make_hits(n: int) -> list[Hit]:
     ]
 
 
+class TestSplitterRecursion:
+    """回归保护：_split_into_atoms 不应在"分隔符仅出现在末尾"时无限递归。
+
+    历史 bug：text = "AAAA...。" 时，split("。") = ["AAAA...", ""]，
+    第一个 piece 加回 sep 后等于原 text → 递归不收敛 → RecursionError。
+    修复方式：sep 切分后有效 piece < 2 时跳到下一级 sep。
+    """
+
+    def test_atoms_no_recursion_overflow_when_only_trailing_sep(self) -> None:
+        import sys
+        from src.rag.splitter import _split_into_atoms
+
+        original_limit = sys.getrecursionlimit()
+        sys.setrecursionlimit(200)
+        try:
+            atoms = _split_into_atoms("A" * 2000 + "。", 600)
+        finally:
+            sys.setrecursionlimit(original_limit)
+        assert len(atoms) > 0
+        assert all(len(a) <= 600 for a in atoms)
+
+    def test_atoms_no_recursion_overflow_when_only_trailing_newline(self) -> None:
+        import sys
+        from src.rag.splitter import _split_into_atoms
+
+        original_limit = sys.getrecursionlimit()
+        sys.setrecursionlimit(200)
+        try:
+            atoms = _split_into_atoms("B" * 2000 + "\n", 600)
+        finally:
+            sys.setrecursionlimit(original_limit)
+        assert len(atoms) > 0
+        assert all(len(a) <= 600 for a in atoms)
+
+
 class TestReranker:
     """测试 src/rag/reranker.rerank() 精排逻辑（纯单元测试，不依赖向量数据库）"""
 
