@@ -111,7 +111,12 @@ def _check_golden(use_default: bool) -> None:
 
 
 def _summarize(report_path: Path) -> str:
-    """从 eval 输出 JSON 抽 4 项关键指标，拼成一行可粘进表格的字符串。"""
+    """
+    从 eval 输出 JSON 抽 4 项关键指标 + 关键 metadata 摘要拼成一行。
+
+    输出格式适合 grep / 粘进表格做跨实验对比；metadata 摘要回答"这次跑用的是
+    哪个 commit / 哪些 collection / 关了哪些功能"，不必再点开 JSON 看头部。
+    """
     if not report_path.exists():
         return f"<no report at {report_path}>"
     try:
@@ -127,13 +132,31 @@ def _summarize(report_path: Path) -> str:
         except (TypeError, ValueError):
             return str(v)
 
-    return (
+    metric_line = (
         f"items={data.get('items')} k={data.get('k')} "
         f"hit_source@k={_pct(data.get('hit_source_at_k'))} "
         f"hit_keyword@k={_pct(data.get('hit_keyword_at_k'))} "
         f"hit_either@k={_pct(data.get('hit_either_at_k'))} "
         f"MRR={float(data.get('mrr', 0.0)):.4f}"
     )
+
+    md = data.get("metadata") or {}
+    if not md:
+        return metric_line
+
+    git = md.get("env", {}).get("git", {})
+    git_part = f"{git.get('commit', '?')}{'*' if git.get('dirty') else ''}"
+    aliases = md.get("embeddings", {}).get("active_aliases", [])
+    rr = md.get("reranker", {})
+    qr = md.get("query_rewrite", {})
+
+    ctx = (
+        f"git={git_part} "
+        f"emb={','.join(aliases) or '?'} "
+        f"rr={'ON' if rr.get('enabled') else 'OFF'} "
+        f"rewrite={'ON' if qr.get('enabled') else 'OFF'}"
+    )
+    return f"{metric_line} | {ctx}"
 
 
 def main(argv: list[str] | None = None) -> int:

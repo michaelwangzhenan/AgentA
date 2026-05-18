@@ -24,6 +24,26 @@ RAG 检索评估脚本（Iter-4）。
     hit_either@k    上述任一命中（更宽松）
     MRR             第一次命中位置的倒数平均（衡量"早命中"程度）
 
+JSON 报告结构（results-first：打开就能看到结果，无需滚动）：
+    items / k                 样本数与 top-K
+    hit_source_at_k           expected_source / contains 命中比例
+    hit_keyword_at_k          expected_keywords 命中比例
+    hit_either_at_k           上述任一命中（更宽松）
+    mrr                       第一次命中位置的倒数平均
+    use_rewriter / use_rerank 该次评估实际生效的实验开关
+    metadata: {                影响结果的全部配置因子（横向对比定位"差异是配置变了还是代码变了"）
+      env: {timestamp, git: {commit, dirty}, python, platform, llm_provider},
+      golden: {path, size, en_queries, zh_queries},
+      embeddings: {active_aliases, by_alias: alias→(model, collection)},
+      kb_counts: 每个启用 collection 的实测 chunk 数,
+      reranker: {enabled, model, recall_multiplier, min_score},
+      dense_thresholds: {global, per_model: en/zh/m3},
+      bm25: {enabled, k1, b, rrf_k},
+      query_rewrite: {enabled, max_queries, hyde_enabled, translate_enabled},
+      retrieval: {top_k, k_per_source, chunk_size, chunk_overlap},
+    }
+    cases: [...]               逐条详情（最大块，放最后避免淹没指标）
+
 注意：未填 expected_source*/expected_keywords 的 item 会自动按"该指标的分母"剔除，
 避免空目标污染统计。命中"以 expected_source* 在 OR 上的并集"为准。
 """
@@ -32,8 +52,11 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import platform
+import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -59,15 +82,150 @@ class CaseResult:
 
 @dataclass
 class EvalReport:
-    items: int
-    k: int
-    use_rewriter: bool
-    use_rerank: bool
-    hit_source_at_k: float | None
-    hit_keyword_at_k: float | None
-    hit_either_at_k: float
-    mrr: float
+    """
+    评估报告。
+
+    字段顺序 = JSON 序列化顺序，刻意按 "results-first" 排：
+      1. 核心指标（items / k / hit_* / mrr）—— 打开 JSON 第一眼就看到结果
+      2. 实验开关（use_rewriter / use_rerank）—— 该次评估实际生效的配置
+      3. metadata —— 影响结果的全部配置因子（git / 模型 / 阈值 / KB 状态）
+      4. cases —— 逐条详情（最大块，放最后避免滚动）
+
+    所有字段给默认值，便于上层先 EvalReport()、再按需赋值。
+    """
+    items: int = 0
+    k: int = 0
+    hit_source_at_k: float | None = None
+    hit_keyword_at_k: float | None = None
+    hit_either_at_k: float = 0.0
+    mrr: float = 0.0
+    use_rewriter: bool = False
+    use_rerank: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
     cases: list[CaseResult] = field(default_factory=list)
+
+
+def _git_info(repo_root: Path) -> dict[str, Any]:
+    """读 git commit 短哈希 + dirty 标志；命令缺失或非 git 仓库时静默回退。"""
+    out: dict[str, Any] = {"commit": "unknown", "dirty": False}
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=repo_root, capture_output=True, text=True, timeout=2,
+        )
+        if r.returncode == 0:
+            out["commit"] = r.stdout.strip()
+        r = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=repo_root, capture_output=True, text=True, timeout=2,
+        )
+        if r.returncode == 0:
+            out["dirty"] = bool(r.stdout.strip())
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+    return out
+
+
+def _kb_counts(active: list[tuple[str, str, str]]) -> dict[str, int]:
+    """实测每个启用 collection 的 chunk 数；ChromaDB 不可用 / 库未建好时退化为空 dict。"""
+    counts: dict[str, int] = {}
+    try:
+        import chromadb  # noqa: WPS433 — 仅在评估收集 metadata 时需要
+        client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
+        for _alias, _model, coll in active:
+            try:
+                counts[coll] = client.get_or_create_collection(coll).count()
+            except Exception:  # noqa: BLE001 — collection 不存在 / schema 不匹配 等
+                counts[coll] = -1
+    except Exception:  # noqa: BLE001 — chromadb 未装 / db 路径异常
+        return {}
+    return counts
+
+
+def _golden_lang_split(items: list[dict[str, Any]]) -> tuple[int, int]:
+    """粗略统计 golden 集中 EN / ZH query 数量（中文字符存在性判定，对评估足够）。"""
+    en = 0
+    for it in items:
+        q = str(it.get("query", ""))
+        has_zh = any(0x4e00 <= ord(c) <= 0x9fff for c in q)
+        if not has_zh:
+            en += 1
+    return en, len(items) - en
+
+
+def _collect_metadata(
+    golden_path: Path,
+    items: list[dict[str, Any]],
+    k: int,
+    use_rewriter_eff: bool,
+    use_rerank_eff: bool,
+) -> dict[str, Any]:
+    """
+    汇总"会影响评估结果"的所有因子。
+
+    分组：
+        env       运行环境（时间戳、git、python、provider）
+        golden    数据集（路径、规模、双语分布）
+        embeddings  active alias → (model, collection) 映射
+        kb_counts collection 实际 chunk 数量（实测，便于和 commit 关联）
+        reranker  开关 / 模型 / min_score / recall_multiplier
+        dense_thresholds  全局 + per-model 阈值（Iter-2 / Iter-5）
+        bm25      开关 / 经典超参 / RRF k
+        query_rewrite  改写 / HyDE / 翻译轴 三个轴的开关 + max_queries
+        retrieval top_k / per_source / chunk 切分
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+    active = config.iter_active_embeddings()
+    en_q, zh_q = _golden_lang_split(items)
+
+    return {
+        "env": {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "git": _git_info(repo_root),
+            "python": platform.python_version(),
+            "platform": sys.platform,
+            "llm_provider": config.ACTIVE_PROVIDER,
+        },
+        "golden": {
+            "path": str(golden_path),
+            "size": len(items),
+            "en_queries": en_q,
+            "zh_queries": zh_q,
+        },
+        "embeddings": {
+            "active_aliases": [a for a, _, _ in active],
+            "by_alias": {a: {"model": m, "collection": c} for a, m, c in active},
+        },
+        "kb_counts": _kb_counts(active),
+        "reranker": {
+            "enabled": bool(config.RERANKER_ENABLED and use_rerank_eff),
+            "model": config.RERANKER_MODEL,
+            "recall_multiplier": config.RERANKER_RECALL_MULTIPLIER,
+            "min_score": config.RAG_RERANK_MIN_SCORE,
+        },
+        "dense_thresholds": {
+            "global": config.RAG_DENSE_MIN_SCORE,
+            "per_model": dict(config.RAG_DENSE_MIN_SCORE_PER_MODEL),
+        },
+        "bm25": {
+            "enabled": config.BM25_ENABLED,
+            "k1": config.BM25_K1,
+            "b": config.BM25_B,
+            "rrf_k": config.RRF_K,
+        },
+        "query_rewrite": {
+            "enabled": bool(config.RAG_QUERY_REWRITE_ENABLED and use_rewriter_eff),
+            "max_queries": config.RAG_REWRITE_MAX_QUERIES,
+            "hyde_enabled": config.RAG_HYDE_ENABLED,
+            "translate_enabled": config.RAG_TRANSLATE_QUERY_ENABLED,
+        },
+        "retrieval": {
+            "top_k": k,
+            "k_per_source": config.RAG_K_PER_SOURCE,
+            "chunk_size": config.CHUNK_SIZE,
+            "chunk_overlap": config.CHUNK_OVERLAP,
+        },
+    }
 
 
 def _is_source_match(item: dict[str, Any], hit_source: str) -> bool:
@@ -217,22 +375,63 @@ def _load_golden(path: Path) -> list[dict[str, Any]]:
 
 
 def _print_report(rep: EvalReport) -> None:
-    print("=" * 60)
-    print("RAG 检索评估")
-    print("=" * 60)
-    print(f"  样本数:         {rep.items}")
-    print(f"  Top-K:          {rep.k}")
-    print(f"  Query 改写:     {rep.use_rewriter}")
-    print(f"  Reranker:       {rep.use_rerank}")
-    print("-" * 60)
-
+    """results-first 打印：第一屏就是核心指标，配置上下文次之，逐条详情垫底。"""
     def _fmt(v: float | None) -> str:
         return "—" if v is None else f"{v:.2%}"
 
+    print("=" * 60)
+    print("RAG 检索评估 — 结果")
+    print("=" * 60)
+    print(f"  样本数:         {rep.items}")
+    print(f"  Top-K:          {rep.k}")
     print(f"  hit_source@k:   {_fmt(rep.hit_source_at_k)}")
     print(f"  hit_keyword@k:  {_fmt(rep.hit_keyword_at_k)}")
     print(f"  hit_either@k:   {rep.hit_either_at_k:.2%}")
     print(f"  MRR:            {rep.mrr:.4f}")
+
+    m = rep.metadata or {}
+    if m:
+        print("-" * 60)
+        print("实验上下文（影响结果的配置因子）：")
+        env = m.get("env", {})
+        git = env.get("git", {})
+        dirty_flag = "*" if git.get("dirty") else ""
+        print(
+            f"  环境:           git={git.get('commit', '?')}{dirty_flag}  "
+            f"python={env.get('python', '?')}  provider={env.get('llm_provider', '?')}"
+        )
+        g = m.get("golden", {})
+        print(
+            f"  Golden:         {g.get('size', 0)} items"
+            f"  (en={g.get('en_queries', 0)}, zh={g.get('zh_queries', 0)})"
+        )
+        em = m.get("embeddings", {})
+        by = em.get("by_alias", {})
+        kb = m.get("kb_counts", {})
+        parts: list[str] = []
+        for a in em.get("active_aliases", []):
+            info = by.get(a, {})
+            model_short = info.get("model", "?").split("/")[-1]
+            coll = info.get("collection", "?")
+            parts.append(f"{a}({model_short}, {coll}={kb.get(coll, '?')})")
+        print(f"  Embeddings:     {', '.join(parts) or '?'}")
+        rr = m.get("reranker", {})
+        rr_model_short = rr.get("model", "?").split("/")[-1]
+        print(
+            f"  Reranker:       {'ON ' if rr.get('enabled') else 'OFF'} "
+            f"{rr_model_short}  min_score={rr.get('min_score', '?')}"
+        )
+        bm = m.get("bm25", {})
+        qr = m.get("query_rewrite", {})
+        print(
+            f"  BM25/RRF:       {'ON' if bm.get('enabled') else 'OFF'}  "
+            f"k1={bm.get('k1')}  b={bm.get('b')}  rrf_k={bm.get('rrf_k')}"
+        )
+        print(
+            f"  Query rewrite:  {'ON' if qr.get('enabled') else 'OFF'}  "
+            f"max={qr.get('max_queries')}  hyde={qr.get('hyde_enabled')}  "
+            f"translate={qr.get('translate_enabled')}"
+        )
     print("-" * 60)
     print("逐条详情：")
     for c in rep.cases:
@@ -264,6 +463,17 @@ def main(argv: list[str] | None = None) -> int:
     use_rewriter = (not args.no_rewriter) and config.RAG_QUERY_REWRITE_ENABLED
     use_rerank = not args.no_rerank
     rep = evaluate(items, k=args.k, use_rewriter=use_rewriter, use_rerank=use_rerank)
+
+    # 在 evaluate 之后收集 metadata：rep.use_rewriter / rep.use_rerank 已反映
+    # "实际是否生效"（query_rewriter 不可用会被 evaluate 自动降级），所以这里
+    # 用 rep.* 而非命令行 args，避免 metadata 显示和实际行为不一致。
+    rep.metadata = _collect_metadata(
+        golden_path=Path(args.golden),
+        items=items,
+        k=args.k,
+        use_rewriter_eff=rep.use_rewriter,
+        use_rerank_eff=rep.use_rerank,
+    )
 
     if args.quiet:
         # 静默模式：只打 4 项汇总
