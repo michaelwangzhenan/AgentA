@@ -30,6 +30,11 @@ class ProviderConfig:
     model: str
     # 透传给 openai SDK 的额外请求体参数（如 enable_thinking、response_format 等）
     extra_body: dict[str, Any] | None = None
+    # 强制覆盖 temperature（不为 None 时无视调用方传入值）。
+    # 用于个别模型对 temperature 有硬约束的情况，例如：
+    #   kimi-k2.6 要求 temperature 必须 = 1（其他值会返回 400）；
+    #   Claude Extended Thinking 也要求 temperature = 1（已在 provider.py 中单独处理）。
+    force_temperature: float | None = None
 
 
 # 当前激活的 Provider，从环境变量读取，默认 kimi
@@ -37,10 +42,27 @@ ACTIVE_PROVIDER: str = os.getenv("LLM_PROVIDER", "kimi").lower()
 
 # 所有 Provider 配置表（统一使用 OpenAI SDK 格式，claude 除外）
 PROVIDER_CONFIGS: dict[str, ProviderConfig] = {
+    # kimi-k2.6 是 Moonshot 2026-04 发布的最新旗舰，262K context，K2 系列专门强化
+    # agentic tool use（旧的 moonshot-v1-8k 在我们 Agent 链路里有"该调工具不调"的
+    # 顽疾，K2.6 显著改善）。旧的 K2 系列（kimi-k2-0905-preview 等）将于 2026-05-25
+    # 下线，已不必再考虑回退。若想省钱，可换成 kimi-k2-turbo-preview（更快/便宜）。
+    #
+    # 关键 quirk：K2.6 默认开 thinking。开了 thinking 之后多轮 tool calling 时，
+    # 历史的 assistant tool_call 消息必须把 reasoning_content 字段一并回传给 API，
+    # 否则 400 ("thinking is enabled but reasoning_content is missing in assistant
+    # tool call message")。我们的 Agent 链路是"决策 + 工具调用"而非"长链推理"，
+    # thinking 既无收益还引入这个 bug，故显式关闭。litellm #26156 / openclaw #70392
+    # 都遇到同一个坑。
     "kimi": ProviderConfig(
         base_url="https://api.moonshot.cn/v1",
         api_key=os.getenv("MOONSHOT_API_KEY", ""),
-        model="moonshot-v1-8k",
+        model="kimi-k2.6",
+        extra_body={"thinking": {"type": "disabled"}},
+        # K2.6 在两种 thinking 模式下分别强制不同的 temperature（其他值一律 400）：
+        #   thinking 开启 → 只允许 temperature=1.0
+        #   thinking 关闭 → 只允许 temperature=0.6
+        # 我们关了 thinking，所以这里必须是 0.6。
+        force_temperature=0.6,
     ),
     "openai": ProviderConfig(
         base_url="https://api.openai.com/v1",
@@ -64,10 +86,18 @@ PROVIDER_CONFIGS: dict[str, ProviderConfig] = {
     ),
     # ── 国内直连 ────────────────────────────────────────────────
     # qwen3 支持 Extended Thinking，但非流式调用必须显式设 enable_thinking=False
+    #
+    # 模型选型：默认换成 qwen3-max 旗舰（阿里官方文档强调"upgraded for agent
+    # programming and tool invocation"），适合本项目"Agent + RAG 工具调用"链路。
+    # 备选（按价格/速度递减、精度递增）：
+    #   qwen-plus-latest    较便宜，常规对话足够
+    #   qwen3.5-plus        2026-02 新出，hybrid 线性注意力 + 稀疏 MoE
+    #   qwen3-max           ★ 当前默认，旗舰
+    #   qwen3-235b-a22b     开源 MoE 版，能力相当但延迟更高
     "qwen": ProviderConfig(
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         api_key=os.getenv("QWEN_API_KEY", ""),
-        model="qwen3-8b",  # 可升级为 qwen3-32b / qwen3-235b-a22b 提升效果
+        model="qwen3-max",
         extra_body={"enable_thinking": False},
     ),
     "minimax": ProviderConfig(

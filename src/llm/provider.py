@@ -70,10 +70,18 @@ def chat(
 
     provider_config = config.get_active_config()
 
+    # 个别模型对 temperature 有硬约束（如 kimi-k2.6 强制要求 = 1，非 1 直接 400），
+    # 由 ProviderConfig.force_temperature 声明，此处统一覆盖，避免在每个调用点重复处理。
+    effective_temperature = (
+        provider_config.force_temperature
+        if provider_config.force_temperature is not None
+        else temperature
+    )
+
     kwargs: dict[str, Any] = {
         "model": provider_config.model,
         "messages": messages,
-        "temperature": temperature,
+        "temperature": effective_temperature,
     }
     if tools:
         kwargs["tools"] = tools

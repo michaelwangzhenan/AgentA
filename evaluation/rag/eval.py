@@ -60,8 +60,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import src.config as config
-from src.rag.retriever import search
+# 必须在 import src.config 之前加载 .env：config.py 在模块导入时即用 os.getenv
+# 读取所有配置（含 *_API_KEY），而 evaluation 入口不像 main.py / ingest.py 那样
+# 自带 load_dotenv()，单独 `python -m evaluation.rag.eval` 或被 run_eval.py 作为
+# 子进程拉起时会拿到空 key，导致 query 改写 / 翻译轴 LLM 调用全部 401 静默降级。
+from dotenv import load_dotenv
+load_dotenv(override=True)
+
+import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
+from src.rag.retriever import search  # noqa: E402 — 同上
 
 logger = logging.getLogger(__name__)
 
