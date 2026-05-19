@@ -809,8 +809,20 @@ ToDo List：
       "召回 → 生成"全链路。需要另一套评估脚本，超出 retriever 范畴。
 
 44. Web UI 优化
+  重新设计，不是硬搬CLI
+45. RAG run eval
+46. RAG 代码整理
+47. Agent Refine
+  重新考虑如何成为一个真正的Agent, 而不是闹着玩
 
 99. 画出完整的 AI 系统架构图并解释每个决策
+100. todo
+  45
+  46
+  47
+  44
+
+
 
 -
 a. Agent S
