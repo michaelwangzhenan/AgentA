@@ -4,12 +4,12 @@ RAG 检索评估脚本（Iter-4）。
 跑前提：先 ingest 至少一遍知识库；脚本调用 src.rag.retriever.search 实际检索。
 
 使用方式：
-    python -m evaluation.rag.eval                       # 用默认 golden.json（不存在则尝试 example）
-    python -m evaluation.rag.eval --golden custom.json  # 指定黄金集
-    python -m evaluation.rag.eval --k 10                # 评估 top-K
-    python -m evaluation.rag.eval --no-rewriter         # 关闭 query 改写（用于基线对比）
-    python -m evaluation.rag.eval --no-rerank           # 关闭 reranker（用于基线对比）
-    python -m evaluation.rag.eval --json out.json       # 同时输出 JSON 文件供 diff/CI
+    python -m tools.rag_eval.eval                       # 用默认 golden.json（不存在则尝试 example）
+    python -m tools.rag_eval.eval --golden custom.json  # 指定黄金集
+    python -m tools.rag_eval.eval --k 10                # 评估 top-K
+    python -m tools.rag_eval.eval --no-rewriter         # 关闭 query 改写（用于基线对比）
+    python -m tools.rag_eval.eval --no-rerank           # 关闭 reranker（用于基线对比）
+    python -m tools.rag_eval.eval --json out.json       # 同时输出 JSON 文件供 diff/CI
 
 黄金集格式（list[item]，逐条 item 字段如下）：
     query                    必填，str，用户问题
@@ -61,8 +61,8 @@ from pathlib import Path
 from typing import Any
 
 # 必须在 import src.config 之前加载 .env：config.py 在模块导入时即用 os.getenv
-# 读取所有配置（含 *_API_KEY），而 evaluation 入口不像 main.py / ingest.py 那样
-# 自带 load_dotenv()，单独 `python -m evaluation.rag.eval` 或被 run_eval.py 作为
+# 读取所有配置（含 *_API_KEY），而 rag_eval 入口不像 main.py / ingest.py 那样
+# 自带 load_dotenv()，单独 `python -m tools.rag_eval.eval` 或被 run_eval.py 作为
 # 子进程拉起时会拿到空 key，导致 query 改写 / 翻译轴 LLM 调用全部 401 静默降级。
 from dotenv import load_dotenv
 load_dotenv(override=True)

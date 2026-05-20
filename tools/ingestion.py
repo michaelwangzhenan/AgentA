@@ -525,7 +525,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     # Windows 控制台默认 GBK，遇到 ⚠️ ✓ ✅ 等字符会抛 UnicodeEncodeError。
-    # 与 evaluation/rag/eval.py 同源修复：把 stdout/stderr 强制 reconfigure 成 utf-8。
+    # 与 tools/rag_eval/eval.py 同源修复：把 stdout/stderr 强制 reconfigure 成 utf-8。
     # Python 3.7+ 才有 reconfigure；老解释器忽略即可（不影响主流程）。
     for _stream in (sys.stdout, sys.stderr):
         try:

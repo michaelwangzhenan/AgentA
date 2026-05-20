@@ -17,7 +17,7 @@
 - **二阶段精排**：使用 `bge-reranker-base` Cross-Encoder 对召回结果做精排，并按 per-model 阈值过滤低质 chunk。
 - **Query 改写**：Multi-Query 同义改写、HyDE 假设性答案、跨语言翻译轴三档可独立开关。
 - **多格式解析**：覆盖 PDF / DOCX / PPTX / XLSX / Markdown / HTML / TXT 七种格式，PDF 扫描件自动 OCR 兜底（rapidocr-onnxruntime）。
-- **评估闭环**：`evaluation/rag/eval.py` 内置黄金集 + `hit@k` / `MRR` 指标，每次调优结果可 JSON 留档对比。
+- **评估闭环**：`tools/rag_eval/eval.py` 内置黄金集 + `hit@k` / `MRR` 指标，每次调优结果可 JSON 留档对比。
 
 ### 1.2.Agent
 
@@ -99,37 +99,66 @@ USER_MEMORY_ENABLED=true          # 跨 session 用户记忆
 
 ```
 
-## 4.实用脚本
+## 4.实用工具
 
-### 4.1.UT 测试
+### 4.1.RAG 入库
 
-`scripts/ut.sh` 按模块封装了 pytest 调用：
+`tools/ingestion.py` 把 `./docs` 下文档灌入向量库 + BM25 索引（与 `/ingest` 等价），额外提供清库与状态查询：
 
 ```bash
-bash scripts/ut.sh -h          # 查看全部分组
-bash scripts/ut.sh -not        # 跑除集成测试外的全部 UT
-bash scripts/ut.sh -rag        # 仅跑 RAG（分块 / 双语检索 / Reranker）
-bash scripts/ut.sh -agent      # 仅跑 Agent ReAct 循环
+python tools/ingestion.py status                  # 查看每个 collection 的当前状态
+python tools/ingestion.py ingest                  # 幂等增量入库（默认 docs + 默认模型）
+python tools/ingestion.py ingest -d ./docs_zh -m zh   # 指定目录 / 模型别名（en / zh / m3）
+python tools/ingestion.py clear                   # 清空全部 collection + BM25（需 yes 确认）
+python tools/ingestion.py clear -m m3             # 只清空指定 alias
 ```
 
 ### 4.2.RAG 评估
 
-基于 `evaluation/rag/golden.json` 黄金集计算 `hit@k` / `MRR`，结果落到 `reports/`：
+基于 `tools/rag_eval/golden.json` 黄金集计算 `hit@k` / `MRR`，结果默认落到 `tools/rag_eval/reports/`：
 
 ```bash
-python -m evaluation.rag.eval                       # 当前配置基线
-python -m evaluation.rag.eval --no-rewriter         # 关闭 Query 改写做消融对比
-python -m evaluation.rag.eval --no-rerank           # 关闭精排做消融对比
-python -m evaluation.rag.eval --json reports/x.json # 保存 JSON 便于 diff
+python -m tools.rag_eval.eval                                          # 当前配置基线
+python -m tools.rag_eval.eval --no-rewriter                            # 关闭 Query 改写做消融对比
+python -m tools.rag_eval.eval --no-rerank                              # 关闭精排做消融对比
+python -m tools.rag_eval.eval --json tools/rag_eval/reports/x.json     # 保存 JSON 便于 diff
 ```
 
-### 4.3.UI 调试
+`tools/rag_eval/run_eval.py` 把"清库 → 双语种 ingest → 评估"打包成一条命令，方便跨 commit / 跨配置对比：
 
-`scripts/ui_debug.ps1`（Windows / PowerShell）一键拉起 Chainlit + cloudflared 隧道，自动把生成的临时公网 URL 复制到剪贴板，方便手机或外部设备调试：
+```bash
+python -m tools.rag_eval.run_eval --label iter5                                    # 一次完整评估
+python -m tools.rag_eval.run_eval --skip-ingest --no-rewriter --label ablation-rw  # 消融实验
+```
+
+### 4.3.模型下载
+
+`tools/download_models.py` 按编号下载所需 Embedding / Reranker，自带多镜像 fallback：
+
+```bash
+python tools/download_models.py        # 默认下载全部 5 个（已缓存自动跳过）
+python tools/download_models.py -l     # 仅查看清单与缓存状态
+python tools/download_models.py 3 4    # 仅下载指定编号
+```
+
+### 4.4.UT 测试
+
+`tools/ut.sh` 按模块封装了 pytest 调用：
+
+```bash
+bash tools/ut.sh -h          # 查看全部分组
+bash tools/ut.sh -not        # 跑除集成测试外的全部 UT
+bash tools/ut.sh -rag        # 仅跑 RAG（分块 / 双语检索 / Reranker）
+bash tools/ut.sh -agent      # 仅跑 Agent ReAct 循环
+```
+
+### 4.5.UI 调试
+
+`tools/ui_debug.ps1`（Windows / PowerShell）一键拉起 Chainlit + cloudflared 隧道，自动把生成的临时公网 URL 复制到剪贴板，方便手机或外部设备调试：
 
 ```powershell
-.\scripts\ui_debug.ps1                 # 默认 8000 端口
-.\scripts\ui_debug.ps1 -Port 8080      # 自定义端口
+.\tools\ui_debug.ps1                 # 默认 8000 端口
+.\tools\ui_debug.ps1 -Port 8080      # 自定义端口
 ```
 
 # 5.缩写

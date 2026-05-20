@@ -18,7 +18,7 @@ bm25_index/
 
 # RAG 评估报告 / 自定义黄金集（自动生成 / 个人数据，Iter-5）
 reports/
-evaluation/rag/golden.json
+tools/rag_eval/golden.json
 
 # 对话历史数据库目录（自动生成）
 sqlite_db/

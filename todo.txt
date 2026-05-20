@@ -547,8 +547,8 @@ ToDo List：
 
   【P2-1 没有评估集 / 召回率指标】
     无 hit@k / MRR / NDCG，所有调参都凭直觉。
-    →  在 evaluation/rag/ 下放 20~50 条黄金对（query, expected_doc_id, expected_chunk_keywords）；
-       提供 `python -m evaluation.rag.eval` 跑回归；任何检索改动前后跑一次比较。
+    →  在 tools/rag_eval/ 下放 20~50 条黄金对（query, expected_doc_id, expected_chunk_keywords）；
+       提供 `python -m tools.rag_eval.eval` 跑回归；任何检索改动前后跑一次比较。
 
   【P2-2 模型加载未做进程级缓存】
     retriever._query_collection 每次调用都新建 SentenceTransformerEmbeddingFunction()，
@@ -672,9 +672,9 @@ ToDo List：
       ▸ src/rag/retriever.py
         · _embedding_fn_cache 加 RLock；新增 warm_up() 一次性预热全部
           embedding 模型 + reranker，避免首查抖动。
-      ▸ evaluation/rag/{eval.py, golden.example.json, __init__.py}（新目录）
+      ▸ tools/rag_eval/{eval.py, golden.example.json, __init__.py}（新目录）
         · 评估指标 hit_source@k / hit_keyword@k / hit_either@k / MRR；
-        · 命令：python -m evaluation.rag.eval [--golden ... --k ...
+        · 命令：python -m tools.rag_eval.eval [--golden ... --k ...
           --no-rewriter --no-rerank --json out.json --quiet]（实现 P2-1）。
       ▸ requirements.txt
         · 增加可选依赖注释：pymupdf / pdfplumber / rapidocr-onnxruntime。
@@ -703,7 +703,7 @@ ToDo List：
          · 跨文档对比 / 枚举类（"列出所有 ..."）；
          · 多轮 / 口语化提问（"它支持哪些 ...？"）；
          · 中英混合 / 跨语言。
-       格式参考 evaluation/rag/golden.example.json，写到 evaluation/rag/golden.json。
+       格式参考 tools/rag_eval/golden.example.json，写到 tools/rag_eval/golden.json。
 
     2. 评估指标（top-K 默认 = RAG_TOP_K=8）
        hit_source@k    top-K 中命中 expected_source(_contains) 的样本占比
@@ -735,7 +735,7 @@ ToDo List：
 
   ── 操作步骤
     准备工作（一次性）：
-      编辑 evaluation/rag/golden.json
+      编辑 tools/rag_eval/golden.json
       （基于 golden.example.json 改成自己的真实问题，规模 20~50 条；每条 query
        的语种应与 expected_source 所在目录一致——en 问题对 docs/，zh 问题对 docs_zh/）
 
@@ -749,13 +749,13 @@ ToDo List：
 
     一次性跑 Iter-0 → Iter-4 baseline 对照（commit 倒回去依次跑）：
       git stash                                          # 保存未提交改动
-      mkdir reports                                      # 存评估结果
+      mkdir tools/rag_eval/reports                       # 存评估结果
 
-      git checkout 1fe5582; Reingest-Bilingual; python -m evaluation.rag.eval --json reports/iter0.json
-      git checkout 50f19b1; Reingest-Bilingual; python -m evaluation.rag.eval --json reports/iter1.json
-      git checkout 3bc21ac; Reingest-Bilingual; python -m evaluation.rag.eval --json reports/iter2.json
-      git checkout 6fbb30d; Reingest-Bilingual; python -m evaluation.rag.eval --json reports/iter3.json
-      git checkout ba58024; Reingest-Bilingual; python -m evaluation.rag.eval --json reports/iter4.json
+      git checkout 1fe5582; Reingest-Bilingual; python -m tools.rag_eval.eval --json tools/rag_eval/reports/iter0.json
+      git checkout 50f19b1; Reingest-Bilingual; python -m tools.rag_eval.eval --json tools/rag_eval/reports/iter1.json
+      git checkout 3bc21ac; Reingest-Bilingual; python -m tools.rag_eval.eval --json tools/rag_eval/reports/iter2.json
+      git checkout 6fbb30d; Reingest-Bilingual; python -m tools.rag_eval.eval --json tools/rag_eval/reports/iter3.json
+      git checkout ba58024; Reingest-Bilingual; python -m tools.rag_eval.eval --json tools/rag_eval/reports/iter4.json
 
       git checkout main; git stash pop
 
@@ -766,21 +766,21 @@ ToDo List：
       注 3：每次切 commit 后 src/config.py 也跟着变；ReIngest-Bilingual 必须
             在 checkout 之后再调用，使用的是当前 commit 的 ingest 实现。
 
-      最后读 reports/iter*.json 拼出对比表，看每轮 vs Iter-0 的 +pp。
+      最后读 tools/rag_eval/reports/iter*.json 拼出对比表，看每轮 vs Iter-0 的 +pp。
 
     日常回归（任何检索/分块/embedding 改动后）：
-      python -m evaluation.rag.eval --json reports/before.json   # 改动前
+      python -m tools.rag_eval.eval --json tools/rag_eval/reports/before.json   # 改动前
       <改代码；动到分块/解析/embedding 时必须 Reingest-Bilingual>
-      python -m evaluation.rag.eval --json reports/after.json    # 改动后
+      python -m tools.rag_eval.eval --json tools/rag_eval/reports/after.json    # 改动后
       diff 两份 JSON 看升降；指标下降 → 回退或继续改。
 
     消融实验（A/B 单一开关，验证某项是否真有效）：
       ── 关单一开关，无需重灌：
-      python -m evaluation.rag.eval --no-rewriter        # 关 query 改写
-      python -m evaluation.rag.eval --no-rerank          # 关 reranker
-      python -m evaluation.rag.eval --k 5                # 看 top_k 曲线
+      python -m tools.rag_eval.eval --no-rewriter        # 关 query 改写
+      python -m tools.rag_eval.eval --no-rerank          # 关 reranker
+      python -m tools.rag_eval.eval --k 5                # 看 top_k 曲线
       $env:RERANKER_MODEL="cross-encoder/ms-marco-MiniLM-L-6-v2"
-        python -m evaluation.rag.eval                    # 多语言 vs 英文 reranker
+        python -m tools.rag_eval.eval                    # 多语言 vs 英文 reranker
 
       ── 测 bge-m3 单库（与 en/zh 双库对比，需重灌）：
       Remove-Item -Recurse -Force chroma_db, bm25_index -ErrorAction SilentlyContinue
@@ -788,7 +788,7 @@ ToDo List：
       python -m src.rag.ingest --docs-dir docs_zh --model m3
       ⚠ 重要：临时把 src/config.py 的 EMBEDDING_MODELS 中 en/zh 两行注释掉
         只留 m3，否则 retriever 还会去查空的 kb_en / kb_zh，结果偏低且不公平。
-      python -m evaluation.rag.eval --json reports/m3.json
+      python -m tools.rag_eval.eval --json tools/rag_eval/reports/m3.json
       跑完恢复 EMBEDDING_MODELS 三项以及双语种入库，避免影响后续日常使用。
 
   ── 看输出怎么用（结果解读）

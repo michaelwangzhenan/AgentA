@@ -8,8 +8,8 @@ RAG 评估自动化脚本（Iter-5）
     1. （可选）清空 chroma_db / bm25_index，避免不同分块/索引格式互相污染；
     2. 用 en 模型把 --en-dir 灌进 kb_en；
     3. 用 zh 模型把 --zh-dir 灌进 kb_zh；
-    4. 调 evaluation.rag.eval 评估；
-    5. 把结果保存为 reports/<label>-<时间戳>.json，并打印 1 行汇总。
+    4. 调 tools.rag_eval.eval 评估；
+    5. 把结果保存为 tools/rag_eval/reports/<label>-<时间戳>.json，并打印 1 行汇总。
 
 默认 ingest 路径（可被 --en-dir / --zh-dir 覆盖）：
     en  →  ../pursue          # 用户工作笔记，英文/通用为主
@@ -17,29 +17,29 @@ RAG 评估自动化脚本（Iter-5）
 
 使用示例：
     # 当前 HEAD 跑一次完整评估
-    python -m evaluation.rag.run_eval
+    python -m tools.rag_eval.run_eval
 
     # baseline 多 commit 对比（在外层用 PowerShell / bash 串）
     git stash
-    git checkout 1fe5582; python -m evaluation.rag.run_eval --label iter0
-    git checkout 50f19b1; python -m evaluation.rag.run_eval --label iter1
-    git checkout 54103d8; python -m evaluation.rag.run_eval --label iter5
+    git checkout 1fe5582; python -m tools.rag_eval.run_eval --label iter0
+    git checkout 50f19b1; python -m tools.rag_eval.run_eval --label iter1
+    git checkout 54103d8; python -m tools.rag_eval.run_eval --label iter5
     git checkout main; git stash pop
 
     # 消融实验（不重灌库，复用上一轮 ingest）
-    python -m evaluation.rag.run_eval --skip-ingest --no-rewriter --label ablation-no-rewriter
-    python -m evaluation.rag.run_eval --skip-ingest --no-rerank   --label ablation-no-rerank
+    python -m tools.rag_eval.run_eval --skip-ingest --no-rewriter --label ablation-no-rewriter
+    python -m tools.rag_eval.run_eval --skip-ingest --no-rerank   --label ablation-no-rerank
 
     # 评估 m3 单库（依赖 RAG_ACTIVE_EMBEDDINGS env 切换，Iter-5 引入）
     $env:RAG_ACTIVE_EMBEDDINGS="m3"
-    python -m evaluation.rag.run_eval --en-dir ../pursue --zh-dir ../pursue/resume `
+    python -m tools.rag_eval.run_eval --en-dir ../pursue --zh-dir ../pursue/resume `
         --en-model m3 --zh-model m3 --label m3-single
     $env:RAG_ACTIVE_EMBEDDINGS="en,zh"     # 跑完恢复
 
 注意：
-    1. golden.json 不存在时 evaluation.rag.eval 会回退到 golden.example.json，
+    1. golden.json 不存在时 tools.rag_eval.eval 会回退到 golden.example.json，
        但例子是泛用占位、与 ../pursue 真实内容无关，所有 case 必然 miss。
-       第一次跑前请基于 ../pursue 内容写一份 evaluation/rag/golden.json。
+       第一次跑前请基于 ../pursue 内容写一份 tools/rag_eval/golden.json。
     2. ../pursue/resume 是 ../pursue 的子目录；同一份文档会同时进 kb_en 与
        kb_zh，是预期行为（双库各按自己模型嵌入，retriever 跨库 round-robin
        合并）。如要严格分离，请用 --en-dir 指向不含 resume 的目录。
@@ -59,19 +59,21 @@ from typing import Any
 
 logger = logging.getLogger("run_eval")
 
-# 项目根目录 = 本文件向上两级（evaluation/rag/run_eval.py → AgentA/）
+# 项目根目录 = 本文件向上两级（tools/rag_eval/run_eval.py → AgentA/）
 ROOT = Path(__file__).resolve().parents[2]
 
 DEFAULT_EN_DIR = "../pursue"
 DEFAULT_ZH_DIR = "../pursue/resume"
-DEFAULT_REPORTS_DIR = "reports"
+# reports 默认与本脚本同级（tools/rag_eval/reports），跟 golden.json 一起归属
+# rag_eval 域；用户传 --reports-dir 时仍会按"相对 ROOT"语义解析（见 main()）。
+DEFAULT_REPORTS_DIR = "tools/rag_eval/reports"
 
 # 入库时清掉的目录（务必与 src/config.py / src/rag/bm25_index.py 默认一致）
 PURGE_DIRS: tuple[str, ...] = ("chroma_db", "bm25_index")
 
-# 默认 golden 路径（与 evaluation/rag/eval.py 保持一致）
-DEFAULT_GOLDEN = ROOT / "evaluation" / "rag" / "golden.json"
-EXAMPLE_GOLDEN = ROOT / "evaluation" / "rag" / "golden.example.json"
+# 默认 golden 路径（与 tools/rag_eval/eval.py 保持一致）
+DEFAULT_GOLDEN = ROOT / "tools" / "rag_eval" / "golden.json"
+EXAMPLE_GOLDEN = ROOT / "tools" / "rag_eval" / "golden.example.json"
 
 
 def _run(cmd: list[str], step: str) -> None:
@@ -161,7 +163,7 @@ def _summarize(report_path: Path) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
-        prog="python -m evaluation.rag.run_eval",
+        prog="python -m tools.rag_eval.run_eval",
         description="RAG 评估自动化（清库 + 双语种 ingest + eval 一条龙）",
     )
     ap.add_argument("--label", default="run",
@@ -180,11 +182,11 @@ def main(argv: list[str] | None = None) -> int:
                     help="完全跳过 ingest，直接评估当前库（消融实验用）")
     ap.add_argument("--reports-dir", default=DEFAULT_REPORTS_DIR,
                     help=f"报告目录（默认 {DEFAULT_REPORTS_DIR}）")
-    # 透传给 evaluation.rag.eval 的常用开关
+    # 透传给 tools.rag_eval.eval 的常用开关
     ap.add_argument("--k", type=int, default=None,
                     help="评估 top-K（默认沿用 RAG_TOP_K）")
     ap.add_argument("--golden", default=None,
-                    help="黄金集 JSON 路径（默认 evaluation/rag/golden.json）")
+                    help="黄金集 JSON 路径（默认 tools/rag_eval/golden.json）")
     ap.add_argument("--no-rewriter", action="store_true",
                     help="评估时禁用 query 改写（基线对比）")
     ap.add_argument("--no-rerank", action="store_true",
@@ -234,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
     # 4. 评估
     _check_golden(use_default=args.golden is None)
     eval_cmd: list[str] = [
-        sys.executable, "-m", "evaluation.rag.eval",
+        sys.executable, "-m", "tools.rag_eval.eval",
         "--json", str(report_path),
     ]
     if args.k is not None:
