@@ -131,3 +131,14 @@ python -m evaluation.rag.eval --json reports/x.json # 保存 JSON 便于 diff
 .\scripts\ui_debug.ps1                 # 默认 8000 端口
 .\scripts\ui_debug.ps1 -Port 8080      # 自定义端口
 ```
+
+# 5.缩写
+| 缩写 | 全称 | 含义 |
+|---|---|---|
+| **KB** | Knowledge Base | 知识库（向量库 + 关键词索引）|
+| **RAG** | Retrieval-Augmented Generation | 检索增强生成 |
+| **BM25** | Best Matching 25 | 经典关键词检索算法 |
+| **RRF** | Reciprocal Rank Fusion | 倒数排名融合（合并多路召回排序）|
+| **HyDE** | Hypothetical Document Embeddings | 假设性文档嵌入（让 LLM 先编一段答案再检索）|
+| **MRR** | Mean Reciprocal Rank | 平均倒数排名（评估指标）|
+| **nDCG** | normalized Discounted Cumulative Gain | 归一化折损累积增益（更细的评估指标）|

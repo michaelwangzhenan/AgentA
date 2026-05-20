@@ -452,6 +452,15 @@ def _print_report(rep: EvalReport) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows 控制台默认 GBK 编码，遇到 ✓ ✗ 📁 等 Unicode 会抛 UnicodeEncodeError
+    # 把 stdout/stderr reconfigure 成 utf-8 避免 _print_report 中途崩溃；
+    # 旧版 Python / 被管道重定向的 stream 没有 reconfigure 方法，try 静默忽略
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
     ap = argparse.ArgumentParser(description="RAG 检索评估")
     ap.add_argument("--golden", default=str(DEFAULT_GOLDEN),
                     help=f"黄金集 JSON 路径（默认 {DEFAULT_GOLDEN.name}，不存在则用 golden.example.json）")
@@ -482,6 +491,16 @@ def main(argv: list[str] | None = None) -> int:
         use_rerank_eff=rep.use_rerank,
     )
 
+    # 先落盘 JSON 再打印：_print_report 若在 Windows 控制台抛 UnicodeEncodeError
+    # 会导致整个 main 退出码非 0，旧版会把 --json 写文件这一步也跳过；
+    # 调换顺序后即便 print 崩了，至少 JSON 已经稳稳落盘
+    if args.json_out:
+        out_path = Path(args.json_out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with out_path.open("w", encoding="utf-8") as f:
+            json.dump(asdict(rep), f, ensure_ascii=False, indent=2)
+        print(f"📁 详细报告已写入 {out_path}")
+
     if args.quiet:
         # 静默模式：只打 4 项汇总
         print(f"items={rep.items} k={rep.k} "
@@ -489,13 +508,6 @@ def main(argv: list[str] | None = None) -> int:
               f"hit_either@k={rep.hit_either_at_k:.4f} MRR={rep.mrr:.4f}")
     else:
         _print_report(rep)
-
-    if args.json_out:
-        out_path = Path(args.json_out)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with out_path.open("w", encoding="utf-8") as f:
-            json.dump(asdict(rep), f, ensure_ascii=False, indent=2)
-        print(f"📁 详细报告已写入 {out_path}")
 
     return 0
 
