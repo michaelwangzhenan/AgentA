@@ -115,20 +115,13 @@ python tools/ingestion.py clear -m m3             # 只清空指定 alias
 
 ### 4.2.RAG 评估
 
-基于 `tools/rag_eval/golden.json` 黄金集计算 `hit@k` / `MRR`，结果默认落到 `tools/rag_eval/reports/`：
+基于 `tools/rag_eval/golden.json` 黄金集计算 `hit@k` / `MRR`，结果默认落到 `tools/rag_eval/reports/`。
 
 ```bash
 python -m tools.rag_eval.eval                                          # 当前配置基线
 python -m tools.rag_eval.eval --no-rewriter                            # 关闭 Query 改写做消融对比
 python -m tools.rag_eval.eval --no-rerank                              # 关闭精排做消融对比
 python -m tools.rag_eval.eval --json tools/rag_eval/reports/x.json     # 保存 JSON 便于 diff
-```
-
-`tools/rag_eval/run_eval.py` 把"清库 → 双语种 ingest → 评估"打包成一条命令，方便跨 commit / 跨配置对比：
-
-```bash
-python -m tools.rag_eval.run_eval --label iter5                                    # 一次完整评估
-python -m tools.rag_eval.run_eval --skip-ingest --no-rewriter --label ablation-rw  # 消融实验
 ```
 
 ### 4.3.模型下载
