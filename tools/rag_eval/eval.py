@@ -6,18 +6,16 @@ RAG 检索评估脚本（Iter-5）。
 使用方式：
     python -m tools.rag_eval.eval                                  # 跑默认 golden，仅终端汇总
     python -m tools.rag_eval.eval --no-rewriter                    # 关闭 query 改写（基线对比）
-    python -m tools.rag_eval.eval hit_source@k	86.36%
-hit_keyword@k	95.56%
-hit_either@k	95.56%
-MRR	0.9278
-                      # 关闭 reranker（基线对比）
-    python -m tools.rag_eval.eval -o tools/rag_eval/reports/m3.md  # 同时落盘 Markdown 报告
+    python -m tools.rag_eval.eval --no-rerank                      # 关闭 reranker（真关，透传给 retriever）
+    python -m tools.rag_eval.eval -o tools/rag_eval/reports/m3.md  # 同时落盘 Markdown + .log trace
+    python -m tools.rag_eval.eval -v                               # 终端打印 [search] 阶段化日志
 
 设计原则：
-    - 终端只显示进度（\\r 单行刷新）+ 结果汇总（核心指标 + 环境配置），不打逐条详情。
+    - 终端默认仅显示进度（\\r 单行刷新）+ 结果汇总；-v 才把 INFO 倒灌进终端。
+    - -o 输出 Markdown 时自动 sidecar 一份 <out>.md.log 收集 INFO trace，便于事后诊断。
     - 详细结果（含 Miss 用例定位信息）全部走 -o 写到 Markdown，供人浏览 / 历史对比。
-    - 日志级别写死 ERROR，第三方进度条（tqdm / HF）启动前全部静默。
-    - 调试时直接改本文件代码（golden 路径 / top-K / log 级别），不通过 CLI 增加表面积。
+    - --no-rerank 通过 search(rerank=False) 透传给 retriever 内层，真正禁用 cross-encoder
+      精排（早期实现只关 eval 层的二次 rerank，retriever 内层仍跑，导致 ablation 失效）。
 
 黄金集格式（list[item]，逐条 item 字段如下）：
     query                    必填，str，用户问题
@@ -105,9 +103,11 @@ DEFAULT_GOLDEN = Path(__file__).parent / "golden.json"
 @dataclass
 class CaseResult:
     query: str
-    first_hit_rank: int | None
-    source_hit: bool
-    keyword_hit: bool
+    first_hit_rank: int | None       # min(first_source_rank, first_keyword_rank)，留给 MRR
+    first_source_rank: int | None    # source 在 top-K 中的首次命中名次；None=miss
+    first_keyword_rank: int | None   # keyword 在 top-K 中的首次命中名次；None=miss
+    source_hit: bool                 # ≡ first_source_rank is not None
+    keyword_hit: bool                # ≡ first_keyword_rank is not None
     has_source_target: bool
     has_keyword_target: bool
     top_sources: list[str] = field(default_factory=list)
@@ -125,11 +125,20 @@ class EvalReport:
       2. 实验开关（use_rewriter / use_rerank）
       3. metadata —— 影响结果的全部配置因子（git / 模型 / 阈值 / KB 状态）
       4. cases —— 逐条详情（最大块，给 Markdown 渲染 Miss 用例小节用）
+
+    位置敏感指标（@1 / @3 / @k）专门设计来暴露 reranker 的真实工作量：
+    rerank 主要价值在 top-1/2 精度，hit@k 这种"K 内任一命中"的粗指标看不到 +pp；
+    hit@1 / hit@3 一旦出现差异，说明开关在做事。keyword 命中是 chunk-level（rank 弱相关），
+    只保留 @k，避免噪音指标。
     """
     items: int = 0
     k: int = 0
+    hit_source_at_1: float | None = None
+    hit_source_at_3: float | None = None
     hit_source_at_k: float | None = None
     hit_keyword_at_k: float | None = None
+    hit_either_at_1: float = 0.0
+    hit_either_at_3: float = 0.0
     hit_either_at_k: float = 0.0
     mrr: float = 0.0
     use_rewriter: bool = False
@@ -315,11 +324,18 @@ def evaluate(
     n = len(items)
     cases: list[CaseResult] = []
 
+    # 位置敏感累积：分 1 / 3 / k 三档分桶，避免 evaluate 后再次遍历 cases。
+    # _src_targets / _kw_targets 是各自分母（无目标的 item 不进入对应分母），
+    # 其余按"命中名次 <= 阈值 R"递增。@k 与旧版 src_hits / kw_hits 完全等价。
     src_targets = 0
     kw_targets = 0
-    src_hits = 0
-    kw_hits = 0
-    either_hits = 0
+    src_hits_at_1 = 0
+    src_hits_at_3 = 0
+    src_hits_at_k = 0
+    kw_hits_at_k = 0
+    either_at_1 = 0
+    either_at_3 = 0
+    either_at_k = 0
     rr_sum = 0.0
 
     # query 改写按需引入；--no-rewriter / config 关闭时跳过 expand_queries 的 LLM 调用
@@ -332,14 +348,19 @@ def evaluate(
             expand_fn = None
             use_rewriter = False
 
-    rerank_fn = None
-    if use_rerank and config.RERANKER_ENABLED:
-        try:
-            from src.rag.reranker import rerank as rerank_fn  # type: ignore
-        except Exception as e:
-            logger.warning("[eval] reranker 不可用，已自动禁用：%s", e)
-            rerank_fn = None
-            use_rerank = False
+    # rerank 不再由 eval 包外层冗余精排，而是通过 search(rerank=...) 透传给 retriever
+    # 内层，让 retriever 自己决定是否启用 cross-encoder：
+    #   · use_rerank=True  → search(rerank=None)，retriever 走 config.RERANKER_ENABLED
+    #   · use_rerank=False → search(rerank=False)，retriever 强制跳过
+    # 早期版本在拿到 search() 结果后又调一次 rerank_fn，造成 double-rerank：
+    # 关 eval 层 rerank_fn 仍然不能关掉 retriever 内层那一次，
+    # baseline vs --no-rerank 因此完全等同。这里彻底删除外层调用。
+    search_rerank: bool | None = None if use_rerank else False
+    # 同步把"实际生效的 rerank 状态"反映到 use_rerank：retriever 还可能因
+    # config.RERANKER_ENABLED=False 默默不跑，把它显式落地，避免后续 metadata
+    # 显示 ON 但 trace 显示 skipped 这种和实际不一致。
+    if use_rerank and not config.RERANKER_ENABLED:
+        use_rerank = False
 
     for i, item in enumerate(items, start=1):
         query: str = item["query"]
@@ -355,34 +376,45 @@ def evaluate(
             kw_targets += 1
 
         queries = list(expand_fn(query)) if expand_fn else [query]
-        hits = search(query, top_k=k, queries=queries)
-        if rerank_fn and hits:
-            try:
-                hits = rerank_fn(query, hits, top_k=k)
-            except Exception as e:
-                logger.warning("[eval] rerank 失败，使用原始 hits: %s", e)
+        hits = search(query, top_k=k, queries=queries, rerank=search_rerank)
 
-        first_rank: int | None = None
-        case_src_hit = False
-        case_kw_hit = False
+        # 分别记录 source / keyword 的首次命中名次，便于 hit@1 / hit@3 这种位置
+        # 敏感指标分桶。两个 rank 都拿到后可提前 break，避免无谓比较。
+        first_source_rank: int | None = None
+        first_keyword_rank: int | None = None
         for rank, h in enumerate(hits, start=1):
-            matched = False
-            if has_src and _is_source_match(item, h.source):
-                case_src_hit = True
-                matched = True
-            if has_kw and _is_keyword_match(keywords, h.document or ""):
-                case_kw_hit = True
-                matched = True
-            if matched and first_rank is None:
-                first_rank = rank
+            if has_src and first_source_rank is None and _is_source_match(item, h.source):
+                first_source_rank = rank
+            if has_kw and first_keyword_rank is None and _is_keyword_match(keywords, h.document or ""):
+                first_keyword_rank = rank
+            if (not has_src or first_source_rank is not None) \
+               and (not has_kw or first_keyword_rank is not None):
+                break
 
-        if case_src_hit:
-            src_hits += 1
-        if case_kw_hit:
-            kw_hits += 1
-        if case_src_hit or case_kw_hit:
-            either_hits += 1
+        case_src_hit = first_source_rank is not None
+        case_kw_hit = first_keyword_rank is not None
+
+        # 把 source / keyword 各自的首次命中名次合并成 "either 首次命中"，给 MRR 用
+        if first_source_rank and first_keyword_rank:
+            first_rank: int | None = min(first_source_rank, first_keyword_rank)
+        else:
+            first_rank = first_source_rank or first_keyword_rank
+
+        # 分桶累积（含目标的 item 才进入对应分母）
+        if has_src and first_source_rank is not None:
+            if first_source_rank <= 1:
+                src_hits_at_1 += 1
+            if first_source_rank <= 3:
+                src_hits_at_3 += 1
+            src_hits_at_k += 1  # hits 长度本身就 <= k，能进 for 循环就 ≤ k
+        if has_kw and first_keyword_rank is not None:
+            kw_hits_at_k += 1
         if first_rank is not None:
+            if first_rank <= 1:
+                either_at_1 += 1
+            if first_rank <= 3:
+                either_at_3 += 1
+            either_at_k += 1
             rr_sum += 1.0 / first_rank
 
         # expected_source / keywords 一并塞进 CaseResult，便于 Markdown
@@ -393,6 +425,8 @@ def evaluate(
             CaseResult(
                 query=query,
                 first_hit_rank=first_rank,
+                first_source_rank=first_source_rank,
+                first_keyword_rank=first_keyword_rank,
                 source_hit=case_src_hit,
                 keyword_hit=case_kw_hit,
                 has_source_target=has_src,
@@ -405,10 +439,18 @@ def evaluate(
 
     _clear_progress_line()
 
-    # 含目标的样本占比；无目标的不进入对应分母
-    hit_src = (src_hits / src_targets) if src_targets else None
-    hit_kw = (kw_hits / kw_targets) if kw_targets else None
-    hit_either = (either_hits / n) if n else 0.0
+    # 含目标的样本占比；无目标的 item 不进入对应分母（hit_source / hit_keyword）。
+    # hit_either 用全样本 n 作分母（任意命中都算赢，包括只测 keyword 的 item）。
+    def _pct(num: int, den: int) -> float | None:
+        return (num / den) if den else None
+
+    hit_src_at_1 = _pct(src_hits_at_1, src_targets)
+    hit_src_at_3 = _pct(src_hits_at_3, src_targets)
+    hit_src_at_k = _pct(src_hits_at_k, src_targets)
+    hit_kw_at_k = _pct(kw_hits_at_k, kw_targets)
+    hit_either_at_1 = (either_at_1 / n) if n else 0.0
+    hit_either_at_3 = (either_at_3 / n) if n else 0.0
+    hit_either_at_k = (either_at_k / n) if n else 0.0
     mrr = (rr_sum / n) if n else 0.0
 
     return EvalReport(
@@ -416,9 +458,13 @@ def evaluate(
         k=k,
         use_rewriter=use_rewriter,
         use_rerank=use_rerank,
-        hit_source_at_k=hit_src,
-        hit_keyword_at_k=hit_kw,
-        hit_either_at_k=hit_either,
+        hit_source_at_1=hit_src_at_1,
+        hit_source_at_3=hit_src_at_3,
+        hit_source_at_k=hit_src_at_k,
+        hit_keyword_at_k=hit_kw_at_k,
+        hit_either_at_1=hit_either_at_1,
+        hit_either_at_3=hit_either_at_3,
+        hit_either_at_k=hit_either_at_k,
         mrr=mrr,
         cases=cases,
     )
@@ -448,9 +494,15 @@ def _print_report(rep: EvalReport, report_path: Path | None = None) -> None:
     print("=" * 60)
     print(f"  样本数:         {rep.items}")
     print(f"  Top-K:          {rep.k}")
-    print(f"  hit_source@k:   {_fmt(rep.hit_source_at_k)}")
+    print(
+        f"  hit_source:     @1={_fmt(rep.hit_source_at_1)}  "
+        f"@3={_fmt(rep.hit_source_at_3)}  @k={_fmt(rep.hit_source_at_k)}"
+    )
     print(f"  hit_keyword@k:  {_fmt(rep.hit_keyword_at_k)}")
-    print(f"  hit_either@k:   {rep.hit_either_at_k:.2%}")
+    print(
+        f"  hit_either:     @1={rep.hit_either_at_1:.2%}  "
+        f"@3={rep.hit_either_at_3:.2%}  @k={rep.hit_either_at_k:.2%}"
+    )
     print(f"  MRR:            {rep.mrr:.4f}")
 
     m = rep.metadata or {}
@@ -537,8 +589,13 @@ def _render_markdown(rep: EvalReport) -> str:
     lines.append("| --- | --- |")
     lines.append(f"| 样本数 | {rep.items} |")
     lines.append(f"| Top-K | {rep.k} |")
+    # 位置敏感指标先列 @1 / @3 / @k，方便对比 rerank/rewriter 是否真在做事
+    lines.append(f"| hit_source@1 | {_fmt(rep.hit_source_at_1)} |")
+    lines.append(f"| hit_source@3 | {_fmt(rep.hit_source_at_3)} |")
     lines.append(f"| hit_source@k | {_fmt(rep.hit_source_at_k)} |")
     lines.append(f"| hit_keyword@k | {_fmt(rep.hit_keyword_at_k)} |")
+    lines.append(f"| hit_either@1 | {rep.hit_either_at_1:.2%} |")
+    lines.append(f"| hit_either@3 | {rep.hit_either_at_3:.2%} |")
     lines.append(f"| hit_either@k | {rep.hit_either_at_k:.2%} |")
     lines.append(f"| MRR | {rep.mrr:.4f} |")
     lines.append("")
@@ -620,18 +677,35 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-rewriter", action="store_true", help="禁用 query 改写（基线对比）")
     ap.add_argument("--no-rerank", action="store_true", help="禁用 reranker（基线对比）")
     ap.add_argument("-o", dest="output", default="",
-                    help="把详细报告写到该 Markdown 文件（缺省不落盘）")
+                    help="把详细报告写到该 Markdown 文件（同时把 INFO trace 落到同名 .log）")
+    ap.add_argument("-v", "--verbose", action="store_true",
+                    help="终端打印 retriever 阶段化 INFO 日志（会干扰单行进度条）")
+    ap.add_argument("--quiet", action="store_true",
+                    help="进一步压到 ERROR（与 -v 互斥，-v 优先）")
     args = ap.parse_args(argv)
 
-    # 日志级别写死 ERROR：评估期间只关心最终汇总，运行时 INFO/WARNING 会污染单行进度条。
-    # 调试时直接把下面这行的 ERROR 改成 DEBUG 即可，不再通过 CLI 增加表面积。
+    # 日志策略（兼顾默认 UX 与诊断可观测性）：
+    #   终端：默认 ERROR（保留 \r 单行进度条干净）；-v 开 INFO；--quiet 显式 ERROR；
+    #   文件：给了 -o 时把 INFO 永久落到 <output>.log，无需重跑就能回看 [search] trace。
+    # 这条折中替代了"默认 INFO 倒灌进度条"的方案：日常用看终端汇总，诊断时直接读
+    # .log（reports/round2-no-rerank.md 旁边就是 round2-no-rerank.md.log）。
     # force=True 必要：上面 import src.rag.retriever 时若 retriever / chromadb /
     # sentence_transformers 任何一个偷调过 basicConfig，没 force=True 这行会被静默跳过。
+    terminal_level = logging.INFO if args.verbose else logging.ERROR
     logging.basicConfig(
-        level=logging.ERROR,
+        level=logging.DEBUG,  # root 收所有，handler 各自决定阈值
         format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[logging.StreamHandler()],
         force=True,
     )
+    logging.getLogger().handlers[0].setLevel(terminal_level)
+    if args.output:
+        log_path = Path(args.output).with_suffix(Path(args.output).suffix + ".log")
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        fh = logging.FileHandler(log_path, mode="w", encoding="utf-8")
+        fh.setLevel(logging.INFO)
+        fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+        logging.getLogger().addHandler(fh)
 
     items = _load_golden(DEFAULT_GOLDEN)
 

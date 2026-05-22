@@ -314,6 +314,7 @@ def search(
     top_k: int = config.RAG_TOP_K,
     where: dict | None = None,
     queries: list[str] | None = None,
+    rerank: bool | None = None,
 ) -> list[Hit]:
     """
     在所有已入库的 collection 中检索最相关的 Top-K 文档片段。
@@ -329,18 +330,25 @@ def search(
         where:    可选 metadata 过滤子句（透传给 chroma 与 BM25）。
         queries:  可选的多 query 列表（来自 query_rewriter.expand_queries）；
                   非空时本参数完全覆盖 query 的检索行为，query 仅用于日志。
+        rerank:   是否启用 cross-encoder 精排，三值语义：
+                    · None  → 沿用全局 config.RERANKER_ENABLED（生产代码、agent 走这条）；
+                    · True  → 强制开启（即使 config 关闭也跑）；
+                    · False → 强制关闭（evaluation 做 ablation 时用）。
+                  显式参数取代了"通过 monkey-patch config.RERANKER_ENABLED 做关闭"的
+                  旧路径，避免全局状态污染并消除 eval.py 早期 double-rerank bug。
 
     Returns:
         Hit 列表，按融合后/精排后 score 降序，长度 ≤ top_k；空列表表示无命中。
     """
     client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
 
+    # 本次 search 是否启用 rerank：参数 > 全局 config。下面所有"是否扩召回窗口 /
+    # 是否调 reranker / 是否打印 rerank 阶段日志"统一读 use_rerank，避免内部分支再各自
+    # 重新判一遍 config 导致行为不一致。
+    use_rerank = config.RERANKER_ENABLED if rerank is None else bool(rerank)
+
     # 召回窗口：开启精排时扩大候选；BM25 与 dense 各取 recall_k 条
-    recall_k = (
-        top_k * config.RERANKER_RECALL_MULTIPLIER
-        if config.RERANKER_ENABLED
-        else top_k
-    )
+    recall_k = top_k * config.RERANKER_RECALL_MULTIPLIER if use_rerank else top_k
 
     # 多 query 时每条 query 单独召回的窗口要适当收缩，避免候选总量爆炸：
     #   per_query_k = max(top_k, recall_k // n_queries)
@@ -355,6 +363,15 @@ def search(
         effective_queries = [query]
     n_q = max(len(effective_queries), 1)
     per_query_k = max(top_k, recall_k // n_q)
+
+    # ── 阶段化 trace（INFO 级） ────────────────────────────────────────────────
+    # 把"本次 search 到底跑了哪些阶段、各阶段候选数"打成结构化日志，便于事后
+    # 复盘消融实验（特别是 rerank/rewriter on/off 结果一致时一眼看清谁真的被
+    # 跳过了）。所有日志带 [search] 前缀，方便 grep。
+    logger.info(
+        "[search] q=%r n_q=%d rerank=%s top_k=%d recall_k=%d per_query_k=%d",
+        query[:60], n_q, use_rerank, top_k, recall_k, per_query_k,
+    )
 
     # 每个 collection 内部对每条 query 跑 dense + BM25，所有 ranking 一并 RRF 融合，
     # 再跨 collection round-robin。Iter-5 起用 iter_active_embeddings() 取启用列表，
@@ -397,6 +414,7 @@ def search(
         per_collection_fused.append(fused)
 
     if not per_collection_fused:
+        logger.info("[search] no candidates from any collection → return []")
         return []
 
     # Round-robin 跨 collection 合并（避免某模型距离空间挤压另一模型）
@@ -415,6 +433,10 @@ def search(
             iterators.pop(idx)
         if not iterators:
             break
+    logger.info(
+        "[search] round-robin merged: %d collections → %d cands (cap=%d)",
+        len(per_collection_fused), len(candidates), recall_k,
+    )
 
     # Dense 阈值过滤（Iter-5：per-model）：仅对"纯 dense 命中"应用，BM25 加持的
     # chunk 不被 dense 阈值剔除。每条 hit 按 hit.collection 反查对应 alias 的
@@ -435,42 +457,59 @@ def search(
             return dense_like_score >= threshold
 
         candidates = [h for h in candidates if _keep(h)]
-        if before != len(candidates):
-            logger.info(
-                "Dense 阈值过滤（per-model）：%d → %d（BM25 命中豁免）",
-                before, len(candidates),
-            )
+        logger.info(
+            "[search] dense filter: %d → %d (BM25 命中豁免)",
+            before, len(candidates),
+        )
+    else:
+        logger.info("[search] dense filter: skipped (all thresholds <= 0)")
 
     if not candidates:
+        logger.info("[search] no candidates left after dense filter → return []")
         return []
 
-    # 精排（可选）
-    if config.RERANKER_ENABLED:
-        from src.rag.reranker import rerank
-        top_hits = rerank(query=query, hits=candidates, top_k=max(top_k * 2, top_k))
-        logger.info("Reranker 精排后保留 %d 条", len(top_hits))
+    # 精排（可选；以 use_rerank 为准，已合并 config 与 rerank 参数语义）
+    if use_rerank:
+        # 局部导入并用别名 _do_rerank，避免与本函数 rerank 参数同名遮蔽
+        from src.rag.reranker import rerank as _do_rerank
+        cands_in = len(candidates)
+        top_hits = _do_rerank(query=query, hits=candidates, top_k=max(top_k * 2, top_k))
+        logger.info(
+            "[search] rerank: %d → %d (cross-encoder ON)",
+            cands_in, len(top_hits),
+        )
 
         min_rerank = config.RAG_RERANK_MIN_SCORE
         if min_rerank > 0 and len(candidates) > top_k:
             before = len(top_hits)
             top_hits = [h for h in top_hits if (h.score or 0.0) >= min_rerank]
-            if before != len(top_hits):
-                logger.info(
-                    "Reranker 阈值过滤：%d → %d（min_score=%.3f）",
-                    before, len(top_hits), min_rerank,
-                )
+            logger.info(
+                "[search] rerank min_score filter: %d → %d (min=%.3f)",
+                before, len(top_hits), min_rerank,
+            )
+        else:
+            logger.info(
+                "[search] rerank min_score filter: skipped (min=%.3f, cands=%d)",
+                min_rerank, len(candidates),
+            )
     else:
         top_hits = candidates
-
-    # 按 source 文件去重，避免一个长文档把 top_k 全部占满
-    deduped = _dedupe_by_source(top_hits, config.RAG_K_PER_SOURCE)
-    if len(deduped) != len(top_hits):
         logger.info(
-            "Per-source 去重：%d → %d（k_per_source=%d）",
-            len(top_hits), len(deduped), config.RAG_K_PER_SOURCE,
+            "[search] rerank: skipped (use_rerank=False, %d cands kept as-is)",
+            len(top_hits),
         )
 
-    return deduped[:top_k]
+    # 按 source 文件去重，避免一个长文档把 top_k 全部占满
+    before_dedupe = len(top_hits)
+    deduped = _dedupe_by_source(top_hits, config.RAG_K_PER_SOURCE)
+    logger.info(
+        "[search] dedupe per_source=%d: %d → %d",
+        config.RAG_K_PER_SOURCE, before_dedupe, len(deduped),
+    )
+
+    final = deduped[:top_k]
+    logger.info("[search] truncate top_k=%d: %d → %d", top_k, len(deduped), len(final))
+    return final
 
 
 def format_search_results(hits: list[Hit]) -> str:
