@@ -120,7 +120,7 @@ def main() -> None:
                 continue
             case "/ingest":
                 # 解析 /ingest [<目录>] [-m <模型>]
-                # 支持: /ingest  /ingest ./docs_zh  /ingest ./docs_zh -m zh  /ingest -m zh
+                # 支持: /ingest  /ingest ./datasets/data_zh  /ingest ./datasets/data_zh -m zh  /ingest -m zh
                 raw_args = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""
                 docs_dir: str | None = None
                 model_alias: str | None = None

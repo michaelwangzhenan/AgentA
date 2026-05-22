@@ -5,16 +5,16 @@
 
 # 英文模型入库
 # python tools/ingestion.py ingest -d ../pursue/ -m en
-# python tools/ingestion.py ingest -d ./docs -m en
+# python tools/ingestion.py ingest -d ./datasets/data_en -m en
 
 # 中文模型入库
 # python tools/ingestion.py ingest -d ../pursue/resume -m zh
-# python tools/ingestion.py ingest -d ./docs_zh -m zh
+# python tools/ingestion.py ingest -d ./datasets/data_zh -m zh
 
 # m3混合模型入库
 # python tools/ingestion.py ingest -d ../pursue/ -m m3
-# python tools/ingestion.py ingest -d ./docs -m m3
-# python tools/ingestion.py ingest -d ./docs_zh -m m3
+# python tools/ingestion.py ingest -d ./datasets/data_en -m m3
+# python tools/ingestion.py ingest -d ./datasets/data_zh -m m3
 
 
 # 评估中英文双语模型

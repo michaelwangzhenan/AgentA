@@ -149,8 +149,9 @@ knowledge-agent/
 │   ├── agent.py                # Agent 主控逻辑（ReAct 循环）
 │   └── tools.py                # 工具定义与执行
 │
-├── docs/                       # 你的私有文档放这里
-│   └── (your documents)
+├── datasets/                   # 你的私有文档放这里（按语种分库）
+│   ├── data_en/                # 英文 / 多语言资料
+│   └── data_zh/                # 中文资料
 │
 └── chroma_db/                  # ChromaDB 向量库（自动生成，不提交 Git）
 ```
@@ -183,7 +184,7 @@ LLM_PROVIDER=claude    # 生产阶段：高性能
 ### 5.4 `rag/ingest.py` — 文档入库流程
 
 ```
-扫描 docs/ 目录
+扫描 datasets/ 目录
     ↓
 逐文件解析为纯文本
     ↓
@@ -261,11 +262,11 @@ LLM 继续推理：结果是否足够？
 - [x] 编写 `rag/ingest.py`：
   - [x] 实现 `chunk_text()` 函数  $env:HF_ENDPOINT="https://hf-mirror.com"
     .venv\Scripts\python -m rag.ingest：固定长度分块，带重叠
-  - [x] 实现 `ingest_all()` 函数：扫描 `docs/` 目录，逐文件解析 → 分块 → 向量化 → upsert
+  - [x] 实现 `ingest_all()` 函数：扫描 `datasets/` 目录，逐文件解析 → 分块 → 向量化 → upsert
   - [x] 使用文件路径 + 块序号的 MD5 作为唯一 ID，支持重复运行不重复入库
 - [x] 编写 `rag/retriever.py`：
   - [x] 实现 `search(query, top_k=5)` 函数：向量化 query → 检索 → 格式化返回结果（含来源文件名）
-- [x] 将几份测试文档放入 `docs/`，运行 `python rag/ingest.py` 验证入库
+- [x] 将几份测试文档放入 `datasets/data_en/`，运行 `python rag/ingest.py` 验证入库
 - [x] 手动调用 `search()` 验证检索结果是否相关
 
 ---
@@ -321,7 +322,7 @@ LLM 继续推理：结果是否足够？
 ### Phase 8：优化与扩展（按需）
 
 - [x] **中文优化**：增加嵌入模型 `BAAI/bge-small-zh` 的支持
-- [ ] **文档自动同步**：使用 `watchdog` 监听 `docs/` 目录变化，自动增量入库
+- [ ] **文档自动同步**：使用 `watchdog` 监听 `datasets/` 目录变化，自动增量入库
 - [ ] **对话记忆**：将 messages 历史持久化到 SQLite，支持多轮上下文
 - [ ] **Web UI**：接入 Gradio 或 Streamlit，提供图形界面
 - [ ] **URL 批量导入**：支持通过配置文件批量爬取指定网页入库

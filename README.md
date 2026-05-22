@@ -64,7 +64,7 @@ CLI 模式：
 
 ```bash
 python main.py
-# 进入后输入 /help 查看全部命令；首次使用先 /ingest 把 ./docs 入库
+# 进入后输入 /help 查看全部命令；首次使用先 /ingest 把 ./datasets/data_en 入库
 ```
 
 WebUI 模式（Chainlit）：
@@ -103,14 +103,14 @@ USER_MEMORY_ENABLED=true          # 跨 session 用户记忆
 
 ### 4.1.RAG 入库
 
-`tools/ingestion.py` 把 `./docs` 下文档灌入向量库 + BM25 索引（与 `/ingest` 等价），额外提供清库与状态查询：
+`tools/ingestion.py` 把 `./datasets/` 下文档灌入向量库 + BM25 索引（与 `/ingest` 等价），额外提供清库与状态查询：
 
 ```bash
-python tools/ingestion.py status                  # 查看每个 collection 的当前状态
-python tools/ingestion.py ingest                  # 幂等增量入库（默认 docs + 默认模型）
-python tools/ingestion.py ingest -d ./docs_zh -m zh   # 指定目录 / 模型别名（en / zh / m3）
-python tools/ingestion.py clear                   # 清空全部 collection + BM25（需 yes 确认）
-python tools/ingestion.py clear -m m3             # 只清空指定 alias
+python tools/ingestion.py status                                 # 查看每个 collection 的当前状态
+python tools/ingestion.py ingest                                 # 幂等增量入库（默认 datasets/data_en + 默认模型）
+python tools/ingestion.py ingest -d ./datasets/data_zh -m zh     # 指定目录 / 模型别名（en / zh / m3）
+python tools/ingestion.py clear                                  # 清空全部 collection + BM25（需 yes 确认）
+python tools/ingestion.py clear -m m3                            # 只清空指定 alias
 ```
 
 ### 4.2.RAG 评估

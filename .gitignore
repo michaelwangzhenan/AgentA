@@ -7,10 +7,8 @@
 .env
 
 # ── 私有数据（本地知识库内容）──────────────────────────────────
-# 英文/多语言文档目录
-docs/
-# 中文文档目录
-docs_zh/
+# 数据集根目录：英文/多语在 datasets/data_en，中文在 datasets/data_zh
+datasets/
 # ChromaDB 向量索引（自动生成）
 chroma_db/
 # BM25 倒排索引（自动生成，Iter-2）

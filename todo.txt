@@ -162,7 +162,7 @@ ToDo List：
 
 
 [x]14. 文档自动同步
-  目标： 用 `watchdog` 监听 `docs/` 变化，自动增量入库
+  目标： 用 `watchdog` 监听 `datasets/` 变化，自动增量入库
 
 
 [x]15. API/SDK接口
@@ -433,13 +433,13 @@ ToDo List：
   ── 现状（src/rag/ ingest.py · retriever.py · reranker.py · parser.py + config.py + agent/tools.py）
     召回链路：用户问题 → search_knowledge 工具 → 对所有 collection（en/zh）按内部距离取
       top_k × RECALL_MULTIPLIER → round-robin 交错合并 → CrossEncoder 精排 → 截 top_k → format。
-    入库链路：扫描 docs/* → parse_file（按格式提取纯文本） → chunk_text（按字符硬切 600/100）
+    入库链路：扫描 datasets/* → parse_file（按格式提取纯文本） → chunk_text（按字符硬切 600/100）
       → SentenceTransformer embedding → ChromaDB upsert（metadata 仅 {source, chunk_index}）。
 
   ── 已识别的命中率瓶颈（按"影响面 × 易复现度"排序）
   【P0-1 同名文件互相覆盖（数据丢失）】
     src/rag/ingest.py:142  `where={"source": file_path.name}` 只用文件名做 upsert 去重，
-    docs/readme.txt 与 docs_zh/readme.txt 同名时后入库者会删除前者所有 chunks，知识库实际"少东西"。
+    datasets/data_en/readme.txt 与 datasets/data_zh/readme.txt 同名时后入库者会删除前者所有 chunks，知识库实际"少东西"。
     chunk_id 又用完整路径 hash，删除条件 ≠ 写入条件，幂等性破裂。
     →  把 metadata 改为 {"source": str(rel_path), "filename": name, "ext": suffix, "doc_id": sha1(rel_path),
        "mtime": st_mtime, "content_sha1": sha1(text)}；upsert 用 doc_id 而非 filename 过滤。
@@ -453,7 +453,7 @@ ToDo List：
        每个 chunk 头部注入"父级标题面包屑"（## 第 5 章 / ### 5.2 物理层结构）以保留上下文。
        chunk 大小同时记录字符数与近似 token 数，避免中英文差异。
 
-  【P0-3 PDF 解析能力薄弱（影响 docs/2026-03-11 DWA live training_Presentation.pdf 这类）】
+  【P0-3 PDF 解析能力薄弱（影响 datasets/data_en/2026-03-11 DWA live training_Presentation.pdf 这类）】
     src/rag/parser.py:107 仅用 pypdf.extract_text()，对扫描版 PDF（无文本层）输出空字符串；
     对含表格/分栏的 PDF 文本顺序错乱；不带 OCR 兜底；没有页码 metadata。
     →  优先级：pdfplumber/pymupdf（fitz）→ 文本层质量优于 pypdf，且能拿到 page_number、bbox；
@@ -584,7 +584,7 @@ ToDo List：
     Iter-1（修 bug + 立竿见影）—— commit 50f19b1
       ▸ src/rag/ingest.py
         · _doc_id_from_relpath：用 SHA1(rel_path) 作 doc_id 取代 filename，
-          解决 P0-1 同名文件互相覆盖（docs/readme.txt 与 docs_zh/readme.txt）。
+          解决 P0-1 同名文件互相覆盖（datasets/data_en/readme.txt 与 datasets/data_zh/readme.txt）。
         · _open_collection：显式 metadata={"hnsw:space": "cosine"}；
           已有 collection 距离空间不一致时自动 drop 重建（修 P0-8）。
         · 入库 metadata 扩到：doc_id / source(rel_path) / filename / ext / lang /
@@ -718,8 +718,8 @@ ToDo List：
 
   ── 工程入库结构（评估前必读）
     本工程默认用"双 collection 双语种"模式：
-      docs/     英文资料  →  ingest --model en  →  collection kb_en (all-MiniLM-L6-v2)
-      docs_zh/  中文资料  →  ingest --model zh  →  collection kb_zh (BAAI/bge-small-zh)
+      datasets/data_en/   英文资料  →  ingest --model en  →  collection kb_en (all-MiniLM-L6-v2)
+      datasets/data_zh/   中文资料  →  ingest --model zh  →  collection kb_zh (BAAI/bge-small-zh)
     关键事实（src/rag/ingest.py:175 + src/rag/retriever.py:362）：
       · ingest_all(model=...) 一次只灌一个 collection，所以 "完整入库 = 跑 2 次"。
       · retriever.search 默认遍历 config.EMBEDDING_MODELS 中所有别名
@@ -737,14 +737,14 @@ ToDo List：
     准备工作（一次性）：
       编辑 tools/rag_eval/golden.json
       （基于 golden.example.json 改成自己的真实问题，规模 20~50 条；每条 query
-       的语种应与 expected_source 所在目录一致——en 问题对 docs/，zh 问题对 docs_zh/）
+       的语种应与 expected_source 所在目录一致——en 问题对 datasets/data_en/，zh 问题对 datasets/data_zh/）
 
     定义一个 helper（PowerShell function，让步骤紧凑、避免笔误）：
       function Reingest-Bilingual {
           # 清空旧库，避免不同 Iter 的 schema/分块/索引格式互相污染
           Remove-Item -Recurse -Force chroma_db, bm25_index -ErrorAction SilentlyContinue
-          python -m src.rag.ingest --docs-dir docs    --model en    # 英文 → kb_en
-          python -m src.rag.ingest --docs-dir docs_zh --model zh    # 中文 → kb_zh
+          python -m src.rag.ingest --docs-dir datasets/data_en --model en    # 英文 → kb_en
+          python -m src.rag.ingest --docs-dir datasets/data_zh --model zh    # 中文 → kb_zh
       }
 
     一次性跑 Iter-0 → Iter-4 baseline 对照（commit 倒回去依次跑）：
@@ -784,8 +784,8 @@ ToDo List：
 
       ── 测 bge-m3 单库（与 en/zh 双库对比，需重灌）：
       Remove-Item -Recurse -Force chroma_db, bm25_index -ErrorAction SilentlyContinue
-      python -m src.rag.ingest --docs-dir docs    --model m3    # 中英都灌到 kb_m3
-      python -m src.rag.ingest --docs-dir docs_zh --model m3
+      python -m src.rag.ingest --docs-dir datasets/data_en --model m3    # 中英都灌到 kb_m3
+      python -m src.rag.ingest --docs-dir datasets/data_zh --model m3
       ⚠ 重要：临时把 src/config.py 的 EMBEDDING_MODELS 中 en/zh 两行注释掉
         只留 m3，否则 retriever 还会去查空的 kb_en / kb_zh，结果偏低且不公平。
       python -m tools.rag_eval.eval --json tools/rag_eval/reports/m3.json

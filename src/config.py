@@ -205,8 +205,8 @@ DEFAULT_EMBEDDING_MODEL, DEFAULT_COLLECTION = resolve_embedding(DEFAULT_EMBEDDIN
 EMBEDDING_MODEL: str = DEFAULT_EMBEDDING_MODEL
 CHROMA_COLLECTION: str = DEFAULT_COLLECTION
 
-# 私有文档目录
-DOCS_DIR: str = os.getenv("DOCS_DIR", "./docs")
+# 私有文档目录（默认 ./datasets/data_en；中文资料放 ./datasets/data_zh，按需通过 .env 切换）
+DOCS_DIR: str = os.getenv("DOCS_DIR", "./datasets/data_en")
 
 # RAG 检索返回的最大文档片段数
 # Iter-2 默认从 5 提升到 8：枚举/对比类问题 5 条往往不够；当前 LLM 上下文 8K~32K 富裕。

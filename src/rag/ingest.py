@@ -1,15 +1,15 @@
 ﻿"""
 文档入库模块 —— 离线预处理阶段使用
 
-执行完整的入库流程：扫描 docs/ 目录 → 解析文本 → 分块 → 向量化 → 存入 ChromaDB。
+执行完整的入库流程：扫描 datasets/ 目录 → 解析文本 → 分块 → 向量化 → 存入 ChromaDB。
 支持重复运行（upsert），文档更新后重新运行即可，不会重复入库。
 不同 embedding 模型使用独立的 ChromaDB collection，互不干扰。
 
 使用方式（独立脚本入口，等价于 main.py 里的 /ingest 交互命令）：
-    python -m src.rag.ingest                              # 默认目录 + 默认模型
-    python -m src.rag.ingest --model zh                   # 使用中文模型
-    python -m src.rag.ingest --docs-dir ./docs_zh --model zh
-    python -m src.rag.ingest -d ./docs_en -m en
+    python -m src.rag.ingest                                              # 默认目录 + 默认模型
+    python -m src.rag.ingest --model zh                                   # 使用中文模型
+    python -m src.rag.ingest --docs-dir ./datasets/data_zh --model zh
+    python -m src.rag.ingest -d ./datasets/data_en -m en
 
 模型别名（详见 src/config.py EMBEDDING_MODELS）：
     en  →  all-MiniLM-L6-v2  （英文/多语言，collection: kb_en）
@@ -326,7 +326,7 @@ def _build_arg_parser() -> "argparse.ArgumentParser":
     p = argparse.ArgumentParser(
         prog="python -m src.rag.ingest",
         description=(
-            "扫描 docs 目录并入库到 ChromaDB（与 main.py 里的 /ingest 命令等价）。"
+            "扫描 datasets/ 目录并入库到 ChromaDB（与 main.py 里的 /ingest 命令等价）。"
             "支持 upsert，重复运行不会产生重复 chunk。"
         ),
     )

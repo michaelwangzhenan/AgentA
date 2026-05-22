@@ -25,6 +25,6 @@
 
 
 ## 项目约定
-- 项目根目录：`README.md`、`.env.example`、`src/`、`docs/`
+- 项目根目录：`README.md`、`.env.example`、`src/`、`datasets/`（按语种分 `data_en/` 与 `data_zh/`）
 - 业务代码在 `src/`，入口 `main.py`, 功能实现要模块化
 

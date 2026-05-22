@@ -3,15 +3,15 @@
 """
 RAG 知识库入库工具
 
-启动 AgentA（CLI / WebUI）前，用本脚本把 ./docs 下的私有文档一次性灌入向量库 +
+启动 AgentA（CLI / WebUI）前，用本脚本把 ./datasets/ 下的私有文档一次性灌入向量库 +
 BM25 倒排索引。底层复用 src.rag.ingest.ingest_all（与 main.py 中的 /ingest 等价），
 额外补齐了"清空旧库"和"列出当前库状态"两个工程化操作。
 
 CLI 用法（三个原语：读 / 写 / 抹）：
     python scripts/ingestion.py -h                    查看帮助
     python scripts/ingestion.py status                只读：查看每个 collection 的真实状态
-    python scripts/ingestion.py ingest                写：幂等增量入库（默认 docs + 默认模型）
-    python scripts/ingestion.py ingest -d ./docs_zh -m zh
+    python scripts/ingestion.py ingest                写：幂等增量入库（默认 datasets/data_en + 默认模型）
+    python scripts/ingestion.py ingest -d ./datasets/data_zh -m zh
     python scripts/ingestion.py clear                 抹：一键清空全部 collection + BM25（需 yes 确认）
     python scripts/ingestion.py clear -m m3           抹：只清空指定 alias（与 ingest -m 对齐）
 
@@ -36,7 +36,7 @@ CLI 用法（三个原语：读 / 写 / 抹）：
       不依赖也不读这份元数据，纯运维巡检用，删掉也不影响 RAG 工作。
     - 不同 embedding 维度不可混用同一 collection；切换模型只需换 alias，自动落不同 collection。
     - HuggingFace 模型未本地缓存时，ingest 会触发首次下载（建议先跑 download_models.py）。
-    - clear 是不可恢复操作，仅清向量 / 索引，不会动 ./docs 下的原始文件。
+    - clear 是不可恢复操作，仅清向量 / 索引，不会动 ./datasets/ 下的原始文件。
     - 改了 CHUNK_SIZE / CHUNK_OVERLAP 等切分参数后，由于 content_sha1 没变 ingest 会跳过旧文件，
       此时需要先 clear 再 ingest 才能让新切分生效。
     - 孤儿清理原理：Chroma 的 client.delete_collection() 只动 catalog（chroma.sqlite3 内的 collections /
@@ -97,7 +97,7 @@ logger = logging.getLogger("ingestion")
 #        "<collection_name>": {
 #            "alias": "m3",
 #            "model": "BAAI/bge-m3",
-#            "docs_dirs": ["C:/.../docs", "C:/.../docs_zh"],   # 去重后按最近优先
+#            "docs_dirs": ["C:/.../datasets/data_en", "C:/.../datasets/data_zh"],   # 去重后按最近优先
 #            "last_ingested_at": "2026-05-20T15:41:23"
 #        }
 #     }
@@ -327,7 +327,7 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
       - 新文件 → 解析 / 分块 / embed / upsert
       - 内容变化（content_sha1 变了）→ 删旧 chunks → 重新 embed
       - 内容未变 → 直接跳过
-      - docs/ 中已删除的文件 → 不回收孤儿 chunks（如需彻底清理请 clear 后重入）
+      - datasets/ 中已删除的文件 → 不回收孤儿 chunks（如需彻底清理请 clear 后重入）
     """
     alias, model_name, coll_name = _resolve_alias_or_die(args.model)
     docs_dir = Path(args.docs_dir).resolve()
@@ -611,17 +611,17 @@ def _build_parser() -> argparse.ArgumentParser:
     epilog = textwrap.dedent(
         """\
         示例：
-          python scripts/ingestion.py status                        查看当前各 collection 状态
-          python scripts/ingestion.py ingest                        幂等增量入库（默认 docs + 模型）
-          python scripts/ingestion.py ingest -d ./docs_zh -m zh     中文库
-          python scripts/ingestion.py ingest -m m3                  多语言单库
-          python scripts/ingestion.py clear                         一键清空全部 collection（需输入 yes）
-          python scripts/ingestion.py clear -m m3                   只清空 m3 库（与 ingest -m 含义对齐）
+          python scripts/ingestion.py status                                查看当前各 collection 状态
+          python scripts/ingestion.py ingest                                幂等增量入库（默认 datasets/data_en + 模型）
+          python scripts/ingestion.py ingest -d ./datasets/data_zh -m zh    中文库
+          python scripts/ingestion.py ingest -m m3                          多语言单库
+          python scripts/ingestion.py clear                                 一键清空全部 collection（需输入 yes）
+          python scripts/ingestion.py clear -m m3                           只清空 m3 库（与 ingest -m 含义对齐）
 
         典型流程：
           首次启动 AgentA 前：
             1) python scripts/download_models.py 3            # 拉 bge-m3
-            2) python scripts/ingestion.py ingest -m m3       # 把 ./docs 灌进 kb_m3
+            2) python scripts/ingestion.py ingest -m m3       # 把 ./datasets/data_en 灌进 kb_m3
             3) python scripts/ingestion.py status             # 验证 chunks > 0、model/docs_dir 已记录
             4) python main.py                                 # 启动 CLI
 
@@ -654,7 +654,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "ingest",
         help="幂等增量入库（content_sha1 一致的文件自动跳过；新增/变更则重 embed）。",
         description=(
-            "扫描 docs 目录并 upsert 到对应 alias 的 collection，等价 main.py 的 /ingest。"
+            "扫描 datasets/ 目录并 upsert 到对应 alias 的 collection，等价 main.py 的 /ingest。"
             "本身已是幂等增量，无需 append/rebuild 的概念区分。"
         ),
     )
