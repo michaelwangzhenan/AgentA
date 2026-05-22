@@ -387,7 +387,7 @@ ToDo List：
     - ReAct (PYTHON)：单循环交织推理+工具调用，LLM 每轮决定下一步
     - Auto-GPT (本实现)：先生成完整任务列表，逐任务执行，最后综合输出
 
-  【核心文件】src/agent/autogpt_agent.py（新建，独立，不依赖 agent.py / lc_agent.py）
+  【核心文件】src/agent/autogpt_agent.py（新建，独立，不依赖 agent.py / langchain_agent.py）
     复用：
     - get_tools() / execute_tool()  ← src.agent.tools（工具定义与执行）
     - chat()                        ← src.llm.provider（LLM 调用）
@@ -548,7 +548,7 @@ ToDo List：
   【P2-1 没有评估集 / 召回率指标】
     无 hit@k / MRR / NDCG，所有调参都凭直觉。
     →  在 tools/rag_eval/ 下放 20~50 条黄金对（query, expected_doc_id, expected_chunk_keywords）；
-       提供 `python -m tools.rag_eval.eval` 跑回归；任何检索改动前后跑一次比较。
+       提供 `python -m tools.rag_eval.runner` 跑回归；任何检索改动前后跑一次比较。
 
   【P2-2 模型加载未做进程级缓存】
     retriever._query_collection 每次调用都新建 SentenceTransformerEmbeddingFunction()，
@@ -767,20 +767,23 @@ ToDo List：
             在 checkout 之后再调用，使用的是当前 commit 的 ingest 实现。
 
       最后读 tools/rag_eval/reports/iter*.json 拼出对比表，看每轮 vs Iter-0 的 +pp。
+      注 4：上述 5 条命令的 `tools.rag_eval.eval` 是当时旧的模块名；checkout 出来的
+            老 commit 里就是 eval.py，不要替换成新名 runner.py，否则跑不起来。
+            主分支后续命令一律用新名 `tools.rag_eval.runner`。
 
     日常回归（任何检索/分块/embedding 改动后）：
-      python -m tools.rag_eval.eval --json tools/rag_eval/reports/before.json   # 改动前
+      python -m tools.rag_eval.runner --json tools/rag_eval/reports/before.json   # 改动前
       <改代码；动到分块/解析/embedding 时必须 Reingest-Bilingual>
-      python -m tools.rag_eval.eval --json tools/rag_eval/reports/after.json    # 改动后
+      python -m tools.rag_eval.runner --json tools/rag_eval/reports/after.json    # 改动后
       diff 两份 JSON 看升降；指标下降 → 回退或继续改。
 
     消融实验（A/B 单一开关，验证某项是否真有效）：
       ── 关单一开关，无需重灌：
-      python -m tools.rag_eval.eval --no-rewriter        # 关 query 改写
-      python -m tools.rag_eval.eval --no-rerank          # 关 reranker
-      python -m tools.rag_eval.eval --k 5                # 看 top_k 曲线
+      python -m tools.rag_eval.runner --no-rewriter        # 关 query 改写
+      python -m tools.rag_eval.runner --no-rerank          # 关 reranker
+      python -m tools.rag_eval.runner --k 5                # 看 top_k 曲线
       $env:RERANKER_MODEL="cross-encoder/ms-marco-MiniLM-L-6-v2"
-        python -m tools.rag_eval.eval                    # 多语言 vs 英文 reranker
+        python -m tools.rag_eval.runner                    # 多语言 vs 英文 reranker
 
       ── 测 bge-m3 单库（与 en/zh 双库对比，需重灌）：
       Remove-Item -Recurse -Force chroma_db, bm25_index -ErrorAction SilentlyContinue
@@ -788,7 +791,7 @@ ToDo List：
       python -m src.rag.ingest --docs-dir datasets/data_zh --model m3
       ⚠ 重要：临时把 src/config.py 的 EMBEDDING_MODELS 中 en/zh 两行注释掉
         只留 m3，否则 retriever 还会去查空的 kb_en / kb_zh，结果偏低且不公平。
-      python -m tools.rag_eval.eval --json tools/rag_eval/reports/m3.json
+      python -m tools.rag_eval.runner --json tools/rag_eval/reports/m3.json
       跑完恢复 EMBEDDING_MODELS 三项以及双语种入库，避免影响后续日常使用。
 
   ── 看输出怎么用（结果解读）

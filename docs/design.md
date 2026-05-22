@@ -168,7 +168,7 @@ flowchart LR
 | `src/rag/query_rewriter.py` | 三轴 query 改写（Multi-Query / HyDE / 翻译轴），LRU 缓存包装 | `expand_queries(query)` |
 | `src/rag/retriever.py` | 检索总枢纽：多 query × 多 collection × dense+bm25 → RRF → 阈值 → rerank → dedupe | `search(query, ..., rerank=None)` |
 | `src/rag/reranker.py` | Cross-Encoder 精排，输出统一 sigmoid 归一化到 [0,1] | `rerank(query, hits, top_k)` |
-| `tools/rag_eval/eval.py` | 端到端检索评估（黄金集 → 指标 → Markdown 报告 + `.log` sidecar）| `python -m tools.rag_eval.eval` |
+| `tools/rag_eval/runner.py` | 端到端检索评估（黄金集 → 指标 → Markdown 报告 + `.log` sidecar）| `python -m tools.rag_eval.runner` |
 | `tests/test_rag.py` | 单元 + 集成测试（chunk / 阈值 / reranker / search 端到端）| `pytest tests/test_rag.py` |
 
 ### 2.3.2.两条主调用链
@@ -189,8 +189,8 @@ Agent 工具调用
 **评估路径**（离线 ablation）：
 
 ```
-python -m tools.rag_eval.eval [--no-rewriter] [--no-rerank] [-o report.md] [-v]
-  └─ tools/rag_eval/eval.py · main() → evaluate()
+python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v]
+  └─ tools/rag_eval/runner.py · main() → evaluate()
        └─ src/rag/retriever.py · search(..., rerank=False?)         ← 透传 ablation 开关
             └─ (同生产路径)
        → 指标聚合（hit@1/@3/@k · MRR）
@@ -210,7 +210,7 @@ python -m tools.rag_eval.eval [--no-rewriter] [--no-rerank] [-o report.md] [-v]
 - 想优化召回质量 / 阈值 → `retriever.py` 的 dense 阈值过滤与 RRF 段
 - 想加新文档格式 → `parser.py` 的 `parse_file()` 与各 `_parse_*` 私有函数
 - 想调分块策略 → `splitter.py · split_structured()`
-- 想加 / 改指标 → `tools/rag_eval/eval.py · evaluate()` 与 `_render_markdown()`
+- 想加 / 改指标 → `tools/rag_eval/runner.py · evaluate()` 与 `_render_markdown()`
 - 想理解入库幂等性 → `ingest.py · ingest_all()` 的 `content_sha1` 比对逻辑
 
 ### 2.3.4.常见改动落点
@@ -222,8 +222,8 @@ python -m tools.rag_eval.eval [--no-rewriter] [--no-rerank] [-o report.md] [-v]
 | 切换 reranker 模型 | `.env` | `RERANKER_MODEL` + `RAG_RERANK_MIN_SCORE`（统一 sigmoid 后仍需按分布微调） |
 | 关闭某个改写轴 | `.env` | `RAG_QUERY_REWRITE_ENABLED` / `RAG_HYDE_ENABLED` / `RAG_TRANSLATE_QUERY_ENABLED` |
 | Agent / 评估临时关 rerank | 调用方 | `search(..., rerank=False)`，无需改全局 config |
-| 新增黄金集题目 | `tools/rag_eval/golden.json` | 字段 schema 见 `tools/rag_eval/eval.py` 顶部 docstring |
-| 加新指标 | `tools/rag_eval/eval.py` | `EvalReport` 字段 + `evaluate()` 累加 + `_render_markdown()` 渲染 |
+| 新增黄金集题目 | `tools/rag_eval/golden.json` | 字段 schema 见 `tools/rag_eval/runner.py` 顶部 docstring |
+| 加新指标 | `tools/rag_eval/runner.py` | `EvalReport` 字段 + `evaluate()` 累加 + `_render_markdown()` 渲染 |
 
 
 # 3.Agent

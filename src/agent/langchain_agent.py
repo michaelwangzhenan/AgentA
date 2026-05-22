@@ -2,13 +2,13 @@ import logging
 import uuid
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, AIMessage
-from src.llm.lc_provider import build_chat_model
-from src.agent.lc_tools import build_lc_tools
-from src.memory.lc_history import SQLiteChatMessageHistory
+from src.llm.langchain_provider import build_chat_model
+from src.agent.langchain_tools import build_langchain_tools
+from src.memory.langchain_history import SQLiteChatMessageHistory
 import src.config as cfg
 
 logger = logging.getLogger(__name__)
-_make_tools = build_lc_tools
+_make_tools = build_langchain_tools
 
 
 def _default_system_prompt() -> str:

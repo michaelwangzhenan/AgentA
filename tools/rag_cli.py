@@ -8,12 +8,12 @@ BM25 倒排索引。底层复用 src.rag.ingest.ingest_all（与 main.py 中的 
 额外补齐了"清空旧库"和"列出当前库状态"两个工程化操作。
 
 CLI 用法（三个原语：读 / 写 / 抹）：
-    python scripts/ingestion.py -h                    查看帮助
-    python scripts/ingestion.py status                只读：查看每个 collection 的真实状态
-    python scripts/ingestion.py ingest                写：幂等增量入库（默认 datasets/data_en + 默认模型）
-    python scripts/ingestion.py ingest -d ./datasets/data_zh -m zh
-    python scripts/ingestion.py clear                 抹：一键清空全部 collection + BM25（需 yes 确认）
-    python scripts/ingestion.py clear -m m3           抹：只清空指定 alias（与 ingest -m 对齐）
+    python tools/rag_cli.py -h                    查看帮助
+    python tools/rag_cli.py status                只读：查看每个 collection 的真实状态
+    python tools/rag_cli.py ingest                写：幂等增量入库（默认 datasets/data_en + 默认模型）
+    python tools/rag_cli.py ingest -d ./datasets/data_zh -m zh
+    python tools/rag_cli.py clear                 抹：一键清空全部 collection + BM25（需 yes 确认）
+    python tools/rag_cli.py clear -m m3           抹：只清空指定 alias（与 ingest -m 对齐）
 
 模型别名（详见 src/config.py EMBEDDING_MODELS）：
     en  →  all-MiniLM-L6-v2     collection=kb_en   英文/多语言
@@ -63,7 +63,7 @@ _UUID_DIR_RE = re.compile(
 )
 
 # ── 让脚本能在仓库任意位置被调起：把工程根加进 sys.path ────────────────────────
-# 必须先于 `from src...` 的任何 import；否则在 `python scripts/ingestion.py` 这种
+# 必须先于 `from src...` 的任何 import；否则在 `python tools/rag_cli.py` 这种
 # 直接调用方式下，src 不在 sys.path 里，会立刻 ImportError。
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
@@ -611,27 +611,27 @@ def _build_parser() -> argparse.ArgumentParser:
     epilog = textwrap.dedent(
         """\
         示例：
-          python scripts/ingestion.py status                                查看当前各 collection 状态
-          python scripts/ingestion.py ingest                                幂等增量入库（默认 datasets/data_en + 模型）
-          python scripts/ingestion.py ingest -d ./datasets/data_zh -m zh    中文库
-          python scripts/ingestion.py ingest -m m3                          多语言单库
-          python scripts/ingestion.py clear                                 一键清空全部 collection（需输入 yes）
-          python scripts/ingestion.py clear -m m3                           只清空 m3 库（与 ingest -m 含义对齐）
+          python tools/rag_cli.py status                                查看当前各 collection 状态
+          python tools/rag_cli.py ingest                                幂等增量入库（默认 datasets/data_en + 模型）
+          python tools/rag_cli.py ingest -d ./datasets/data_zh -m zh    中文库
+          python tools/rag_cli.py ingest -m m3                          多语言单库
+          python tools/rag_cli.py clear                                 一键清空全部 collection（需输入 yes）
+          python tools/rag_cli.py clear -m m3                           只清空 m3 库（与 ingest -m 含义对齐）
 
         典型流程：
           首次启动 AgentA 前：
-            1) python scripts/download_models.py 3            # 拉 bge-m3
-            2) python scripts/ingestion.py ingest -m m3       # 把 ./datasets/data_en 灌进 kb_m3
-            3) python scripts/ingestion.py status             # 验证 chunks > 0、model/docs_dir 已记录
-            4) python main.py                                 # 启动 CLI
+            1) python tools/download_models.py 3          # 拉 bge-m3
+            2) python tools/rag_cli.py ingest -m m3       # 把 ./datasets/data_en 灌进 kb_m3
+            3) python tools/rag_cli.py status             # 验证 chunks > 0、model/docs_dir 已记录
+            4) python main.py                             # 启动 CLI
 
           单 alias 重建（改了 chunk_size 等切分参数后）：
-            1) python scripts/ingestion.py clear -m m3        # 只抹 m3 库
-            2) python scripts/ingestion.py ingest -m m3       # 重新灌
+            1) python tools/rag_cli.py clear -m m3        # 只抹 m3 库
+            2) python tools/rag_cli.py ingest -m m3       # 重新灌
         """
     )
     parser = argparse.ArgumentParser(
-        prog="ingestion",
+        prog="rag_cli",
         description="RAG 知识库入库工具：status（读）/ ingest（写）/ clear（抹）。",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=epilog,
@@ -706,7 +706,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     # Windows 控制台默认 GBK，遇到 ⚠️ ✓ ✅ 等字符会抛 UnicodeEncodeError。
-    # 与 tools/rag_eval/eval.py 同源修复：把 stdout/stderr 强制 reconfigure 成 utf-8。
+    # 与 tools/rag_eval/runner.py 同源修复：把 stdout/stderr 强制 reconfigure 成 utf-8。
     # Python 3.7+ 才有 reconfigure；老解释器忽略即可（不影响主流程）。
     for _stream in (sys.stdout, sys.stderr):
         try:

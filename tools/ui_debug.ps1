@@ -36,17 +36,19 @@ if (-not $ready) {
 }
 Write-Host "OK: Chainlit ready at http://localhost:$Port" -ForegroundColor Green
 
-# Find cloudflared
+# Find cloudflared (PATH > tools/bin/ > repo root, for backward compatibility)
 Write-Host "[3/3] Starting cloudflared tunnel ..." -ForegroundColor Cyan
 $cfPath = $null
 if (Get-Command "cloudflared" -ErrorAction SilentlyContinue) {
     $cfPath = "cloudflared"
+} elseif (Test-Path ".\tools\bin\cloudflared.exe") {
+    $cfPath = ".\tools\bin\cloudflared.exe"
 } elseif (Test-Path ".\cloudflared.exe") {
     $cfPath = ".\cloudflared.exe"
 } else {
     Write-Host "ERROR: cloudflared not found." -ForegroundColor Red
     Write-Host "  Download from: https://github.com/cloudflare/cloudflared/releases/latest" -ForegroundColor Yellow
-    Write-Host "  Place cloudflared.exe in this folder, then re-run." -ForegroundColor Yellow
+    Write-Host "  Place cloudflared.exe under .\tools\bin\ (or repo root), then re-run." -ForegroundColor Yellow
     exit 1
 }
 

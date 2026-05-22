@@ -89,7 +89,7 @@ fetch_url_tool: BaseTool = StructuredTool(
 )
 
 
-def build_lc_tools(skill_bodies: dict = None) -> list:
+def build_langchain_tools(skill_bodies: dict = None) -> list:
     res = [search_knowledge_tool, web_search_tool, fetch_url_tool]
     if skill_bodies:
         res.append(_build_load_skill_tool(skill_bodies))

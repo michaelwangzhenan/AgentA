@@ -4,11 +4,11 @@ RAG 检索评估脚本（Iter-5）。
 跑前提：先 ingest 至少一遍知识库；脚本调用 src.rag.retriever.search 实际检索。
 
 使用方式：
-    python -m tools.rag_eval.eval                                  # 跑默认 golden，仅终端汇总
-    python -m tools.rag_eval.eval --no-rewriter                    # 关闭 query 改写（基线对比）
-    python -m tools.rag_eval.eval --no-rerank                      # 关闭 reranker（真关，透传给 retriever）
-    python -m tools.rag_eval.eval -o tools/rag_eval/reports/m3.md  # 同时落盘 Markdown + .log trace
-    python -m tools.rag_eval.eval -v                               # 终端打印 [search] 阶段化日志
+    python -m tools.rag_eval.runner                                  # 跑默认 golden，仅终端汇总
+    python -m tools.rag_eval.runner --no-rewriter                    # 关闭 query 改写（基线对比）
+    python -m tools.rag_eval.runner --no-rerank                      # 关闭 reranker（真关，透传给 retriever）
+    python -m tools.rag_eval.runner -o tools/rag_eval/reports/m3.md  # 同时落盘 Markdown + .log trace
+    python -m tools.rag_eval.runner -v                               # 终端打印 [search] 阶段化日志
 
 设计原则：
     - 终端默认仅显示进度（\\r 单行刷新）+ 结果汇总；-v 才把 INFO 倒灌进终端。
@@ -55,7 +55,7 @@ from typing import Any
 
 # 必须在 import src.config 之前加载 .env：config.py 在模块导入时即用 os.getenv
 # 读取所有配置（含 *_API_KEY），而 rag_eval 入口不像 main.py / ingest.py 那样
-# 自带 load_dotenv()，单独 `python -m tools.rag_eval.eval` 启动时若不显式加载，
+# 自带 load_dotenv()，单独 `python -m tools.rag_eval.runner` 启动时若不显式加载，
 # 会拿到空 key，导致 query 改写 / 翻译轴 LLM 调用全部 401 静默降级。
 from dotenv import load_dotenv
 load_dotenv(override=True)

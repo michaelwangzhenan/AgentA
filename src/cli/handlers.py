@@ -171,7 +171,7 @@ def make_agent(
             user_memory=user_memory,
         )
     if imp == "LANGCHAIN":
-        from src.agent.lc_agent import LangChainAgent
+        from src.agent.langchain_agent import LangChainAgent
         return LangChainAgent(
             verbose=verbose,
             chat_history=chat_history,

@@ -17,7 +17,7 @@
 - **二阶段精排**：使用 `bge-reranker-base` Cross-Encoder 对召回结果做精排，并按 per-model 阈值过滤低质 chunk。
 - **Query 改写**：Multi-Query 同义改写、HyDE 假设性答案、跨语言翻译轴三档可独立开关。
 - **多格式解析**：覆盖 PDF / DOCX / PPTX / XLSX / Markdown / HTML / TXT 七种格式，PDF 扫描件自动 OCR 兜底（rapidocr-onnxruntime）。
-- **评估闭环**：`tools/rag_eval/eval.py` 内置黄金集 + `hit@k` / `MRR` 指标，每次调优结果可 JSON 留档对比。
+- **评估闭环**：`tools/rag_eval/runner.py` 内置黄金集 + `hit@k` / `MRR` 指标，每次调优结果可 JSON 留档对比。
 
 ### 1.2.Agent
 
@@ -103,14 +103,14 @@ USER_MEMORY_ENABLED=true          # 跨 session 用户记忆
 
 ### 4.1.RAG 入库
 
-`tools/ingestion.py` 把 `./datasets/` 下文档灌入向量库 + BM25 索引（与 `/ingest` 等价），额外提供清库与状态查询：
+`tools/rag_cli.py` 把 `./datasets/` 下文档灌入向量库 + BM25 索引（与 `/ingest` 等价），额外提供清库与状态查询：
 
 ```bash
-python tools/ingestion.py status                                 # 查看每个 collection 的当前状态
-python tools/ingestion.py ingest                                 # 幂等增量入库（默认 datasets/data_en + 默认模型）
-python tools/ingestion.py ingest -d ./datasets/data_zh -m zh     # 指定目录 / 模型别名（en / zh / m3）
-python tools/ingestion.py clear                                  # 清空全部 collection + BM25（需 yes 确认）
-python tools/ingestion.py clear -m m3                            # 只清空指定 alias
+python tools/rag_cli.py status                                 # 查看每个 collection 的当前状态
+python tools/rag_cli.py ingest                                 # 幂等增量入库（默认 datasets/data_en + 默认模型）
+python tools/rag_cli.py ingest -d ./datasets/data_zh -m zh     # 指定目录 / 模型别名（en / zh / m3）
+python tools/rag_cli.py clear                                  # 清空全部 collection + BM25（需 yes 确认）
+python tools/rag_cli.py clear -m m3                            # 只清空指定 alias
 ```
 
 ### 4.2.RAG 评估
@@ -118,10 +118,10 @@ python tools/ingestion.py clear -m m3                            # 只清空指�
 基于 `tools/rag_eval/golden.json` 黄金集计算 `hit@k` / `MRR`，结果默认落到 `tools/rag_eval/reports/`。
 
 ```bash
-python -m tools.rag_eval.eval                                          # 当前配置基线
-python -m tools.rag_eval.eval --no-rewriter                            # 关闭 Query 改写做消融对比
-python -m tools.rag_eval.eval --no-rerank                              # 关闭精排做消融对比
-python -m tools.rag_eval.eval --json tools/rag_eval/reports/x.json     # 保存 JSON 便于 diff
+python -m tools.rag_eval.runner                                          # 当前配置基线
+python -m tools.rag_eval.runner --no-rewriter                            # 关闭 Query 改写做消融对比
+python -m tools.rag_eval.runner --no-rerank                              # 关闭精排做消融对比
+python -m tools.rag_eval.runner --json tools/rag_eval/reports/x.json     # 保存 JSON 便于 diff
 ```
 
 ### 4.3.模型下载

@@ -655,17 +655,17 @@ class TestMakeAgentFactory:
             cfg.IMP_METHOD = "PYTHON"
 
     def test_make_agent_langchain(self, tmp_path):
-        import src.agent.lc_agent  # ensure module is importable before patching
+        import src.agent.langchain_agent  # ensure module is importable before patching
         from src.cli.handlers import make_agent
-        from src.agent.lc_agent import LangChainAgent
+        from src.agent.langchain_agent import LangChainAgent
         import src.config as cfg
         orig = cfg.IMP_METHOD
         cfg.IMP_METHOD = "LANGCHAIN"
         try:
-            with patch("src.agent.lc_agent.build_chat_model", return_value=MagicMock()), \
-                 patch("src.agent.lc_agent.build_lc_tools", return_value=[]), \
-                 patch("src.agent.lc_agent.SQLiteChatMessageHistory") as mock_h, \
-                 patch("src.agent.lc_agent.create_agent") as mock_ca:
+            with patch("src.agent.langchain_agent.build_chat_model", return_value=MagicMock()), \
+                 patch("src.agent.langchain_agent.build_langchain_tools", return_value=[]), \
+                 patch("src.agent.langchain_agent.SQLiteChatMessageHistory") as mock_h, \
+                 patch("src.agent.langchain_agent.create_agent") as mock_ca:
                 mock_h.return_value = MagicMock(messages=[])
                 mock_ca.return_value = MagicMock()
                 ag = make_agent(**self._build_factory_args(tmp_path))
@@ -708,16 +708,16 @@ class TestMakeAgentFactory:
 
     def test_make_agent_langchain_interface(self, tmp_path):
         """LangChainAgent 应暴露相同的 duck-typed 接口属性。"""
-        import src.agent.lc_agent  # ensure module is importable before patching
+        import src.agent.langchain_agent  # ensure module is importable before patching
         from src.cli.handlers import make_agent
         import src.config as cfg
         orig = cfg.IMP_METHOD
         cfg.IMP_METHOD = "LANGCHAIN"
         try:
-            with patch("src.agent.lc_agent.build_chat_model", return_value=MagicMock()), \
-                 patch("src.agent.lc_agent.build_lc_tools", return_value=[]), \
-                 patch("src.agent.lc_agent.SQLiteChatMessageHistory") as mock_h, \
-                 patch("src.agent.lc_agent.create_agent") as mock_ca:
+            with patch("src.agent.langchain_agent.build_chat_model", return_value=MagicMock()), \
+                 patch("src.agent.langchain_agent.build_langchain_tools", return_value=[]), \
+                 patch("src.agent.langchain_agent.SQLiteChatMessageHistory") as mock_h, \
+                 patch("src.agent.langchain_agent.create_agent") as mock_ca:
                 mock_h.return_value = MagicMock(messages=[])
                 mock_ca.return_value = MagicMock()
                 ag = make_agent(**self._build_factory_args(tmp_path))

@@ -387,11 +387,11 @@ python-dotenv
 - Extended Thinking：暂不支持（LangChain 抽象不完整）
 
 ### 新增文件
-- lc_provider.py : ChatModel 工厂
-- lc_tools.py    : StructuredTool 封装
-- lc_history.py  : SQLite 历史适配器
-- lc_agent.py    : AgentExecutor 驱动的 Agent
-- test_lc_agent.py : 单元测试
+- langchain_provider.py : ChatModel 工厂
+- langchain_tools.py    : StructuredTool 封装
+- langchain_history.py  : SQLite 历史适配器
+- langchain_agent.py    : AgentExecutor 驱动的 Agent
+- test_langchain_agent.py : 单元测试
 
 ### 依赖新增
 - langchain-core, langchain, langchain-openai, langchain-anthropic
