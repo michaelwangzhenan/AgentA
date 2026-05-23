@@ -47,12 +47,31 @@ PROMPTS_DIR: str = config.PROMPTS_DIR
 SKILLS_DIR: str = config.SKILLS_DIR
 
 
+def _warm_up_rag_models() -> None:
+    """启动时预加载 embedding（及可选 reranker），并提示用户勿误以为卡死。"""
+    aliases = ", ".join(a for a, _, _ in config.iter_active_embeddings())
+    parts = [f"embedding（{aliases or '默认'}）"]
+    if config.RERANKER_ENABLED:
+        parts.append(f"reranker（{config.RERANKER_MODEL}）")
+    targets = "、".join(parts)
+    print(
+        f"⏳ 正在预加载 {targets}, 可能需数十秒至数分钟，请稍候…",
+        flush=True,
+    )
+    from src.rag.retriever import warm_up as rag_warm_up
+
+    rag_warm_up()
+    print(f"✅ {targets} 已就绪。\n", flush=True)
+
+
 def main() -> None:
     """CLI 主循环。"""
     print(BANNER)
 
-    # 延迟导入重型依赖（chromadb / sentence-transformers），使 banner 能即时显示
-    print("⏳ 正在初始化...", end="\r", flush=True) 
+    _warm_up_rag_models()
+
+    # 延迟导入 Agent（仍较重，但 banner / RAG 预热提示已先输出）
+    print("⏳ 正在初始化 Agent…", flush=True)
     from src.agent.agent import SYSTEM_PROMPT, ThinkingConfig
 
     # 共享 ChatHistory 实例，整个进程生命周期内复用

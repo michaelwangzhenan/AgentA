@@ -159,15 +159,7 @@ def resolve_embedding(model_alias: str) -> tuple[str, str]:
     return (model_alias, f"kb_{safe_name}")
 
 
-# ── 启用中的 embedding 列表（Iter-5） ─────────────────────────────────────────
-# retriever 默认会遍历 EMBEDDING_MODELS 中所有别名查询；当我们想在 m3 单库与
-# en/zh 双库间干净切换、或暂时禁用某个 collection 做对比实验时，必须能控制
-# "实际启用哪些 alias"，而不是改动 EMBEDDING_MODELS 全局表。
-#
-# 配置方式（.env）：
-#   RAG_ACTIVE_EMBEDDINGS=en,zh   # 默认：双语种双库（向后兼容）
-#   RAG_ACTIVE_EMBEDDINGS=m3      # 切到 bge-m3 单库（需先 ingest --model m3）
-#   RAG_ACTIVE_EMBEDDINGS=en      # 仅英文库（消融实验）
+# retriever 时查询的 collection 列表
 RAG_ACTIVE_EMBEDDINGS: list[str] = [
     a.strip() for a in os.getenv("RAG_ACTIVE_EMBEDDINGS", "en,zh").split(",") if a.strip()
 ]
@@ -175,12 +167,8 @@ RAG_ACTIVE_EMBEDDINGS: list[str] = [
 
 def iter_active_embeddings() -> list[tuple[str, str, str]]:
     """
-    返回当前启用的 embedding 列表 [(alias, model_name, collection_name), ...]，
-    按 RAG_ACTIVE_EMBEDDINGS 的顺序过滤。retriever / warm_up / 评估等遍历点都
-    应通过本函数取列表，而不是直接遍历 EMBEDDING_MODELS。
-
+    返回 RAG_ACTIVE_EMBEDDINGS 配置的 embedding 列表 [(alias, model_name, collection_name), ...]
     若 RAG_ACTIVE_EMBEDDINGS 配置错误（全部别名未知），回退到 EMBEDDING_MODELS
-    全部条目，避免启动时 retriever 完全无库可查。
     """
     items: list[tuple[str, str, str]] = []
     for alias in RAG_ACTIVE_EMBEDDINGS:

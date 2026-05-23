@@ -82,13 +82,11 @@ def _normalize_score(raw: float) -> float:
 def rerank(query: str, hits: "list[Hit]", top_k: int) -> "list[Hit]":
     """
     使用 Cross-Encoder 对候选 hits 重新打分并按相关性降序排列。
-
-    若候选数 ≤ top_k，直接透传原列表（无需精排，避免无意义开销）。
-    若 RERANKER_ENABLED=false，调用方不应调用此函数（retriever.py 中已判断）。
+    若候选数 ≤ top_k，直接透传原列表。
 
     Args:
         query:  用户的自然语言问题。
-        hits:   Bi-Encoder 召回的候选 Hit 列表。
+        hits:   Dense + BM25 召回的候选 Hit 列表。
         top_k:  最终期望返回的条数。
 
     Returns:

@@ -23,7 +23,7 @@ flowchart LR
 - **多格式统一抽象**：7 种格式经 parser 出口统一为纯文本，下游零分支；扫描版 PDF 自动走 OCR 兜底。
 - **解析层清洗**：剥离页眉页脚、版权声明、跨页重复模板，避免高频噪声污染向量空间与 BM25 IDF。
 - **结构化分块**：识别 Markdown 标题与 PDF 页号作为语义锚点；分块同时保留 `heading_path` / `page_no` 元数据，并把父级标题面包屑注入 chunk 文本本身，使每个 chunk 自带"我在第几章 / 第几页 / 讲什么"。
-- **双索引同源**：dense 与 BM25 共享同一份 `chunk_id`，下游 RRF 融合能精确对齐"两路是否命中同一 chunk"——这是混合检索可行性的前提。
+- **双索引同源**：dense 与 BM25 共享同一份 `chunk_id`，下游 RRF（Reciprocal Rank Fusion，融合排名）融合能精确对齐"两路是否命中同一 chunk"——这是混合检索可行性的前提。
 - **幂等增量**：以文件 `content_sha1` 驱动；未变化整文件跳过 re-embed，变化时先删旧再写新，重复运行不产生重复或孤儿数据。
 
 ### 2.1.3.Embedding（Dense 索引）
@@ -31,7 +31,7 @@ flowchart LR
 **目标**：捕获语义相似度，让"5G 基站"能匹配"无线接入网络"这类语义近义表达。
 
 - **多模型并存**：每个 embedding 模型对应独立 collection——不同模型的向量维度天然不可比，必须分库。通过别名（`en / zh / m3`）切换默认模型，也支持多库并行召回再融合。
-- **存储 / 距离空间**：ChromaDB + HNSW 索引，统一使用 cosine 空间（与 BGE / MiniLM 等模型训练目标对齐，避免默认 squared L2 造成命中错位）。
+- **存储 / 距离空间**：ChromaDB + HNSW(Hierarchical Navigable Small World, 分层可导航小世界) 索引，统一使用 cosine 空间（与 BGE / MiniLM 等模型训练目标对齐，避免默认 squared L2 造成命中错位）。
 - **非对称检索约定**：BGE 系列要求 query 侧加专属 prefix、doc 侧不加；retriever 按模型名自动注入，ingest 端保持纯净文本。
 - **物理布局**：每个 collection 一个 UUID 目录存 HNSW 二进制文件，所有元数据集中在 `chroma.sqlite3`，可直接 SQL 查询溯源。
 
@@ -65,10 +65,10 @@ flowchart LR
 
 - **三类策略各打一种盲区，可独立开关**：
   - *Multi-Query* 解决"同义 / 术语化"差异——把口语化或不规范的措辞替换成专业术语；
-  - *HyDE* 解决"口语 → 文档术语"的词汇分布差距，让 LLM 先编一段"假设性答案"作为额外检索 query；
+  - *HyDE*（Hypothetical Document Embeddings，假设性文档嵌入） 解决"口语 → 文档术语"的词汇分布差距，让 LLM 先编一段"假设性答案"作为额外检索 query；
   - *翻译轴* 解决"中文提问、英文文档"的跨语言失衡（dense 跨语言能力有限、BM25 跨语言完全失效）。
 - **零侵入 · 静默降级**：query 改写定位为"锦上添花"层，LLM 调用失败时返回空、不打断主链路。
-- **进程级 LRU 缓存**：同一 query 二次命中零开销，避免重复花 LLM token。
+- **进程级 LRU (Least Recently Used, 最近最少使用) 缓存**：同一 query 二次命中零开销，避免重复花 LLM token。
 - **不依赖 chat_history**：指代消解由上层 Agent 在 query 入参前自行完成；本模块对会话状态零耦合，便于独立测试与离线评估复用。
 
 ### 2.2.2.Hybrid Retrieval
@@ -162,11 +162,11 @@ flowchart LR
 | 路径 | 角色 | 主要入口 |
 |---|---|---|
 | `src/rag/parser.py` | 多格式 → 纯文本（txt/md/html/pdf/docx/pptx/xlsx + OCR 兜底）| `parse_file(path)` |
-| `src/rag/splitter.py` | 结构化分块（识别 Markdown 标题与 PDF 页号作为锚点，注入面包屑）| `split_structured(text, ...)` |
+| `src/rag/splitter.py` | 结构化分块（识别 Markdown 标题与 PDF 页号作为锚点，注入面包屑(breadcrumb)）| `split_structured(text, ...)` |
 | `src/rag/ingest.py` | 入库主流程（遍历目录 → parse → split → 双索引写盘 + 幂等增量）| `ingest_all(...)` · CLI `python -m src.rag.ingest` |
 | `src/rag/bm25_index.py` | BM25 Okapi 自实现（倒排索引 + bigram 中文分词 + pickle 持久化）| `get_index(coll)` |
 | `src/rag/query_rewriter.py` | 三轴 query 改写（Multi-Query / HyDE / 翻译轴），LRU 缓存包装 | `expand_queries(query)` |
-| `src/rag/retriever.py` | 检索总枢纽：多 query × 多 collection × dense+bm25 → RRF → 阈值 → rerank → dedupe | `search(query, ..., rerank=None)` |
+| `src/rag/retriever.py` | 检索总枢纽：多 query × 多 collection × dense+bm25 → RRF → 阈值 → rerank → dedupe(去重）) | `search(query, ..., rerank=None)` |
 | `src/rag/reranker.py` | Cross-Encoder 精排，输出统一 sigmoid 归一化到 [0,1] | `rerank(query, hits, top_k)` |
 | `tools/rag_eval/runner.py` | 端到端检索评估（黄金集 → 指标 → Markdown 报告 + `.log` sidecar）| `python -m tools.rag_eval.runner` |
 | `tests/test_rag.py` | 单元 + 集成测试（chunk / 阈值 / reranker / search 端到端）| `pytest tests/test_rag.py` |
@@ -191,8 +191,9 @@ Agent 工具调用
 ```
 python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v]
   └─ tools/rag_eval/runner.py · main() → evaluate()
-       └─ src/rag/retriever.py · search(..., rerank=False?)         ← 透传 ablation 开关
-            └─ (同生产路径)
+       ├─ [默认] src/rag/query_rewriter.py · expand_queries(query)  ← 可用 --no-rewriter 关
+       └─ src/rag/retriever.py · search(query, queries=..., rerank=...)  ← rerank 透传 ablation
+            └─ (dense + BM25 → RRF → 阈值 → rerank → dedupe，同生产路径)
        → 指标聚合（hit@1/@3/@k · MRR）
        → 落盘 Markdown 报告 + 同名 .log sidecar
 ```

@@ -1,18 +1,18 @@
 """
-Query 改写模块 —— RAG 召回前的语义扩展（Iter-3）
+Query 改写模块 —— RAG 召回前的语义扩展
 
-提供两类零侵入的 query 扩展手段：
-    1. multi_query：让 LLM 为原问题生成 N 条同义/术语化/多角度改写；
-       与原 query 一起送入 retriever，所有 ranking 通过 RRF 融合提升召回率。
-    2. hyde_query：让 LLM 给出 1~2 句"假设性答案"，把答案也作为 embedding
-       检索 query。适合 query 与 doc 词汇分布差异大的场景（口语 → 文档术语）。
+对外主入口为 expand_queries(query)，返回去重后的 query 列表（第 0 项恒为原 query），
+供 retriever 多路召回；RRF 融合在 retriever 内完成，不在本模块。
+
+三轴扩展（各轴独立开关，未开启则不追加）：
+    1. multi_query（RAG_QUERY_REWRITE_ENABLED）：LLM 生成 N 条同义/术语化改写；
+    2. hyde_query（RAG_HYDE_ENABLED）：LLM 生成 1~2 句假设性答案，作额外检索 query；
+    3. translate_query（RAG_TRANSLATE_QUERY_ENABLED）：按 query 语种追加中/英翻译版。
 
 设计要点：
-    - 失败静默降级：LLM 调用异常时返回空，不打断主检索链路；
-    - 进程级 LRU 缓存：同一 query 多次调用零开销，避免重复花 token；
-    - 通过 RAG_QUERY_REWRITE_ENABLED / RAG_HYDE_ENABLED 一键开关；
-    - 不依赖 chat_history：指代消解由 SYSTEM_PROMPT 引导 Agent 在 query 入参时
-      自行解析（避免本模块对会话状态产生耦合）。
+    - 失败静默降级：单轴 LLM 失败只影响该轴，expand_queries 至少保留原 query；
+    - 进程级 LRU 缓存：multi / hyde / translate 各自缓存，同 query 重复调用零 token；
+    - 不依赖 chat_history：指代消解由 Agent 在调用 search 前自行补全 query。
 """
 
 from __future__ import annotations
@@ -208,22 +208,16 @@ def translate_query(query: str, target_lang: str) -> str:
     return _cached_translate(query.strip(), target_lang)
 
 
-# ── 一站式入口 ───────────────────────────────────────────────────────────────
+# ── 主入口 ──────────────────────────────────────────────────────────────
 
 
 def expand_queries(query: str) -> list[str]:
     """
-    生成"原 query + multi-query 改写 + 可选 HyDE 答案 + 可选翻译版"的去重列表。
+    生成「原 query + multi-query 改写 + HyDE 假设性答案 + 中/英翻译」的去重列表。
 
-    Iter-5：当 RAG_TRANSLATE_QUERY_ENABLED=true 时，自动探测原 query 语种，
-    让 LLM 翻译成另一种语言追加进列表。这条翻译版会同时让 dense 检索与 BM25
-    都能在另一语种 collection 上拿到候选，是中英混合知识库的关键召回轴。
-
-    返回的列表第 0 个永远是原 query，便于调用方在主链路中保留原意。
-    任一来源（multi-query / HyDE / translate）失败都不影响其他；全部失败时
-    退化为只有原 query。
+    第 0 项恒为原 query（经 strip）；各轴失败互不影响，全部失败时仅含原 query。
     """
-    seen: set[str] = set()
+    seen: set[str] = set()  
     expanded: list[str] = []
 
     def _add(q: str) -> None:

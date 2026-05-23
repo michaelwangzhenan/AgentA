@@ -164,3 +164,4 @@ bash tools/ut.sh -agent      # 仅跑 Agent ReAct 循环
 | **HyDE** | Hypothetical Document Embeddings | 假设性文档嵌入（让 LLM 先编一段答案再检索）|
 | **MRR** | Mean Reciprocal Rank | 平均倒数排名（评估指标）|
 | **nDCG** | normalized Discounted Cumulative Gain | 归一化折损累积增益（更细的评估指标）|
+

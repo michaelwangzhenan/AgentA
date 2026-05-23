@@ -461,8 +461,8 @@ class Agent:
             result: ToolResult = execute_tool(tool_name, tool_args, self._skill_bodies)
 
             if self.verbose:
-                preview = result.content[:_TOOL_PREVIEW_LEN].replace("\n", " ")
-                logger.info("[Agent] 工具结果 [%s] 预览: %s...", result.status, preview)
+                preview = result.content[:_TOOL_PREVIEW_LEN].replace("\n", " ").replace("\r", " ")
+                logger.info("[Agent] 工具结果 [%s] 预览: %s", result.status, preview)
 
             # DB 写入干净内容（无引导提示），避免污染历史
             db_content = result.to_llm_str()

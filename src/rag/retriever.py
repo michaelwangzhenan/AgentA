@@ -80,7 +80,8 @@ def warm_up() -> None:
     """
     主动触发所有已配置 embedding 模型 + reranker 的加载，避免首次检索时延抖动。
 
-    使用场景：服务进程启动时调用一次；Web UI 在 chat 开始前调用以避免首查卡顿。
+    使用场景：CLI 启动时由 main._warm_up_rag_models() 调用；其它入口也可显式调用。
+    RERANKER_ENABLED=false 时不会加载 CrossEncoder（内层 reranker.warm_up 直接 return）。
     任一模型加载失败仅记录 warning，不抛异常。
     """
     for alias, model_name, _coll in config.iter_active_embeddings():
@@ -100,13 +101,15 @@ def warm_up() -> None:
 @dataclass
 class Hit:
     """
-    单条检索命中结果，跨 collection 排序与下游展示统一使用。
+    Hit = 「从哪来（source/collection）+ 是什么（document）+ 多相关（distance/score）+ 怎么召回到的（id/retrievers）+ 附加信息（metadata）」打包成的一条检索结果。
 
     Attributes:
-        source:     文档相对路径（含子目录），由 ingest 写入 metadata。
+        source:     这条 chunk 来自哪个文件（相对路径，含子目录）。
+                    例如：pursue/a3_RAG/1_AgentA.md、resume/resume.md
+                    由 ingest 写入 metadata，用于去重。
         document:   chunk 正文（已含 heading 面包屑前缀，由 splitter 注入）。
-        distance:   原始向量距离，cosine 空间下 ∈ [0, 2]；BM25-only 命中时为 0.0。
-        collection: 来源 collection 名。
+        distance:   原始向量距离，cosine 空间下 ∈ [0, 2]，越小越相似; BM25-only 命中时为 0.0。
+        collection: 来自哪个 ChromaDB 库,例如：kb_m3、kb_en、kb_zh
         score:      归一化相关性分（越大越好），不同阶段含义不同：
                       · 召回阶段填 RRF 融合分（数值很小，仅作排序用）；
                       · 精排后由 reranker 覆盖为 cross-encoder sigmoid 概率（[0, 1]）。
@@ -125,8 +128,6 @@ class Hit:
 
 
 # ── Dense 召回 ───────────────────────────────────────────────────────────────
-
-
 def _query_collection(
     client: Any,
     model_name: str,
@@ -196,8 +197,6 @@ def _query_collection(
 
 
 # ── BM25 召回 ────────────────────────────────────────────────────────────────
-
-
 def _query_bm25(
     collection_name: str,
     query: str,
@@ -240,8 +239,6 @@ def _query_bm25(
 
 
 # ── RRF 融合 ─────────────────────────────────────────────────────────────────
-
-
 def _rrf_fuse(rankings: list[list[Hit]], k: int) -> list[Hit]:
     """
     Reciprocal Rank Fusion：对多个排序结果做 rank-based 融合。
@@ -288,9 +285,6 @@ def _rrf_fuse(rankings: list[list[Hit]], k: int) -> list[Hit]:
     return out
 
 
-# ── 公共入口 ─────────────────────────────────────────────────────────────────
-
-
 def _dedupe_by_source(hits: list[Hit], k_per_source: int) -> list[Hit]:
     """
     保留 hits 已有顺序，按 source 限流：每个 source 最多保留 k_per_source 条。
@@ -309,6 +303,8 @@ def _dedupe_by_source(hits: list[Hit], k_per_source: int) -> list[Hit]:
     return out
 
 
+# ── 公共入口 ─────────────────────────────────────────────────────────────────
+
 def search(
     query: str,
     top_k: int = config.RAG_TOP_K,
@@ -319,40 +315,32 @@ def search(
     """
     在所有已入库的 collection 中检索最相关的 Top-K 文档片段。
 
-    支持两种调用模式：
-      · 单 query（向后兼容，queries=None）：用 query 同时跑 dense + BM25 → RRF 融合；
-      · 多 query（Iter-3，queries=[原query, 改写1, 改写2, ...]）：每条 query 各跑一次
-        dense + BM25，所有 ranking 一起 RRF 融合，召回更鲁棒。
+    流水线：多 query 召回（dense + BM25）→ 同库 RRF → 跨库 round-robin
+    → dense 阈值过滤 → 可选 rerank → per-source 去重 → 截断 top_k。
 
     Args:
-        query:    用户的自然语言问题（即使提供 queries 也保留它作为兜底/日志用）。
+        query:    用户原始问题；召回兜底（queries 为空时）、精排打分、日志均用此串。
         top_k:    最终返回上限，默认读 config.RAG_TOP_K。
         where:    可选 metadata 过滤子句（透传给 chroma 与 BM25）。
-        queries:  可选的多 query 列表（来自 query_rewriter.expand_queries）；
-                  非空时本参数完全覆盖 query 的检索行为，query 仅用于日志。
-        rerank:   是否启用 cross-encoder 精排，三值语义：
-                    · None  → 沿用全局 config.RERANKER_ENABLED（生产代码、agent 走这条）；
-                    · True  → 强制开启（即使 config 关闭也跑）；
-                    · False → 强制关闭（evaluation 做 ablation 时用）。
-                  显式参数取代了"通过 monkey-patch config.RERANKER_ENABLED 做关闭"的
-                  旧路径，避免全局状态污染并消除 eval.py 早期 double-rerank bug。
+        queries:  可选多 query 列表，只影响召回阶段，不改变 rerank 使用的 query。
+        rerank:   是否启用 cross-encoder 精排：
+                    · None  → 沿用 config.RERANKER_ENABLED；
+                    · True  → 强制开启；
+                    · False → 强制关闭（评估 ablation 用 search(rerank=False)）。
 
     Returns:
         Hit 列表，按融合后/精排后 score 降序，长度 ≤ top_k；空列表表示无命中。
     """
+    # 初始化 chromadb 客户端
     client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
 
-    # 本次 search 是否启用 rerank：参数 > 全局 config。下面所有"是否扩召回窗口 /
-    # 是否调 reranker / 是否打印 rerank 阶段日志"统一读 use_rerank，避免内部分支再各自
-    # 重新判一遍 config 导致行为不一致。
+    # 是否启用 rerank：参数 > 全局 config
     use_rerank = config.RERANKER_ENABLED if rerank is None else bool(rerank)
 
-    # 召回窗口：开启精排时扩大候选；BM25 与 dense 各取 recall_k 条
+    # 召回窗口：开启精排时扩大候选，BM25 与 dense 各取 recall_k 条
     recall_k = top_k * config.RERANKER_RECALL_MULTIPLIER if use_rerank else top_k
 
-    # 多 query 时每条 query 单独召回的窗口要适当收缩，避免候选总量爆炸：
-    #   per_query_k = max(top_k, recall_k // n_queries)
-    # 这样总候选量 ~ recall_k，与单 query 路径量级一致；RRF 融合天然对齐多次命中。
+    # 多 query 时每条 query 单独召回的窗口要适当收缩，保持总候选量 ~ recall_k
     effective_queries: list[str] = []
     if queries:
         for q in queries:
@@ -364,18 +352,13 @@ def search(
     n_q = max(len(effective_queries), 1)
     per_query_k = max(top_k, recall_k // n_q)
 
-    # ── 阶段化 trace（INFO 级） ────────────────────────────────────────────────
-    # 把"本次 search 到底跑了哪些阶段、各阶段候选数"打成结构化日志，便于事后
-    # 复盘消融实验（特别是 rerank/rewriter on/off 结果一致时一眼看清谁真的被
-    # 跳过了）。所有日志带 [search] 前缀，方便 grep。
+
     logger.info(
         "[search] q=%r n_q=%d rerank=%s top_k=%d recall_k=%d per_query_k=%d",
         query[:60], n_q, use_rerank, top_k, recall_k, per_query_k,
     )
 
-    # 每个 collection 内部对每条 query 跑 dense + BM25，所有 ranking 一并 RRF 融合，
-    # 再跨 collection round-robin。Iter-5 起用 iter_active_embeddings() 取启用列表，
-    # 支持 RAG_ACTIVE_EMBEDDINGS env var 在双库 / 单库 / 消融实验间切换而不改代码。
+    # 逐 collection 进行 dense + BM25 召回，同 collection 内 RRF 融合
     per_collection_fused: list[list[Hit]] = []
     for alias, model_name, collection_name in config.iter_active_embeddings():
         rankings: list[list[Hit]] = []
@@ -417,7 +400,7 @@ def search(
         logger.info("[search] no candidates from any collection → return []")
         return []
 
-    # Round-robin 跨 collection 合并（避免某模型距离空间挤压另一模型）
+    # 跨 collection round-robin 合并（避免某模型距离空间挤压另一模型）
     candidates: list[Hit] = []
     iterators = [iter(bucket) for bucket in per_collection_fused]
     while len(candidates) < recall_k and iterators:
@@ -438,10 +421,8 @@ def search(
         len(per_collection_fused), len(candidates), recall_k,
     )
 
-    # Dense 阈值过滤（Iter-5：per-model）：仅对"纯 dense 命中"应用，BM25 加持的
-    # chunk 不被 dense 阈值剔除。每条 hit 按 hit.collection 反查对应 alias 的
-    # RAG_DENSE_MIN_SCORE_PER_MODEL；找不到则回退到全局 RAG_DENSE_MIN_SCORE。
-    # 这样 all-MiniLM (~0.25) 与 bge-zh (~0.40) 各自校准，不再互相干扰。
+    # Dense 阈值过滤， 每个模型自己不同的阈值
+    # BM25 命中的 chunk 不过滤
     before = len(candidates)
     any_filter_active = config.RAG_DENSE_MIN_SCORE > 0 or any(
         v > 0 for v in config.RAG_DENSE_MIN_SCORE_PER_MODEL.values()
@@ -453,7 +434,10 @@ def search(
             threshold = config.min_dense_score_for_collection(h.collection)
             if threshold <= 0:
                 return True
-            dense_like_score = (1.0 - h.distance) if h.distance else (h.score or 0.0)
+            if "dense" in h.retrievers:
+                dense_like_score = 1.0 - h.distance
+            else:
+                dense_like_score = h.score or 0.0
             return dense_like_score >= threshold
 
         candidates = [h for h in candidates if _keep(h)]
@@ -468,7 +452,7 @@ def search(
         logger.info("[search] no candidates left after dense filter → return []")
         return []
 
-    # 精排（可选；以 use_rerank 为准，已合并 config 与 rerank 参数语义）
+    # Cross-Encoder re-rank
     if use_rerank:
         # 局部导入并用别名 _do_rerank，避免与本函数 rerank 参数同名遮蔽
         from src.rag.reranker import rerank as _do_rerank
@@ -479,6 +463,7 @@ def search(
             cands_in, len(top_hits),
         )
 
+        # 精排后 min_score 阈值过滤
         min_rerank = config.RAG_RERANK_MIN_SCORE
         if min_rerank > 0 and len(candidates) > top_k:
             before = len(top_hits)

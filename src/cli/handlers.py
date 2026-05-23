@@ -5,10 +5,11 @@ CLI 命令处理器 —— 各 /command 的具体逻辑
 """
 
 import re
+import sys
 from datetime import datetime
 from pathlib import Path
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import src.config as config
 from src.memory.chat_history import ChatHistory
@@ -28,6 +29,28 @@ OutputFn = Callable[[str], None]
 def _stdout(msg: str) -> None:
     """默认输出适配器：写到 CLI stdout。"""
     print(msg)
+
+
+def _sanitize_cli_text(text: str) -> str:
+    """将 \\r 规范为 \\n，避免终端回车覆盖行首导致回答开头被「吃掉」。"""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _is_visible_assistant_message(msg: dict[str, Any]) -> bool:
+    """仅 tool_calls、无正文的 assistant 行不展示给用户（ReAct 中间态）。"""
+    if msg.get("role") != "assistant":
+        return True
+    if (msg.get("content") or "").strip():
+        return True
+    return not msg.get("tool_calls")
+
+
+def _conversation_messages(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """导出/摘要用的 user + assistant 列表，跳过无正文的 tool-call assistant。"""
+    return [
+        m for m in msgs
+        if m["role"] in ("user", "assistant") and _is_visible_assistant_message(m)
+    ]
 
 
 def quit_sys(chat_history: ChatHistory, user_memory: UserMemoryStore | None) -> None:
@@ -70,7 +93,7 @@ def save_history(
     out: OutputFn = _stdout,
 ) -> None:
     """将当前 session 的 user/assistant 对话导出到 history/<filename>.md。"""
-    msgs = [m for m in chat_history.load(session_id) if m["role"] in ("user", "assistant")]
+    msgs = _conversation_messages(chat_history.load(session_id))
     if not msgs:
         out("📭 当前 session 暂无对话历史，无可导出内容。\n")
         return
@@ -116,7 +139,7 @@ def show_history(
     out: OutputFn = _stdout,
 ) -> None:
     """展示当前 session 的历史对话摘要（角色 + 内容前 60 字）。"""
-    msgs = [m for m in chat_history.load(session_id) if m["role"] in ("user", "assistant")]
+    msgs = _conversation_messages(chat_history.load(session_id))
     if not msgs:
         out("📭 当前 session 暂无对话历史。\n")
         return
@@ -205,14 +228,45 @@ def _print_token_usage(agent: "Agent", out: OutputFn = _stdout) -> None:
 def run_query(agent: "Agent", question: str, out: OutputFn = _stdout) -> None:
     """执行一次问答并打印结果，捕获中断和运行时异常。"""
     out("")
+    streamed = False
+    header_printed = False
+
+    def _on_token_chunk(chunk: str) -> None:
+        nonlocal streamed, header_printed
+        if not chunk:
+            return
+        chunk = chunk.replace("\r", "")
+        if not header_printed:
+            sys.stdout.write("\nAgent: ")
+            header_printed = True
+            streamed = True
+        sys.stdout.write(chunk)
+        sys.stdout.flush()
+
+    set_token_cb = getattr(agent, "set_token_callback", None)
+    if set_token_cb is not None:
+        set_token_cb(_on_token_chunk)
     try:
         reply = agent.run(question)
-        out(f"Agent: {reply}\n")
+        safe = _sanitize_cli_text(reply).strip()
+        if streamed:
+            if header_printed:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+            elif not safe:
+                out("Agent: （无文本输出）\n")
+        elif safe:
+            out(f"Agent: {safe}\n")
+        else:
+            out("Agent: （无文本输出）\n")
         _print_token_usage(agent, out)
     except KeyboardInterrupt:
         out("\n⚠️  已中断当前回答。\n")
     except Exception as e:
         out(f"❌ 出错了: {e}\n")
+    finally:
+        if set_token_cb is not None:
+            set_token_cb(None)
 
 
 def handle_thinking_cfg(

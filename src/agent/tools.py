@@ -271,13 +271,14 @@ def _tool_search_knowledge(
     where: dict | None = None,
 ) -> ToolResult:
     """
-    调用 RAG 检索层（dense + BM25 混合 + Iter-3 query 改写/HyDE），
+    调用 RAG 检索层（query 扩展 → dense + BM25 混合召回 → 可选 rerank），
     返回格式化的文档片段字符串。
 
-    检索前会按 .env 开关做 query 扩展：
-      - RAG_QUERY_REWRITE_ENABLED=true（默认）：让 LLM 生成 N 条同义改写；
-      - RAG_HYDE_ENABLED=true：让 LLM 生成 1~2 句假设性答案作为额外检索 query。
-      原 query 永远在扩展列表中第 0 位；扩展失败时静默退化为单 query 路径。
+    检索前统一走 expand_queries(query)，各轴由 .env 独立开关（未开启的轴不追加）：
+      - RAG_QUERY_REWRITE_ENABLED：Multi-Query，LLM 生成至多 N 条同义改写；
+      - RAG_HYDE_ENABLED：HyDE，LLM 生成 1~2 句假设性答案作为额外检索 query；
+      - RAG_TRANSLATE_QUERY_ENABLED：翻译轴，按 query 语种追加中/英翻译版。
+    列表第 0 项永远是原 query；expand_queries 或 search 异常时退化为单 query。
 
     Args:
         query: 检索查询语句。
@@ -293,7 +294,7 @@ def _tool_search_knowledge(
         logger.warning("[tool] search_knowledge: where 非 dict，已忽略：%r", where)
         where = None
 
-    # Iter-3：multi-query / HyDE 扩展。失败时 expand_queries 返回 [query]，无副作用。
+    # query 三轴扩展（multi-query / HyDE / 翻译）。失败时 expand_queries 退化为 [query]。
     expanded_queries: list[str]
     try:
         from src.rag.query_rewriter import expand_queries
