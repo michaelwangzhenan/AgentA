@@ -126,26 +126,22 @@ MEMORY_DB_PATH: str = os.getenv("MEMORY_DB_PATH", "./sqlite_db/chat_history.db")
 
 # ── Embedding 模型配置 ────────────────────────────────────────────────────────
 # 预定义的 embedding 模型别名，每个别名绑定一个独立的 ChromaDB collection，
-# 不同模型向量维度不同（MiniLM=384, bge-small-zh=512），必须分开存储。
-#
+# 不同模型向量维度不同（MiniLM=384, bge-small-zh=512, bge-m3=1024），必须分开存储。
 # 别名格式：{ 别名: (模型名称, collection名称) }
 EMBEDDING_MODELS: dict[str, tuple[str, str]] = {
     "en": ("all-MiniLM-L6-v2", "kb_en"),       # 英文/多语言，384维
     "zh": ("BAAI/bge-small-zh", "kb_zh"),      # 中文优化，512维
-    # Iter-4：多语言单模型选项；BAAI/bge-m3 在 100+ 语种 / 中英 / 跨语言 上均强于
-    # 上面双小模型方案。设置 EMBEDDING_MODEL=m3 重新 ingest，可用单 collection 取代
-    # 上面 en/zh 双库（首次会下载 ~568MB）。
     "m3": ("BAAI/bge-m3", "kb_m3"),            # 多语言（dense），1024维
 }
 
-# 默认 embedding 别名，可通过 .env 中的 EMBEDDING_MODEL 覆盖（填别名 en/zh，或直接填模型名）
+# 默认 embedding 别名，可通过 .env 中的 EMBEDDING_MODEL 覆盖（填别名 en/zh/m3，或直接填模型名）
 DEFAULT_EMBEDDING_ALIAS: str = os.getenv("EMBEDDING_MODEL", "en")
 
 def resolve_embedding(model_alias: str) -> tuple[str, str]:
     """
-    将别名（en/zh）或模型名称解析为 (model_name, collection_name)。
+    将别名（en/zh/m3）或模型名称解析为 (model_name, collection_name)。
 
-    - 若传入已知别名（en/zh），直接查表返回。
+    - 若传入已知别名（en/zh/m3），直接查表返回。
     - 若传入自定义模型名（含 /），以模型名的最后一段作为 collection 名前缀。
 
     Returns:

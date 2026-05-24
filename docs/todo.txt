@@ -450,7 +450,7 @@ ToDo List：
     切分后 chunk 既无章节锚点也无完整语义，向量化后相似度被噪声拉低。
     →  实现 RecursiveCharacterTextSplitter（按 \n\n → \n → 句号 → 字符 逐级回退）；
        Markdown 用 MarkdownHeaderTextSplitter 先按 H1~H4 切再二次分块；
-       每个 chunk 头部注入"父级标题面包屑"（## 第 5 章 / ### 5.2 物理层结构）以保留上下文。
+       每个 chunk 头部注入"父级标题路径"（## 第 5 章 / ### 5.2 物理层结构）以保留上下文。
        chunk 大小同时记录字符数与近似 token 数，避免中英文差异。
 
   【P0-3 PDF 解析能力薄弱（影响 datasets/data_en/2026-03-11 DWA live training_Presentation.pdf 这类）】
@@ -610,7 +610,7 @@ ToDo List：
         · _split_into_atoms + _greedy_pack：递归按 \n\n → \n → 句号 → 字符
           逐级回退，保留语义边界（修 P0-2）。
         · split_structured：识别 [[PAGE:N]] 与 Markdown # 标题，
-          为每个 chunk 注入"父级标题面包屑"以保留上下文。
+          为每个 chunk 注入"父级标题路径"以保留上下文。
       ▸ src/rag/parser.py
         · _parse_pdf 在每页前插 [[PAGE:N]]；
         · _parse_docx：Heading 1~9 → Markdown # 标题；

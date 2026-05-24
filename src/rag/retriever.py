@@ -107,7 +107,7 @@ class Hit:
         source:     这条 chunk 来自哪个文件（相对路径，含子目录）。
                     例如：pursue/a3_RAG/1_AgentA.md、resume/resume.md
                     由 ingest 写入 metadata，用于去重。
-        document:   chunk 正文（已含 heading 面包屑前缀，由 splitter 注入）。
+        document:   chunk 正文（已含 heading 路径前缀，由 splitter 注入）。
         distance:   原始向量距离，cosine 空间下 ∈ [0, 2]，越小越相似; BM25-only 命中时为 0.0。
         collection: 来自哪个 ChromaDB 库,例如：kb_m3、kb_en、kb_zh
         score:      归一化相关性分（越大越好），不同阶段含义不同：

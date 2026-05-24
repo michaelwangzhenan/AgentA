@@ -164,14 +164,15 @@ def ingest_all(
     model: str = config.DEFAULT_EMBEDDING_ALIAS,
 ) -> None:
     """
-    扫描 docs_dir 目录，将所有支持格式的文档入库到 ChromaDB。
+    扫描 docs_dir，将支持格式的文档写入指定 embedding 对应的 ChromaDB collection。
 
-    流程：逐文件解析 → 分块 → 向量化（由 ChromaDB 内部调用 embedding function） → upsert。
+    流程：逐文件解析 → 分块（split_structured）→ 按 doc_id/content_sha1 幂等
+    （未变跳过，有变先删旧 chunk）→ Chroma upsert（内部调用 embedding function）；
+    若 BM25_ENABLED，同步更新该 collection 的 BM25 索引。
 
     Args:
-        docs_dir: 文档目录路径，默认读取 config.DOCS_DIR。
-        model: embedding 模型别名（en/zh）或模型名称，决定使用哪个 collection。
-               默认使用 config.DEFAULT_EMBEDDING_ALIAS（读取 .env EMBEDDING_MODEL）。
+        docs_dir: 文档目录，默认 config.DOCS_DIR。
+        model: embedding 别名（en / zh / m3）
     """
     model_name, collection_name = config.resolve_embedding(model)
 
@@ -207,7 +208,7 @@ def ingest_all(
                 rel_path = file_path.name
             doc_id = _doc_id_from_relpath(rel_path)
 
-            logger.info("  解析: %s", rel_path)
+            logger.info("Parse 解析: %s", rel_path)
             text = parse_file(file_path)
 
             if not text.strip():
@@ -233,6 +234,7 @@ def ingest_all(
                 collection.delete(ids=existing_ids)
                 logger.info("  清除旧数据: %s → 删除 %d 条", rel_path, len(existing_ids))
 
+            # Split 分块
             structured = split_structured(text, config.CHUNK_SIZE, config.CHUNK_OVERLAP)
             if not structured:
                 logger.warning("  跳过（分块结果为空）: %s", rel_path)
@@ -245,6 +247,7 @@ def ingest_all(
             lang = _detect_lang(text)
             ext = file_path.suffix.lower()
 
+            # Dense 索引
             ids: list[str] = [_make_chunk_id(doc_id, i) for i in range(len(structured))]
             documents: list[str] = [c.text for c in structured]
             metadatas: list[dict] = []

@@ -5,9 +5,9 @@
 # 2.RAG
 ## 2.1.Ingestion
 
-将本地文档转换为可被检索的索引数据。
+将异构本地文档（当前覆盖 PDF / DOCX / PPTX / XLSX / MD / HTML / TXT，可扩展）转换为可被多路检索的索引数据。
 
-### 2.1.1.Ingestion流程
+### 2.1.1.整体流程
 
 ```mermaid
 flowchart LR
@@ -18,36 +18,123 @@ flowchart LR
     D --> E2[Sparse 索引<br/>BM25]
 ```
 
-### 2.1.2.Ingestion设计要点
+### 2.1.2.Parse解析
 
-- **多格式统一抽象**：7 种格式经 parser 出口统一为纯文本，下游零分支；扫描版 PDF 自动走 OCR 兜底。
-- **解析层清洗**：剥离页眉页脚、版权声明、跨页重复模板，避免高频噪声污染向量空间与 BM25 IDF。
-- **结构化分块**：识别 Markdown 标题与 PDF 页号作为语义锚点；分块同时保留 `heading_path` / `page_no` 元数据，并把父级标题面包屑注入 chunk 文本本身，使每个 chunk 自带"我在第几章 / 第几页 / 讲什么"。
-- **双索引同源**：dense 与 BM25 共享同一份 `chunk_id`，下游 RRF（Reciprocal Rank Fusion，融合排名）融合能精确对齐"两路是否命中同一 chunk"——这是混合检索可行性的前提。
-- **幂等增量**：以文件 `content_sha1` 驱动；未变化整文件跳过 re-embed，变化时先删旧再写新，重复运行不产生重复或孤儿数据。
+把多种异构格式统一抽象为"纯文本 + 页号/标题标记"（如 `[[PAGE:5]]`、`## 章节标题`）的中间表示，让下游 Clean、Split 不再做格式分支；新增格式只需补一个 parser，主链路零侵入。
 
-### 2.1.3.Embedding（Dense 索引）
+```mermaid
+flowchart LR
+    F1["PDF"] --> P1["pymupdf → pdfplumber<br/> → pypdf+ OCR 兜底"]
+    F2["DOCX"] --> P2["python-docx"]
+    F3["..."] --> P3["..."]
+    F4["MD / TXT"] --> P4["编码探测<br/>utf-8 / gbk / latin-1"]
+    P1 --> O["统一出口：<br/>纯文本<br/> +page锚点([PAGE:N]) <br/> +标题锚点(#~######)"]
+    P2 --> O
+    P3 --> O
+    P4 --> O
+```
 
-**目标**：捕获语义相似度，让"5G 基站"能匹配"无线接入网络"这类语义近义表达。
+**设计要点**
 
-- **多模型并存**：每个 embedding 模型对应独立 collection——不同模型的向量维度天然不可比，必须分库。通过别名（`en / zh / m3`）切换默认模型，也支持多库并行召回再融合。
-- **存储 / 距离空间**：ChromaDB + HNSW(Hierarchical Navigable Small World, 分层可导航小世界) 索引，统一使用 cosine 空间（与 BGE / MiniLM 等模型训练目标对齐，避免默认 squared L2 造成命中错位）。
-- **非对称检索约定**：BGE 系列要求 query 侧加专属 prefix、doc 侧不加；retriever 按模型名自动注入，ingest 端保持纯净文本。
-- **物理布局**：每个 collection 一个 UUID 目录存 HNSW 二进制文件，所有元数据集中在 `chroma.sqlite3`，可直接 SQL 查询溯源。
+- **多格式统一抽象 · 易扩展**：每种格式各走专用 parser，出口都收敛到同一形态——"纯文本 + 两类锚点"（`[[PAGE:N]]` 标记页号，`#~######` 标记章节标题）。下游 Clean 、 Split 对格式零感知，未来扩 EPUB / CSV / 邮件等只需新增一个 parser，不动后续链路。
+- **结构信号显式注入文本**：HTML 的 h1~h6、DOCX 的 Heading 1~9、PPTX 的 title placeholder、XLSX 的 sheet name 全部在解析阶段翻译成 Markdown `#` 标题写进正文，PDF / PPTX 每页前插 `[[PAGE:N]]`——格式特有的结构信息被"语言化"到正文里，splitter 只需识别这两类锚点就拿到完整结构。
+- **PDF 多后端递降**：pymupdf（最快、质量最优）→ pdfplumber（表格/分栏强）→ pypdf（兜底），任一可用且产文非空即采用，缺哪个库都不报错。
+- **OCR 兜底是 Parse 子环节**：检测"平均每页字符数 < 阈值"自动触发 RapidOCR，调用方对扫描版/数字版 PDF 无感知。OCR 与 PDF 三后端均为软依赖，缺失时静默禁用而非崩溃。
+- **文本编码自适应**：MD / TXT 按 utf-8 → gbk → latin-1 递降探测，兼容 Windows 中文环境与历史文件来源。
 
-### 2.1.4.BM25（Sparse 索引）
+### 2.1.3.Clean清洗
 
-**目标**：捕获字面精确命中，解决 dense 模型对"无语义符号"的盲区——版本号、缩写、项目代号、命令名（如 `3GPP TS 38.211`、`CB014670`、`L2PS`），这些字符串没有可学习的语义，embedding 之后会被完全抹平。
+剥离页眉页脚、版权声明、纯页码、跨页重复模板等"模板噪声"，避免高频片段污染向量空间与 BM25 IDF。
+
+```mermaid
+flowchart LR
+    R["原始文本"] --> S1["统计短行重复次数"]
+    S1 --> S2["规则过滤<br/>重复短行剔除<br/>空行折叠"]
+    S2 --> C["清洗后文本"]
+```
+
+**设计要点**
+
+- **两类噪声分开识别**：单行规则匹配（纯页码、`Page X of Y`、`1/32`、`©®™`、"版权所有"…）覆盖"长得就像噪声"；文档级跨页重复（出现 ≥ 5 次的短行，长度 ≤ 80 字符）覆盖"出现频率说明它是噪声"——两条互补，避免漏掉 PDF 页眉这类无固定模式的模板行。
+- **解析层一次清洗 · 全格式覆盖**：所有 parser 出口统一清洗，下游对格式透明。
+- **空行折叠**：连续多个空行被压缩为单空行，避免 chunk 内出现大段空白浪费 `chunk_size` 预算。
+- **保留两类结构锚点**：`[[PAGE:N]]` 与 `# 标题` 行不在噪声规则覆盖范围内，确保 Split 阶段仍能拿到完整结构信号。
+
+### 2.1.4.Split分块
+
+把清洗后的纯文本切成"既不超长又保留语义边界"的 chunk，并把页号 / 标题层级显式带入下游可检索的 metadata。
+
+```mermaid
+flowchart TD
+    T["清洗后文本"] --> SC["按 [[PAGE:N]] 与 # 标题锚点<br/>切成 section"]
+    SC --> AT["每个section递归切<br/>原子单元：段落→行<br/>→句号→空格→字符"]
+    AT --> PK["贪心打包成 ≤ chunk_size<br/>相邻chunk,保留overlap字符"]
+    PK --> BR["父级标题路径前缀<br/>注入到 chunk text"]
+    BR --> CK["Chunk 列表<br/>text + heading_path + page_no + line"]
+```
+
+**设计要点**
+
+- **递归回退优先级 · 不在词中间断**：段落(`\n\n`) → 行(`\n`) → 中英文断句(`。！？；./?/!`) → 空格 → 字符。前一级能真正切短文本就用它，全部失败才退化到字符级硬切——保证 chunk 边界尽量落在自然语义边界，不会把术语切成两半。
+- **结构化分块元数据**：识别 `[[PAGE:N]]` 与 `#~######` 为切段点，同时维护 `(current_page, heading_stack)` 状态；每个 chunk 自动带上 `heading_path` / `page_no` / `line_start` / `line_end`，下游既可在工具结果里展示"来自 X 文件第 N 页 / 第几章"，也可做溯源跳转。
+- **父级标题路径作为前缀注入正文**：把当前 chunk 所属的"父级标题链"（如 `# 第 5 章 物理层` → `## 5.2 子载波间隔`）以 Markdown 形式拼到 chunk 文本开头，与正文之间留空行。这样每个 chunk 自带"我在第几章 / 讲什么"的语义锚点——dense embedding 命中率显著提升，因为孤立短句被父级标题上下文化。
+- **贪心打包 + overlap**：原子单元按 `chunk_size` 上限贪心拼接；相邻 chunk 间保留 `overlap` 字符尾巴防止跨边界语义被切断。若 overlap + 下一原子单元仍超长则放弃 tail，保证 chunk 永不超长。
+- **标题前缀预算自适应**：正文 budget = chunk_size − 标题前缀长度，但有下限 `max(chunk_size/2, 64)` 防止"标题路径太深把正文挤掉"。
+- **防递归不收敛**：分隔符只出现在文本末尾时（split 后只剩 1 个有效 piece），若把 sep 加回原文等于自身、递归调用栈不会收敛——检测到该情形自动跳到下一级 sep，避免 `RecursionError`。
+
+### 2.1.5.ChromaDB（Dense 索引）
+
+捕获语义相似度，让"5G 基站"能匹配"无线接入网络"这类语义近义表达。
+
+```mermaid
+flowchart LR
+    CK["Chunk 列表<br/>含 heading_path 前缀"] --> EM["SentenceTransformer<br/>编码"]
+    EM --> RT["按模型路由 collection<br/>kb_en / kb_zh / kb_m3"]
+    RT --> HDB["ChromaDB + HNSW<br/>cosine 空间"]
+    HDB --> MD["chroma.sqlite3<br/>doc_id / source / <br/>heading_path 等元数据"]
+```
+
+**设计要点**
+
+- **多模型并存 · 分库存储**：每个 embedding 模型对应独立 collection——不同模型的向量维度天然不可比，必须分库。通过别名（`en / zh / m3`）切换默认模型，也支持多库并行召回再融合。
+- **统一 cosine 空间**：ChromaDB + HNSW (Hierarchical Navigable Small World, 分层可导航小世界) 索引，统一使用 cosine 空间（与 BGE / MiniLM 等模型训练目标对齐，避免默认 squared L2 造成命中错位）。
+- **存量库自动修正**：发现旧 collection 距离空间不是 cosine（如老数据用默认 L2 建的），ingest 时自动 drop & recreate，保证 ingest 与 retriever 的空间始终一致——避免"参数看似一样但底层错位"的隐性事故。
+- **物理布局透明可溯源**：每个 collection 一个 UUID 目录存 HNSW 二进制文件，所有元数据集中在 `chroma.sqlite3`，可直接 SQL 查询溯源 doc_id / source / heading_path。
+- **幂等增量**：以文件 `content_sha1` 驱动；未变化整文件跳过 re-embed，变化时先删旧 chunks 再写新，重复运行不产生重复或孤儿数据。
+
+### 2.1.6.BM25（Sparse 索引）
+
+捕获字面精确命中，解决 dense 模型对"无语义符号"的盲区——版本号、缩写、项目代号、命令名（如 `3GPP TS 38.211`、`CB014670`、`L2PS`），这些字符串没有可学习的语义，embedding 之后会被完全抹平。
+
+```mermaid
+flowchart LR
+    CK["Chunk 列表<br/>与 dense 共享 chunk_id"] --> TK["分词<br/>EN: whitespace + lowercase + 停用词<br/>ZH: bigram (连续 2 字符)"]
+    TK --> IDX["BM25 Okapi 倒排索引<br/>k1=1.5  b=0.75"]
+    IDX --> PK["pickle 持久化<br/>按 collection 分文件"]
+```
+
+**设计要点**
 
 - **与 dense 互补**：dense 强在语义近义、BM25 强在字面精确，两者通过 RRF 融合形成"语义 + 字面"双签到。
 - **自实现 · 零外部依赖**：BM25 Okapi 公式 + 倒排索引 + pickle 持久化足够覆盖需求，无需引入 `rank_bm25` / Lucene 这类重量依赖。
 - **混合分词**：英文走 whitespace + lowercase + 轻量停用词；中文走 **bigram**（连续 2 字符）——避免 `jieba` 30MB 词典依赖，且 RAG 场景下 bigram 召回率优于 unigram。
 - **与 dense 共 chunk_id**：RRF 融合按 id 对齐的前提；缺这一条会退化为粗暴的跨尺度分数加权。
+- **每 collection 一份索引**：按 collection_name 分文件持久化（`bm25_kb_en.pkl` 等），与 ChromaDB collection 一一对应，多语种 / 多模型并行不互扰。
 - **按文件粒度可删**：以 `doc_id` 为索引键支持批量删除，与 ChromaDB 在 ingest 文件级 upsert 上行为对齐。
 
 ## 2.2.Retrieval
 
-### 2.2.1.Query rewrite
+### 2.2.1.整体流程
+
+```mermaid
+flowchart LR
+    A[用户 query] --> B[Query rewrite]
+    B --> C[Hybrid Retrieval]
+    C --> D[Cross-Encoder reranker]
+    D --> E[最终结果]
+```
+
+### 2.2.2.Query rewrite
 
 在检索前对用户原始 query 做语义/词汇扩展，提升召回鲁棒性。
 
@@ -71,7 +158,7 @@ flowchart LR
 - **进程级 LRU (Least Recently Used, 最近最少使用) 缓存**：同一 query 二次命中零开销，避免重复花 LLM token。
 - **不依赖 chat_history**：指代消解由上层 Agent 在 query 入参前自行完成；本模块对会话状态零耦合，便于独立测试与离线评估复用。
 
-### 2.2.2.Hybrid Retrieval
+### 2.2.3.Hybrid Retrieval
 
 在 Dense + BM25 双索引基础上，对多 query 并行召回结果做"同 collection 内分级融合 + 跨 collection 公平合并 + per-model 阈值过滤"。
 
@@ -96,7 +183,7 @@ flowchart TD
 - **BM25 命中豁免 dense 阈值**：BM25 是强字面信号，若被 dense 低分误杀，将失去"无语义符号"召回的全部价值。
 - **检索器溯源**：每条 Hit 保留"由哪些检索器召回"的字段，下游可做差异化阈值策略，也便于评估与排查。
 
-### 2.2.3.Cross-Encoder reranker
+### 2.2.4.Cross-Encoder reranker
 
 对 Bi-Encoder 召回的候选做二阶段精排，弥补"召回阶段双塔模型缺乏 token 级 query-doc 交互"的固有缺陷。
 
@@ -121,7 +208,7 @@ flowchart TD
 - **加载失败降级不崩溃**：模型缺失 / 网络不可达时返回召回前 top_k 条，主链路继续工作并 warning 给出修复指引（offline 开关、模型名拼写、备选轻量模型）。
 - **Per-source 去重置后**：放在 reranker 之后保证"被去重的是真的低质重复"，而不是先按 source 限流再被精排选中——顺序颠倒会废掉一部分精排成果。
 
-### 2.2.4.Evaluation
+## 2.3.Evaluation
 
 用"黄金集（golden set）"对当前 RAG 配置做端到端检索评估，输出指标 + 实验上下文，支撑离线调优、回归对比与 ablation 实验。
 
@@ -155,14 +242,14 @@ flowchart LR
 - **Golden 集题型可分组**：每条 item 可选 `type` 字段（baseline / rerank / rewrite / hyde），便于做 per-type 统计——某组件只在自己擅长的题型上有增益时，全量指标会被稀释，按 type 拆分才看得见。
 
 
-## 2.3.代码阅读指导
+## 2.3.代码
 
-### 2.3.1.文件职责速查
+### 2.4.1.文件职责速查
 
 | 路径 | 角色 | 主要入口 |
 |---|---|---|
 | `src/rag/parser.py` | 多格式 → 纯文本（txt/md/html/pdf/docx/pptx/xlsx + OCR 兜底）| `parse_file(path)` |
-| `src/rag/splitter.py` | 结构化分块（识别 Markdown 标题与 PDF 页号作为锚点，注入面包屑(breadcrumb)）| `split_structured(text, ...)` |
+| `src/rag/splitter.py` | 结构化分块（识别 Markdown 标题与 PDF 页号作为锚点，把父级标题路径作为前缀注入 chunk 文本）| `split_structured(text, ...)` |
 | `src/rag/ingest.py` | 入库主流程（遍历目录 → parse → split → 双索引写盘 + 幂等增量）| `ingest_all(...)` · CLI `python -m src.rag.ingest` |
 | `src/rag/bm25_index.py` | BM25 Okapi 自实现（倒排索引 + bigram 中文分词 + pickle 持久化）| `get_index(coll)` |
 | `src/rag/query_rewriter.py` | 三轴 query 改写（Multi-Query / HyDE / 翻译轴），LRU 缓存包装 | `expand_queries(query)` |
@@ -171,7 +258,7 @@ flowchart LR
 | `tools/rag_eval/runner.py` | 端到端检索评估（黄金集 → 指标 → Markdown 报告 + `.log` sidecar）| `python -m tools.rag_eval.runner` |
 | `tests/test_rag.py` | 单元 + 集成测试（chunk / 阈值 / reranker / search 端到端）| `pytest tests/test_rag.py` |
 
-### 2.3.2.两条主调用链
+### 2.4.2.两条主调用链
 
 **生产路径**（Agent 在线检索）：
 
@@ -198,7 +285,7 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
        → 落盘 Markdown 报告 + 同名 .log sidecar
 ```
 
-### 2.3.3.推荐阅读顺序
+### 2.4.3.推荐阅读顺序
 
 **先读"主线"**，掌握"用户 query 进来后到底走了哪几步"：
 
@@ -214,7 +301,7 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 - 想加 / 改指标 → `tools/rag_eval/runner.py · evaluate()` 与 `_render_markdown()`
 - 想理解入库幂等性 → `ingest.py · ingest_all()` 的 `content_sha1` 比对逻辑
 
-### 2.3.4.常见改动落点
+### 2.4.4.常见改动落点
 
 | 需求 | 改动文件 | 关键函数 / 配置 |
 |---|---|---|

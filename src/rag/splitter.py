@@ -11,8 +11,8 @@
     2. split_structured(text, size, overlap)
        — 在 split_text 之上识别两类锚点并保留结构信息：
          · "[[PAGE:N]]" 独占一行（由 parser 在 PDF/PPTX 解析时插入）→ 切分点 + page_no 元数据；
-         · Markdown 风格的 "#"~"######" 标题行 → 切分点 + heading_path 面包屑。
-       对每个 section.body 走 split_text；最终 Chunk.text 自动注入"父级标题面包屑"前缀，
+         · Markdown 风格的 "#"~"######" 标题行 → 切分点 + heading_path 路径。
+       对每个 section.body 走 split_text；最终 Chunk.text 自动注入"父级标题路径"前缀，
        让 chunk 自带"我在第几章/第几页/讲什么"的语义锚点，显著提升相似度命中率。
 """
 
@@ -33,7 +33,7 @@ class Chunk:
     结构化分块单元，由 split_structured() 产出，供 ingest 写入向量库。
 
     Attributes:
-        text:         已注入"父级标题面包屑 + 空行 + 正文"前缀的最终文本，直接用于 embedding。
+        text:         已注入"父级标题路径 + 空行 + 正文"前缀的最终文本，直接用于 embedding。
         heading_path: 当前 chunk 所属的标题层级路径（按文档顺序），如 ["第 5 章", "5.2 物理层"]。
         page_no:      所属页号（PDF/PPTX 解析时通过 [[PAGE:N]] 标记带入），无则为 None。
         line_start:   1-based 起始行号（在原始解析文本中的行号，用于人工溯源）。
@@ -159,7 +159,7 @@ def split_text(text: str, chunk_size: int, overlap: int) -> list[str]:
 
 
 def _heading_breadcrumb(stack: list[tuple[int, str]]) -> str:
-    """把 (level, title) 栈拼成 Markdown 风格的面包屑前缀。"""
+    """把 (level, title) 栈拼成 Markdown 风格的路径前缀。"""
     if not stack:
         return ""
     return "\n".join(f"{'#' * level} {title}" for level, title in stack)
@@ -173,7 +173,7 @@ def split_structured(text: str, chunk_size: int, overlap: int) -> list[Chunk]:
       1. 逐行扫描，维护 (current_page, heading_stack) 状态。
       2. 标题行与 PAGE 行作为"分段点"：碰到时 flush 当前 body 为一个 section。
       3. 标题行同时更新 heading_stack（新 level >= 栈顶 level 的旧标题被弹出）。
-      4. 对每个 section.body 调用 split_text 切成多块；每块前缀注入面包屑。
+      4. 对每个 section.body 调用 split_text 切成多块；每块前缀注入路径。
     """
     if not text or not text.strip():
         return []
@@ -221,7 +221,7 @@ def split_structured(text: str, chunk_size: int, overlap: int) -> list[Chunk]:
         if not body_text:
             continue
         breadcrumb = _heading_breadcrumb(snap_stack)
-        # 给正文留出 chunk 预算：减去面包屑及空行长度，但下限 chunk_size/2 防止退化
+        # 给正文留出 chunk 预算：减去路径及空行长度，但下限 chunk_size/2 防止退化
         budget = chunk_size - (len(breadcrumb) + 2 if breadcrumb else 0)
         budget = max(budget, max(chunk_size // 2, 64))
 
