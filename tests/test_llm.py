@@ -119,9 +119,16 @@ class TestAllProviders:
         actual = set(config.PROVIDER_CONFIGS.keys())
         assert expected == actual, f"缺少 provider: {expected - actual}"
 
+    # 默认只跑 kimi + qwen；其余 6 个 provider 标 extended_providers，默认 deselect。
+    # 跑全量：pytest -m "extended_providers" tests/test_llm.py
     @pytest.mark.parametrize("provider", [
-        "kimi", "deepseek", "qwen", "minimax", "glm",   # 国内
-        "openai", "grok", "claude",                       # 国外
+        "kimi", "qwen",
+        pytest.param("deepseek", marks=pytest.mark.extended_providers),
+        pytest.param("minimax",  marks=pytest.mark.extended_providers),
+        pytest.param("glm",      marks=pytest.mark.extended_providers),
+        pytest.param("openai",   marks=pytest.mark.extended_providers),
+        pytest.param("grok",     marks=pytest.mark.extended_providers),
+        pytest.param("claude",   marks=pytest.mark.extended_providers),
     ])
     def test_provider_has_model_and_url(self, provider: str) -> None:
         """每个 provider 都必须配置 model 和 base_url（claude 除外）"""
@@ -131,8 +138,13 @@ class TestAllProviders:
             assert cfg.base_url, f"[{provider}] base_url 未配置"
 
     @pytest.mark.parametrize("provider", [
-        "kimi", "deepseek", "qwen", "minimax", "glm",
-        "openai", "grok", "claude",
+        "kimi", "qwen",
+        pytest.param("deepseek", marks=pytest.mark.extended_providers),
+        pytest.param("minimax",  marks=pytest.mark.extended_providers),
+        pytest.param("glm",      marks=pytest.mark.extended_providers),
+        pytest.param("openai",   marks=pytest.mark.extended_providers),
+        pytest.param("grok",     marks=pytest.mark.extended_providers),
+        pytest.param("claude",   marks=pytest.mark.extended_providers),
     ])
     def test_provider_api_key_not_empty(self, provider: str) -> None:
         """每个非 ollama provider 的 api_key 都必须在 .env 中配置"""
@@ -183,11 +195,22 @@ class TestProviderConfigExtraBody:
         cfg = config.PROVIDER_CONFIGS["qwen"]
         assert cfg.extra_body == {"enable_thinking": False}
 
-    def test_other_providers_have_no_extra_body(self) -> None:
-        """其余 provider 不需要 extra_body，应为 None。"""
-        for name in ("kimi", "deepseek", "openai", "claude", "glm", "minimax"):
-            cfg = config.PROVIDER_CONFIGS[name]
-            assert cfg.extra_body is None, f"[{name}] extra_body 应为 None"
+    def test_kimi_extra_body_disables_thinking(self) -> None:
+        """kimi-k2.6 默认会开启 thinking，需通过 extra_body 显式关闭，避免非流式调用 400。"""
+        cfg = config.PROVIDER_CONFIGS["kimi"]
+        assert cfg.extra_body == {"thinking": {"type": "disabled"}}
+
+    @pytest.mark.parametrize("name", [
+        pytest.param("deepseek", marks=pytest.mark.extended_providers),
+        pytest.param("openai",   marks=pytest.mark.extended_providers),
+        pytest.param("claude",   marks=pytest.mark.extended_providers),
+        pytest.param("glm",      marks=pytest.mark.extended_providers),
+        pytest.param("minimax",  marks=pytest.mark.extended_providers),
+    ])
+    def test_other_providers_have_no_extra_body(self, name: str) -> None:
+        """除 qwen / kimi 外的 provider 不需要 extra_body，应为 None。"""
+        cfg = config.PROVIDER_CONFIGS[name]
+        assert cfg.extra_body is None, f"[{name}] extra_body 应为 None"
 
     def test_thinking_enabled_is_bool(self) -> None:
         """THINKING_ENABLED 应为 bool 类型。"""

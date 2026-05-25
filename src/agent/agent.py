@@ -228,10 +228,19 @@ class Agent:
         )
 
     def _on_thinking_chunk(self, chunk: str) -> None:
-        """思考过程流式回调，首个 chunk 先打印头部。"""
+        """
+        思考过程流式回调，首个 chunk 先打印头部。
+
+        订阅者异常隔离：用户传入的 callback 抛异常不应中断 Agent 主流程，
+        吞掉异常并降级到 CLI stdout（保证 thinking 输出可见）。
+        """
         if self._thinking_chunk_callback is not None:
             self._thinking_started = True
-            self._thinking_chunk_callback(chunk)
+            try:
+                self._thinking_chunk_callback(chunk)
+            except Exception as exc:
+                logger.warning("[Agent] thinking callback 抛异常，已隔离并降级到 stdout: %s", exc)
+                print(chunk, end="", flush=True)
             return
         if not self._thinking_started:
             print("\n\U0001f4ad 思考中...\n", flush=True)

@@ -5,7 +5,7 @@
 支持重复运行（upsert），文档更新后重新运行即可，不会重复入库。
 不同 embedding 模型使用独立的 ChromaDB collection，互不干扰。
 
-使用方式（独立脚本入口，等价于 main.py 里的 /ingest 交互命令）：
+使用方式（独立脚本入口，与 tools/rag_cli.py ingest 等价的底层调用）：
     python -m src.rag.ingest                                              # 默认目录 + 默认模型
     python -m src.rag.ingest --model zh                                   # 使用中文模型
     python -m src.rag.ingest --docs-dir ./datasets/data_zh --model zh
@@ -329,7 +329,7 @@ def _build_arg_parser() -> "argparse.ArgumentParser":
     p = argparse.ArgumentParser(
         prog="python -m src.rag.ingest",
         description=(
-            "扫描 datasets/ 目录并入库到 ChromaDB（与 main.py 里的 /ingest 命令等价）。"
+            "扫描 datasets/ 目录并入库到 ChromaDB（tools/rag_cli.py ingest 的底层调用）。"
             "支持 upsert，重复运行不会产生重复 chunk。"
         ),
     )

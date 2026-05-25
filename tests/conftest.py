@@ -6,7 +6,16 @@ autouse fixture：将 Agent 共享内存替换为每个测试独立的临时 SQL
 
 同样隔离 UserMemoryStore：测试期间关闭用户记忆功能，避免额外 LLM 调用
 干扰 mock call count，也避免向真实 DB 写入测试数据。
+
+模块 import 顺序：
+    必须先 load_dotenv() 再 import src.* —— src.config 在 import 时即读取
+    os.getenv()，否则 PROVIDER_CONFIGS 中的 api_key 全为空字符串，会让
+    test_provider_api_key_not_empty / test_get_active_config_returns_provider_config
+    等"配置存在性"测试统一 fail。与 main.py / chainlit_app.py 同源行为。
 """
+from dotenv import load_dotenv
+load_dotenv(override=True)
+
 import pytest
 
 import src.agent.agent as _agent_module

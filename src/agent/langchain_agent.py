@@ -61,9 +61,6 @@ class LangChainAgent:
         self._history.add_message(AIMessage(content=answer))
         return answer
 
-    def chat(self, user_input: str) -> str:
-        return self.run(user_input)
-
     def activate_skill(self, name: str, body: str) -> bool:
         open_tag = f'<skill_content name="{name}">'
         if open_tag in self._system_prompt:

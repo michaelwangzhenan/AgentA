@@ -209,20 +209,8 @@ class TestAgentIntegration:
 
 
 class TestSystemPromptWebSearch:
-    """测试 SYSTEM_PROMPT 包含强制联网搜索策略和国内网站优先引导"""
-
-    def test_system_prompt_has_mandatory_search_strategy(self) -> None:
-        """SYSTEM_PROMPT 应包含强制搜索策略：必须、fetch_url、国外备选"""
-        assert "必须" in SYSTEM_PROMPT, "SYSTEM_PROMPT 应包含'必须'强制策略"
-        assert "fetch_url" in SYSTEM_PROMPT
-        assert "国外" in SYSTEM_PROMPT, "SYSTEM_PROMPT 应提及国外网站作为备选"
-
-    def test_system_prompt_has_domestic_site_guidance(self) -> None:
-        """SYSTEM_PROMPT 应包含国内优先引导和至少 3 个国内网站"""
-        assert "国内" in SYSTEM_PROMPT, "SYSTEM_PROMPT 应包含'国内'字样"
-        domestic_keywords = ["xinhuanet", "baidu", "zhihu", "segmentfault", "csdn", "people"]
-        matched = [kw for kw in domestic_keywords if kw in SYSTEM_PROMPT]
-        assert len(matched) >= 3, f"SYSTEM_PROMPT 应列出至少3个国内网站，实际匹配：{matched}"
+    """SYSTEM_PROMPT 字面 string-match 测试已删除（脆性高、prompt 迭代受阻；
+    业务策略改由 RAG 评估 / Agent 评估端到端验证）。本类只保留行为级测试。"""
 
     def test_agent_calls_fetch_url_when_knowledge_empty(self) -> None:
         """知识库返回空时，Agent 应主动调用 fetch_url（通过 mock 验证）"""

@@ -137,28 +137,6 @@ def main() -> None:
             case "/help":
                 print(HELP_TEXT)
                 continue
-            case "/ingest":
-                # 解析 /ingest [<目录>] [-m <模型>]
-                # 支持: /ingest  /ingest ./datasets/data_zh  /ingest ./datasets/data_zh -m zh  /ingest -m zh
-                raw_args = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""
-                docs_dir: str | None = None
-                model_alias: str | None = None
-
-                # 简单手动解析，避免引入 argparse
-                tokens = raw_args.split()
-                i = 0
-                while i < len(tokens):
-                    if tokens[i] in ("-m", "--model") and i + 1 < len(tokens):
-                        model_alias = tokens[i + 1]
-                        i += 2
-                    elif not tokens[i].startswith("-"):
-                        docs_dir = tokens[i]
-                        i += 1
-                    else:
-                        i += 1  # 忽略未知标志
-
-                handlers.run_ingest(docs_dir=docs_dir, model=model_alias)
-                continue
             case "/clear":
                 chat_history.clear(agent.session_id)
                 agent = handlers.make_agent(chat_history, skills_map, thinking_cfg, SYSTEM_PROMPT, user_memory=user_memory)

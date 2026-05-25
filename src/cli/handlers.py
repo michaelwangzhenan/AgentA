@@ -54,37 +54,10 @@ def _conversation_messages(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def quit_sys(chat_history: ChatHistory, user_memory: UserMemoryStore | None) -> None:
-    import sys
     chat_history.close()
     if user_memory is not None:
         user_memory.close()
     sys.exit(0)
-
-def run_ingest(
-    docs_dir: str | None = None,
-    model: str | None = None,
-    out: OutputFn = _stdout,
-) -> None:
-    """在 CLI 中触发文档入库，可指定文档目录和 embedding 模型。"""
-    import os
-    target_dir = docs_dir or config.DOCS_DIR
-    target_model = model or config.DEFAULT_EMBEDDING_ALIAS
-    if not os.path.exists(target_dir):
-        out(f"❌ 目录不存在: {target_dir}\n")
-        return
-    if not os.path.isdir(target_dir):
-        out(f"❌ 路径不是目录: {target_dir}\n")
-        return
-    model_name, collection_name = config.resolve_embedding(target_model)
-    out(f"\n⏳ 正在扫描 {target_dir}")
-    out(f"   Embedding 模型: {model_name}  →  collection: {collection_name}\n")
-    try:
-        from src.rag.ingest import ingest_all
-        ingest_all(docs_dir=target_dir, model=target_model)
-        out("")
-    except Exception as e:
-        out(f"❌ 入库失败: {e}\n")
-
 
 def save_history(
     chat_history: ChatHistory,

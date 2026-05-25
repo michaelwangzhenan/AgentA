@@ -4,8 +4,10 @@
 RAG 知识库入库工具
 
 启动 AgentA（CLI / WebUI）前，用本脚本把 ./datasets/ 下的私有文档一次性灌入向量库 +
-BM25 倒排索引。底层复用 src.rag.ingest.ingest_all（与 main.py 中的 /ingest 等价），
+BM25 倒排索引。底层复用 src.rag.ingest.ingest_all，
 额外补齐了"清空旧库"和"列出当前库状态"两个工程化操作。
+
+注：原 CLI `/ingest` 交互命令已废弃，RAG 运维全部走本工具。
 
 CLI 用法（三个原语：读 / 写 / 抹）：
     python tools/rag_cli.py -h                    查看帮助
@@ -654,7 +656,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "ingest",
         help="幂等增量入库（content_sha1 一致的文件自动跳过；新增/变更则重 embed）。",
         description=(
-            "扫描 datasets/ 目录并 upsert 到对应 alias 的 collection，等价 main.py 的 /ingest。"
+            "扫描 datasets/ 目录并 upsert 到对应 alias 的 collection。"
             "本身已是幂等增量，无需 append/rebuild 的概念区分。"
         ),
     )

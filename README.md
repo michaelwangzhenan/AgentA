@@ -56,18 +56,24 @@ cp .env.example .env
 
 ### 2.4.启动 AgentA
 
-CLI 模式：
+首次使用先入库（详见 [4.1.RAG 入库](#41rag-入库)）：
 
 ```bash
-python main.py
-# 进入后输入 /help 查看全部命令；首次使用先 /ingest 把 ./datasets/data_en 入库
+python -m tools.rag_cli ingest -m m3
 ```
 
-WebUI 模式（Chainlit）：
+WebUI 模式（Chainlit，推荐）：
 
 ```bash
 chainlit run chainlit_app.py --port 8000
 # 浏览器打开 http://localhost:8000
+```
+
+CLI 模式（开发调试 / 无 GUI 场景）：
+
+```bash
+python main.py
+# 进入后输入 /help 查看全部命令
 ```
 
 ## 3.主要配置
@@ -99,7 +105,7 @@ USER_MEMORY_ENABLED=true          # 跨 session 用户记忆
 
 ### 4.1.RAG 入库
 
-`tools/rag_cli.py` 把 `./datasets/` 下文档灌入向量库 + BM25 索引（与 `/ingest` 等价），额外提供清库与状态查询：
+`tools/rag_cli.py` 把 `./datasets/` 下文档灌入向量库 + BM25 索引，并提供清库与状态查询：
 
 ```bash
 python -m tools.rag_cli status                                 # 查看每个 collection 的当前状态
@@ -135,14 +141,18 @@ python -m tools.download_models 3    # 下载指定模型(编号详见 -l 输出
 
 ### 4.4.UT 测试
 
-`tools/ut.sh` 按模块封装了 pytest 调用：
+`tools/ut.sh` 封装了 pytest 调用，分两类：**档位**（按 marker 过滤）+ **模块**（按文件，调试用）。
 
 ```bash
-bash tools/ut.sh -h          # 查看全部分组
-bash tools/ut.sh -not        # 跑除集成测试外的全部 UT
-bash tools/ut.sh -rag        # 仅跑 RAG（分块 / 双语检索 / Reranker）
-bash tools/ut.sh -agent      # 仅跑 Agent ReAct 循环
+bash tools/ut.sh -h          # 查看帮助
+bash tools/ut.sh -fast       # 默认case，跳过 integration/langchain/autogpt/extended_providers
+bash tools/ut.sh -ext        # 默认 + 其余 7 个 LLM provider
+bash tools/ut.sh -int        # 仅集成测试（需 .env 中相应真实 API key）
+bash tools/ut.sh -all        # 全部case
+
 ```
+
+> Windows 用户也可直接 `python -m pytest tests/` ，效果等同 `-fast`（pytest.ini 已配 marker 过滤）。
 
 ### 4.5.UI 调试
 

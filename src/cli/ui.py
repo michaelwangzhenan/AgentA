@@ -14,8 +14,6 @@ BANNER = """
 HELP_TEXT = """
 可用命令：
   /help                      显示本帮助信息
-  /ingest                    使用默认模型扫描默认目录入库
-  /ingest <目录> -m <模型>   指定目录和模型（zh/en）入库
   /clear                     清空当前 session 的对话历史并重置 Agent
   /history                   查看当前 session 的历史对话摘要
   /session                   列出所有历史 session

@@ -106,16 +106,6 @@ class TestFetchUrl:
         assert result.status == "error"
 
 
-class TestFetchUrlDescriptionGuidance:
-    """测试 fetch_url description 包含国内网站优先引导说明"""
-
-    def test_fetch_url_description_has_domestic_guidance(self) -> None:
-        """description 应包含国内网站关键词（≥3个）、国内优先和国外备选提示"""
-        tool = next(t for t in TOOLS if t["function"]["name"] == "fetch_url")
-        desc = tool["function"]["description"]
-
-        domestic_keywords = ["xinhuanet", "baidu", "zhihu", "segmentfault", "csdn", "people"]
-        matched = [kw for kw in domestic_keywords if kw in desc]
-        assert len(matched) >= 3, f"description 应包含至少3个国内网站关键词，实际匹配：{matched}"
-        assert "国内" in desc, "description 应包含'国内'字样"
-        assert "国外" in desc, "description 应提及国外网站作为备选"
+# TestFetchUrlDescriptionGuidance 已删除：原断言 fetch_url description 内必须含
+# "国内 / 国外 / baidu / zhihu / csdn ..." 等字串，属于脆性 string-match 测试，
+# description 已精简，相关引导策略改由 SYSTEM_PROMPT + Agent 行为测覆盖。

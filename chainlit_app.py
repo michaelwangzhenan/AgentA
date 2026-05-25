@@ -21,9 +21,9 @@ from starlette.responses import Response
 from dotenv import load_dotenv
 
 try:
-    from chainlit.input_widget import Select, Slider, Switch, TextInput
+    from chainlit.input_widget import Select, Slider, Switch
 except Exception:  # pragma: no cover - 兼容旧版 chainlit
-    Select = Slider = Switch = TextInput = None  # type: ignore[assignment]
+    Select = Slider = Switch = None  # type: ignore[assignment]
 
 # 消除 HuggingFace tokenizer 的 FutureWarning
 warnings.filterwarnings("ignore", category=FutureWarning, module="transformers")
@@ -101,8 +101,6 @@ class AppState:
         user_memory: UserMemoryStore | None,
         agent: Any,
         active_prompt_name: str | None = None,
-        ingest_docs_dir: str = config.DOCS_DIR,
-        ingest_model_alias: str = config.DEFAULT_EMBEDDING_ALIAS,
     ) -> None:
         self.chat_history = chat_history
         self.custom_prompts = custom_prompts
@@ -112,8 +110,6 @@ class AppState:
         self.user_memory = user_memory
         self.agent = agent
         self.active_prompt_name = active_prompt_name
-        self.ingest_docs_dir = ingest_docs_dir
-        self.ingest_model_alias = ingest_model_alias
 
 
 class _OutputCollector:
@@ -164,25 +160,8 @@ def _get_actions() -> list[cl.Action]:
     return []
 
 
-def _parse_ingest_args(raw_args: str) -> tuple[str | None, str | None]:
-    docs_dir: str | None = None
-    model_alias: str | None = None
-    tokens = raw_args.split()
-    i = 0
-    while i < len(tokens):
-        if tokens[i] in ("-m", "--model") and i + 1 < len(tokens):
-            model_alias = tokens[i + 1]
-            i += 2
-        elif not tokens[i].startswith("-"):
-            docs_dir = tokens[i]
-            i += 1
-        else:
-            i += 1
-    return docs_dir, model_alias
-
-
 def _runtime_settings_widgets(state: AppState) -> list[Any]:
-    if Select is None or Switch is None or Slider is None or TextInput is None:
+    if Select is None or Switch is None or Slider is None:
         return []
     providers = sorted(config.PROVIDER_CONFIGS.keys())
     widgets: list[Any] = [
@@ -209,13 +188,6 @@ def _runtime_settings_widgets(state: AppState) -> list[Any]:
             max=10,
             step=1,
             initial=int(config.RAG_TOP_K),
-        ),
-        TextInput(id="ingest_docs_dir", label="Ingest Docs Dir", initial=state.ingest_docs_dir),
-        Select(
-            id="ingest_model_alias",
-            label="Ingest Embedding Alias",
-            values=list(config.EMBEDDING_MODELS.keys()),
-            initial_value=state.ingest_model_alias if state.ingest_model_alias in config.EMBEDDING_MODELS else config.DEFAULT_EMBEDDING_ALIAS,
         ),
     ]
     return widgets
@@ -313,14 +285,6 @@ async def _handle_command(state: AppState, user_input: str) -> bool:
     match cmd_name:
         case "/help":
             await cl.Message(content=f"```text\n{HELP_TEXT}\n```", actions=_get_actions()).send()
-            return True
-        case "/ingest":
-            raw_args = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""
-            docs_dir, model_alias = _parse_ingest_args(raw_args)
-            docs_dir = docs_dir or state.ingest_docs_dir
-            model_alias = model_alias or state.ingest_model_alias
-            await asyncio.to_thread(handlers.run_ingest, docs_dir, model_alias, collector.write)
-            await _send_collected("入库结果", collector, actions=_get_actions())
             return True
         case "/clear":
             await asyncio.to_thread(state.chat_history.clear, state.agent.session_id)
@@ -540,13 +504,6 @@ async def on_settings_update(settings: dict[str, Any]) -> None:
         config.RAG_TOP_K = int(settings.get("rag_top_k", config.RAG_TOP_K))
     except (TypeError, ValueError):
         pass
-
-    docs_dir = settings.get("ingest_docs_dir")
-    if isinstance(docs_dir, str) and docs_dir.strip():
-        state.ingest_docs_dir = docs_dir.strip()
-    model_alias = settings.get("ingest_model_alias")
-    if isinstance(model_alias, str) and model_alias in config.EMBEDDING_MODELS:
-        state.ingest_model_alias = model_alias
 
     _set_state(state)
     await cl.Message(

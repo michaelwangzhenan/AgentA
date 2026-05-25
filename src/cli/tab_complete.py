@@ -19,9 +19,6 @@ from src.memory.chat_history import ChatHistory
 # 所有静态可补全命令（无需参数，或常用参数组合）
 CLI_COMMANDS: list[str] = [
     "/help",
-    "/ingest",
-    "/ingest -m zh",
-    "/ingest -m en",
     "/clear",
     "/history",
     "/session",

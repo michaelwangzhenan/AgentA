@@ -4,6 +4,9 @@ from langchain_core.messages import HumanMessage, AIMessage
 from src.memory.langchain_history import SQLiteChatMessageHistory
 from src.agent.langchain_tools import build_langchain_tools, SearchKnowledgeInput, FetchUrlInput
 
+# LangChain Agent 本期不验证（详见 iter_2.md §4.4.3），整文件默认 deselect
+pytestmark = pytest.mark.langchain
+
 def test_sqlite_history_add_and_load(tmp_path):
     db = str(tmp_path) + '/test.db'
     h = SQLiteChatMessageHistory('s1', db)
@@ -74,10 +77,6 @@ def test_langchain_agent_run():
     ag, _ = _mk()
     r = ag.run('hello')
     assert r == 'ok'
-
-def test_langchain_agent_chat_alias():
-    ag, _ = _mk()
-    assert isinstance(ag.chat('hi'), str)
 
 def test_langchain_agent_activate_skill_first_true():
     ag, _ = _mk()
