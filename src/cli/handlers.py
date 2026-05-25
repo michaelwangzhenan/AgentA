@@ -12,7 +12,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import src.config as config
-from src.memory.chat_history import ChatHistory
+from src.memory.chat_history import ChatHistoryStore
 from src.memory.user_memory import UserMemoryStore
 
 # 历史记录预览截断长度
@@ -53,14 +53,14 @@ def _conversation_messages(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
-def quit_sys(chat_history: ChatHistory, user_memory: UserMemoryStore | None) -> None:
+def quit_sys(chat_history: ChatHistoryStore, user_memory: UserMemoryStore | None) -> None:
     chat_history.close()
     if user_memory is not None:
         user_memory.close()
     sys.exit(0)
 
 def save_history(
-    chat_history: ChatHistory,
+    chat_history: ChatHistoryStore,
     session_id: str,
     filename: str,
     out: OutputFn = _stdout,
@@ -107,7 +107,7 @@ def save_history(
 
 
 def show_history(
-    chat_history: ChatHistory,
+    chat_history: ChatHistoryStore,
     session_id: str,
     out: OutputFn = _stdout,
 ) -> None:
@@ -125,7 +125,7 @@ def show_history(
     out("")
 
 
-def list_sessions(chat_history: ChatHistory, out: OutputFn = _stdout) -> None:
+def list_sessions(chat_history: ChatHistoryStore, out: OutputFn = _stdout) -> None:
     """列出所有历史 session。"""
     sessions = chat_history.list_sessions()
     if not sessions:
@@ -144,7 +144,7 @@ def list_sessions(chat_history: ChatHistory, out: OutputFn = _stdout) -> None:
 
 
 def make_agent(
-    chat_history: ChatHistory,
+    chat_history: ChatHistoryStore,
     skills_map: "dict[str, SkillInfo]",
     thinking_cfg: "ThinkingConfig",
     system_prompt: str,
@@ -216,9 +216,16 @@ def run_query(agent: "Agent", question: str, out: OutputFn = _stdout) -> None:
         sys.stdout.write(chunk)
         sys.stdout.flush()
 
-    set_token_cb = getattr(agent, "set_token_callback", None)
-    if set_token_cb is not None:
-        set_token_cb(_on_token_chunk)
+    # 用 AgentAPI 的统一事件入口：按 event.type 派发到 _on_token_chunk（仅 token_chunk）。
+    # 其它事件（thinking_chunk / tool_call_* / final_answer / error / info）在 CLI 这里不渲染。
+    set_event_cb = getattr(agent, "set_event_callback", None)
+
+    def _event_router(event) -> None:
+        if event.type == "token_chunk":
+            _on_token_chunk(event.payload.get("text", ""))
+
+    if set_event_cb is not None:
+        set_event_cb(_event_router)
     try:
         reply = agent.run(question)
         safe = _sanitize_cli_text(reply).strip()
@@ -238,8 +245,8 @@ def run_query(agent: "Agent", question: str, out: OutputFn = _stdout) -> None:
     except Exception as e:
         out(f"❌ 出错了: {e}\n")
     finally:
-        if set_token_cb is not None:
-            set_token_cb(None)
+        if set_event_cb is not None:
+            set_event_cb(None)
 
 
 def handle_thinking_cfg(
@@ -280,7 +287,7 @@ def handle_thinking_cfg(
 
 
 def switch_session(
-    chat_history: ChatHistory,
+    chat_history: ChatHistoryStore,
     session_arg: str,
     custom_prompts: dict[str, str],
     default_system_prompt: str,

@@ -13,10 +13,10 @@ usage() {
               跳过 integration / langchain / autogpt / extended_providers
   -ext        默认 + extended_providers（kimi/qwen 以外 7 个 LLM provider）
   -int        仅 integration（真实 API/网络，需配置 .env 中相应 key）
-  -lc         仅 langchain 标记的用例（环境需有 langchain.agents.create_agent）
+  -lc         仅 langchain 标记的用例（用 langchain 0.3 的 AgentExecutor + create_tool_calling_agent）
   -auto       仅 autogpt 标记的用例
   -all        全部，含所有 marker
-  -helper     重构安全, 5 个文件（history / memory / event / fmt / proto）
+  -helper     重构安全, 6 个文件（history / memory / event / events / fmt / proto）
 
 按模块（单文件，调试用）:
   -llm        LLM 配置 & Provider             (tests/test_llm.py)
@@ -30,9 +30,10 @@ usage() {
   -save       对话导出 _save_history           (tests/test_save_history.py)
   -history    HistoryManager 行为基线           (tests/test_history_manager.py)
   -mem        MemoryManager 注入/抽取           (tests/test_memory_manager.py)
-  -event      Event callback 契约               (tests/test_event_callbacks.py)
+  -event      EventBus 行为契约                  (tests/test_event_bus.py)
+  -events     Agent loop 事件流契约              (tests/test_agent_events.py)
   -fmt        format_search_results            (tests/test_format_search_results.py)
-  -proto      BaseAgent Protocol 一致性         (tests/test_agent_protocol.py)
+  -proto      AgentAPI 一致性                    (tests/test_agent_protocol.py)
 EOF
 }
 
@@ -47,8 +48,8 @@ case "$1" in
     -auto)   $PYTEST -m "autogpt" ;;
     -all)    $PYTEST -m "" ;;
     -helper) $PYTEST tests/test_history_manager.py tests/test_memory_manager.py \
-                     tests/test_event_callbacks.py tests/test_format_search_results.py \
-                     tests/test_agent_protocol.py ;;
+                     tests/test_event_bus.py tests/test_agent_events.py \
+                     tests/test_format_search_results.py tests/test_agent_protocol.py ;;
     # ── 按模块 ─────────────────────────────────────────────
     -llm)     $PYTEST tests/test_llm.py ;;
     -parser)  $PYTEST tests/test_parser.py ;;
@@ -61,7 +62,8 @@ case "$1" in
     -save)    $PYTEST tests/test_save_history.py ;;
     -history) $PYTEST tests/test_history_manager.py ;;
     -mem)     $PYTEST tests/test_memory_manager.py ;;
-    -event)   $PYTEST tests/test_event_callbacks.py ;;
+    -event)   $PYTEST tests/test_event_bus.py ;;
+    -events)  $PYTEST tests/test_agent_events.py ;;
     -fmt)     $PYTEST tests/test_format_search_results.py ;;
     -proto)   $PYTEST tests/test_agent_protocol.py ;;
     *)

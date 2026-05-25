@@ -24,7 +24,7 @@ import pytest
 from src.agent.autogpt_agent import AutoGPTAgent
 from src.agent.agent import ThinkingConfig, TokenUsage, SYSTEM_PROMPT
 from src.agent.tools import ToolResult
-from src.memory.chat_history import ChatHistory
+from src.memory.chat_history import ChatHistoryStore
 
 # AutoGPT Agent 本期不验证（详见 iter_2.md §4.4.3），整文件默认 deselect
 pytestmark = pytest.mark.autogpt
@@ -73,8 +73,8 @@ def _make_agent(
     verbose: bool = False,
     skills=None,
 ) -> AutoGPTAgent:
-    """工厂：构建一个使用临时 DB 的 AutoGPTAgent（不依赖全局 ChatHistory）。"""
-    ch = ChatHistory(db_path=str(tmp_path / "ag.db"))
+    """工厂：构建一个使用临时 DB 的 AutoGPTAgent（不依赖全局 ChatHistoryStore）。"""
+    ch = ChatHistoryStore(db_path=str(tmp_path / "ag.db"))
     ag = AutoGPTAgent(
         verbose=verbose,
         session_id=session_id,
@@ -123,7 +123,7 @@ class TestAutoGPTInit:
 
     def test_thinking_cfg_explicit(self, tmp_path):
         cfg = ThinkingConfig(enabled=True, budget=8000)
-        ch = ChatHistory(db_path=str(tmp_path / "ag.db"))
+        ch = ChatHistoryStore(db_path=str(tmp_path / "ag.db"))
         ag = AutoGPTAgent(thinking_config=cfg, chat_history=ch, verbose=False)
         assert ag.thinking_cfg.enabled is True
         assert ag.thinking_cfg.budget == 8000
@@ -149,12 +149,12 @@ class TestAutoGPTInit:
         assert "coder" in ag._system_prompt or "编程助手" in ag._system_prompt
 
     def test_system_prompt_default(self, tmp_path):
-        ch = ChatHistory(db_path=str(tmp_path / "ag.db"))
+        ch = ChatHistoryStore(db_path=str(tmp_path / "ag.db"))
         ag = AutoGPTAgent(chat_history=ch, verbose=False)
         assert ag._system_prompt == SYSTEM_PROMPT
 
     def test_system_prompt_custom(self, tmp_path):
-        ch = ChatHistory(db_path=str(tmp_path / "ag.db"))
+        ch = ChatHistoryStore(db_path=str(tmp_path / "ag.db"))
         ag = AutoGPTAgent(system_prompt="自定义提示", chat_history=ch, verbose=False)
         assert ag._system_prompt == "自定义提示"
 
@@ -372,7 +372,7 @@ class TestAutoGPTReview:
         assert "抱歉" in result
 
     def test_review_system_prompt_used_in_messages(self, tmp_path):
-        ch = ChatHistory(db_path=str(tmp_path / "ag.db"))
+        ch = ChatHistoryStore(db_path=str(tmp_path / "ag.db"))
         ag = AutoGPTAgent(
             system_prompt="自定义系统提示",
             chat_history=ch,
@@ -471,7 +471,7 @@ class TestAutoGPTRun:
         assert review_args[0][1] == ("t2", "done_t2")
 
     def test_run_persists_user_and_assistant_to_db(self, tmp_path):
-        ch = ChatHistory(db_path=str(tmp_path / "ag.db"))
+        ch = ChatHistoryStore(db_path=str(tmp_path / "ag.db"))
         ag = AutoGPTAgent(
             session_id="persist-test",
             chat_history=ch,
@@ -491,7 +491,7 @@ class TestAutoGPTRun:
         assert msgs[1]["content"] == "最终回答"
 
     def test_run_does_not_persist_tool_messages(self, tmp_path):
-        ch = ChatHistory(db_path=str(tmp_path / "ag.db"))
+        ch = ChatHistoryStore(db_path=str(tmp_path / "ag.db"))
         ag = AutoGPTAgent(session_id="tool-check", chat_history=ch, verbose=False)
         ag._plan = lambda *a, **kw: ["task"]
         ag._execute_task = lambda *a, **kw: "exec"
@@ -598,7 +598,7 @@ class TestAutoGPTHistorySummary:
         assert summary == ""
 
     def test_history_summary_includes_user_and_assistant(self, tmp_path):
-        ch = ChatHistory(db_path=str(tmp_path / "ag.db"))
+        ch = ChatHistoryStore(db_path=str(tmp_path / "ag.db"))
         ag = AutoGPTAgent(session_id="hist-test", chat_history=ch, verbose=False)
         ch.append("hist-test", {"role": "user", "content": "你好"})
         ch.append("hist-test", {"role": "assistant", "content": "你好！"})
@@ -609,7 +609,7 @@ class TestAutoGPTHistorySummary:
         assert "Agent" in summary
 
     def test_history_summary_excludes_tool_messages(self, tmp_path):
-        ch = ChatHistory(db_path=str(tmp_path / "ag.db"))
+        ch = ChatHistoryStore(db_path=str(tmp_path / "ag.db"))
         ag = AutoGPTAgent(session_id="hist-tool", chat_history=ch, verbose=False)
         ch.append("hist-tool", {"role": "user", "content": "问题"})
         ch.append("hist-tool", {"role": "tool", "tool_call_id": "x", "content": "工具结果"})
@@ -627,7 +627,7 @@ class TestMakeAgentFactory:
     @staticmethod
     def _build_factory_args(tmp_path):
         from src.agent.agent import ThinkingConfig
-        ch = ChatHistory(db_path=str(tmp_path / "factory.db"))
+        ch = ChatHistoryStore(db_path=str(tmp_path / "factory.db"))
         return dict(
             chat_history=ch,
             skills_map={},
@@ -668,9 +668,10 @@ class TestMakeAgentFactory:
             with patch("src.agent.langchain_agent.build_chat_model", return_value=MagicMock()), \
                  patch("src.agent.langchain_agent.build_langchain_tools", return_value=[]), \
                  patch("src.agent.langchain_agent.SQLiteChatMessageHistory") as mock_h, \
-                 patch("src.agent.langchain_agent.create_agent") as mock_ca:
+                 patch("src.agent.langchain_agent.create_tool_calling_agent", return_value=MagicMock()), \
+                 patch("src.agent.langchain_agent.AgentExecutor") as mock_exec:
                 mock_h.return_value = MagicMock(messages=[])
-                mock_ca.return_value = MagicMock()
+                mock_exec.return_value = MagicMock()
                 ag = make_agent(**self._build_factory_args(tmp_path))
             assert isinstance(ag, LangChainAgent)
         finally:
@@ -720,9 +721,10 @@ class TestMakeAgentFactory:
             with patch("src.agent.langchain_agent.build_chat_model", return_value=MagicMock()), \
                  patch("src.agent.langchain_agent.build_langchain_tools", return_value=[]), \
                  patch("src.agent.langchain_agent.SQLiteChatMessageHistory") as mock_h, \
-                 patch("src.agent.langchain_agent.create_agent") as mock_ca:
+                 patch("src.agent.langchain_agent.create_tool_calling_agent", return_value=MagicMock()), \
+                 patch("src.agent.langchain_agent.AgentExecutor") as mock_exec:
                 mock_h.return_value = MagicMock(messages=[])
-                mock_ca.return_value = MagicMock()
+                mock_exec.return_value = MagicMock()
                 ag = make_agent(**self._build_factory_args(tmp_path))
             assert hasattr(ag, "run")
             assert hasattr(ag, "session_id")
@@ -748,7 +750,7 @@ class TestAutoGPTIntegration:
 
     @pytest.mark.integration
     def test_run_persists_to_db(self, tmp_path):
-        ch = ChatHistory(db_path=str(tmp_path / "int.db"))
+        ch = ChatHistoryStore(db_path=str(tmp_path / "int.db"))
         ag = AutoGPTAgent(
             session_id="int-test",
             chat_history=ch,

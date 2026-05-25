@@ -10,7 +10,7 @@ Auto-GPT 风格 Agent —— Plan → Execute → Review 三阶段循环
     1. [Plan]    接收用户目标，LLM 生成 JSON 格式任务列表（最多 MAX_PLAN_TASKS 个）
     2. [Execute] 对每个任务运行迷你 ReAct 子循环（最多 MAX_TASK_TOOL_ROUNDS 轮工具调用）
     3. [Review]  汇总所有任务结果，LLM 综合生成最终回答
-    4. [Persist] 仅将 user + 最终 assistant 消息写入 ChatHistory SQLite
+    4. [Persist] 仅将 user + 最终 assistant 消息写入 ChatHistoryStore SQLite
 
 接口契约（duck-typed，与 Agent / LangChainAgent 一致）：
     run(user_input) -> str
@@ -24,13 +24,24 @@ Auto-GPT 风格 Agent —— Plan → Execute → Review 三阶段循环
 import json
 import logging
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 from src.agent.agent import ThinkingConfig, TokenUsage, SYSTEM_PROMPT
+from src.agent.core.event_bus import (
+    ALL_EVENT_TYPES,
+    EVENT_ERROR,
+    EVENT_FINAL_ANSWER,
+    EVENT_INFO,
+    EVENT_TOOL_CALL_END,
+    EVENT_TOOL_CALL_START,
+    AgentEvent,
+    EventBus,
+)
 from src.agent.tools import get_tools, execute_tool, ToolResult
 from src.cli.skill_loader import SkillInfo, build_skill_catalog
 from src.llm.provider import chat
-from src.memory.chat_history import ChatHistory
+from src.memory.chat_history import ChatHistoryStore
 from src.memory.user_memory import UserMemoryStore
 import src.config as _cfg
 
@@ -124,7 +135,7 @@ class AutoGPTAgent:
         system_prompt: str = SYSTEM_PROMPT,
         verbose: bool = True,
         session_id: str | None = None,
-        chat_history: ChatHistory | None = None,
+        chat_history: ChatHistoryStore | None = None,
         prompt_name: str = "",
         skills: dict[str, SkillInfo] | None = None,
         thinking_config: ThinkingConfig | None = None,
@@ -148,13 +159,17 @@ class AutoGPTAgent:
             self._skill_bodies = {name: info.body for name, info in skills.items()}
             self._system_prompt = self._system_prompt + build_skill_catalog(skills)
 
-        # ChatHistory：支持外部注入（便于测试 mock），默认懒加载全局实例
-        self._chat_history: ChatHistory = (
+        # ChatHistoryStore：支持外部注入（便于测试 mock），默认懒加载全局实例
+        self._chat_history: ChatHistoryStore = (
             chat_history if chat_history is not None else self._get_shared_chat_history()
         )
 
         # 用户记忆：支持外部注入
         self._user_memory: UserMemoryStore | None = user_memory
+
+        # 事件总线：与 Python Agent 接口一致。AutoGPT 子任务推理粒度较粗，
+        # 当前仅 emit final_answer / error；流式 thinking / token 视后续 LLM 调用是否接入。
+        self.events: EventBus = EventBus()
 
         # 配置限制，优先使用构造参数，其次读 config，最后用内置默认值
         self._max_plan_tasks: int = (
@@ -189,6 +204,11 @@ class AutoGPTAgent:
 
         history_summary = self._build_history_summary()
 
+        self.events.publish(AgentEvent(
+            type=EVENT_INFO,
+            payload={"message": "agent.run.start", "session_id": self.session_id, "impl": "autogpt"},
+        ))
+
         # Phase 1: Plan
         if self.verbose:
             logger.info("[AutoGPT] Phase 1: Planning for goal: %r", user_input[:80])
@@ -217,7 +237,7 @@ class AutoGPTAgent:
             print("[AutoGPT] 综合子任务结果，生成最终回答...\n")
         final_answer = self._review(user_input, task_results)
 
-        # Persist to ChatHistory
+        # Persist to ChatHistoryStore
         self._persist(user_input, final_answer)
 
         # Record token usage
@@ -230,7 +250,29 @@ class AutoGPTAgent:
         else:
             self.last_usage = None
 
+        self.events.publish(AgentEvent(
+            type=EVENT_FINAL_ANSWER,
+            payload={"text": final_answer, "usage": self.last_usage},
+        ))
         return final_answer
+
+    # ── 事件订阅（与 AgentAPI 一致）────────────────────────────────────────────
+
+    def set_event_callback(self, callback: Callable[[AgentEvent], None] | None) -> None:
+        """
+        设置统一事件回调（覆盖语义）：传 None 清空所有事件订阅。
+
+        AutoGPT 当前在子任务粒度推理，暂不发出 thinking_chunk / token_chunk 流式事件；
+        会发出：info / tool_call_start / tool_call_end / final_answer / error。
+        接口与 `AgentAPI` 一致，便于上层 UI 以同一套代码挂三种 Agent 实现。
+        """
+        self.events.clear()
+        if callback is None:
+            return
+        for evt_type in ALL_EVENT_TYPES:
+            def _wrapper(payload: Any, _t: str = evt_type) -> None:
+                callback(AgentEvent(type=_t, payload=payload))
+            self.events.subscribe(evt_type, _wrapper)
 
     def activate_skill(self, name: str, body: str) -> bool:
         """
@@ -251,6 +293,10 @@ class AutoGPTAgent:
         )
         self._skill_bodies.pop(name, None)
         logger.info("[AutoGPT] Skill [%s] 已激活并从工具枚举移除", name)
+        self.events.publish(AgentEvent(
+            type=EVENT_INFO,
+            payload={"message": "skill.activated", "skill_name": name},
+        ))
         return True
 
     # ── 内部：三阶段核心方法 ─────────────────────────────────────────────────
@@ -342,16 +388,24 @@ class AutoGPTAgent:
                             tool_name,
                             json.dumps(tool_args, ensure_ascii=False),
                         )
+                    self.events.publish(AgentEvent(
+                        type=EVENT_TOOL_CALL_START,
+                        payload={"name": tool_name, "args": tool_args, "call_id": tool_call.id},
+                    ))
 
                     result: ToolResult = execute_tool(
                         tool_name, tool_args, self._skill_bodies
                     )
 
+                    preview = result.content[:_TOOL_PREVIEW_LEN].replace("\n", " ")
                     if self.verbose:
-                        preview = result.content[:_TOOL_PREVIEW_LEN].replace("\n", " ")
                         logger.info(
                             "[AutoGPT] 工具结果 [%s]: %s...", result.status, preview
                         )
+                    self.events.publish(AgentEvent(
+                        type=EVENT_TOOL_CALL_END,
+                        payload={"call_id": tool_call.id, "status": result.status, "preview": preview},
+                    ))
 
                     tool_msg: dict[str, Any] = {
                         "role": "tool",
@@ -413,8 +467,8 @@ class AutoGPTAgent:
     # ── 内部：辅助方法 ────────────────────────────────────────────────────────
 
     @staticmethod
-    def _get_shared_chat_history() -> ChatHistory:
-        """懒加载全局共享 ChatHistory（与 agent.py 的共享实例独立，避免跨实现污染）。"""
+    def _get_shared_chat_history() -> ChatHistoryStore:
+        """懒加载全局共享 ChatHistoryStore（与 agent.py 的共享实例独立，避免跨实现污染）。"""
         # 使用局部 import，避免在模块顶层引起循环
         from src.agent.agent import _get_shared_chat_history
         return _get_shared_chat_history()
@@ -439,7 +493,7 @@ class AutoGPTAgent:
         return "\n".join(lines[-20:])
 
     def _persist(self, user_input: str, final_answer: str) -> None:
-        """将 user + 最终 assistant 消息写入 ChatHistory SQLite。"""
+        """将 user + 最终 assistant 消息写入 ChatHistoryStore SQLite。"""
         self._chat_history.append(
             self.session_id,
             {"role": "user", "content": user_input},

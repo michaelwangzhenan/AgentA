@@ -1,12 +1,12 @@
 from typing import List
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_core.chat_history import BaseChatMessageHistory
-from src.memory.chat_history import ChatHistory
+from src.memory.chat_history import ChatHistoryStore
 
 class SQLiteChatMessageHistory(BaseChatMessageHistory):
     def __init__(self, session_id: str, db_path: str = None):
         self._session_id = session_id
-        self._history = ChatHistory(db_path=db_path) if db_path else ChatHistory()
+        self._history = ChatHistoryStore(db_path=db_path) if db_path else ChatHistoryStore()
 
     @property
     def messages(self) -> List[BaseMessage]:

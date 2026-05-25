@@ -30,11 +30,11 @@ def _isolated_agent_memory(tmp_path):
     - 替换 _shared_user_memory 为 None，并临时关闭 USER_MEMORY_ENABLED：
       防止 _try_extract_memories 向真实 DB 写入、或额外调用 LLM 干扰 mock 计数
     """
-    from src.memory.chat_history import ChatHistory
+    from src.memory.chat_history import ChatHistoryStore
 
     # ── 对话历史隔离 ──────────────────────────────────────────────────────────
     _orig_mem = _agent_module._chat_history
-    mem = ChatHistory(db_path=str(tmp_path / "agent_test.db"))
+    mem = ChatHistoryStore(db_path=str(tmp_path / "agent_test.db"))
     _agent_module._chat_history = mem
 
     # ── 用户记忆隔离 ──────────────────────────────────────────────────────────

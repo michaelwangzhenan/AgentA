@@ -37,8 +37,8 @@ flowchart TB
 
     subgraph AGENT["② Agent core"]
         IMP["三种 Agent loop<br/>Python · LangChain<br/>AutoGPT"]
-        SHARED["公共层<br/>Tools · Memory<br/>LLM Provider<br/>Skill/Prompt loader"]
-        IMP -.->|"BaseAgent Protocol"| SHARED
+        SHARED["公共层<br/>Tools · Memory<br/>LLM Provider<br/>Skill/Prompt loader · Helpers"]
+        IMP --> SHARED
     end
 
     RAPI["RetrieverAPI<br/>search · expand_queries<br/>· format · warm_up"]
@@ -393,15 +393,18 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 
 # 3.Agent
 
-## AgentAPI
+## 3.1. AgentAPI
 
-`BaseAgent` 是表现层调用 Agent core 的唯一约定。`AgentEvent` 是流式回调的事件协议。
+`AgentAPI` 是表现层调用 Agent core 的唯一约定（Python 实现在 `src/agent/agent_api.py`）。
+`AgentEvent` 是流式回调的事件协议。
 
 ```python
-class BaseAgent(Protocol):
+@runtime_checkable
+class AgentAPI(Protocol):
     session_id: str
     last_usage: TokenUsage | None
     thinking_cfg: ThinkingConfig
+    events: EventBus                # 高级订阅入口：按事件类型 fine-grained subscribe
 
     def run(self, user_input: str) -> str: ...
     def activate_skill(self, name: str, body: str) -> bool: ...
@@ -409,14 +412,15 @@ class BaseAgent(Protocol):
 
 @dataclass(frozen=True)
 class AgentEvent:
-    type: Literal[
-        "thinking_chunk", "token_chunk",
-        "tool_call_start", "tool_call_end",
-        "final_answer", "error", "info",
-    ]
-    payload: Any
-    ts: float
+    type: str                       # 取自 src/agent/core/event_bus.py 的 ALL_EVENT_TYPES
+    payload: Any                    # 按 type 分别约定的 dict（见下表）
+    ts: float                       # Unix 时间戳，default_factory=time.time
 ```
+
+**两种订阅方式**
+
+- 简单：`agent.set_event_callback(fn)` —— 一个回调收所有 7 类事件（带 type/ts 元信息）
+- 高级：`agent.events.subscribe(EVENT_X, fn)` —— 按事件类型订阅，回调收到的是 payload dict
 
 **事件类型速查表**
 
@@ -427,10 +431,24 @@ class AgentEvent:
 | `tool_call_start` | `{name, args, call_id}` | LLM 决定调用工具 |
 | `tool_call_end` | `{call_id, status, preview}` | 工具返回（`ok` / `empty` / `error`） |
 | `final_answer` | `{text, usage}` | 最终回答 |
-| `error` | `{message, recoverable}` | 运行时异常 |
-| `info` | `{message}` | session / skill 切换等元信息 |
+| `error` | `{message, recoverable, phase}` | 运行时异常 |
+| `info` | `{message, ...}` | session / skill 切换等元信息 |
 
-## RetrieverAPI
+**实现进度（[iter_2.md §4.5.4](iter_2.md#454-api-收口) 落地）**
+
+| 事件 | Python `Agent` | `AutoGPTAgent` | `LangChainAgent` |
+|---|---|---|---|
+| `thinking_chunk` | ✓ | ✗（未走流式 thinking） | ✗（D3=A） |
+| `token_chunk` | ✓ | ✗ | ✗（D3=A） |
+| `tool_call_start` / `_end` | ✓ | ✓ | ✗（D3=A） |
+| `final_answer` | ✓ | ✓ | ✓ |
+| `error` | ✓ | ✓ | ✓ |
+| `info` | ✓（run/skill） | ✓（run/skill） | ✗ |
+
+LangChain 实现暂只发 `final_answer + error`（详见 [iter_2.md §4.5.4](iter_2.md#454-api-收口)）；流式 thinking / token
+后续可接入 LangChain 的 `BaseCallbackHandler` 体系再补齐。
+
+## 3.2. RetrieverAPI
 
 RAG 对 Agent 暴露的全部接口集中在 `src/rag/retriever.py` 与 `src/rag/query_rewriter.py`。
 
@@ -459,7 +477,7 @@ def warm_up() -> None: ...
 | `collection` | `str` | `kb_en` / `kb_zh` / `kb_m3` |
 | `id` | `str` | chunk 唯一 id |
 | `retrievers` | `list[str]` | `["dense"]` / `["bm25"]` / `["dense","bm25"]` |
-| `metadata` | `dict` | 含 `lang` / `ext` / `page_no` / `heading_path` 等 |
+| `metadata` | `dict \| None` | 含 `lang` / `ext` / `page_no` / `heading_path` 等；个别上游可能传 None |
 
 **降级行为约定**
 
@@ -543,7 +561,7 @@ flowchart TB
 
 三种 Agent 实现共享公共层，差异只在 loop 编排。每个实现都必须：
 
-1. 实现 `BaseAgent` Protocol（duck-typed，不强制继承）
+1. 满足 `AgentAPI` Protocol（duck-typed，不强制继承；定义在 `src/agent/agent_api.py`）
 2. 用 `src/agent/core/` 提供的 helper 组装 loop，而不是重写 helper 内部逻辑
 3. 至少 emit `final_answer` 与 `error` 事件；`thinking_chunk` / `token_chunk` 视 framework 能力可选
 
@@ -565,10 +583,27 @@ flowchart TB
 > - **依赖**：底层能力，不感知 Agent loop 语义（turn / skill_pair / thinking budget），可独立测试与替换实现（如 SQLite → Postgres）。命名约定：数据存储用 `*Store` 后缀。
 > - **Helper**：公共层抽象，封装"何时调依赖、如何编排结果"的业务策略，被三种 Agent 实现共享。命名约定：编排类用 `*Manager` / `*Engine` / `*Policy` / `*Bus` 后缀。
 
+**代码组织**
+
+公共层 helpers 统一放在 `src/agent/core/`，命名遵循上文"类型说明"约定：
+
+```
+src/agent/core/
+├── __init__.py
+├── history_manager.py        # HistoryManager
+├── memory_manager.py         # MemoryManager
+├── event_bus.py              # EventBus（含 EVENT_* 类型常量）
+├── tool_call_engine.py       # ToolCallEngine（含 TOOL_EMPTY_HINT 常量）
+└── thinking_policy.py        # ThinkingPolicy + ThinkingConfig 数据类
+```
+
+依赖层（`src/memory/chat_history.py` 的 `ChatHistoryStore` / `src/memory/user_memory.py` 的 `UserMemoryStore` / `src/llm/provider.py`）位置不动，被 helper 调用。
+
 **实现进度**
 
-- Python：本期落地，完成公共层抽取与对接
-- LangChain / AutoGPT：保留骨架代码，对接公共层放在后续任务
+- Python：本期落地，完成公共层抽取与对接；`Agent.events` 暴露 `EventBus` 实例供 UI 多订阅
+- AutoGPT：持有 `events: EventBus` 与 `set_thinking/token_callback` 转发方法，接口对齐；流式事件 emit 视后续 LLM 调用是否接入
+- LangChain：保留骨架代码，对接公共层放在后续任务（依赖环境 `langchain.agents.create_agent` 修复）
 
 
 ## Python 

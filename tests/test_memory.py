@@ -2,7 +2,7 @@
 测试对话记忆模块（memory/store.py）
 
 测试内容：
-    - ChatHistory 基本 CRUD：append / load / clear / list_sessions
+    - ChatHistoryStore 基本 CRUD：append / load / clear / list_sessions
     - tool_calls 字段序列化与反序列化
     - tool role 的 tool_call_id 持久化
     - session 不存在时的降级处理
@@ -19,16 +19,16 @@ from unittest.mock import patch
 
 import pytest
 
-from src.memory.chat_history import ChatHistory
+from src.memory.chat_history import ChatHistoryStore
 from src.agent.agent import Agent
 
 
 # ── 辅助 fixture ──────────────────────────────────────────────────────────────
 
 @pytest.fixture
-def store(tmp_path: Path) -> ChatHistory:
+def store(tmp_path: Path) -> ChatHistoryStore:
     """每个测试用独立临时 DB，互不影响。"""
-    db = ChatHistory(db_path=str(tmp_path / "test_memory.db"))
+    db = ChatHistoryStore(db_path=str(tmp_path / "test_memory.db"))
     yield db
     db.close()
 
@@ -41,23 +41,23 @@ SESSION = "test-session-001"
 class TestAppendLoad:
     """测试基本写入和读取。"""
 
-    def test_load_empty_session_returns_empty_list(self, store: ChatHistory) -> None:
+    def test_load_empty_session_returns_empty_list(self, store: ChatHistoryStore) -> None:
         assert store.load("nonexistent-session") == []
 
-    def test_append_user_message(self, store: ChatHistory) -> None:
+    def test_append_user_message(self, store: ChatHistoryStore) -> None:
         store.append(SESSION, {"role": "user", "content": "你好"})
         msgs = store.load(SESSION)
         assert len(msgs) == 1
         assert msgs[0]["role"] == "user"
         assert msgs[0]["content"] == "你好"
 
-    def test_append_assistant_message(self, store: ChatHistory) -> None:
+    def test_append_assistant_message(self, store: ChatHistoryStore) -> None:
         store.append(SESSION, {"role": "assistant", "content": "你好，有什么可以帮助你？"})
         msgs = store.load(SESSION)
         assert msgs[0]["role"] == "assistant"
         assert msgs[0]["content"] == "你好，有什么可以帮助你？"
 
-    def test_append_multiple_messages_preserves_order(self, store: ChatHistory) -> None:
+    def test_append_multiple_messages_preserves_order(self, store: ChatHistoryStore) -> None:
         store.append(SESSION, {"role": "user", "content": "第一条"})
         store.append(SESSION, {"role": "assistant", "content": "第一个回答"})
         store.append(SESSION, {"role": "user", "content": "第二条"})
@@ -67,7 +67,7 @@ class TestAppendLoad:
         assert msgs[1]["content"] == "第一个回答"
         assert msgs[2]["content"] == "第二条"
 
-    def test_sessions_are_isolated(self, store: ChatHistory) -> None:
+    def test_sessions_are_isolated(self, store: ChatHistoryStore) -> None:
         store.append("session-A", {"role": "user", "content": "A的消息"})
         store.append("session-B", {"role": "user", "content": "B的消息"})
         assert len(store.load("session-A")) == 1
@@ -80,7 +80,7 @@ class TestAppendLoad:
 class TestToolCallsSerialization:
     """测试 tool_calls 和 tool_call_id 的序列化/反序列化。"""
 
-    def test_assistant_tool_calls_roundtrip(self, store: ChatHistory) -> None:
+    def test_assistant_tool_calls_roundtrip(self, store: ChatHistoryStore) -> None:
         tool_calls = [
             {
                 "id": "call_abc",
@@ -97,7 +97,7 @@ class TestToolCallsSerialization:
         loaded = store.load(SESSION)
         assert loaded[0]["tool_calls"] == tool_calls
 
-    def test_tool_result_message_roundtrip(self, store: ChatHistory) -> None:
+    def test_tool_result_message_roundtrip(self, store: ChatHistoryStore) -> None:
         msg: dict[str, Any] = {
             "role": "tool",
             "tool_call_id": "call_abc",
@@ -109,7 +109,7 @@ class TestToolCallsSerialization:
         assert loaded[0]["tool_call_id"] == "call_abc"
         assert loaded[0]["content"] == "检索结果内容"
 
-    def test_message_without_tool_calls_has_no_tool_calls_key(self, store: ChatHistory) -> None:
+    def test_message_without_tool_calls_has_no_tool_calls_key(self, store: ChatHistoryStore) -> None:
         """普通 user/assistant 消息加载后不应携带 tool_calls 键（或为空列表）。"""
         store.append(SESSION, {"role": "user", "content": "普通消息"})
         loaded = store.load(SESSION)
@@ -122,19 +122,19 @@ class TestToolCallsSerialization:
 class TestClear:
     """测试清空 session。"""
 
-    def test_clear_removes_all_messages(self, store: ChatHistory) -> None:
+    def test_clear_removes_all_messages(self, store: ChatHistoryStore) -> None:
         store.append(SESSION, {"role": "user", "content": "消息1"})
         store.append(SESSION, {"role": "assistant", "content": "回答1"})
         store.clear(SESSION)
         assert store.load(SESSION) == []
 
-    def test_clear_removes_session_metadata(self, store: ChatHistory) -> None:
+    def test_clear_removes_session_metadata(self, store: ChatHistoryStore) -> None:
         store.append(SESSION, {"role": "user", "content": "消息"})
         store.clear(SESSION)
         sessions = store.list_sessions()
         assert not any(s["session_id"] == SESSION for s in sessions)
 
-    def test_clear_nonexistent_session_is_safe(self, store: ChatHistory) -> None:
+    def test_clear_nonexistent_session_is_safe(self, store: ChatHistoryStore) -> None:
         """清空不存在的 session 不应抛异常。"""
         store.clear("does-not-exist")  # 不应 raise
 
@@ -144,39 +144,39 @@ class TestClear:
 class TestDeleteSession:
     """测试彻底删除指定历史 session。"""
 
-    def test_delete_existing_session_returns_true(self, store: ChatHistory) -> None:
+    def test_delete_existing_session_returns_true(self, store: ChatHistoryStore) -> None:
         store.append("del-session", {"role": "user", "content": "待删除"})
         result = store.delete_session("del-session")
         assert result is True
 
-    def test_delete_removes_all_messages(self, store: ChatHistory) -> None:
+    def test_delete_removes_all_messages(self, store: ChatHistoryStore) -> None:
         store.append("del-session", {"role": "user", "content": "消息1"})
         store.append("del-session", {"role": "assistant", "content": "回答1"})
         store.delete_session("del-session")
         assert store.load("del-session") == []
 
-    def test_delete_removes_session_metadata(self, store: ChatHistory) -> None:
+    def test_delete_removes_session_metadata(self, store: ChatHistoryStore) -> None:
         store.append("del-session", {"role": "user", "content": "消息"})
         store.delete_session("del-session")
         ids = [s["session_id"] for s in store.list_sessions()]
         assert "del-session" not in ids
 
-    def test_delete_nonexistent_session_returns_false(self, store: ChatHistory) -> None:
+    def test_delete_nonexistent_session_returns_false(self, store: ChatHistoryStore) -> None:
         result = store.delete_session("ghost-session")
         assert result is False
 
-    def test_delete_nonexistent_session_is_safe(self, store: ChatHistory) -> None:
+    def test_delete_nonexistent_session_is_safe(self, store: ChatHistoryStore) -> None:
         """删除不存在的 session 不应抛异常。"""
         store.delete_session("ghost-session")  # 不应 raise
 
-    def test_delete_does_not_affect_other_sessions(self, store: ChatHistory) -> None:
+    def test_delete_does_not_affect_other_sessions(self, store: ChatHistoryStore) -> None:
         store.append("keep-session", {"role": "user", "content": "保留"})
         store.append("del-session", {"role": "user", "content": "删除"})
         store.delete_session("del-session")
         assert store.load("del-session") == []
         assert len(store.load("keep-session")) == 1
 
-    def test_delete_session_no_longer_in_list(self, store: ChatHistory) -> None:
+    def test_delete_session_no_longer_in_list(self, store: ChatHistoryStore) -> None:
         store.append("s-a", {"role": "user", "content": "A"})
         store.append("s-b", {"role": "user", "content": "B"})
         store.delete_session("s-a")
@@ -190,31 +190,31 @@ class TestDeleteSession:
 class TestCleanAllSessions:
     """测试清空所有 session。"""
 
-    def test_clean_all_returns_correct_count(self, store: ChatHistory) -> None:
+    def test_clean_all_returns_correct_count(self, store: ChatHistoryStore) -> None:
         store.append("s1", {"role": "user", "content": "A"})
         store.append("s2", {"role": "user", "content": "B"})
         store.append("s3", {"role": "user", "content": "C"})
         count = store.clean_all_sessions()
         assert count == 3
 
-    def test_clean_all_removes_all_messages(self, store: ChatHistory) -> None:
+    def test_clean_all_removes_all_messages(self, store: ChatHistoryStore) -> None:
         store.append("s1", {"role": "user", "content": "A"})
         store.append("s2", {"role": "user", "content": "B"})
         store.clean_all_sessions()
         assert store.load("s1") == []
         assert store.load("s2") == []
 
-    def test_clean_all_removes_all_session_metadata(self, store: ChatHistory) -> None:
+    def test_clean_all_removes_all_session_metadata(self, store: ChatHistoryStore) -> None:
         store.append("s1", {"role": "user", "content": "A"})
         store.append("s2", {"role": "user", "content": "B"})
         store.clean_all_sessions()
         assert store.list_sessions() == []
 
-    def test_clean_all_on_empty_db_returns_zero(self, store: ChatHistory) -> None:
+    def test_clean_all_on_empty_db_returns_zero(self, store: ChatHistoryStore) -> None:
         count = store.clean_all_sessions()
         assert count == 0
 
-    def test_clean_all_on_empty_db_is_safe(self, store: ChatHistory) -> None:
+    def test_clean_all_on_empty_db_is_safe(self, store: ChatHistoryStore) -> None:
         """空库时调用不应抛异常。"""
         store.clean_all_sessions()  # 不应 raise
 
@@ -224,10 +224,10 @@ class TestCleanAllSessions:
 class TestListSessions:
     """测试 session 列表查询。"""
 
-    def test_list_sessions_empty(self, store: ChatHistory) -> None:
+    def test_list_sessions_empty(self, store: ChatHistoryStore) -> None:
         assert store.list_sessions() == []
 
-    def test_list_sessions_returns_created_sessions(self, store: ChatHistory) -> None:
+    def test_list_sessions_returns_created_sessions(self, store: ChatHistoryStore) -> None:
         store.append("s1", {"role": "user", "content": "第一个 session"})
         store.append("s2", {"role": "user", "content": "第二个 session"})
         sessions = store.list_sessions()
@@ -235,13 +235,13 @@ class TestListSessions:
         assert "s1" in ids
         assert "s2" in ids
 
-    def test_list_sessions_includes_msg_count(self, store: ChatHistory) -> None:
+    def test_list_sessions_includes_msg_count(self, store: ChatHistoryStore) -> None:
         store.append(SESSION, {"role": "user", "content": "消息1"})
         store.append(SESSION, {"role": "assistant", "content": "回答1"})
         sessions = store.list_sessions()
         assert sessions[0]["msg_count"] == 2
 
-    def test_list_sessions_first_user_msg_is_recorded(self, store: ChatHistory) -> None:
+    def test_list_sessions_first_user_msg_is_recorded(self, store: ChatHistoryStore) -> None:
         store.append(SESSION, {"role": "user", "content": "我的第一个问题"})
         sessions = store.list_sessions()
         assert "我的第一个问题" in sessions[0]["first_user_msg"]
@@ -258,7 +258,7 @@ class TestAgentMemoryIntegration:
 
     def test_second_run_includes_first_turn_in_messages(self, tmp_path: Path) -> None:
         """第二次 run() 时 messages 应包含第一轮的 user + assistant 历史。"""
-        store = ChatHistory(db_path=str(tmp_path / "agent_test.db"))
+        store = ChatHistoryStore(db_path=str(tmp_path / "agent_test.db"))
         agent = Agent(verbose=False, session_id="integ-001", chat_history=store)
 
         captured_messages: list[list[dict]] = []
@@ -284,7 +284,7 @@ class TestAgentMemoryIntegration:
     def test_history_persists_across_agent_instances(self, tmp_path: Path) -> None:
         """新建 Agent 实例（模拟重启），历史应从 DB 中恢复。"""
         db_path = str(tmp_path / "persist_test.db")
-        store1 = ChatHistory(db_path=db_path)
+        store1 = ChatHistoryStore(db_path=db_path)
         agent1 = Agent(verbose=False, session_id="persist-session", chat_history=store1)
 
         with patch("src.agent.agent.chat", return_value=self._make_text_response("第一轮回答")):
@@ -292,7 +292,7 @@ class TestAgentMemoryIntegration:
         store1.close()
 
         # 模拟重启：新建 store 和 agent，使用同一 session_id
-        store2 = ChatHistory(db_path=db_path)
+        store2 = ChatHistoryStore(db_path=db_path)
         captured: list[list[dict]] = []
 
         def mock_chat2(messages, tools=None, **kwargs):
@@ -321,7 +321,7 @@ class TestHistoryTruncation:
 
     def test_truncation_limits_messages_passed_to_llm(self, tmp_path: Path) -> None:
         """当历史超过 max_history_turns 时，传给 LLM 的 messages 数量应受限。"""
-        store = ChatHistory(db_path=str(tmp_path / "trunc_test.db"))
+        store = ChatHistoryStore(db_path=str(tmp_path / "trunc_test.db"))
         # max_history_turns=2：只保留最近 2 轮
         agent = Agent(verbose=False, session_id="trunc-session", chat_history=store, max_history_turns=2)
 
@@ -349,17 +349,17 @@ class TestHistoryTruncation:
 class TestLoadLastN:
     """测试 load_last_n_messages() SQL 层粗粒度过滤。"""
 
-    def test_returns_empty_for_nonexistent_session(self, store: ChatHistory) -> None:
+    def test_returns_empty_for_nonexistent_session(self, store: ChatHistoryStore) -> None:
         result = store.load_last_n_messages("no-such-session", 10)
         assert result == []
 
-    def test_returns_all_when_n_exceeds_total(self, store: ChatHistory) -> None:
+    def test_returns_all_when_n_exceeds_total(self, store: ChatHistoryStore) -> None:
         for i in range(3):
             store.append("s1", {"role": "user", "content": f"msg{i}"})
         result = store.load_last_n_messages("s1", 100)
         assert len(result) == 3
 
-    def test_returns_last_n_in_chronological_order(self, store: ChatHistory) -> None:
+    def test_returns_last_n_in_chronological_order(self, store: ChatHistoryStore) -> None:
         for i in range(5):
             store.append("s2", {"role": "user", "content": f"msg{i}"})
         result = store.load_last_n_messages("s2", 3)
@@ -369,13 +369,13 @@ class TestLoadLastN:
         assert result[1]["content"] == "msg3"
         assert result[2]["content"] == "msg4"
 
-    def test_preserves_message_fields(self, store: ChatHistory) -> None:
+    def test_preserves_message_fields(self, store: ChatHistoryStore) -> None:
         store.append("s3", {"role": "user", "content": "hello"})
         result = store.load_last_n_messages("s3", 5)
         assert result[0]["role"] == "user"
         assert result[0]["content"] == "hello"
 
-    def test_result_matches_tail_of_full_load(self, store: ChatHistory) -> None:
+    def test_result_matches_tail_of_full_load(self, store: ChatHistoryStore) -> None:
         """load_last_n_messages(n) 结果应等于 load() 结果的末尾 n 条。"""
         for i in range(8):
             store.append("s4", {"role": "user", "content": f"turn{i}"})
@@ -383,7 +383,7 @@ class TestLoadLastN:
         last3 = store.load_last_n_messages("s4", 3)
         assert last3 == full[-3:]
 
-    def test_isolates_sessions(self, store: ChatHistory) -> None:
+    def test_isolates_sessions(self, store: ChatHistoryStore) -> None:
         """不同 session 的消息不应互相干扰。"""
         for i in range(4):
             store.append("sa", {"role": "user", "content": f"a{i}"})
@@ -400,30 +400,30 @@ class TestLoadLastN:
 class TestSetPromptName:
     """测试 set_prompt_name() 持久化与 list_sessions() 返回 prompt_name 字段。"""
 
-    def test_set_prompt_name_updates_value(self, store: ChatHistory) -> None:
+    def test_set_prompt_name_updates_value(self, store: ChatHistoryStore) -> None:
         store.append("s1", {"role": "user", "content": "hello"})
         store.set_prompt_name("s1", "5g-expert")
         sessions = {s["session_id"]: s for s in store.list_sessions()}
         assert sessions["s1"]["prompt_name"] == "5g-expert"
 
-    def test_set_prompt_name_can_overwrite(self, store: ChatHistory) -> None:
+    def test_set_prompt_name_can_overwrite(self, store: ChatHistoryStore) -> None:
         store.append("s1", {"role": "user", "content": "hello"})
         store.set_prompt_name("s1", "5g-expert")
         store.set_prompt_name("s1", "code-assistant")
         sessions = {s["session_id"]: s for s in store.list_sessions()}
         assert sessions["s1"]["prompt_name"] == "code-assistant"
 
-    def test_set_prompt_name_nonexistent_session_is_ignored(self, store: ChatHistory) -> None:
+    def test_set_prompt_name_nonexistent_session_is_ignored(self, store: ChatHistoryStore) -> None:
         # session 不存在时不报错，list_sessions 结果不变
         store.set_prompt_name("no-such-session", "5g-expert")
         assert store.list_sessions() == []
 
-    def test_list_sessions_includes_prompt_name_field(self, store: ChatHistory) -> None:
+    def test_list_sessions_includes_prompt_name_field(self, store: ChatHistoryStore) -> None:
         store.append("s1", {"role": "user", "content": "hello"})
         sessions = store.list_sessions()
         assert "prompt_name" in sessions[0]
 
-    def test_list_sessions_prompt_name_default_is_empty(self, store: ChatHistory) -> None:
+    def test_list_sessions_prompt_name_default_is_empty(self, store: ChatHistoryStore) -> None:
         store.append("s1", {"role": "user", "content": "hello"})
         sessions = store.list_sessions()
         assert sessions[0]["prompt_name"] == ""

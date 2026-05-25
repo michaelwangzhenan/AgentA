@@ -4,6 +4,6 @@
 提供基于 SQLite 的 messages 持久化存储，支持多 session 管理。
 """
 
-from src.memory.chat_history import ChatHistory
+from src.memory.chat_history import ChatHistoryStore
 
-__all__ = ["ChatHistory"]
+__all__ = ["ChatHistoryStore"]

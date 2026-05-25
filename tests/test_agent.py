@@ -17,7 +17,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.agent.agent import Agent, MAX_TOOL_ROUNDS, MAX_TOTAL_ROUNDS, SYSTEM_PROMPT, TOOL_EMPTY_HINT
+from src.agent.agent import Agent, MAX_TOOL_ROUNDS, MAX_TOTAL_ROUNDS, SYSTEM_PROMPT
+from src.agent.core.tool_call_engine import TOOL_EMPTY_HINT
 from src.agent.tools import ToolResult
 
 
@@ -113,7 +114,7 @@ class TestAgentToolCall:
             return _make_text_response("RAG 是检索增强生成技术。")
 
         with patch("src.agent.agent.chat", side_effect=mock_chat), \
-             patch("src.agent.agent.execute_tool", return_value=ToolResult(status="ok", content="RAG 相关文档片段")):
+             patch("src.agent.core.tool_call_engine.execute_tool", return_value=ToolResult(status="ok", content="RAG 相关文档片段")):
             result = agent.run("什么是 RAG？")
 
         assert result == "RAG 是检索增强生成技术。"
@@ -131,7 +132,7 @@ class TestAgentToolCall:
             return _make_text_response("最终回答")
 
         with patch("src.agent.agent.chat", side_effect=mock_chat), \
-             patch("src.agent.agent.execute_tool", return_value=ToolResult(status="ok", content="工具返回内容")):
+             patch("src.agent.core.tool_call_engine.execute_tool", return_value=ToolResult(status="ok", content="工具返回内容")):
             agent.run("测试问题")
 
         roles = [m["role"] for m in captured_messages if isinstance(m, dict)]
@@ -151,7 +152,7 @@ class TestAgentToolCall:
             return _make_text_response("完成")
 
         with patch("src.agent.agent.chat", side_effect=mock_chat), \
-             patch("src.agent.agent.execute_tool", return_value=ToolResult(status="ok", content="结果")):
+             patch("src.agent.core.tool_call_engine.execute_tool", return_value=ToolResult(status="ok", content="结果")):
             agent.run("问题")
 
         tool_messages = [m for m in captured if m.get("role") == "tool"]
@@ -167,7 +168,7 @@ class TestAgentMaxIterations:
 
         with patch("src.agent.agent.chat",
                    return_value=_make_tool_call_response("search_knowledge", {"query": "q"})), \
-             patch("src.agent.agent.execute_tool", return_value=ToolResult(status="ok", content="结果")):
+             patch("src.agent.core.tool_call_engine.execute_tool", return_value=ToolResult(status="ok", content="结果")):
             result = agent.run("无法结束的问题")
 
         assert "抱歉" in result or "规定轮次" in result
@@ -180,7 +181,7 @@ class TestAgentMaxIterations:
         )
 
         with patch("src.agent.agent.chat", mock_chat), \
-             patch("src.agent.agent.execute_tool", return_value=ToolResult(status="ok", content="结果")):
+             patch("src.agent.core.tool_call_engine.execute_tool", return_value=ToolResult(status="ok", content="结果")):
             agent.run("问题")
 
         assert mock_chat.call_count == 3
@@ -239,7 +240,7 @@ class TestSystemPromptWebSearch:
             return ToolResult(status="error", content="未知工具")
 
         with patch("src.agent.agent.chat", side_effect=mock_chat), \
-             patch("src.agent.agent.execute_tool", side_effect=mock_execute_tool):
+             patch("src.agent.core.tool_call_engine.execute_tool", side_effect=mock_execute_tool):
             result = agent.run("最新AI新闻是什么？")
 
         assert "fetch_url" in tool_calls, "知识库为空时，Agent 应调用 fetch_url"
@@ -273,7 +274,7 @@ class TestToolGuidance:
         error_result = ToolResult(status="error", content="请求超时（15s），URL: https://example.com")
 
         with patch("src.agent.agent.chat", side_effect=mock_chat), \
-             patch("src.agent.agent.execute_tool", return_value=error_result):
+             patch("src.agent.core.tool_call_engine.execute_tool", return_value=error_result):
             agent.run("查询某网页")
 
         assert captured_tool_messages, "应有 tool role 消息"
@@ -298,7 +299,7 @@ class TestToolGuidance:
         empty_result = ToolResult(status="empty", content="知识库为空，未找到相关内容。")
 
         with patch("src.agent.agent.chat", side_effect=mock_chat), \
-             patch("src.agent.agent.execute_tool", return_value=empty_result):
+             patch("src.agent.core.tool_call_engine.execute_tool", return_value=empty_result):
             agent.run("未知主题")
 
         assert captured_tool_messages
@@ -322,7 +323,7 @@ class TestToolGuidance:
         ok_result = ToolResult(status="ok", content="[1] 来源: doc.txt\nRAG 相关内容")
 
         with patch("src.agent.agent.chat", side_effect=mock_chat), \
-             patch("src.agent.agent.execute_tool", return_value=ok_result):
+             patch("src.agent.core.tool_call_engine.execute_tool", return_value=ok_result):
             agent.run("什么是 RAG？")
 
         assert captured_tool_messages
@@ -344,7 +345,7 @@ class TestToolGuidance:
         ok_result = ToolResult(status="ok", content="结果内容")
 
         with patch("src.agent.agent.chat", side_effect=mock_chat), \
-             patch("src.agent.agent.execute_tool", return_value=ok_result):
+             patch("src.agent.core.tool_call_engine.execute_tool", return_value=ok_result):
             result = agent.run("测试工具轮次上限")
 
         assert chat_calls[-1] is None, "达到工具轮次上限后应以 tools=None 调用 chat()"
@@ -480,7 +481,7 @@ class TestTokenUsage:
             return resp
 
         with patch("src.agent.agent.chat", side_effect=mock_chat_with_usage), \
-             patch("src.agent.agent.execute_tool",
+             patch("src.agent.core.tool_call_engine.execute_tool",
                    return_value=ToolResult(status="ok", content="结果")):
             agent.run("跨轮次问题")
 
@@ -530,7 +531,7 @@ class TestAgentThinkingRun:
             enabled=True, budget=16000, adaptive=True
         ))
 
-        with patch("src.agent.agent.estimate_thinking_budget",
+        with patch("src.agent.core.thinking_policy.estimate_thinking_budget",
                    return_value=1500) as mock_est, \
              patch("src.agent.agent.call_with_thinking",
                    return_value=_make_text_response("ok")):
@@ -549,7 +550,7 @@ class TestAgentThinkingRun:
         ))
         estimated = 1500
 
-        with patch("src.agent.agent.estimate_thinking_budget",
+        with patch("src.agent.core.thinking_policy.estimate_thinking_budget",
                    return_value=estimated), \
              patch("src.agent.agent.call_with_thinking",
                    return_value=_make_text_response("ok")) as mock_cwt:
@@ -565,7 +566,7 @@ class TestAgentThinkingRun:
             enabled=True, budget=4000, adaptive=False
         ))
 
-        with patch("src.agent.agent.estimate_thinking_budget") as mock_est, \
+        with patch("src.agent.core.thinking_policy.estimate_thinking_budget") as mock_est, \
              patch("src.agent.agent.call_with_thinking",
                    return_value=_make_text_response("ok")) as mock_cwt:
             agent.run("任意问题")

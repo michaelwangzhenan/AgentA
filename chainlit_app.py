@@ -43,7 +43,7 @@ from src.cli import handlers
 from src.cli.prompt_loader import scan_prompts
 from src.cli.skill_loader import SkillInfo, scan_skills
 from src.cli.ui import HELP_TEXT
-from src.memory.chat_history import ChatHistory
+from src.memory.chat_history import ChatHistoryStore
 import src.config as config
 
 if config.USER_MEMORY_ENABLED:
@@ -65,7 +65,7 @@ SKILLS_DIR: str = config.SKILLS_DIR
 class _AgentAApiMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.url.path == "/api/agenta/sessions":
-            ch = ChatHistory()
+            ch = ChatHistoryStore()
             try:
                 rows = await asyncio.to_thread(ch.list_sessions)
                 return Response(
@@ -93,7 +93,7 @@ class AppState:
     def __init__(
         self,
         *,
-        chat_history: ChatHistory,
+        chat_history: ChatHistoryStore,
         custom_prompts: dict[str, str],
         skills_map: dict[str, SkillInfo],
         skill_cmds: dict[str, str],
@@ -252,20 +252,24 @@ async def _stream_agent_reply(state: AppState, user_input: str) -> tuple[str, cl
             token_received = True
             await answer_msg.stream_token(token)
 
-    if hasattr(state.agent, "set_thinking_callback"):
-        state.agent.set_thinking_callback(thinking_callback)
-    if hasattr(state.agent, "set_token_callback"):
-        state.agent.set_token_callback(token_callback)
+    # 走统一 set_event_callback 入口：单回调按 event.type 分流到对应 queue。
+    # thinking_callback/token_callback 仍是 Callable[[str], None] 签名，沿用旧的 chunk 文本即可。
+    def _event_router(event):
+        if event.type == "thinking_chunk":
+            thinking_callback(event.payload.get("text", ""))
+        elif event.type == "token_chunk":
+            token_callback(event.payload.get("text", ""))
+
+    if hasattr(state.agent, "set_event_callback"):
+        state.agent.set_event_callback(_event_router)
 
     thinking_task = asyncio.create_task(consume_thinking())
     token_task = asyncio.create_task(consume_tokens())
     try:
         answer = await asyncio.to_thread(state.agent.run, user_input)
     finally:
-        if hasattr(state.agent, "set_thinking_callback"):
-            state.agent.set_thinking_callback(None)
-        if hasattr(state.agent, "set_token_callback"):
-            state.agent.set_token_callback(None)
+        if hasattr(state.agent, "set_event_callback"):
+            state.agent.set_event_callback(None)
         loop.call_soon_threadsafe(thinking_queue.put_nowait, None)
         loop.call_soon_threadsafe(token_queue.put_nowait, None)
         await thinking_task
@@ -413,7 +417,7 @@ async def _handle_command(state: AppState, user_input: str) -> bool:
 
 @cl.on_chat_start
 async def on_chat_start() -> None:
-    chat_history = ChatHistory()
+    chat_history = ChatHistoryStore()
     custom_prompts = scan_prompts(PROMPTS_DIR)
     skills_map = scan_skills(SKILLS_DIR)
     skill_cmds = {f"/{name}": info.body for name, info in skills_map.items()}

@@ -1,21 +1,17 @@
 """
-测试：BaseAgent Protocol 一致性 —— 三种 Agent 实现接口对齐
+测试：AgentAPI 一致性 —— 三种 Agent 实现接口对齐
 
-`design.md §3.3.1` 规划的 `BaseAgent` Protocol 是 §4.5 重构的契约支点。
-本文件用 duck-typing（`hasattr` + `inspect.signature`）锁定三种实现的方法签名，
-任何一方破坏契约都立刻在 CI 红出来。
+`design.md §1.3 / §3.1` 定义的 `AgentAPI` 是表现层 ↔ Agent core 的对外契约，
+Python 实现位于 `src/agent/agent_api.py`（`@runtime_checkable Protocol`）。
+本文件用 isinstance + 方法签名验证三种 Agent 实现：
+- isinstance(agent, AgentAPI) 必为 True（runtime_checkable 自动按 duck typing 校验）
+- 方法签名锁定，任一方破坏契约 CI 红出来
 
-当前（重构前）已统一的方法：
+§4.5.4 后三种实现统一的方法（全部断言必过）：
   - `run(user_input: str) -> str`
   - `activate_skill(name: str, body: str) -> bool`
-  - `session_id: str` 实例属性
-
-待 §4.5 EventBus / 接口对齐后才统一的方法（本期 placeholder，xfail）：
-  - `set_thinking_callback(cb)` —— 目前仅 Python `Agent` 提供
-  - `set_token_callback(cb)`    —— 同上
-
-LangChain 实现：当前环境 `langchain.agents.create_agent` 不可用，整组测试 skip；
-LangChain 修复后此 skip 自然解除。
+  - `set_event_callback(cb: Callable[[AgentEvent], None] | None)` ── 统一事件入口
+  - `session_id: str` / `events: EventBus` / `last_usage` / `thinking_cfg` 实例属性
 """
 from __future__ import annotations
 
@@ -39,11 +35,12 @@ def _try_import(module: str, name: str):
 Agent = _try_import("src.agent.agent", "Agent")
 AutoGPTAgent = _try_import("src.agent.autogpt_agent", "AutoGPTAgent")
 LangChainAgent = _try_import("src.agent.langchain_agent", "LangChainAgent")
+AgentAPI = _try_import("src.agent.agent_api", "AgentAPI")
 
 
 # ── 已统一的核心接口（三种实现都必须有） ───────────────────────────────────
 
-CORE_METHODS = ["run", "activate_skill"]
+CORE_METHODS = ["run", "activate_skill", "set_event_callback"]
 
 
 class TestPythonAgentProtocol:
@@ -106,52 +103,85 @@ class TestAutoGPTAgentProtocol:
 
 
 class TestLangChainAgentProtocol:
-    """LangChain 实现：当前环境 import 失败，整组 skip。"""
+    """LangChain 实现：§4.5.3 修复 import 后纳入正式断言（默认套件按 marker deselect）。"""
 
     def setup_method(self) -> None:
         if LangChainAgent is None:
-            pytest.skip(
-                "LangChainAgent import 失败（langchain.agents.create_agent 不可用），"
-                "待 LangChain 环境修复后自然解除 skip"
-            )
+            pytest.skip("LangChainAgent 未导入（环境未装 langchain）")
 
     def test_has_core_methods(self) -> None:
         for name in CORE_METHODS:
             assert callable(getattr(LangChainAgent, name, None)), f"LangChainAgent.{name} 缺失"
 
 
-# ── 待重构后统一的事件接口（当前仅 Python 提供） ───────────────────────────
+# ── EventBus 实例契约（三种实现都暴露 `events` 属性） ──────────────────────
 
-EVENT_METHODS = ["set_thinking_callback", "set_token_callback"]
+class TestEventBusInstanceContract:
+    """§4.5 EventBus 抽出后，所有 Agent 实例都暴露 `events: EventBus` 属性。"""
 
+    def test_python_agent_has_events_attr(self) -> None:
+        from unittest.mock import MagicMock
+        from src.agent.core.event_bus import EventBus
+        mock_history = MagicMock()
+        mock_history.load_last_n_messages.return_value = []
+        a = Agent(verbose=False, chat_history=mock_history, user_memory=None)
+        assert isinstance(a.events, EventBus)
 
-class TestEventInterfaceCurrentState:
-    """记录当前事件接口的实际分布，避免误以为已统一。"""
-
-    def test_python_agent_has_event_methods(self) -> None:
-        for name in EVENT_METHODS:
-            assert callable(getattr(Agent, name, None)), f"Agent.{name} 必须存在"
-
-    def test_autogpt_event_methods_missing_today(self) -> None:
-        """AutoGPT 今天没有 callback 接口；EventBus 重构后应补齐。"""
+    def test_autogpt_agent_has_events_attr(self) -> None:
         if AutoGPTAgent is None:
             pytest.skip("AutoGPTAgent 未导入")
-        for name in EVENT_METHODS:
-            assert not hasattr(AutoGPTAgent, name), (
-                f"AutoGPTAgent.{name} 出现了 —— 已统一？请去掉本 negative assert "
-                "并把方法名加进 CORE_METHODS"
-            )
+        from unittest.mock import MagicMock
+        from src.agent.core.event_bus import EventBus
+        mock_history = MagicMock()
+        mock_history.load_last_n_messages.return_value = []
+        a = AutoGPTAgent(verbose=False, chat_history=mock_history)
+        assert isinstance(a.events, EventBus)
+
+    def test_langchain_agent_has_events_attr(self) -> None:
+        if LangChainAgent is None:
+            pytest.skip("LangChainAgent 未导入（环境未装 langchain）")
+        from unittest.mock import patch
+        from src.agent.core.event_bus import EventBus
+        # 全 mock 掉 LLM / tools / SQLite / agent / executor，避免真实 langchain 调用
+        with patch("src.agent.langchain_agent.build_chat_model"), \
+             patch("src.agent.langchain_agent.build_langchain_tools", return_value=[]), \
+             patch("src.agent.langchain_agent.SQLiteChatMessageHistory"), \
+             patch("src.agent.langchain_agent.create_tool_calling_agent"), \
+             patch("src.agent.langchain_agent.AgentExecutor"):
+            a = LangChainAgent(session_id="x", verbose=False)
+        assert isinstance(a.events, EventBus)
 
 
-class TestEventInterfaceFutureContract:
-    """EventBus 抽出后，三种实现都应有事件订阅接口；当前 xfail。"""
+# ── AgentAPI 契约（runtime_checkable isinstance） ─────────────────────────
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="AutoGPT 待 §4.5 EventBus 抽出后统一事件接口（届时移除 xfail）",
-    )
-    def test_autogpt_has_event_methods_after_refactor(self) -> None:
+class TestAgentAPIIsInstance:
+    """`design.md §3.1` 的 AgentAPI(Protocol, runtime_checkable) 用 isinstance 校验。"""
+
+    def test_python_agent_satisfies_agent_api(self) -> None:
+        assert AgentAPI is not None
+        from unittest.mock import MagicMock
+        mock_history = MagicMock()
+        mock_history.load_last_n_messages.return_value = []
+        a = Agent(verbose=False, chat_history=mock_history, user_memory=None)
+        assert isinstance(a, AgentAPI)
+
+    def test_autogpt_agent_satisfies_agent_api(self) -> None:
         if AutoGPTAgent is None:
             pytest.skip("AutoGPTAgent 未导入")
-        for name in EVENT_METHODS:
-            assert callable(getattr(AutoGPTAgent, name, None))
+        from unittest.mock import MagicMock
+        mock_history = MagicMock()
+        mock_history.load_last_n_messages.return_value = []
+        a = AutoGPTAgent(verbose=False, chat_history=mock_history)
+        assert isinstance(a, AgentAPI)
+
+    def test_langchain_agent_satisfies_agent_api(self) -> None:
+        if LangChainAgent is None:
+            pytest.skip("LangChainAgent 未导入（环境未装 langchain）")
+        from unittest.mock import patch
+        with patch("src.agent.langchain_agent.build_chat_model"), \
+             patch("src.agent.langchain_agent.build_langchain_tools", return_value=[]), \
+             patch("src.agent.langchain_agent.SQLiteChatMessageHistory"), \
+             patch("src.agent.langchain_agent.create_tool_calling_agent"), \
+             patch("src.agent.langchain_agent.AgentExecutor"):
+            a = LangChainAgent(session_id="x", verbose=False)
+        assert isinstance(a, AgentAPI)

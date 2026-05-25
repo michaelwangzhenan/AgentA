@@ -35,7 +35,7 @@ from src.cli.tab_complete import make_completer
 from src.cli.prompt_loader import scan_prompts
 from src.cli.skill_loader import scan_skills, SkillInfo
 from src.cli import handlers
-from src.memory.chat_history import ChatHistory
+from src.memory.chat_history import ChatHistoryStore
 import src.config as config
 
 # 如果用户记忆功能开启，提前导入以备 main() 中直接使用
@@ -74,8 +74,8 @@ def main() -> None:
     print("⏳ 正在初始化 Agent…", flush=True)
     from src.agent.agent import SYSTEM_PROMPT, ThinkingConfig
 
-    # 共享 ChatHistory 实例，整个进程生命周期内复用
-    chat_history = ChatHistory()
+    # 共享 ChatHistoryStore 实例，整个进程生命周期内复用
+    chat_history = ChatHistoryStore()
 
     # 启动时扫描自定义 Prompt 目录
     custom_prompts: dict[str, str] = scan_prompts(PROMPTS_DIR)

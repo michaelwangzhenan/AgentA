@@ -39,9 +39,15 @@ MEMORY_DB_PATH: str = config.MEMORY_DB_PATH
 _FIRST_MSG_PREVIEW_LEN: int = 80
 
 
-class ChatHistory:
+class ChatHistoryStore:
     """
-    SQLite 对话记忆存储。
+    SQLite 对话记忆存储（CRUD 依赖层）。
+
+    职责单一：消息的 append / load / delete / list_sessions / clear。
+    不感知"轮（turn）/ skill_pair 完整性 / max_history_turns 截断"等 loop 语义 ——
+    这些业务策略由 `src/agent/core/history_manager.py` 的 `HistoryManager` 封装。
+
+    命名约定（design.md §5）：数据存储用 `*Store` 后缀，区别于 `*Manager` helper。
 
     线程安全说明：每个实例持有独立连接，同一进程单实例使用即可。
     """
@@ -58,7 +64,7 @@ class ChatHistory:
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._create_tables()
-        logger.info("ChatHistory 初始化完成: %s", db_path)
+        logger.info("ChatHistoryStore 初始化完成: %s", db_path)
 
     # ── 表结构初始化 ──────────────────────────────────────────────────────────
 
@@ -283,7 +289,7 @@ class ChatHistory:
         """关闭数据库连接。"""
         self._conn.close()
 
-    def __enter__(self) -> "ChatHistory":
+    def __enter__(self) -> "ChatHistoryStore":
         return self
 
     def __exit__(self, *_: object) -> None:

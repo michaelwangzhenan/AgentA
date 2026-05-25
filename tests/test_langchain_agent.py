@@ -4,7 +4,8 @@ from langchain_core.messages import HumanMessage, AIMessage
 from src.memory.langchain_history import SQLiteChatMessageHistory
 from src.agent.langchain_tools import build_langchain_tools, SearchKnowledgeInput, FetchUrlInput
 
-# LangChain Agent 本期不验证（详见 iter_2.md §4.4.3），整文件默认 deselect
+# LangChain Agent 用 langchain 0.3 的 create_tool_calling_agent + AgentExecutor 实现。
+# 默认套件按需 deselect（import langchain 较慢，~7s 左右），用 `bash tools/ut.sh -lc` 单独跑。
 pytestmark = pytest.mark.langchain
 
 def test_sqlite_history_add_and_load(tmp_path):
@@ -39,19 +40,24 @@ def test_fetch_input_defaults():
     assert FetchUrlInput(url='http://x.com').max_chars == 3000
 
 def _mk(sess='sid', prompt='p', tc=None):
-    import src.agent.langchain_agent
-    with patch('src.agent.langchain_agent.build_chat_model') as a, \
-         patch('src.agent.langchain_agent.build_langchain_tools') as b, \
-         patch('src.agent.langchain_agent.SQLiteChatMessageHistory') as c, \
-         patch('src.agent.langchain_agent.create_agent') as d:
-        a.return_value = MagicMock()
-        b.return_value = []
+    """构造 LangChainAgent + 返回 (agent, mock_executor)。
+
+    完整 mock 掉 LLM / tools / SQLite / agent / executor，避免真实 langchain 调用。
+    """
+    with patch('src.agent.langchain_agent.build_chat_model') as p_llm, \
+         patch('src.agent.langchain_agent.build_langchain_tools') as p_tools, \
+         patch('src.agent.langchain_agent.SQLiteChatMessageHistory') as p_hist, \
+         patch('src.agent.langchain_agent.create_tool_calling_agent') as p_create, \
+         patch('src.agent.langchain_agent.AgentExecutor') as p_exec:
+        p_llm.return_value = MagicMock()
+        p_tools.return_value = []
         hi = MagicMock()
         hi.messages = []
-        c.return_value = hi
+        p_hist.return_value = hi
+        p_create.return_value = MagicMock()
         mx = MagicMock()
-        mx.invoke.return_value = {'messages': [AIMessage(content='ok')]}
-        d.return_value = mx
+        mx.invoke.return_value = {'output': 'ok'}
+        p_exec.return_value = mx
         from src.agent.langchain_agent import LangChainAgent
         ag = LangChainAgent(session_id=sess, system_prompt=prompt, thinking_config=tc)
     return ag, mx
