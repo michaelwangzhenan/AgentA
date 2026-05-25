@@ -51,7 +51,7 @@ TBD:
 
 # 4.Agent 改进计划
 
-## 4.1.Review 现有
+## 4.1.Review 现有代码
 Review 完整实现 @AgentA 目录
 只了解现状，不需要输出
 
@@ -70,11 +70,23 @@ Review 完整实现 @AgentA 目录
 ## 4.3.三种实现模块化共享
 目标：模块化共享，抽离公共部分（LLM provider / RAG / Tools），三个 impl 只换"Agent loop"那一层
 
+**命名约定（4.5 重构 + 后续新增模块都按此走）**：
+- **依赖层**（不感知 Agent loop 的底层能力）：数据存储用 `*Store` 后缀，如 `ChatHistoryStore` / `UserMemoryStore`
+- **Helper 层**（封装业务策略、被三种 impl 共享）：按角色选后缀
+  - `*Manager`：策略编排（如 `HistoryManager` / `MemoryManager`）
+  - `*Engine`：执行流水线（如 `ToolCallEngine`）
+  - `*Policy`：纯策略判定（如 `ThinkingPolicy`）
+  - `*Bus`：事件分发（如 `EventBus`）
+
 ## 4.4.清理前期不必要功能/代码
 根据新的架构，评估哪些功能/代码是不必要的，需要清理
 例如：
 1. 因为现在已有 tools/rag_cli.py, CLI中的 /ingest 命令可以删掉
 2. 考虑到后续还有UI功能，CLI的定位需要重新考虑
+
+### to clean up
+
+### imp plan
 
 ## 4.5.根据新的设计，调整代码框架
 1.把代码框架，按新的架构调整好
@@ -86,7 +98,10 @@ Review 完整实现 @AgentA 目录
 
 输出：候选清单（每项一句话简介 + 主要参考来源）
 
-## 4.7.确定 AgentA 中 Agent 部分的需求：哪些是本项目应该支持，能够支持，值得支持的
+## 4.7.确定 AgentA 中 Agent 部分的需求
+
+确定哪些是本项目应该支持，能够支持，值得支持的。
+
 输入：[3.x 12 项必做] + [4.6 候选清单]
 
 1. Review 4.6 输出
@@ -109,7 +124,7 @@ Review 完整实现 @AgentA 目录
     2.5 更新design文档
     2.6 评估是否需要新加工具，在 [配套 tools](#410配套-tools) 实现
 
-## 4.10.配套 tools(参考/tools目录下的 RAG tool)
+## 4.10.配套 tools(参考/tools下的 RAG tool)
 1. Review 9.2.6 累积的工具候选清单 → 合并、取舍、定优先级
 2. 逐工具实现
 

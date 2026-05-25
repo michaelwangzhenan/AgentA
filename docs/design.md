@@ -1,5 +1,82 @@
 # 1.整体架构
 
+AgentA 是"私有知识库 Agent"，按职责分为三层(表现层/ Agent Core / RAG) ，通过两套接口（AgentAPI 和 RetrieverAPI）连接。
+
+## 1.1.分解视角
+
+**纵向:三大业务模块**
+
+| 模块 | 职责 |
+|---|---|
+| 表现层 | CLI / Web UI / SDK: 采集输入、渲染输出、命令管理 |
+| Agent Core | 推理循环 + 工具调用 + 上下文管理 |
+| RAG | 异构文档多模型索引；对查询做精准召回 |
+
+**横向:四档可替换**
+
+| 维度 | 选项 | 
+|---|---|
+| LLM Provider | 国内 / 国外 / 本地模型，按配置切换 | 
+| Embedding 模型 | en / zh / m3，支持多模型并行 | 
+| Agent 实现 | Python / LangChain / AutoGPT；共享公共层（Tools/Memory/LLM），差异只在 loop | 
+| Skill / Prompt / MCP | 文件驱动，支持热更新 |
+
+
+## 1.2.整体架构
+
+```mermaid
+flowchart TB
+    subgraph PRESENT["① 表现层"]
+        direction LR
+        CLI["CLI"]
+        WEB["Web UI"]
+        SDK["SDK / 脚本"]
+    end
+
+    AAPI["AgentAPI<br/>run · activate_skill<br/>· set_event_callback"]
+
+    subgraph AGENT["② Agent core"]
+        IMP["三种 Agent loop<br/>Python · LangChain<br/>AutoGPT"]
+        SHARED["公共层<br/>Tools · Memory<br/>LLM Provider<br/>Skill/Prompt loader"]
+        IMP -.->|"BaseAgent Protocol"| SHARED
+    end
+
+    RAPI["RetrieverAPI<br/>search · expand_queries<br/>· format · warm_up"]
+
+    subgraph RAG_BOX["③ RAG"]
+        direction LR
+        ING["Ingest<br/>Parse → Clean<br/>Split → Index"]
+        IDX[("索引存储<br/>ChromaDB + BM25")]
+        RET["Retrieval<br/>多 query → 召回<br/>RRF → 阈值<br/>Rerank → 去重"]
+        ING --> IDX
+        RET --> IDX
+    end
+
+    CLI --> AAPI
+    WEB --> AAPI
+    SDK --> AAPI
+    AAPI --> IMP
+    SHARED --> RAPI
+    RAPI --> RET
+```
+
+**设计要点**
+
+- **三层职责清晰**：表现层只管 IO，Agent core 只管推理与工具，RAG 只管检索；任一层换实现不影响其它层。
+- **两套接口隔离关注点**：`AgentAPI` 隔离表现层与 Agent，`RetrieverAPI` 隔离 Agent 与 RAG。
+- **横向可替换正交于纵向分层**：LLM Provider / Embedding / Agent 都可通过配置切换，不影响接口契约。
+- **三种实现共享公共层**：三种 Agent 实现共享 Tools / Memory / LLM Provider / Skill/Prompt loader 等公共能力。
+
+## 1.3.两套接口
+
+AgentA 模块间通过两套接口连接：
+
+| 接口 | 边界 | API 简介 |
+|---|---|---|
+| `AgentAPI` | 表现层 ↔ Agent core | `run`：执行一次完整推理循环，返回最终回答<br/> `activate_skill`：手动注入 Skill 指令到当前会话<br/> `set_event_callback`：注册流式事件回调（思考 / token / 工具调用 / 最终回答） |
+| `RetrieverAPI` | Agent core ↔ RAG | `search`：多 query 召回 + RRF 融合 + 阈值过滤 + Rerank，返回 `Hit` 列表<br/> `expand_queries`：把原 query 扩展为 Multi-Query / HyDE / 翻译三轴<br/> `format_search_results`：把 `Hit` 列表格式化为 LLM 可读文本<br/> `warm_up`：启动时预热 embedding 与 reranker 模型 |
+
+详细签名见 [AgentAPI](#agentAPI) 与 [RetrieverAPI](#retrieverapi)
 
 
 # 2.RAG
@@ -315,6 +392,82 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 
 
 # 3.Agent
+
+## AgentAPI
+
+`BaseAgent` 是表现层调用 Agent core 的唯一约定。`AgentEvent` 是流式回调的事件协议。
+
+```python
+class BaseAgent(Protocol):
+    session_id: str
+    last_usage: TokenUsage | None
+    thinking_cfg: ThinkingConfig
+
+    def run(self, user_input: str) -> str: ...
+    def activate_skill(self, name: str, body: str) -> bool: ...
+    def set_event_callback(self, cb: Callable[[AgentEvent], None] | None) -> None: ...
+
+@dataclass(frozen=True)
+class AgentEvent:
+    type: Literal[
+        "thinking_chunk", "token_chunk",
+        "tool_call_start", "tool_call_end",
+        "final_answer", "error", "info",
+    ]
+    payload: Any
+    ts: float
+```
+
+**事件类型速查表**
+
+| event.type | payload | 触发时机 |
+|---|---|---|
+| `thinking_chunk` | `{text}` | Extended Thinking 流式 |
+| `token_chunk` | `{text}` | 正文 token 流式 |
+| `tool_call_start` | `{name, args, call_id}` | LLM 决定调用工具 |
+| `tool_call_end` | `{call_id, status, preview}` | 工具返回（`ok` / `empty` / `error`） |
+| `final_answer` | `{text, usage}` | 最终回答 |
+| `error` | `{message, recoverable}` | 运行时异常 |
+| `info` | `{message}` | session / skill 切换等元信息 |
+
+## RetrieverAPI
+
+RAG 对 Agent 暴露的全部接口集中在 `src/rag/retriever.py` 与 `src/rag/query_rewriter.py`。
+
+```python
+def search(
+    query: str,
+    top_k: int = config.RAG_TOP_K,
+    where: dict | None = None,
+    queries: list[str] | None = None,
+    rerank: bool | None = None,
+) -> list[Hit]: ...
+
+def expand_queries(query: str) -> list[str]: ...
+def format_search_results(hits: list[Hit]) -> str: ...
+def warm_up() -> None: ...
+```
+
+`Hit` 字段为对外接口的一部分，RAG 内部重构不允许变更字段语义：
+
+| 字段 | 类型 | 语义 |
+|---|---|---|
+| `source` | `str` | 文件相对路径 |
+| `document` | `str` | 文本正文（已含父级标题路径） |
+| `score` | `float \| None` | 越大越好，[0,1] 概率或 RRF 分 |
+| `distance` | `float` | 原始向量距离，cosine ∈ [0,2] |
+| `collection` | `str` | `kb_en` / `kb_zh` / `kb_m3` |
+| `id` | `str` | chunk 唯一 id |
+| `retrievers` | `list[str]` | `["dense"]` / `["bm25"]` / `["dense","bm25"]` |
+| `metadata` | `dict` | 含 `lang` / `ext` / `page_no` / `heading_path` 等 |
+
+**降级行为约定**
+
+- 知识库为空 / collection 缺失 → 返回 `[]`，不抛异常
+- `format_search_results([])` → 返回带操作引导的字符串
+- 单 embedding 模型加载失败 → `warm_up()` 记 warning，其它 collection 不受影响
+- BM25 索引缺失 → 静默退化为纯 dense
+
 ## LLM
 
 ## ReAct
@@ -332,11 +485,92 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 ## MCP
 
 
-# 4.UI
+# 4.表现层
 
+表现层负责"采集输入 → 调用 Agent → 渲染输出"三件事，按 IO 形态分为 CLI / Web UI / SDK 三种形态，全部通过 `AgentAPI` 与 Agent core 通信。
+
+```mermaid
+flowchart TB
+    subgraph CLI["CLI"]
+        ENTRY["main.py<br/>启动 · 预热 · 主循环"]
+        DISPATCH["dispatcher.py<br/>命令解析 + 路由"]
+        H["handlers/<br/>session · memory · thinking · history · save · reload"]
+        RENDER["render.py<br/>事件流 → 终端渲染"]
+        ENTRY --> DISPATCH --> H
+        H -->|"事件流"| RENDER
+    end
+
+    subgraph WEB["Web UI"]
+        WS["WebSocket / SSE handler"]
+        UI["前端组件"]
+        WS --> UI
+    end
+
+    subgraph SDK["SDK / 脚本"]
+        SCRIPT["from src.agent import Agent<br/>agent.run(...)"]
+    end
+
+    AAPI(("AgentAPI"))
+
+    subgraph FILES["文件驱动配置"]
+        direction LR
+        P["advanced/prompts/*.prompt.md"]
+        SK["advanced/skills/&lt;name&gt;/SKILL.md"]
+    end
+
+    H -->|"调用"| AAPI
+    WS -->|"事件流 + 调用"| AAPI
+    SCRIPT -->|"调用"| AAPI
+    P -.加载.-> H
+    SK -.加载.-> H
+```
+
+**设计要点**
+
+- **三段分离**：命令解析（`dispatcher`）→ 业务处理（`handlers/`）→ 渲染（`render`）三段独立，替换 IO 形态时只换 render 段。
+- **事件流驱动 UI**：handler 不直接 `print`，而是 emit `AgentEvent`；CLI 的 render 把事件转成终端流式输出，Web UI 直接转 WebSocket / SSE。
+- **文件驱动配置**：Prompt 与 Skill 都用文件落地，启动时扫描 + 运行时 `/reload-*` 热更新；新增不需要改代码。
+- **本期范围**：CLI 形态完成重构（命令解析 / handler / render 三段分离）；Web UI / SDK 留接口位，后续任务实现。
+
+## 4.1.CLI
+
+## 4.2.WebUI
+
+## 4.3.SDK
 
 
 # 5.IMP
+
+三种 Agent 实现共享公共层，差异只在 loop 编排。每个实现都必须：
+
+1. 实现 `BaseAgent` Protocol（duck-typed，不强制继承）
+2. 用 `src/agent/core/` 提供的 helper 组装 loop，而不是重写 helper 内部逻辑
+3. 至少 emit `final_answer` 与 `error` 事件；`thinking_chunk` / `token_chunk` 视 framework 能力可选
+
+**公共层复用粒度**
+
+| 共享组件 | 类型 | 职责 | Python | LangChain | AutoGPT |
+|---|---|---|---|---|---|
+| `tools.py`（工具实现） | 依赖 | 工具 JSON Schema 定义 + `execute_tool` 路由 + 各工具实现 | ✓ | ✓（StructuredTool 包装） | ✓ |
+| `LLMProvider` | 依赖 | 多 provider chat + Extended Thinking + 流式 token 抽象 | ✓ | △（可选，framework 自带） | ✓ |
+| `ChatHistoryStore` | 依赖 | session 内消息持久化与按 N 条加载（CRUD） | ✓ | ✓（adapter） | ✓ |
+| `UserMemoryStore` | 依赖 | 跨 session 用户偏好 / 背景持久化（CRUD） | ✓ | ✓ | ✓ |
+| `EventBus` | Helper | 统一流式事件分发（thinking / token / tool / final） | ✓ | ✓ | ✓ |
+| `ToolCallEngine` | Helper | 工具调用编排：执行 + 结果格式化 + 引导提示注入 + 写历史 | ✓ | ✓ | ✓ |
+| `HistoryManager` | Helper | 历史按轮截断 + skill_pair 完整性保护 + system 拼接 | ✓ | ✓ | △（用 summary 替代） |
+| `MemoryManager` | Helper | UserMemory 触发判定 + 提取 + 注入 system_prompt | ✓ | ✓ | ✓ |
+| `ThinkingPolicy` | Helper | adaptive thinking budget 估算（LOW / MED / HIGH 三档） | ✓ | ✓ | △（子任务不启用） |
+
+> **类型说明**
+> - **依赖**：底层能力，不感知 Agent loop 语义（turn / skill_pair / thinking budget），可独立测试与替换实现（如 SQLite → Postgres）。命名约定：数据存储用 `*Store` 后缀。
+> - **Helper**：公共层抽象，封装"何时调依赖、如何编排结果"的业务策略，被三种 Agent 实现共享。命名约定：编排类用 `*Manager` / `*Engine` / `*Policy` / `*Bus` 后缀。
+
+**实现进度**
+
+- Python：本期落地，完成公共层抽取与对接
+- LangChain / AutoGPT：保留骨架代码，对接公共层放在后续任务
+
+
 ## Python 
 
 ## LangChain
