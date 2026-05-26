@@ -17,7 +17,7 @@
 - **二阶段精排**：使用 `bge-reranker-base` Cross-Encoder 对召回结果做精排，并按 per-model 阈值过滤低质 chunk。
 - **Query 改写**：Multi-Query 同义改写、HyDE 假设性答案、跨语言翻译轴三档可独立开关。
 - **多格式解析**：覆盖 PDF / DOCX / PPTX / XLSX / Markdown / HTML / TXT 七种格式，PDF 扫描件自动 OCR 兜底（rapidocr-onnxruntime）。
-- **评估闭环**：`tools/rag_eval/runner.py` 内置黄金集 + `hit@1，hit@3，hit@k` / `MRR` 指标，每次调优结果可 JSON 留档对比。
+- **评估闭环**：`tools/rag_eval/runner.py` 内置黄金集 + `hit@1，hit@3，hit@k` / `MRR` 指标，每次调优结果落盘 Markdown 报告（含 Miss 用例诊断），便于跨轮 diff。
 
 ### 1.2.Agent
 
@@ -123,7 +123,7 @@ python -m tools.rag_cli clear -m m3                            # 只清空指定
 python -m tools.rag_eval.runner                                          # 当前配置基线
 python -m tools.rag_eval.runner --no-rewriter                            # 关闭 Query 改写做消融对比
 python -m tools.rag_eval.runner --no-rerank                              # 关闭精排做消融对比
-python -m tools.rag_eval.runner --json tools/rag_eval/reports/x.json     # 保存 JSON 便于 diff
+python -m tools.rag_eval.runner -o tools/rag_eval/reports/x.md          # 落 Markdown 报告 + 同名 .log trace
 ```
 
 <a id="43-模型下载"></a>

@@ -613,7 +613,7 @@ Part B 落地总览：
 | 序 | feature | 类型 | 优先级 | 出口判据 |
 |---|---|---|---|---|
 | 1.1 | Session 列表/搜索/恢复 | 已有强化 | P0 | CLI 能 `/sessions list` 看历史会话并恢复 |
-| 1.2 | Memory 三层 + 主动 consolidation | 已有强化 | P0 | 跨次对话能记住"用户喜欢中文回答""偏好引用论文页码" |
+| 1.2 | Memory 触发优化 + 手动写入 + 评估 | 已有强化 | P0 | 跨次对话能记住"用户喜欢中文回答""偏好引用论文页码"；自动提取按 N 轮/min_len 触发；用户可 `/memory add` / `/memory edit`；golden 召回 ≥ 80%（详 [§4.9.2](#492-memory-触发优化--手动写入--评估-phase-12)） |
 | 1.3 | Prompt 用户偏好（`.agenta/rules.md`）| 已有强化 | P1 | 项目根放 rules.md 自动注入 |
 | 1.4 | 引用展示（jump to source）| 新 | P0 | 每条回答末尾列 `[source: file#section]`，Chainlit 可点击 |
 | 1.5 | Skills 框架强化（registry / 自动加载）| 已有强化 | P0 | 为 Phase 2 的 Quiz/Plan Skill 铺路 |
@@ -723,7 +723,7 @@ Part B 落地总览：
 | 工具 | 用途 | 谁用 |
 |---|---|---|
 | `runner` | 统一 eval 入口（按 feature / phase / full 选择） | 所有 eval |
-| `report` | 渲染 markdown / JSON 报告 | 所有 eval |
+| `report` | 渲染 Markdown 报告（含元信息头 / 核心指标表 / 诊断小节） | 所有 eval |
 | `judge` | LLM-as-Judge 通用模块（judge prompt + 待评内容 → 分数 + 理由） | Plan / Quiz / Harness |
 | `trajectory` | 录制 agent run 完整事件流 / 离线回放 / diff | Plan-Execute / Harness / 任何多轮 feature |
 | `profiler` | 延迟、token、cost 自动采集 | 所有 |
@@ -781,7 +781,7 @@ Session 基础设施已经相当厚（`src/memory/chat_history.py` + `src/cli/ha
 | B | 切换后无最近消息预览 | 切回旧 session 必须再敲 `/history` |
 | Punt | 分页 / Session 命名 / 标签 / 收藏 | over-engineering for MVP |
 | Punt | Chainlit 端同步 | 出口判据明写 "CLI 能"，留 [design.md §4.2 WebUI](design.md#42webui) 一并处理 |
-| Punt | Session 关联 project 层 | 等 [Phase 1.2 Memory 三层](#473-实施顺序) 做时按需 ALTER TABLE 加列 |
+| Punt | Session 关联 project 层 | [Phase 1.2](#492-memory-触发优化--手动写入--评估-phase-12) 已 punt 三层方案，此项一并 punt（若未来真要做分层再加列）|
 
 **Step 2 · 实施计划**
 
@@ -849,13 +849,202 @@ Session 基础设施已经相当厚（`src/memory/chat_history.py` + `src/cli/ha
 
 
 ### 4.9.2 Memory 管理 (phase 1.2)
-三层 + 主动 consolidation
+触发优化 + 手动写入 + 评估 
 
-### ...
+**Step 1 · Review 现状（含 feature 设计调整）**
+
+[§4.7.3 Phase 1.2](#473-实施顺序) 原 feature 名 "Memory 三层 + 主动 consolidation"。Review 现有代码 + 评估两个增量在当前场景的必要性后，得出结论：
+
+| 原计划项 | 来源 | 现状结论 |
+|---|---|---|
+| Memory 三层（user / project / local） | [D2 §4.6.2](#462-按能力域归类) Claude Code | **不做** —— Claude Code 三层的动机（团队共享 / git 协作 / 本地隔离）在 AgentA"个人学习者单机 CLI"场景全部不成立；强行实现 = 为致敬而做 |
+| 主动 consolidation（去重/衰减/压缩） | [D4/D5/D9 §4.6.2](#462-按能力域归类) Paper | **不做** —— consolidation 三件套是为"记忆量大到 context 装不下"设计；个人学习者实际记忆体量约 30-100 条 × 100 字 < 10K tokens，触发不到任何机制 |
+
+Memory 实际现状已经覆盖大部分  混合范式（用户记忆自动提取+手动修改，ChatGPT / Cursor Memories 同款）：
+
+| 混合能力 | 当前实现 | 状态 |
+|---|---|---|
+| 自动从对话提取 | `MemoryManager.try_extract` + `USER_MEMORY_AUTO_EXTRACT` | ✅ |
+| 显式"请记住" | `should_extract_immediately`（中英 8 关键词）| ✅ |
+| 防 prompt injection | `_sanitize` 8 个 regex + 控制字符过滤 | ✅ 强 |
+| 注入 system_prompt | `<user_context>` 块 + 防注入说明 | ✅ |
+| 用户可查看 | `/memory` | ✅ |
+| 用户可删除单条 | `/memory del <id>` | ✅ |
+| 用户可清空 | `/memory clear` | ✅ |
+| **手动 add/edit** | — | ❌ 缺失 |
+| **触发频率/质量控制** | 每轮无脑提取，成本浪费 | ❌ 需优化 |
+| **跨 session 召回评估** | 无 golden 数据集 | ❌ 需补 |
+
+
+**Step 2 · 实施计划**
+
+| 决策 | 选择 | 理由 |
+|---|---|---|
+| 写入范式 | 混合 | 跟 ChatGPT / Cursor Memories 一致，对学习场景最契合 |
+| 分层 | **不分层**（单一全局池）| 单用户几十条规模 context 装得下，按主题切是负担 |
+| 触发频率 | 每 N 轮 + min_len（默认 N=5, min_len=20，可配置）| 短问题不浪费 LLM 调用 |
+| 编辑形态 | 纯 CLI（`add` / `edit` / `del`）| MD sidecar 加 ~200 行 sync 代码 over-engineering |
+| 评估方式 | 5-8 个 golden case + keyword/regex check | LLM-judge 留 Phase 2 Plan/Quiz 时再上 framework |
+
+11 项改动，分 7 块：
+
+| 块 | # | 改动 | 文件 |
+|---|---|---|---|
+| **A 触发优化** | 1 | 加 config `USER_MEMORY_EXTRACT_EVERY_N=5` + `_MIN_INPUT_LEN=20` | `src/config.py` |
+| | 2 | `MemoryManager.try_extract` 加 N 轮/min_len 判定（显式触发不受限） | `core/memory_manager.py` |
+| **B 数据层** | 3 | `UserMemoryStore` 加 `source` 字段（auto/explicit/manual）+ `update_value(id, value)` + schema auto-migrate | `memory/user_memory.py` |
+| **C CLI 写入** | 4 | `handlers` 加 `memory_add` / `memory_edit` | `cli/handlers.py` |
+| | 5 | `main.py` 拆 `/memory` 子命令（add/edit/del/clear/空展示） | `main.py` |
+| | 6 | tab 补全加 `/memory add` / `/memory edit` | `cli/tab_complete.py` |
+| **D UI 强化** | 7 | `/memory` 输出按 category 分组 + 时间格式化（复用 `_format_relative_time`）+ source 列 | `cli/handlers.py` |
+| | 8 | help 文本更新 | `cli/ui.py` |
+| **E 测试** | 9 | `TestExtractTriggerPolicy` + `TestSourceField` + `TestManualWrite` + `TestMemoryOutput` | `tests/` |
+| **F 评估** | 10a | 合并 `session_perf_eval` + `memory_perf_eval` → `tools/agent_eval/perf_eval.py`（`--target session/memory`）；删除旧 `feature_session/` | `tools/` |
+| | 10b | `tools/agent_eval/memory/recall_golden.py` + `dataset.json`（5-8 case）+ `reports/.gitkeep` + `.gitignore` | `tools/` |
+| **G 文档** | 11 | iter_2.md §4.9.2 实施结果回填；§4.7.3 feature 名同步；design.md 加 Memory 小节；§4.10 工具组织描述更新 | `docs/` |
+
+**实施顺序**
+
+| 阶段 | 内容 | 验证 |
+|---|---|---|
+| 2.1 文档落地 | 写入 §4.9.2 Step 1 + 2 | 本节 |
+| 2.2 数据层 | 改动 3 | 旧 UT 全过 + `TestSourceField` 通过 |
+| 2.3 触发优化 | 改动 1 + 2 + 9 触发部分 | `TestExtractTriggerPolicy` 通过 |
+| 2.4 CLI + UI | 改动 4-8 + 9 写入/输出部分 | 手动 add/edit 在 CLI 跑通 |
+| 2.5 全量回归 | fast UT | 0 failed |
+| 2.6 评估 | 改动 10a + 10b | recall ≥ 80% / perf 数据 |
+| 2.7 design.md 同步 | 改动 11 部分 | 文档对齐 |
+
+**显式不做（避免 scope 蔓延）**
+
+| 不做项 | 原因 |
+|---|---|
+| 三层 user/project/local | 单用户场景动机不成立（见 Step 1）|
+| LLM-driven consolidation | 30-100 条体量用不上 |
+| `/project` 切换 | 不分层就不需要 |
+| MD sidecar 双向 sync | over-engineering（200 行 sync 代码换批量编辑能力，单用户场景用不上）|
+| LLM-judge 评估 | 留 Phase 2 Plan/Quiz 第 2 次复用时再上 framework |
+| baseline 对比（with vs without）| 本期只做绝对召回，达 80% 即合格 |
+| Chainlit / WebUI 同步 | CLI only |
+
+**Step 3 · 实施结果（代码变更）**
+
+按计划完成 11 项改动：
+
+| 块 | 文件 | 变更摘要 |
+|---|---|---|
+| 触发优化 | `src/config.py` | 新增 `USER_MEMORY_EXTRACT_EVERY_N=5` / `_MIN_INPUT_LEN=20` |
+| 触发优化 | `src/agent/core/memory_manager.py` | `try_extract` 加节流：auto 路径走 N 轮 + min_len 双闸；显式路径不消耗也不重置计数；上 source 标记（auto/explicit）|
+| 数据层 | `src/memory/user_memory.py` | 表加 `source` 列（DEFAULT 'auto'）+ `MEMORY_SOURCES`/`SOURCE_LABELS` 常量；新增 `update_value(id, value)`；`load_all` 返回含 source；`PRAGMA table_info` 自动迁移旧库 |
+| CLI 写入 | `src/cli/handlers.py` | `handle_memory` 重写为 list/add/edit/del/clear 五路；value 保留原大小写与空格；新 `_print_memory_list` 分组渲染（类别 + source + 人性化时间）|
+| CLI 写入 | `src/cli/ui.py` | help 文本新增 `/memory add` / `/memory edit` 行 |
+| CLI 写入 | `src/cli/tab_complete.py` | Tab 补全新增 `/memory add` / `/memory edit` / `/memory del` |
+| 测试 | `tests/test_user_memory.py` | +11 case（TestSourceField 6 + TestUpdateValue 5）|
+| 测试 | `tests/test_memory_manager.py` | +8 case（TestExtractTriggerPolicy），3 旧 case 跟随调断言（多 source 参数）|
+| 测试 | `tests/test_cli_handlers.py` | +15 case（TestManualWrite 8 + TestMemoryOutput 7）|
+| 评估 | `tools/agent_eval/perf_eval.py` | 合并 session + memory 两 target；旧 `feature_session/session_perf_eval.py` 删除 |
+| 评估 | `tools/agent_eval/memory/recall_golden.py` + `dataset.json`（7 case） | 走真实 LLM 检验"记忆 → system_prompt → answer"闭环；keyword/regex check |
+| 评估 | `tools/agent_eval/reports/.gitkeep` + `.gitignore` | reports/ 目录占位，自动生成的 `.md` 报告由 `.gitignore` 忽略 |
+
+**Step 4 · UT 结果**
+
+```text
+tests/test_user_memory.py + tests/test_memory_manager.py + tests/test_cli_handlers.py
+117 passed  (= 原 84 + 新增 33)
+全量回归：pytest → 386 passed, 110 deselected, 0 failed (28s)
+```
+
+(deselected 110 项为 pytest.ini 默认 deselect 的 integration / langchain / autogpt /
+extended_providers 集，需特定环境/凭据，与本期改动无关。)
+
+**Step 5 · 性能基准（`tools/agent_eval/perf_eval.py --target all --sizes 100,1000,5000`）**
+
+Session（向后回归确认 Phase 1.1 未退化）：
+
+| size | no-filter | id-prefix | keyword | limit=20 | render-full | render-filt |
+|---:|---:|---:|---:|---:|---:|---:|
+| 100  | 0.33 ms | 0.18 ms | 0.19 ms | 0.17 ms | 1.21 ms  | 0.27 ms  |
+| 1000 | 2.53 ms | 0.45 ms | 1.28 ms | 0.68 ms | 8.93 ms  | 1.89 ms  |
+| 5000 | 12.82 ms | 1.66 ms | 4.07 ms | 3.00 ms | 45.15 ms | 10.39 ms |
+
+判据：查询类 < 50ms ✅、渲染类 < 200ms ✅、keyword/no-filter < 2× ✅。
+
+Memory（本期新增）：
+
+| size | load_all | load_ctx | upsert | update_value | render-list |
+|---:|---:|---:|---:|---:|---:|
+| 100  | 0.60 ms | 0.98 ms | 6.62 ms | 5.29 ms | 1.41 ms  |
+| 1000 | 2.43 ms | 1.38 ms | 8.61 ms | 5.88 ms | 10.25 ms |
+| 5000 | 15.40 ms | 8.89 ms | 8.51 ms | 7.45 ms | 37.78 ms |
+
+判据（以 size=5000 行对照，实际单用户场景 ≤ 100 条）：load_all < 20 ms ✅、
+load_ctx < 30 ms ✅、upsert/update < 10 ms ✅、render-list < 100 ms ✅。
+
+**Step 6 · 召回评估（`tools/agent_eval/memory/recall_golden.py`）**
+
+7 case 设计 + 跑分表（pass 列**待人工实测回填**）：
+
+| id | 验证维度 | must_contain_any (OR) | must_not_contain | pass |
+|---|---|---|---|:-:|
+| M01-lang-zh | 偏好（语言）跨语言迁移：英文问→中文答 | 排名 / 融合 / 倒数 / 检索 / RRF | — |  |
+| M02-cite-pages | 指令（引用风格带页码） | p. / 页 / § / page / 章 | — |  |
+| M03-bullet-off | 偏好（格式·散文不用 bullet） | RAG / 微调 | `- ` / `* ` / `1.` / `2.` / `3.` |  |
+| M04-background-job | 背景（5G 工程师·可直接用专业缩写） | PDCP / RLC | "请先解释什么是 PDCP" |  |
+| M05-task-context | 任务（承接 RAG 综述上下文） | RAG / 综述 / 检索 / 生成 | — |  |
+| M06-correction-no-em-dash | 纠错（禁用 em dash） | BM25 / dense | `——` |  |
+| M07-multi-memory-compose | 多条记忆同时生效（中文+无 bullet+页码） | BM25 / dense / 稠密 | `- ` / `* ` |  |
+| **合计** | | | | **? / 7（≥ 6 算合格）** |
+
+跑法：
+
+```powershell
+python -m tools.agent_eval.memory.recall_golden                       # 跑全部并落盘 Markdown 报告
+python -m tools.agent_eval.memory.recall_golden --case M01-lang-zh    # 单 case 调试
+```
+
 
 
 ## 4.10. 配套 tools（tools/agent_eval）
+
 这里只包含 Agent 评估工具框架，具体feature 的工具在对应[4.9](#49-开始实现)子章节实现。
+
+**Entry point 必须加载 `.env`（强制）**
+
+`tools/agent_eval/**` 下任何被 `python -m ...` 直接调用的脚本，**必须**在顶部
+（`import src.*` **之前**）调用 `load_dotenv(override=True)`，否则 `src.config`
+在 import 时通过 `os.getenv` 取到的所有 `*_API_KEY` 都是空串，一旦下游有 LLM
+调用就 401 "Incorrect API key provided"。
+
+```python
+from dotenv import load_dotenv  # noqa: E402
+load_dotenv(override=True)
+
+import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
+```
+
+参考实现：[`tools/rag_eval/runner.py`](../tools/rag_eval/runner.py) 第 56–61 行
+（带详细注释解释为什么）、[`tools/agent_eval/memory/recall_golden.py`](../tools/agent_eval/memory/recall_golden.py)
+顶部。该规约只对脚本 entry point 强制，被 entry point 二次 import 的内部模块
+不需要重复 load。
+
+**评估报告输出约定（强制）**
+
+所有 `tools/agent_eval/**` 下的评估脚本，落盘报告**必须**用 Markdown，禁止 JSON / CSV / TSV。后续新增工具一律照办，不再讨论。
+
+- **文件名**：`<feature>-<target>-<YYYYMMDD-HHMMSS>.md`（如 `perf-session-20260526-173529.md`、`recall-20260526-173615.md`）
+- **目录**：统一落 `tools/agent_eval/reports/`（由 `.gitignore` 整目录忽略，只 keep `.gitkeep`）
+- **版式**（参考 [`tools/rag_eval/runner.py`](../tools/rag_eval/runner.py) `_render_markdown`）：
+  1. `# 标题`
+  2. 元信息列表：`时间 / Git / Python / Provider`（实现见 `perf_eval._collect_env()`，可复用）
+  3. `## 核心指标` 表（Markdown 表格）
+  4. `## 判据评估` 表（✅/❌ + 实测值，超阈值自动标红）
+  5. `## <诊断小节>`（Miss / Fail 用例，长文本用 `<details>` 折叠，参考 [`recall_golden._render_markdown`](../tools/agent_eval/memory/recall_golden.py)）
+
+**为什么不允许 JSON 报告**
+
+- 评估输出的消费者是人（IDE diff / 贴报告到 PR / 跨轮对比），不是程序
+- 一旦留 JSON 后门，下次又会有人偷懒只落 JSON，工程慢慢退化
+- 真要做"机器可读+对比表"的需求，走单独的 `tools/agent_eval/diff.py` 脚本聚合多份 `.md`，源数据仍是 Markdown 单一事实
 
 
 ## 4.11. 更新 README

@@ -44,6 +44,9 @@ class MemoryManager:
         self._chat_history = chat_history
         self._session_id = session_id
         self._llm_chat = llm_chat
+        # 自动模式触发节流：累计 user 消息计数；每 USER_MEMORY_EXTRACT_EVERY_N 次触发一次。
+        # 显式触发（"请记住"）不消耗也不重置此计数。
+        self._auto_extract_turn_counter: int = 0
 
     # ── system_prompt 注入 ─────────────────────────────────────────────────
 
@@ -73,12 +76,18 @@ class MemoryManager:
         尝试从本轮对话提取用户记忆并写入 UserMemoryStore。
 
         触发条件（满足任意一个）：
-          1. `should_extract_immediately(user_input)`（显式触发词，如"请记住"）
-             → 同时附带最近 10 条历史作为上下文（宽松 prompt）
-          2. `USER_MEMORY_AUTO_EXTRACT=true`（每轮自动提取）
+          1. **显式触发** `should_extract_immediately(user_input)`（如"请记住"）
+             → 立即触发；附带最近 10 条历史作为上下文（宽松 prompt）
+             → source='explicit'；**不受 N 轮/min_len 限制**
+          2. **自动提取** `USER_MEMORY_AUTO_EXTRACT=true`
+             → 节流判定：每 `USER_MEMORY_EXTRACT_EVERY_N` 轮（默认 5）+
+                user_input 长度 ≥ `USER_MEMORY_EXTRACT_MIN_INPUT_LEN`（默认 20）才触发
              → 不附带历史上下文（严格 prompt，仅判断单轮）
+             → source='auto'
 
         提取失败时静默吞掉，不影响主流程。
+
+        节流策略详见 iter_2.md §4.9.2：避免每轮无脑调 LLM extract 浪费成本。
         """
         if self._user_memory is None:
             logger.debug("[MemoryManager] try_extract: user_memory 为 None，跳过")
@@ -87,17 +96,38 @@ class MemoryManager:
         if not (is_explicit or _cfg.USER_MEMORY_AUTO_EXTRACT):
             return
 
+        # 自动模式节流：N 轮 + min_len 双闸；显式触发不受限
+        if not is_explicit:
+            self._auto_extract_turn_counter += 1
+            every_n = max(1, _cfg.USER_MEMORY_EXTRACT_EVERY_N)
+            min_len = max(0, _cfg.USER_MEMORY_EXTRACT_MIN_INPUT_LEN)
+            if self._auto_extract_turn_counter < every_n:
+                logger.debug(
+                    "[MemoryManager] auto-extract 节流：%d/%d 轮，跳过",
+                    self._auto_extract_turn_counter, every_n,
+                )
+                return
+            if len(user_input.strip()) < min_len:
+                logger.debug(
+                    "[MemoryManager] auto-extract 节流：输入长度 %d < min_len %d，跳过",
+                    len(user_input.strip()), min_len,
+                )
+                return
+            # 触发后重置计数，进入下一个 N 轮窗口
+            self._auto_extract_turn_counter = 0
+
         # 显式触发时拼接最近若干轮历史；AUTO_EXTRACT 路径用严格 prompt（不带历史）
         context_history = self._build_context_history() if is_explicit else ""
+        source = "explicit" if is_explicit else "auto"
 
         try:
             entries = extract_memories(user_input, agent_reply, self._llm_chat, context_history)
             for entry in entries:
                 self._user_memory.upsert(
-                    entry["category"], entry["key"], entry["value"]
+                    entry["category"], entry["key"], entry["value"], source=source,
                 )
             if entries:
-                logger.info("[MemoryManager] 已提取 %d 条用户记忆", len(entries))
+                logger.info("[MemoryManager] 已提取 %d 条用户记忆 (source=%s)", len(entries), source)
             else:
                 logger.info(
                     "[MemoryManager] 记忆提取完成，未发现值得保存的内容（is_explicit=%s, auto=%s）",

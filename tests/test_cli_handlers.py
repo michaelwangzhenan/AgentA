@@ -173,3 +173,137 @@ class TestSwitchSessionPreview:
         full = "\n".join(lines)
         # 空 session 不应触发预览块
         assert "最近对话预览" not in full
+
+
+# ── Phase 1.2 /memory 子命令（iter_2.md §4.9.2） ──────────────────────────
+
+from collections.abc import Iterator
+from src.memory.user_memory import UserMemoryStore
+
+
+@pytest.fixture
+def mem_store(tmp_path: Path) -> Iterator[UserMemoryStore]:
+    db = UserMemoryStore(str(tmp_path / "mem.db"))
+    yield db
+    db.close()
+
+
+def _call_memory(mem: UserMemoryStore, *args: str) -> list[str]:
+    """组装 cmd_parts 调 handle_memory，捕获所有输出行。
+
+    main.py 切割规则：cmd_parts = user_input.split(maxsplit=1) → 子命令含空格时
+    全部塞在 cmd_parts[1] 中。这里复现：把 args 用空格拼起来当 cmd_parts[1]。
+    """
+    cmd_parts: list[str] = ["/memory"]
+    if args:
+        cmd_parts.append(" ".join(args))
+    lines: list[str] = []
+    handlers.handle_memory(mem, cmd_parts, out=lines.append)
+    return lines
+
+
+class TestManualWrite:
+    """/memory add 与 /memory edit 的手动写入路径。"""
+
+    def test_add_basic(self, mem_store: UserMemoryStore) -> None:
+        lines = _call_memory(mem_store, "add", "preference", "lang", "中文回答")
+        rows = mem_store.load_all()
+        assert len(rows) == 1
+        assert rows[0]["category"] == "preference"
+        assert rows[0]["key"] == "lang"
+        assert rows[0]["value"] == "中文回答"
+        assert rows[0]["source"] == "manual"
+        assert any("已记录" in s for s in lines)
+
+    def test_add_value_with_spaces_preserved(self, mem_store: UserMemoryStore) -> None:
+        """value 中的空格 + 大小写必须原样保留（不能被 lower）。"""
+        lines = _call_memory(
+            mem_store, "add", "instruction", "cite_style", "APA 7th Edition with page #"
+        )
+        rows = mem_store.load_all()
+        assert rows[0]["value"] == "APA 7th Edition with page #"
+
+    def test_add_category_case_insensitive(self, mem_store: UserMemoryStore) -> None:
+        """类别大小写不敏感（用户敲 Preference 也应识别）。"""
+        _call_memory(mem_store, "add", "PREFERENCE", "lang", "中文")
+        assert mem_store.load_all()[0]["category"] == "preference"
+
+    def test_add_unknown_category_rejected(self, mem_store: UserMemoryStore) -> None:
+        lines = _call_memory(mem_store, "add", "bogus", "k", "v")
+        assert mem_store.load_all() == []
+        assert any("未知类别" in s for s in lines)
+
+    def test_add_missing_args_shows_usage(self, mem_store: UserMemoryStore) -> None:
+        lines = _call_memory(mem_store, "add", "preference", "only_key")
+        assert mem_store.load_all() == []
+        assert any("用法" in s for s in lines)
+
+    def test_edit_updates_value(self, mem_store: UserMemoryStore) -> None:
+        mem_store.upsert("preference", "lang", "中文", source="manual")
+        row_id = mem_store.load_all()[0]["id"]
+        lines = _call_memory(mem_store, "edit", str(row_id), "English with examples")
+        assert mem_store.load_all()[0]["value"] == "English with examples"
+        assert any("已更新" in s for s in lines)
+
+    def test_edit_missing_id_friendly(self, mem_store: UserMemoryStore) -> None:
+        lines = _call_memory(mem_store, "edit", "9999", "new value")
+        assert any("不存在" in s for s in lines)
+
+    def test_edit_invalid_id_friendly(self, mem_store: UserMemoryStore) -> None:
+        lines = _call_memory(mem_store, "edit", "abc", "x")
+        assert any("无效 ID" in s for s in lines)
+
+
+class TestMemoryOutput:
+    """/memory（无参）：分组、source 列、人性化时间。"""
+
+    def test_empty_db_shows_hint(self, mem_store: UserMemoryStore) -> None:
+        lines = _call_memory(mem_store)
+        assert any("没有任何记忆" in s for s in lines)
+
+    def test_grouped_by_category_in_fixed_order(self, mem_store: UserMemoryStore) -> None:
+        mem_store.upsert("background", "job", "工程师", source="auto")
+        mem_store.upsert("preference", "lang", "中文", source="manual")
+        mem_store.upsert("instruction", "cite", "APA", source="explicit")
+        lines = _call_memory(mem_store)
+        full = "\n".join(lines)
+        # 顺序：preference → background → instruction（MEMORY_CATEGORY_ORDER）
+        i_pref = full.find("偏好")
+        i_back = full.find("背景")
+        i_inst = full.find("指令")
+        assert 0 < i_pref < i_back < i_inst
+
+    def test_source_labels_rendered(self, mem_store: UserMemoryStore) -> None:
+        mem_store.upsert("preference", "k1", "v1", source="auto")
+        mem_store.upsert("preference", "k2", "v2", source="explicit")
+        mem_store.upsert("preference", "k3", "v3", source="manual")
+        full = "\n".join(_call_memory(mem_store))
+        assert "自动" in full
+        assert "请记住" in full
+        assert "手工" in full
+
+    def test_relative_time_rendered(self, mem_store: UserMemoryStore) -> None:
+        """新写入条目应显示 '今天 HH:MM'（_format_relative_time 路径）。"""
+        mem_store.upsert("preference", "k", "v", source="manual")
+        full = "\n".join(_call_memory(mem_store))
+        assert "今天" in full
+
+    def test_unknown_subcmd_shows_usage(self, mem_store: UserMemoryStore) -> None:
+        lines = _call_memory(mem_store, "wtf")
+        full = "\n".join(lines)
+        assert "未知子命令" in full
+        assert "add" in full and "edit" in full
+
+    def test_del_still_works(self, mem_store: UserMemoryStore) -> None:
+        mem_store.upsert("preference", "k", "v", source="auto")
+        row_id = mem_store.load_all()[0]["id"]
+        lines = _call_memory(mem_store, "del", str(row_id))
+        assert mem_store.load_all() == []
+        assert any("已删除" in s for s in lines)
+
+    def test_clear_still_works(self, mem_store: UserMemoryStore) -> None:
+        mem_store.upsert("preference", "k1", "v1", source="auto")
+        mem_store.upsert("preference", "k2", "v2", source="manual")
+        lines = _call_memory(mem_store, "clear")
+        assert mem_store.load_all() == []
+        assert any("已清空" in s and "2" in s for s in lines)

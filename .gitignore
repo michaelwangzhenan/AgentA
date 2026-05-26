@@ -18,6 +18,11 @@ bm25_index/
 reports/
 tools/rag_eval/golden.json
 
+# Agent eval 报告（perf_eval / recall_golden 自动落盘 .md，Iter-2 Phase 1.2）
+# 保留目录本身（.gitkeep）但忽略所有自动生成的报告文件
+tools/agent_eval/reports/*
+!tools/agent_eval/reports/.gitkeep
+
 # 对话历史数据库目录（自动生成）
 sqlite_db/
 history/

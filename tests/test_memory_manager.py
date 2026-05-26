@@ -120,10 +120,13 @@ class TestTryExtract:
         assert args[1] == "好的"
         # 第 4 个参数是 extract_context，应包含前一轮内容
         assert "前一轮问题" in args[3] or "前一轮回答" in args[3]
-        um.upsert.assert_called_once_with("preference", "k", "v")
+        um.upsert.assert_called_once_with("preference", "k", "v", source="explicit")
 
     def test_auto_extract_passes_empty_context(self) -> None:
-        """AUTO_EXTRACT 路径：context_history 必须为 ""（用严格 prompt）。"""
+        """AUTO_EXTRACT 路径：context_history 必须为 ""（用严格 prompt）。
+
+        Phase 1.2 节流（iter_2.md §4.9.2）：every_n=1 + min_len=0 等价于旧的"每轮触发"行为。
+        """
         um = MagicMock()
         recent = [
             {"role": "user", "content": "x"},
@@ -133,6 +136,8 @@ class TestTryExtract:
         with (
             patch("src.agent.core.memory_manager.should_extract_immediately", return_value=False),
             patch("src.agent.core.memory_manager._cfg.USER_MEMORY_AUTO_EXTRACT", True),
+            patch("src.agent.core.memory_manager._cfg.USER_MEMORY_EXTRACT_EVERY_N", 1),
+            patch("src.agent.core.memory_manager._cfg.USER_MEMORY_EXTRACT_MIN_INPUT_LEN", 0),
             patch("src.agent.core.memory_manager.extract_memories", return_value=[]) as mock_extract,
         ):
             mgr.try_extract("普通问题", "普通回答")
@@ -162,5 +167,116 @@ class TestTryExtract:
         ):
             mgr.try_extract("请记住", "好")
         assert um.upsert.call_count == 2
-        um.upsert.assert_any_call("preference", "a", "1")
-        um.upsert.assert_any_call("background", "b", "2")
+        um.upsert.assert_any_call("preference", "a", "1", source="explicit")
+        um.upsert.assert_any_call("background", "b", "2", source="explicit")
+
+
+# ── Phase 1.2 触发节流策略（iter_2.md §4.9.2） ───────────────────────────
+
+class TestExtractTriggerPolicy:
+    """auto 模式下的"每 N 轮 + min_len"节流，显式触发必须不受影响。"""
+
+    @staticmethod
+    def _auto_mgr(input_str: str, every_n: int, min_len: int, *, call_times: int = 1):
+        """跑 call_times 次 try_extract，返回 extract_memories 被调用次数。"""
+        um = MagicMock()
+        mgr = _mk_mgr(user_memory=um)
+        with (
+            patch("src.agent.core.memory_manager.should_extract_immediately", return_value=False),
+            patch("src.agent.core.memory_manager._cfg.USER_MEMORY_AUTO_EXTRACT", True),
+            patch("src.agent.core.memory_manager._cfg.USER_MEMORY_EXTRACT_EVERY_N", every_n),
+            patch("src.agent.core.memory_manager._cfg.USER_MEMORY_EXTRACT_MIN_INPUT_LEN", min_len),
+            patch("src.agent.core.memory_manager.extract_memories", return_value=[]) as mock_extract,
+        ):
+            for _ in range(call_times):
+                mgr.try_extract(input_str, "reply")
+            return mock_extract.call_count
+
+    def test_auto_n_throttle_skips_first_n_minus_1(self) -> None:
+        """N=5：前 4 次不触发，第 5 次才触发。"""
+        long_input = "x" * 100
+        # 跑 4 次 → 0
+        assert self._auto_mgr(long_input, every_n=5, min_len=0, call_times=4) == 0
+        # 跑 5 次 → 1
+        assert self._auto_mgr(long_input, every_n=5, min_len=0, call_times=5) == 1
+
+    def test_auto_n_throttle_window_resets(self) -> None:
+        """每达 N 次后计数重置，第 2N 次再次触发，共 2 次。"""
+        long_input = "x" * 100
+        assert self._auto_mgr(long_input, every_n=3, min_len=0, call_times=6) == 2
+
+    def test_auto_min_len_skips_short_input(self) -> None:
+        """短输入 < min_len 时即使到了 N 轮也不触发。"""
+        short_input = "短"  # 1 字符
+        assert self._auto_mgr(short_input, every_n=1, min_len=20, call_times=5) == 0
+
+    def test_auto_min_len_zero_disables_length_filter(self) -> None:
+        """min_len=0 时长度过滤被禁用（等同旧行为）。"""
+        assert self._auto_mgr("", every_n=1, min_len=0, call_times=1) == 1
+
+    def test_auto_every_n_one_triggers_every_turn(self) -> None:
+        """N=1 + min_len=0 等同每轮触发（向后兼容旧 default）。"""
+        long_input = "x" * 100
+        assert self._auto_mgr(long_input, every_n=1, min_len=0, call_times=3) == 3
+
+    def test_explicit_trigger_bypasses_throttle(self) -> None:
+        """显式触发（"请记住"）即使 N=999、min_len=999 也立即触发。"""
+        um = MagicMock()
+        mgr = _mk_mgr(user_memory=um)
+        with (
+            patch("src.agent.core.memory_manager.should_extract_immediately", return_value=True),
+            patch("src.agent.core.memory_manager._cfg.USER_MEMORY_EXTRACT_EVERY_N", 999),
+            patch("src.agent.core.memory_manager._cfg.USER_MEMORY_EXTRACT_MIN_INPUT_LEN", 999),
+            patch("src.agent.core.memory_manager.extract_memories", return_value=[]) as mock_extract,
+        ):
+            mgr.try_extract("短", "reply")
+        mock_extract.assert_called_once()
+
+    def test_explicit_trigger_does_not_consume_auto_counter(self) -> None:
+        """显式触发不消耗也不重置 auto 计数器（混合场景下 auto 节流不被打乱）。"""
+        um = MagicMock()
+        mgr = _mk_mgr(user_memory=um)
+        long_input = "x" * 100
+        with (
+            patch("src.agent.core.memory_manager._cfg.USER_MEMORY_AUTO_EXTRACT", True),
+            patch("src.agent.core.memory_manager._cfg.USER_MEMORY_EXTRACT_EVERY_N", 3),
+            patch("src.agent.core.memory_manager._cfg.USER_MEMORY_EXTRACT_MIN_INPUT_LEN", 0),
+            patch("src.agent.core.memory_manager.extract_memories", return_value=[]) as mock_extract,
+        ):
+            # 序列：auto, auto, explicit(不消耗), auto → 第 3 次 auto 应触发
+            with patch("src.agent.core.memory_manager.should_extract_immediately", return_value=False):
+                mgr.try_extract(long_input, "r")  # counter=1
+                mgr.try_extract(long_input, "r")  # counter=2
+            with patch("src.agent.core.memory_manager.should_extract_immediately", return_value=True):
+                mgr.try_extract(long_input, "r")  # explicit，不动 counter
+            with patch("src.agent.core.memory_manager.should_extract_immediately", return_value=False):
+                mgr.try_extract(long_input, "r")  # counter=3, 触发
+
+        # 共 2 次：1 次 explicit + 1 次 auto-3rd
+        assert mock_extract.call_count == 2
+
+    def test_source_field_in_upsert(self) -> None:
+        """auto 路径传 source='auto'，explicit 路径传 source='explicit'。"""
+        um = MagicMock()
+        mgr = _mk_mgr(user_memory=um)
+        entries = [{"category": "preference", "key": "k", "value": "v"}]
+
+        # auto
+        with (
+            patch("src.agent.core.memory_manager.should_extract_immediately", return_value=False),
+            patch("src.agent.core.memory_manager._cfg.USER_MEMORY_AUTO_EXTRACT", True),
+            patch("src.agent.core.memory_manager._cfg.USER_MEMORY_EXTRACT_EVERY_N", 1),
+            patch("src.agent.core.memory_manager._cfg.USER_MEMORY_EXTRACT_MIN_INPUT_LEN", 0),
+            patch("src.agent.core.memory_manager.extract_memories", return_value=entries),
+        ):
+            mgr.try_extract("hello world", "r")
+        um.upsert.assert_called_with("preference", "k", "v", source="auto")
+
+        # explicit
+        um.reset_mock()
+        with (
+            patch("src.agent.core.memory_manager.should_extract_immediately", return_value=True),
+            patch("src.agent.core.memory_manager.extract_memories", return_value=entries),
+        ):
+            mgr.try_extract("请记住 X", "r")
+        um.upsert.assert_called_with("preference", "k", "v", source="explicit")

@@ -316,6 +316,13 @@ USER_MEMORY_DB_PATH: str = os.getenv("USER_MEMORY_DB_PATH", "./sqlite_db/user_me
 USER_MEMORY_MAX_CHARS: int = int(os.getenv("USER_MEMORY_MAX_CHARS", "1500"))
 # true 每次对话结束后自动提取记忆（每轮额外一次 LLM 调用，默认关闭需手动开启）
 USER_MEMORY_AUTO_EXTRACT: bool = os.getenv("USER_MEMORY_AUTO_EXTRACT", "false").lower() == "true"
+# 自动提取触发频率（Phase 1.2 触发优化，详 iter_2.md §4.9.2）：
+# 每 N 轮（user 消息计）才触发一次自动提取，降低 LLM 调用成本；显式触发（"请记住"）
+# 不受此限制。设为 1 等同每轮触发（旧行为）。
+USER_MEMORY_EXTRACT_EVERY_N: int = int(os.getenv("USER_MEMORY_EXTRACT_EVERY_N", "5"))
+# 用户输入短于此长度（字符数）不触发自动提取（短问题如"什么是 RAG"无值得记忆的个人信息）。
+# 显式触发同样不受此限制。设为 0 禁用此过滤。
+USER_MEMORY_EXTRACT_MIN_INPUT_LEN: int = int(os.getenv("USER_MEMORY_EXTRACT_MIN_INPUT_LEN", "20"))
 
 
 def get_active_config() -> ProviderConfig:

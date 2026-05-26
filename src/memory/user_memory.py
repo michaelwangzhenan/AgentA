@@ -16,10 +16,16 @@
         category    TEXT     NOT NULL,  -- preference/background/instruction/task/correction
         key         TEXT     NOT NULL,  -- 短标识（≤ 30 字符）
         value       TEXT     NOT NULL,  -- 实际内容（≤ 500 字符）
+        source      TEXT     NOT NULL DEFAULT 'auto',  -- auto/explicit/manual
         created_at  TEXT     NOT NULL,
         accessed_at TEXT     NOT NULL,
         UNIQUE(category, key)           -- 同类同 key 自动覆盖旧值
     )
+
+source 字段来源（C 混合范式，详 iter_2.md §4.9.2）：
+    - auto      MemoryManager.try_extract 在自动模式下提取（USER_MEMORY_AUTO_EXTRACT）
+    - explicit  用户敲"请记住"/"remember" 等触发词后由 LLM 提取
+    - manual    用户用 /memory add / /memory edit 显式写入
 """
 
 import json
@@ -64,6 +70,14 @@ CATEGORY_LABELS: dict[str, str] = {
     "instruction": "指令",
     "task":        "任务",
     "correction":  "纠错",
+}
+
+# 写入来源（详 iter_2.md §4.9.2 C 混合范式）
+MEMORY_SOURCES: frozenset[str] = frozenset({"auto", "explicit", "manual"})
+SOURCE_LABELS: dict[str, str] = {
+    "auto":     "自动",
+    "explicit": "请记住",
+    "manual":   "手工",
 }
 
 # 用户显式触发记忆提取的关键词
@@ -247,7 +261,13 @@ class UserMemoryStore:
     # ── 表结构 ────────────────────────────────────────────────────────────────
 
     def _create_tables(self) -> None:
-        """创建 user_memories 表（幂等）。"""
+        """创建 user_memories 表（幂等）+ fail-fast 检测旧 schema。
+
+        不做向后兼容 schema 迁移：从 pre-Phase 1.2 升级时请手动删除
+        `sqlite_db/user_memory.db` 重建（单用户场景损失可接受，避免引入迁移代码）。
+        但裸的 `sqlite3.OperationalError` 对用户不友好，所以在表创建后做一次
+        PRAGMA 自检，缺列时抛带操作指引的 RuntimeError。
+        """
         with self._lock, self._conn:
             self._conn.execute("""
                 CREATE TABLE IF NOT EXISTS user_memories (
@@ -255,6 +275,7 @@ class UserMemoryStore:
                     category    TEXT    NOT NULL,
                     key         TEXT    NOT NULL,
                     value       TEXT    NOT NULL,
+                    source      TEXT    NOT NULL DEFAULT 'auto',
                     created_at  TEXT    NOT NULL,
                     accessed_at TEXT    NOT NULL,
                     UNIQUE(category, key)
@@ -264,10 +285,15 @@ class UserMemoryStore:
                 CREATE INDEX IF NOT EXISTS idx_user_memories_category
                     ON user_memories(category)
             """)
+            cols = {row[1] for row in self._conn.execute("PRAGMA table_info(user_memories)")}
+            if "source" not in cols:
+                raise RuntimeError(
+                    f"user_memory.db schema 已过期，请删除后重启。"
+                )
 
     # ── 核心 CRUD ─────────────────────────────────────────────────────────────
 
-    def upsert(self, category: str, key: str, value: str) -> None:
+    def upsert(self, category: str, key: str, value: str, source: str = "auto") -> None:
         """
         插入或更新一条记忆。同 (category, key) 的旧值被新值覆盖（去重）。
 
@@ -275,10 +301,15 @@ class UserMemoryStore:
             category: 记忆类别，必须在 MEMORY_CATEGORIES 内。
             key: 简短标识（≤ 30 字符，同样经过注入过滤）。
             value: 具体内容（自动清洗、截断）。
+            source: 写入来源，必须在 MEMORY_SOURCES 内；未知值降级为 'auto'。
+                    冲突 upsert 时也会更新 source，反映"最近一次来源"。
         """
         if category not in MEMORY_CATEGORIES:
             logger.warning("[UserMemory] 未知类别 %r，跳过写入", category)
             return
+        if source not in MEMORY_SOURCES:
+            logger.warning("[UserMemory] 未知 source %r，降级为 'auto'", source)
+            source = "auto"
         clean_key = _sanitize(key.strip())[:_MAX_KEY_CHARS]
         clean_value = _sanitize(value)
         if not clean_key:
@@ -290,20 +321,50 @@ class UserMemoryStore:
         now = datetime.now().isoformat(timespec="seconds")
         with self._lock, self._conn:
             self._conn.execute(
-                """INSERT INTO user_memories(category, key, value, created_at, accessed_at)
-                   VALUES(?, ?, ?, ?, ?)
+                """INSERT INTO user_memories(category, key, value, source, created_at, accessed_at)
+                   VALUES(?, ?, ?, ?, ?, ?)
                    ON CONFLICT(category, key) DO UPDATE SET
                        value = excluded.value,
+                       source = excluded.source,
                        accessed_at = excluded.accessed_at""",
-                (category, clean_key, clean_value, now, now),
+                (category, clean_key, clean_value, source, now, now),
             )
-        logger.info("[UserMemory] 已写入 [%s] %s", category, key)
+        logger.info("[UserMemory] 已写入 [%s] %s (source=%s)", category, key, source)
+
+    def update_value(self, memory_id: int, new_value: str) -> bool:
+        """
+        按 id 更新单条记忆的 value（保持 category/key/source 不变；accessed_at 同步刷新）。
+
+        用途：CLI `/memory edit <id> <new_value>` 让用户直接修正 LLM 误提取的 value，
+        无需重敲完整 (category, key) 元组。
+
+        Args:
+            memory_id: `/memory` 列表中显示的 id。
+            new_value: 新内容，自动 _sanitize + 截断。
+
+        Returns:
+            True 表示 id 存在且已更新；False 表示 id 不存在。
+        """
+        clean_value = _sanitize(new_value)
+        if not clean_value:
+            logger.warning("[UserMemory] update_value: 清洗后为空，跳过 id=%d", memory_id)
+            return False
+        now = datetime.now().isoformat(timespec="seconds")
+        with self._lock, self._conn:
+            cursor = self._conn.execute(
+                "UPDATE user_memories SET value = ?, accessed_at = ? WHERE id = ?",
+                (clean_value, now, memory_id),
+            )
+        updated = cursor.rowcount > 0
+        if updated:
+            logger.info("[UserMemory] 已更新 id=%d", memory_id)
+        return updated
 
     def load_all(self) -> list[dict[str, Any]]:
-        """加载全部记忆条目，按类别和创建时间升序排序。"""
+        """加载全部记忆条目，按类别和创建时间升序排序。返回字段含 source。"""
         with self._lock:
             rows = self._conn.execute(
-                """SELECT id, category, key, value, created_at, accessed_at
+                """SELECT id, category, key, value, source, created_at, accessed_at
                    FROM user_memories
                    ORDER BY category, created_at ASC"""
             ).fetchall()

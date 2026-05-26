@@ -468,6 +468,81 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 **演进点**：当前未做的 punt 列在 [iter_2.md §4.9.1 缺口表](iter_2.md#491-session-列表搜索恢复phase-11)，包括分页（>10K 时再做）、Session 命名/标签（[§5.1 C4](iter_2.md#5-future) 之后）、project 列（[Phase 1.2 Memory 三层](iter_2.md#473-实施顺序) 做时 ALTER TABLE 加列）、Chainlit 端同步（[§4.2 WebUI](#42webui) 一并处理）。
 
 
+## 3.4 用户记忆（Memory）
+
+跨 session 的"用户偏好/背景/指令/任务/纠错"持久化。由 `src/agent/core/memory_manager.py`
+的 `MemoryManager`（[iter_2.md §4.5 Helper 抽象层](./iter_2.md#45-helper-抽象层) 抽出）+
+`src/memory/user_memory.py` 的 `UserMemoryStore` 共同承担：前者负责注入/提取的策略，
+后者负责持久化。Phase 1.2 完成"触发优化 + 手动写入 + source 字段 + 评估闭环"。
+
+### 3.4.1 SQLite Schema
+
+单表 `user_memories`，文件默认 `./sqlite_db/user_memory.db`（与对话历史的
+`chat_history.db` 物理隔离，避免误删互相影响）。字段：
+
+| 列 | 类型 | 约束 / 默认 | 说明 |
+|---|---|---|---|
+| `id` | INTEGER | PK, AUTOINCREMENT | 主键，`/memory` 列表与 `del` / `edit` 用 |
+| `category` | TEXT | NOT NULL | preference / background / instruction / task / correction |
+| `key` | TEXT | NOT NULL | 短标识（≤ 30 字符）|
+| `value` | TEXT | NOT NULL | 实际内容（≤ 500 字符；写入时 `_sanitize` 防 prompt injection）|
+| `source` | TEXT | NOT NULL, DEFAULT `'auto'` | 写入来源：auto / explicit / manual（详 §3.4.2）|
+| `created_at` | TEXT | NOT NULL | ISO 时间戳 |
+| `accessed_at` | TEXT | NOT NULL | 同上；upsert / update_value 时刷新 |
+| —— UNIQUE | (category, key) | | 同类同 key 自动覆盖（二次提取去重）|
+| —— INDEX | idx ON (category) | | 按类别过滤加速 |
+
+> 不做向后兼容 schema 迁移：升级时手动删除 `./sqlite_db/user_memory.db` 重建即可
+> （单用户场景损失可接受，省下 ~30 行迁移代码与对应测试）。
+
+### 3.4.2 写入来源（source）与混合范式
+
+**混合范式**（C 混合，对标 ChatGPT / Cursor Memories）：自动从对话提取 + 显式触发词
+立即提取 + 用户手动编辑三种写入方式共存于同一份记忆池，用 `source` 字段标记来源
+便于事后审计与排错。
+
+| source | 触发路径 | 备注 |
+|---|---|---|
+| `auto` | `USER_MEMORY_AUTO_EXTRACT=true` 下 `MemoryManager.try_extract` 自动跑 | 受 N 轮 + min_len 双闸节流 |
+| `explicit` | 用户输入命中触发词（"请记住"/"remember" 等 8 个中英 keyword） | 立即触发；附带最近 10 条历史作为 context_history |
+| `manual` | `/memory add` 与 `/memory edit` CLI 命令 | 不调 LLM，直接 SQL 写入 |
+
+三者底层都走 `UserMemoryStore.upsert(category, key, value, source=...)`，由调用方传 source 标记来源。
+
+### 3.4.3 触发节流
+
+避免每轮无脑调 LLM extract，由两个 config 控制：
+
+| config | 默认 | 含义 |
+|---|---|---|
+| `USER_MEMORY_EXTRACT_EVERY_N` | 5 | 每 N 轮（user 消息计）才触发一次自动提取 |
+| `USER_MEMORY_EXTRACT_MIN_INPUT_LEN` | 20 | 用户输入短于此字符数不触发（"什么是 RAG"等短问无值得记忆的个人信息） |
+
+**显式触发不受此限**，且不消耗也不重置 auto 计数器 —— 这意味着 `/memory` 显式与
+auto 节流是两条独立流水线，不会互相干扰。
+
+### 3.4.4 CLI 命令
+
+| 命令 | 说明 |
+|---|---|
+| `/memory` | 按 category 分组列出全部，含 source 标签（自动/请记住/手工）+ 人性化时间 |
+| `/memory add <类别> <key> <value>` | 手动写入（source='manual'），value 可含空格与大小写 |
+| `/memory edit <id> <新内容>` | 修正指定条目的 value（不变 category/key/source） |
+| `/memory del <id>` | 删除单条 |
+| `/memory clear` | 清空全部 |
+
+`/memory` 列表按固定顺序展示 preference → background → instruction → task → correction，
+便于人眼扫描定位（详 `src/cli/handlers.py::MEMORY_CATEGORY_ORDER`）。
+
+### 3.4.5 评估闭环
+
+| 维度 | 工具 | 判据 |
+|---|---|---|
+| 正确性 | `tests/test_user_memory.py` + `tests/test_memory_manager.py` + `tests/test_cli_handlers.py` 中 Memory 相关 Test 类 | 全过 |
+| 性能 | `tools/agent_eval/perf_eval.py --target memory` | size=1000：load_all<20ms / load_ctx<30ms / upsert,update<10ms / render<100ms |
+| 召回 | `tools/agent_eval/memory/recall_golden.py`（7 case，keyword/regex check） | 通过率 ≥ 80% |
+
+
 # 4.表现层
 
 表现层负责"采集输入 → 调用 Agent → 渲染输出"三件事，按 IO 形态分为 CLI / Web UI / SDK 三种形态，全部通过 `AgentAPI` 与 Agent core 通信。
