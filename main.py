@@ -68,7 +68,7 @@ def main() -> None:
     """CLI 主循环。"""
     print(BANNER)
 
-    _warm_up_rag_models()
+    # _warm_up_rag_models()
 
     # 延迟导入 Agent（仍较重，但 banner / RAG 预热提示已先输出）
     print("⏳ 正在初始化 Agent…", flush=True)
@@ -146,8 +146,19 @@ def main() -> None:
             case "/history":
                 handlers.show_history(chat_history, agent.session_id)
                 continue
+            case "/sessions":
+                query = cmd_parts[1].strip() if len(cmd_parts) > 1 else None
+                handlers.list_sessions(
+                    chat_history,
+                    query=query,
+                    current_session_id=agent.session_id,
+                )
+                continue
             case "/session":
                 session_arg = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""
+                if not session_arg:
+                    print("⚠️  /session 需要 session id 参数。用 /sessions 查看列表，或 /sessions <关键词> 搜索。\n")
+                    continue
                 result = handlers.switch_session(
                     chat_history, session_arg, custom_prompts, SYSTEM_PROMPT, skills_map,
                     thinking_cfg, user_memory=user_memory

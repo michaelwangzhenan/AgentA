@@ -17,6 +17,10 @@ from src.memory.user_memory import UserMemoryStore
 
 # 历史记录预览截断长度
 _HISTORY_PREVIEW_LEN: int = 60
+# 切换 session 后展示的最近消息条数
+_SWITCH_PREVIEW_COUNT: int = 2
+# 切换预览每条消息正文截断长度
+_SWITCH_PREVIEW_LEN: int = 80
 
 if TYPE_CHECKING:
     from src.agent.agent import Agent, ThinkingConfig
@@ -125,21 +129,64 @@ def show_history(
     out("")
 
 
-def list_sessions(chat_history: ChatHistoryStore, out: OutputFn = _stdout) -> None:
-    """列出所有历史 session。"""
-    sessions = chat_history.list_sessions()
+def _format_relative_time(iso_ts: str) -> str:
+    """把 ISO timestamp 格式化为人性化时间字符串。
+
+    - 当天 → "今天 HH:MM"
+    - 昨天 → "昨天 HH:MM"
+    - 2-7 天 → "N 天前"
+    - 更早 → "YYYY-MM-DD"
+
+    解析失败时降级为原 ISO 串截断到秒。
+    """
+    try:
+        ts = datetime.fromisoformat(iso_ts)
+    except ValueError:
+        return iso_ts[:19].replace("T", " ")
+    days = (datetime.now().date() - ts.date()).days
+    if days == 0:
+        return f"今天 {ts.strftime('%H:%M')}"
+    if days == 1:
+        return f"昨天 {ts.strftime('%H:%M')}"
+    if 2 <= days <= 7:
+        return f"{days} 天前"
+    return ts.strftime("%Y-%m-%d")
+
+
+def list_sessions(
+    chat_history: ChatHistoryStore,
+    query: str | None = None,
+    current_session_id: str | None = None,
+    out: OutputFn = _stdout,
+) -> None:
+    """列出历史 session，可选关键词过滤与当前 session 高亮。
+
+    Args:
+        chat_history: 存储依赖。
+        query: 可选搜索词，按 session_id 前缀 OR first_user_msg LIKE 过滤。
+        current_session_id: 若提供，在列表中用 "▶" 标记当前活跃 session。
+        out: 输出适配器，便于测试注入。
+    """
+    sessions = chat_history.list_sessions(query=query)
     if not sessions:
-        out("📭 暂无历史 session 记录。\n")
+        if query:
+            out(f"📭 没有匹配 {query!r} 的 session。\n")
+        else:
+            out("📭 暂无历史 session 记录。\n")
         return
-    out(f"\n📚 历史 Session 列表（共 {len(sessions)} 个）：")
-    out(f"  {'ID':<10}  {'Create On':<19}  {'messages':<12}  {'Prompt':<16}  {'1st Question':<40}")
-    out(f"  {'-'*8:<10}  {'-'*19:<19}  {'-'*12:<12}  {'-'*16:<16}  {'-'*40}")
+
+    title_suffix = f"（共 {len(sessions)} 个，过滤 {query!r}）" if query else f"（共 {len(sessions)} 个）"
+    out(f"\n📚 历史 Session 列表{title_suffix}：")
+    out(f"  {'':<2}{'ID':<10}  {'Create On':<14}  {'msgs':<6}  {'Prompt':<16}  {'1st Question':<40}")
+    out(f"  {'':<2}{'-'*8:<10}  {'-'*14:<14}  {'-'*6:<6}  {'-'*16:<16}  {'-'*40}")
     for s in sessions:
-        created = s["created_at"][:19].replace("T", " ")
-        sid_short = s["session_id"][:8]
+        sid = s["session_id"]
+        marker = "▶ " if current_session_id and sid == current_session_id else "  "
+        sid_short = sid[:8]
+        created = _format_relative_time(s["created_at"])
         prompt_label = s["prompt_name"] or "默认"
         first_msg = (s["first_user_msg"] or "（无用户消息）")[:40]
-        out(f"  {sid_short:<10}  {created:<19}  {s['msg_count']:<12}  {prompt_label:<16}  {first_msg:<40}")
+        out(f"  {marker}{sid_short:<10}  {created:<14}  {s['msg_count']:<6}  {prompt_label:<16}  {first_msg:<40}")
     out("")
 
 
@@ -299,11 +346,15 @@ def switch_session(
 ) -> "tuple[Agent, str | None] | None":
     """切换到指定 session 并恢复对应 Prompt 上下文。
 
+    无参兜底 `/session` → list 已废弃；list 由 main.py 路由到独立的 `/sessions` 命令
+    （见 [iter_2.md §4.9.1](../../docs/iter_2.md#491-session-列表搜索恢复phase-11)），
+    本函数保留对空 session_arg 的防御性返回 None，但不再回退到 list。
+
     Returns:
-        (新 Agent, active_prompt_name)；若无 session_arg 则列出列表并返回 None。
+        (新 Agent, active_prompt_name)；session_arg 为空时返回 None。
     """
     if not session_arg:
-        list_sessions(chat_history, out=out)
+        out("⚠️  /session 需要 session id。用 /sessions 查看列表。\n")
         return None
 
     sessions_info = {s["session_id"]: s for s in chat_history.list_sessions()}
@@ -327,7 +378,20 @@ def switch_session(
     history = chat_history.load(session_arg)
     msg_count = len([m for m in history if m["role"] != "system"])
     prompt_hint = f"  Prompt: {active_prompt_name}" if active_prompt_name else ""
-    out(f"✅ 已切换到 Session: {session_arg}（共 {msg_count} 条历史消息）{prompt_hint}\n")
+    out(f"✅ 已切换到 Session: {session_arg}（共 {msg_count} 条历史消息）{prompt_hint}")
+
+    preview_msgs = [
+        m for m in history
+        if m["role"] in ("user", "assistant") and _is_visible_assistant_message(m)
+    ][-_SWITCH_PREVIEW_COUNT:]
+    if preview_msgs:
+        out("   最近对话预览：")
+        for m in preview_msgs:
+            role_label = "你" if m["role"] == "user" else "Agent"
+            content = (m.get("content") or "").replace("\n", " ").strip()
+            preview = content[:_SWITCH_PREVIEW_LEN] + ("…" if len(content) > _SWITCH_PREVIEW_LEN else "")
+            out(f"     {role_label}: {preview}")
+    out("")
     return agent, active_prompt_name
 
 

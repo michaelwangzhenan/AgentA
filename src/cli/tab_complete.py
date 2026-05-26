@@ -21,6 +21,7 @@ CLI_COMMANDS: list[str] = [
     "/help",
     "/clear",
     "/history",
+    "/sessions",
     "/session",
     "/del-session",
     "/clean-session",

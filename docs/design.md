@@ -433,6 +433,39 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 
 ## 3.3 Session 管理
 
+会话状态由 `src/memory/chat_history.py:ChatHistoryStore` 持久化到 SQLite（`./sqlite_db/chat_history.db`），是 Agent 跨进程恢复上下文与跨 session 切换的唯一事实来源。
+
+**表结构**
+
+| 表 | 字段 | 用途 |
+|---|---|---|
+| `sessions` | `session_id` (PK) / `created_at` / `first_user_msg` / `prompt_name` | 会话元数据；`first_user_msg` 用于 list/搜索预览 |
+| `messages` | `id` (PK) / `session_id` (idx) / `role` / `content` / `tool_calls` (JSON) / `tool_call_id` / `timestamp` | 消息全量；`tool_calls` 序列化为 JSON |
+
+**Store API**（`ChatHistoryStore`）
+
+| 方法 | 说明 |
+|---|---|
+| `append(session_id, msg, prompt_name="")` | 写入单条 message；首次写入自动创建 session 元数据 |
+| `load(session_id)` | 全量加载 messages（按 id 升序），供 Agent 恢复上下文 |
+| `load_last_n_messages(session_id, n)` | 仅取末尾 n 条，规避长 session I/O 开销 |
+| `list_sessions(query=None, limit=None)` | 列出 session；`query` 按 id 前缀 OR `first_user_msg` LIKE（不区分大小写）过滤 |
+| `set_prompt_name(session_id, name)` | 更新当前 session 关联的自定义 Prompt 名 |
+| `clear / delete_session / clean_all_sessions` | 三档清理：当前重置 / 单 session 删除 / 全删 |
+
+**CLI 命令约定**
+
+按"单数=对一个对象 / 复数=对集合"原则拆分（[iter_2.md §4.9.1](iter_2.md#491-session-列表搜索恢复phase-11)）：
+
+| 命令 | 行为 |
+|---|---|
+| `/sessions` | 列出全部 session（▶ 标记当前活跃），含相对时间（今天/昨天/N 天前/日期） |
+| `/sessions <关键词>` | 按 id 前缀或首问内容过滤 |
+| `/session <id>` | 切到指定 session，恢复 prompt + 全量历史，并打印末尾 2 条预览 |
+| `/del-session <id>` | 删除指定 session（拒删当前活跃） |
+| `/clean-session` | 清空全部 session（需 yes 二次确认） |
+
+**演进点**：当前未做的 punt 列在 [iter_2.md §4.9.1 缺口表](iter_2.md#491-session-列表搜索恢复phase-11)，包括分页（>10K 时再做）、Session 命名/标签（[§5.1 C4](iter_2.md#5-future) 之后）、project 列（[Phase 1.2 Memory 三层](iter_2.md#473-实施顺序) 做时 ALTER TABLE 加列）、Chainlit 端同步（[§4.2 WebUI](#42webui) 一并处理）。
 
 
 # 4.表现层

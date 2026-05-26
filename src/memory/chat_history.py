@@ -268,21 +268,44 @@ class ChatHistoryStore:
         logger.info("已清空全部 %d 个 session", count)
         return count
 
-    def list_sessions(self) -> list[dict[str, Any]]:
+    def list_sessions(
+        self,
+        query: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
         """
-        列出所有历史 session，按创建时间降序排列。
+        列出历史 session，按创建时间降序排列。
+
+        Args:
+            query: 可选搜索词，按 session_id 前缀（去前后空白后大小写敏感）OR
+                   first_user_msg 大小写不敏感 LIKE 匹配。None 或空串视为不过滤。
+            limit: 可选返回上限。None 表示返回全部。
 
         Returns:
-            list of dict，每项包含 session_id、created_at、first_user_msg、msg_count。
+            list of dict，每项包含 session_id、created_at、first_user_msg、
+            prompt_name、msg_count。
         """
-        rows = self._conn.execute(
-            """SELECT s.session_id, s.created_at, s.first_user_msg, s.prompt_name,
-                      COUNT(m.id) AS msg_count
-               FROM sessions s
-               LEFT JOIN messages m ON s.session_id = m.session_id
-               GROUP BY s.session_id
-               ORDER BY s.created_at DESC""",
-        ).fetchall()
+        sql = """
+            SELECT s.session_id, s.created_at, s.first_user_msg, s.prompt_name,
+                   COUNT(m.id) AS msg_count
+            FROM sessions s
+            LEFT JOIN messages m ON s.session_id = m.session_id
+        """
+        params: list[Any] = []
+        if query:
+            q = query.strip()
+            if q:
+                sql += (
+                    " WHERE s.session_id LIKE ? "
+                    "OR LOWER(s.first_user_msg) LIKE LOWER(?)"
+                )
+                params.extend([f"{q}%", f"%{q}%"])
+        sql += " GROUP BY s.session_id ORDER BY s.created_at DESC"
+        if limit is not None and limit > 0:
+            sql += " LIMIT ?"
+            params.append(limit)
+
+        rows = self._conn.execute(sql, params).fetchall()
         return [dict[str, Any](row) for row in rows]
 
     def close(self) -> None:

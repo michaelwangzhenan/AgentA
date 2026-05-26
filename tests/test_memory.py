@@ -247,6 +247,66 @@ class TestListSessions:
         assert "我的第一个问题" in sessions[0]["first_user_msg"]
 
 
+class TestListSessionsSearch:
+    """测试 list_sessions(query, limit) 过滤行为。"""
+
+    def _seed(self, store: ChatHistoryStore) -> None:
+        store.append("abc12345-foo", {"role": "user", "content": "RAG 召回评测怎么做"})
+        store.append("def67890-bar", {"role": "user", "content": "Agent ReAct 实现细节"})
+        store.append("abc99999-baz", {"role": "user", "content": "LangChain 历史管理"})
+
+    def test_query_none_returns_all(self, store: ChatHistoryStore) -> None:
+        self._seed(store)
+        assert len(store.list_sessions(query=None)) == 3
+
+    def test_query_empty_string_returns_all(self, store: ChatHistoryStore) -> None:
+        self._seed(store)
+        assert len(store.list_sessions(query="")) == 3
+
+    def test_query_matches_session_id_prefix(self, store: ChatHistoryStore) -> None:
+        self._seed(store)
+        ids = {s["session_id"] for s in store.list_sessions(query="abc")}
+        assert ids == {"abc12345-foo", "abc99999-baz"}
+
+    def test_query_matches_first_user_msg_substring(self, store: ChatHistoryStore) -> None:
+        self._seed(store)
+        ids = {s["session_id"] for s in store.list_sessions(query="ReAct")}
+        assert ids == {"def67890-bar"}
+
+    def test_query_first_msg_is_case_insensitive(self, store: ChatHistoryStore) -> None:
+        self._seed(store)
+        ids_upper = {s["session_id"] for s in store.list_sessions(query="REACT")}
+        ids_lower = {s["session_id"] for s in store.list_sessions(query="react")}
+        assert ids_upper == ids_lower == {"def67890-bar"}
+
+    def test_query_no_match_returns_empty(self, store: ChatHistoryStore) -> None:
+        self._seed(store)
+        assert store.list_sessions(query="nonsense-xyz-zzz") == []
+
+    def test_query_whitespace_only_is_treated_as_no_filter(self, store: ChatHistoryStore) -> None:
+        self._seed(store)
+        assert len(store.list_sessions(query="   ")) == 3
+
+    def test_limit_caps_results(self, store: ChatHistoryStore) -> None:
+        self._seed(store)
+        assert len(store.list_sessions(limit=2)) == 2
+
+    def test_limit_none_returns_all(self, store: ChatHistoryStore) -> None:
+        self._seed(store)
+        assert len(store.list_sessions(limit=None)) == 3
+
+    def test_limit_zero_treated_as_no_limit(self, store: ChatHistoryStore) -> None:
+        """limit<=0 视为不限制（避免外部传 0 把列表截没）。"""
+        self._seed(store)
+        assert len(store.list_sessions(limit=0)) == 3
+
+    def test_query_combined_with_limit(self, store: ChatHistoryStore) -> None:
+        self._seed(store)
+        result = store.list_sessions(query="abc", limit=1)
+        assert len(result) == 1
+        assert result[0]["session_id"].startswith("abc")
+
+
 # ── 集成测试：跨 Agent 实例历史拼接 ──────────────────────────────────────────
 
 class TestAgentMemoryIntegration:

@@ -16,7 +16,8 @@ HELP_TEXT = """
   /help                      显示本帮助信息
   /clear                     清空当前 session 的对话历史并重置 Agent
   /history                   查看当前 session 的历史对话摘要
-  /session                   列出所有历史 session
+  /sessions                  列出所有历史 session（▶ 标记当前 session）
+  /sessions <关键词>         按 session id 前缀或首问内容搜索
   /session <id>              切换到指定 session 并恢复历史
   /del-session <id>          彻底删除指定历史 session 的所有记录（不可恢复）
   /clean-session             清空所有历史 session 的记录（不可恢复）

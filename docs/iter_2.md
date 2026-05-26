@@ -764,10 +764,92 @@ Part B 落地总览：
 6. 更新design文档 到 [design.md](design.md) 对应子章节， 如 [Session 管理](design.md#33-session-管理)。desgin 文件要写的简练，抓住重点，风格要跟原来的章节统一。
 
 
-### 4.9.1 Session 列表/搜索/恢复(phase 1.1)
+### 4.9.1 Session 管理 (phase 1.1)
+
+**Step 1 · Review 现状**
+
+Session 基础设施已经相当厚（`src/memory/chat_history.py` + `src/cli/handlers.py` + `src/cli/tab_complete.py`）：自动创建、`list_sessions()` API（含 first_user_msg + msg_count）、`/session <id>` 切换 + prompt 恢复、`/del-session`、`/clean-session`、`/history`、`/save`、tab 补全（短 id + 首问 label）全部已实现。**[§4.7.3](#473-实施顺序) Phase 1.1 字面 P0 出口已满足**。
+
+按 feature 名 "列表/搜索/**恢复**" 三件套 + [§4.8 UX 流畅度](#481-评估方法论) 维度做缺口分析：
+
+| 等级 | 缺口 | 影响 |
+|---|---|---|
+| A | **无搜索能力** | feature 名明写"搜索"但 `list_sessions()` 只 ORDER BY，session >30 个时找不到东西 |
+| A | `/session` 双语义重载（list + switch 共用一个命令） | 新用户难记，UX 自评扣分 |
+| B | 时间用 ISO 字符串 | 不直观 |
+| B | 当前活跃 session 在 list 里无标记 | 一眼看不出在哪 |
+| B | 切换后无最近消息预览 | 切回旧 session 必须再敲 `/history` |
+| Punt | 分页 / Session 命名 / 标签 / 收藏 | over-engineering for MVP |
+| Punt | Chainlit 端同步 | 出口判据明写 "CLI 能"，留 [design.md §4.2 WebUI](design.md#42webui) 一并处理 |
+| Punt | Session 关联 project 层 | 等 [Phase 1.2 Memory 三层](#473-实施顺序) 做时按需 ALTER TABLE 加列 |
+
+**Step 2 · 实施计划**
+
+本期 scope：A1+A2 必做 + B1+B2+B3 强化（共 5 项）。命令拆分用**硬拆分**：`/session <id>` 仅做 switch，`/sessions [query]` 做 list/搜索。原则：复数=对集合操作，单数=对单个操作。
+
+| 改动 | 文件 | 内容 |
+|---|---|---|
+| 1 | `src/memory/chat_history.py` | `list_sessions(query=None, limit=None)`：按 session_id 前缀或 first_user_msg LIKE 过滤 |
+| 2 | `src/cli/handlers.py` | `list_sessions` 输出：时间格式化（B1）+ 当前 session 高亮（B2）+ 接受 query 参数 |
+| 3 | `src/cli/handlers.py` | `switch_session` 末尾追加最近 2 条消息预览（B3） |
+| 4 | `main.py` | 拆 `/sessions [query]`（list/搜索） vs `/session <id>`（switch 专用）；单 `/session` 报错提示用 `/sessions` |
+| 5 | `src/cli/ui.py` | help 文本更新 |
+| 6 | `src/cli/tab_complete.py` | 补全加 `/sessions`，`/session` 只补全 `<id>` 形式 |
+| 7 | `tests/test_chat_history_search.py` | search filter 单测 |
+| 8 | `tests/test_cli_handlers.py` | 命令拆分后的行为 |
+
+[§4.8 评估](#48-如何评估-agent-实现方法论) 按 [Feature × 方法矩阵](#481-评估方法论) Session 行：**Unit ✅ + Profiling ✅ + 人工评分 ○**。
+
+**Step 3 · 代码实现**
+
+按计划 8 项改动全部落地（无 scope 蔓延）。关键代码位置：
+
+| 改动 | 实现位置 | 行号 |
+|---|---|---|
+| Store 层 search filter | `src/memory/chat_history.py:list_sessions` | `query=None, limit=None`，LIKE OR session_id 前缀 |
+| 时间格式化 | `src/cli/handlers.py:_format_relative_time` | 今天/昨天/N 天前/日期/降级 5 分支 |
+| List 输出强化 | `src/cli/handlers.py:list_sessions` | 多 `query` 与 `current_session_id` 参数，▶ 标记当前 |
+| 切换预览 | `src/cli/handlers.py:switch_session` | 末尾 `_SWITCH_PREVIEW_COUNT=2` 条预览 |
+| 命令硬拆分 | `main.py /sessions` / `main.py /session <id>` | 单 `/session` 报错，引导用 `/sessions` |
+| Help / Tab | `src/cli/ui.py` + `src/cli/tab_complete.py` | `/sessions` 加入静态命令表 |
+
+**Step 4 · UT 结果**
+
+- 新增 [`tests/test_memory.py::TestListSessionsSearch`](../tests/test_memory.py) 11 个测试覆盖 query/limit 6 种边界（None / 空串 / 全空白 / id 前缀 / 大小写 / limit=0）
+- 扩展 [`tests/test_cli_handlers.py`](../tests/test_cli_handlers.py) `TestFormatRelativeTime` 7 个测试（5 个时间分支 + 解析失败 + 长串截断）、`TestListSessionsOutput` 4 个、`TestSwitchSessionPreview` 3 个
+- 全量回归：`pytest` → **352 passed, 0 failed**（含 18 个本次新增测试，跑 52s）
+
+**Step 5 · §4.8 评估**
+
+| 维度 | 方法 | 结果 |
+|---|---|---|
+| Functional | Unit (18 新增) | 全过；search filter / 时间格式化 / 高亮 / 预览 / 命令路由全覆盖 |
+| Perf/Cost | Profiling | [`tools/agent_eval/feature_session/session_perf_eval.py`](../tools/agent_eval/feature_session/session_perf_eval.py) 跑 size = 10/100/1000/5000；5000 sessions 时查询 13.3ms / 渲染 35.6ms，全面优于判据（< 50ms / < 200ms） |
+| UX | 人工实测（5 分制） | **待人工实测回填**。维度：列表清晰度 / 搜索易用性 / 切换流畅度 / 命令记忆度。测试动作：`/sessions`、`/sessions <关键词>`、`/session <id>`、单 `/session`（验报错提示） |
+
+| 指标 | size=10 | size=100 | size=1000 | size=5000 |
+|---|---:|---:|---:|---:|
+| 查询无 filter | 0.10ms | 0.31ms | 3.00ms | 13.32ms |
+| 查询 id 前缀 | 0.10ms | 0.16ms | 0.50ms | 2.14ms |
+| 查询 keyword LIKE | 0.10ms | 0.18ms | 0.99ms | 4.03ms |
+| 渲染全量 | 0.14ms | 0.76ms | 10.75ms | 35.59ms |
+| 渲染过滤 | 0.13ms | 0.42ms | 2.10ms | 9.65ms |
+
+观察：搜索因结果集变小通常**比无 filter 更快**；FTS5 全文索引 / B-tree 索引等性能优化在 10K 量级内完全没必要 —— 与 [§4.8.2 硬约束 1](#482-评估工具列表)（"不为单一 feature 新增 framework 工具"）同精神：当前 1 个 feature 不上抽象，等真到瓶颈再说。
+
+**Step 6 · design.md 同步**
+
+新增 [`design.md §3.3 Session 管理`](design.md#33-session-管理)：表结构 / API 列表 / CLI 命令约定（单复数分工原则）。
+
+**总结**
+
+- 改动量：6 个源文件 + 2 个测试文件 + 1 个 eval 脚本，无破坏性 API 变更
+- 出口判据：**已超出** [§4.7.3 Phase 1.1](#473-实施顺序) 字面 P0（"看 + 恢复"），补齐"搜索"+ UX 强化 5 项
+- Punt 项确认：分页 / Session 命名 / Chainlit 同步 / project 关联 留到对应 Phase 处理
 
 
-### 4.9.2 Memory 三层 + 主动 consolidation(phase 1.2)
+### 4.9.2 Memory 管理 (phase 1.2)
+三层 + 主动 consolidation
 
 ### ...
 
