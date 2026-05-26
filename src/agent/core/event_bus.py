@@ -23,7 +23,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-# 事件类型字符串常量（与 design.md §3.3.2 AgentEvent 表对齐）
+# 事件类型字符串常量（与 design.md §3.1 AgentEvent 表对齐）
 EVENT_THINKING_CHUNK = "thinking_chunk"
 EVENT_TOKEN_CHUNK = "token_chunk"
 EVENT_TOOL_CALL_START = "tool_call_start"
@@ -46,11 +46,11 @@ ALL_EVENT_TYPES: tuple[str, ...] = (
 @dataclass(frozen=True)
 class AgentEvent:
     """
-    统一事件对象（design.md §3.3.2）。
+    统一事件对象（design.md §3.1 AgentEvent 表）。
 
     Fields:
         type:    事件类型字符串，取自 `ALL_EVENT_TYPES`
-        payload: 事件载荷 dict —— 各事件类型 payload schema 见 design.md §3.3.2 表
+        payload: 事件载荷 dict —— 各事件类型 payload schema 见 design.md §3.1 表
         ts:      Unix 时间戳（秒，float），由发射方填或自动 default
     """
     type: str

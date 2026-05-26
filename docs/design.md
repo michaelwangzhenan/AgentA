@@ -395,34 +395,18 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 
 ## 3.1. AgentAPI
 
-`AgentAPI` 是表现层调用 Agent core 的唯一约定（Python 实现在 `src/agent/agent_api.py`）。
-`AgentEvent` 是流式回调的事件协议。
+`AgentAPI` 是**表现层 ↔ Agent core** 之间的接口，以 `@runtime_checkable Protocol` 定义于 `src/agent/agent_api.py`，三种 Agent（Python / LangChain / AutoGPT）通过 duck typing 满足。
 
-```python
-@runtime_checkable
-class AgentAPI(Protocol):
-    session_id: str
-    last_usage: TokenUsage | None
-    thinking_cfg: ThinkingConfig
-    events: EventBus                # 高级订阅入口：按事件类型 fine-grained subscribe
+| 项 | 说明 |
+|---|---|
+| `run` | 执行一轮推理，返回 LLM 最终回答；失败返回 `Error: <msg>` 不抛异常 |
+| `activate_skill` | 注入 Skill 到 system_prompt；`True`=新激活、`False`=已激活 |
+| `set_event_callback` | 设置统一事件回调（覆盖语义，传 `None` 清空） |
 
-    def run(self, user_input: str) -> str: ...
-    def activate_skill(self, name: str, body: str) -> bool: ...
-    def set_event_callback(self, cb: Callable[[AgentEvent], None] | None) -> None: ...
+**事件协议（AgentEvent）** —— `src/agent/core/event_bus.py` 的 frozen dataclass，三字段 `type` / `payload` / `ts`。两种订阅方式：
 
-@dataclass(frozen=True)
-class AgentEvent:
-    type: str                       # 取自 src/agent/core/event_bus.py 的 ALL_EVENT_TYPES
-    payload: Any                    # 按 type 分别约定的 dict（见下表）
-    ts: float                       # Unix 时间戳，default_factory=time.time
-```
-
-**两种订阅方式**
-
-- 简单：`agent.set_event_callback(fn)` —— 一个回调收所有 7 类事件（带 type/ts 元信息）
-- 高级：`agent.events.subscribe(EVENT_X, fn)` —— 按事件类型订阅，回调收到的是 payload dict
-
-**事件类型速查表**
+- 简单：`agent.set_event_callback(fn)` —— 一个回调收所有 7 类事件，`fn` 收 `AgentEvent` 对象（含 `type` / `ts`）
+- 高级：`agent.events.subscribe(EVENT_X, fn)` —— 按事件类型订阅，`fn` 仅收 `payload`
 
 | event.type | payload | 触发时机 |
 |---|---|---|
@@ -434,73 +418,21 @@ class AgentEvent:
 | `error` | `{message, recoverable, phase}` | 运行时异常 |
 | `info` | `{message, ...}` | session / skill 切换等元信息 |
 
-**实现进度（[iter_2.md §4.5.4](iter_2.md#454-api-收口) 落地）**
-
-| 事件 | Python `Agent` | `AutoGPTAgent` | `LangChainAgent` |
-|---|---|---|---|
-| `thinking_chunk` | ✓ | ✗（未走流式 thinking） | ✗（D3=A） |
-| `token_chunk` | ✓ | ✗ | ✗（D3=A） |
-| `tool_call_start` / `_end` | ✓ | ✓ | ✗（D3=A） |
-| `final_answer` | ✓ | ✓ | ✓ |
-| `error` | ✓ | ✓ | ✓ |
-| `info` | ✓（run/skill） | ✓（run/skill） | ✗ |
-
-LangChain 实现暂只发 `final_answer + error`（详见 [iter_2.md §4.5.4](iter_2.md#454-api-收口)）；流式 thinking / token
-后续可接入 LangChain 的 `BaseCallbackHandler` 体系再补齐。
-
 ## 3.2. RetrieverAPI
 
-RAG 对 Agent 暴露的全部接口集中在 `src/rag/retriever.py` 与 `src/rag/query_rewriter.py`。
+`RetrieverAPI` 是 **Agent core ↔ RAG** 之间的接口，以 **module-level 函数** 形式分布在 `src/rag/retriever.py` 与 `src/rag/query_rewriter.py`。
 
-```python
-def search(
-    query: str,
-    top_k: int = config.RAG_TOP_K,
-    where: dict | None = None,
-    queries: list[str] | None = None,
-    rerank: bool | None = None,
-) -> list[Hit]: ...
+| 函数 | 说明 |
+|---|---|
+| `search` | 主入口；支持多查询并行（HyDE）与可选 reranker，返回 `list[Hit]` |
+| `expand_queries` | LLM 查询改写（HyDE），返回原查询 + 扩展查询 |
+| `format_search_results` | 把 hits 拼成可注入 prompt 的 markdown 字符串 |
+| `warm_up` | 预热全部 collection，避免首查延迟 |
 
-def expand_queries(query: str) -> list[str]: ...
-def format_search_results(hits: list[Hit]) -> str: ...
-def warm_up() -> None: ...
-```
+> **两套 API 风格刻意不对称**：`AgentAPI` 用 Protocol 类是因为 3 个实现并存，需 `isinstance` 校验任一实现没破契约；`RetrieverAPI` 仅 1 实现，按 Python 社区 idiom（`os.path` / `json` / `re` 风格）用 module 函数，未来出现第 2 个 retriever 实现时再升级为 Protocol。
 
-`Hit` 字段为对外接口的一部分，RAG 内部重构不允许变更字段语义：
+## 3.3 Session 管理
 
-| 字段 | 类型 | 语义 |
-|---|---|---|
-| `source` | `str` | 文件相对路径 |
-| `document` | `str` | 文本正文（已含父级标题路径） |
-| `score` | `float \| None` | 越大越好，[0,1] 概率或 RRF 分 |
-| `distance` | `float` | 原始向量距离，cosine ∈ [0,2] |
-| `collection` | `str` | `kb_en` / `kb_zh` / `kb_m3` |
-| `id` | `str` | chunk 唯一 id |
-| `retrievers` | `list[str]` | `["dense"]` / `["bm25"]` / `["dense","bm25"]` |
-| `metadata` | `dict \| None` | 含 `lang` / `ext` / `page_no` / `heading_path` 等；个别上游可能传 None |
-
-**降级行为约定**
-
-- 知识库为空 / collection 缺失 → 返回 `[]`，不抛异常
-- `format_search_results([])` → 返回带操作引导的字符串
-- 单 embedding 模型加载失败 → `warm_up()` 记 warning，其它 collection 不受影响
-- BM25 索引缺失 → 静默退化为纯 dense
-
-## LLM
-
-## ReAct
-
-## Session
-
-## Memory
-
-## Tools
-
-## Prompt
-
-## Skills
-
-## MCP
 
 
 # 4.表现层

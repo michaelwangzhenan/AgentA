@@ -348,40 +348,457 @@ Part B 落地总览：
 
 
 ## 4.6. Agent 的最新功能/技术探索
-[3.Agent 优化方向](#3agent-优化方向) 中已列的 12 项是**必做项**（基础盘）。
+[3.Agent 优化方向](#3-agent-优化方向) 中已列的 12 项。
 本步在此基础上**补充候选**：调研最新 Agent 论文 / 产品（GHC、Cursor、Claude Code 等）+ [3.x TBD] 中的项，列出所有可能新增的功能/技术作为**候选清单**。
 
-### Agent 相关 feature/技术方案清单
+**本步原则**：广撒网、只登记、不判断、不实现。所有取舍留到 [§4.7](#47-确定-agenta-中-agent-部分的需求)。
 
+### 4.6.1. 更多可能feature 清单
+
+按来源分组。每行格式：`feature 名` — 一句话说明（来源缩写）。来源缩写：[Cursor]=Cursor IDE、[CC]=Claude Code、[GHC]=GitHub Copilot、[Devin]=Cognition Devin、[Manus]=Manus、[Replit]=Replit Agent、[CU]=Anthropic Computer Use、[Operator]=OpenAI Operator、[Mariner]=Google Mariner、[Paper]=学术论文、[TBD]=本文 [§3](#3-agent-优化方向) TBD 项。
+
+**A. Cursor**（IDE 内置 Agent，2025–2026）
+- **多模式切换**：Agent / Ask / Plan / Debug 四档，每档独立 context 窗口 [Cursor]
+- **并行 subagents**：研究 / shell / 浏览器子代理在独立 context 跑，结果回填主对话 [Cursor]
+- **[x]Custom subagent**：`.cursor/agents/*.md` 用 markdown + frontmatter 定义自定义子代理 [Cursor]
+- **Cloud / Background Agent**：云 VM 跑长任务，自动开 `agent/<task>` 分支并提 PR [Cursor]
+- **多渠道触发**：Slack `@cursor` / GitHub issue 评论 / Linear / Web / 移动端 [Cursor]
+- **Rules 三层**：project rules / user rules / team rules（每次对话自动注入）[Cursor]
+- **Bugbot**：PR 级自动 code review + 安全问题标记，effort 可调（高 effort 多花成本换更深审查）[Cursor]
+- **Auto-Run Allowlist**：自动执行命令白名单（与防 prompt injection 配套）[Cursor]
+- **Design Mode / Agents Window / PR review lifecycle / 环境版本历史** [Cursor]
+- **Composer 训练数据**：把"开发者真实在 Cursor 中的会话"反哺基模（产品差异化路线）[Cursor]
+
+**B. Claude Code**（CLI Agent，2026）
+- **Subagent frontmatter 全字段**：`tools / disallowedTools / model / permissionMode / mcpServers / hooks / skills / memory / isolation / maxTurns / background` [CC]
+- **Skills 预加载**：subagent 启动时把指定 skill **完整内容**注入 context（不是仅 description）[CC]
+- **Hooks lifecycle**：`PreToolUse / PostToolUse / Stop / SubagentStart / SubagentStop / UserPromptSubmit / UserPromptExpansion / SessionStart / TaskCreated / TaskCompleted` 等事件钩子 [CC]
+- **Hook 4 种类型**：`command`（shell）/ `http`（POST URL）/ `mcp_tool`（调 MCP 工具）/ `prompt`（单次 LLM 判定）/ `agent`（开 subagent 验证条件，experimental）[CC]
+- **3 档 Memory**：`user`（跨项目）/ `project`（仓内共享）/ `local`（gitignore）[CC]
+- **6 档 Permission Mode**：`default / acceptEdits / auto / dontAsk / bypassPermissions / plan` [CC]
+- **Worktree Isolation**：subagent 自动开 git worktree 隔离工作 [CC]
+- **Headless / SDK 模式**：`claude -p` + Python/TS SDK，可塞进 CI/CD；`--bare` 跳过自动发现保证 reproducibility [CC]
+- **输出格式**：`text / json / stream-json`（新行分隔流式 JSON）[CC]
+- **AGENTS.md 协议**：跨 AI agent 共享的项目指令文件 [CC] [GHC]
+
+**C. GitHub Copilot Coding Agent**
+- **Coding Agent**：从 issue 直接产 PR（云上自主，开发者只批 review）[GHC]
+- **[x]Custom instructions 三层**：`.github/copilot-instructions.md`（repo 全局）+ `.github/instructions/*.instructions.md` + `AGENTS.md`（跨 agent）[GHC]
+- **applyTo glob frontmatter**：路径模式触发的 path-specific 指令 [GHC]
+- **excludeAgent**：按 agent 类型禁用某指令文件（如 code-review / cloud-agent）[GHC]
+- **[x]Custom agents YAML**：单文件定义 prompt（≤30k 字符）+ tools + mcp-servers + model + 调用条件 [GHC]
+- **[x]MCP server 仓库级配置**：repo settings 里 JSON 形式管理 MCP servers + secrets + toolsets header [GHC]
+- **Code Review Agent**：PR 自动评审（与 Bugbot 同类，独立于 coding agent）[GHC]
+
+**D. 自主/沙箱 Agent 产品**
+- **沙箱云 VM 全套**：shell + editor + browser 的隔离环境（Devin 范式）[Devin]
+- **[x]多 sub-agent 协同**：内部 Planner + Coder + Critic（Devin），或 Planner / Tool / Answer Agent（MIRROR）[Devin] [Paper]
+- **Auto-Triage**：跨渠道（Slack / Linear / GitHub / 观测平台）监控告警 → 自动起调查 → 给上下文 / 推荐操作 / 直接出 PR [Devin]
+- **跨 incident 记忆 + 去重 + 责任人追踪** [Devin]
+- **多 OS 支持**：Linux + Windows + Android Emulator [Devin] [Manus]
+- **CodeAct**：用 Python 代码片段作为 action（Manus），比 JSON tool call 表达能力强 [Manus]
+- **Computer Use（OS 级）**：截屏 + 鼠标 + 键盘，控任意桌面应用（不限浏览器）[CU]
+- **Browser-only Agent**：隔离 Chromium 跑 web 任务（不能访问本地文件）[Operator] [Mariner]
+- **Headless / 程序化触发**：通过 API/SDK 让 Agent 跑后台任务 [Devin] [CC]
+- **Spec-driven multi-agent**（Intent 范式）：本地 worktree + coordinator agent，开发者保留架构话语权 [Devin 对比]
+
+**E. 学术/论文前沿**（2025–2026）
+- **Prospective Reflection**：在 plan 阶段就反思，而非动后反思（PreFlect）[Paper]
+- **Multi-agent Self-Improvement**：principle-based + procedural reflection 单循环合并（MARS）[Paper]
+- **Intra + Inter Reflection**：动前自查 + 动后跨 agent 反思 + dual memory（MIRROR）[Paper]
+- **Hierarchical Roles**：Context Manager + Meta-Thinker + Executor 三角色分离（COMPASS）[Paper]
+- **Editable Meta-Improvement**：把"如何改进自己"的过程本身做成可改写代码（HyperAgents）[Paper]
+- **Workspace Reconstruction**：每轮重建工作区，防止 mono-context 累积污染（IterResearch，已扩到 2048 轮 / 40K context）[Paper]
+- **Semantic Memory Compression**：CLS 启发的语义压缩（SimpleMem，节省 30× token）[Paper]
+- **Budget-Aware Context Mgmt**：把压缩当作 budget-constrained 决策（BACM / ContextBudget）[Paper]
+- **Near-Constant Memory**：单步整合，每轮把 (Si, Ai, Oi) 剪掉，只留单一压缩状态（MEM1，3.5× perf / 3.7× 省内存）[Paper]
+- **Step-level Compression + Plan Retell**：每步压缩 + 周期重述计划防遗忘（CSIM）[Paper]
+- **Verifier-Driven Trajectory**：用独立 verifier agent 验证子任务/最终答案（Marco DeepResearch）[Paper]
+- **Long-Horizon Trajectory 合成**：训练数据离线生成（OpenResearcher）[Paper]
+- **Deep Research 产品形态**：OpenAI Deep Research / Claude Research / Kimi-Researcher / Grok DeepSearch / Gemini Deep Research [Paper]
+- **Test-time Scaling**：受控 compute budget 下让 agent 在难题上继续推理 [Paper]
+- **Test-time Verifier**：agent 自己当 verifier，结果不通过就再推一轮 [Paper]
+
+**F. 来自 [§3](#3-agent-优化方向) TBD 的项**
+- **多 Agent / SubAgent / A2A 协议** ：Google A2A、Anthropic 子代理协议、跨 agent 消息交换标准
+- **Sandbox 支持** ：本地 docker / E2B / Modal 之类的隔离执行环境
+- **用户自定义 Workflow** ：声明式（YAML / DSL）或可视化（Flow 图）编排 Agent 流程
+
+### 4.6.2. 合并后的所有可能 feature 列表
+
+把 [§3 12 项必做](#3-agent-优化方向) + [§3.x TBD](#3-agent-优化方向) + [§4.6.1](#461-更多可能feature-清单) 全部合并去重，按"能力领域"重新分大类。每条标记来源（[§3] = 已在 12 项必做、[§3.x TBD] = TBD 项、其余沿用 §4.6.1 的来源缩写）。
+
+**A. Agent 循环与推理范式**
+- A1. 基础 loop（ReAct / Plan-Execute / Loop）[§3 #2]
+- A2. Plan 模式（生成计划 → 用户/自动审批 → 执行）[Cursor] [Devin]
+- A3. Debug 模式（专做 runtime evidence 收集）[Cursor]
+- A4. CodeAct：用代码作 action 替代 JSON tool call [Manus]
+- A5. Hierarchical roles 分离（Planner / Executor / Context Mgr / Meta-Thinker）[Paper]
+- A6. Workspace reconstruction（每轮重建，不累积）[Paper]
+- A7. Interaction Scaling（百~千轮稳定运行）[Paper]
+- A8. Test-time Scaling（在 budget 内多算几轮）[Paper]
+- A9. Self-Improving Loop（meta-improvement，运行中改进自己）[Paper]
+
+**B. 多 Agent / 子 Agent 协作**
+- B1. 内部多 agent 流水线（Planner + Coder + Critic 等）[Devin] [Paper]
+- B2. 并行 subagents（独立 context，结果回填主对话）[Cursor] [CC]
+- B3. Custom subagent 定义（markdown/YAML frontmatter）[Cursor] [CC] [GHC]
+- B4. Subagent 工具/模型/权限/skill 隔离 [CC]
+- B5. Subagent 内 hook 生命周期 [CC]
+- B6. A2A 协议（跨 agent 消息交换标准）[§3.x TBD]
+- B7. Spec-driven coordinator（保留架构话语权）[Devin 对比]
+- B8. Subagent Worktree 隔离（git 分支级）[CC]
+
+**C. 会话 / Session 与触发入口**
+- C1. Session（单次对话记录）[§3 #3]
+- C2. 多渠道触发（Slack / GitHub issue / Linear / Web / 移动端 / Email）[Cursor] [Devin]
+- C3. Headless / `-p` 程序化运行 [CC]
+- C4. SDK 形式封装（Python / TS）[CC]
+- C5. CI/CD 集成（`--bare` 跳过本地配置保证可重现）[CC]
+- C6. 输出流格式标准化（text / json / stream-json）[CC]
+- C7. 后台/异步 Cloud Agent + 自动 PR [Cursor] [Devin] [GHC]
+- C8. Auto-Triage（监控告警自动转 Agent 任务）[Devin]
+
+**D. 记忆 / 上下文工程**
+- D1. Per-user 跨 session memory [§3 #4]
+- D2. Memory 分级（user / project / local）[CC]
+- D3. 跨 incident / 跨任务记忆 + 去重 [Devin]
+- D4. 语义压缩（CLS 风格，semantic gating）[Paper]
+- D5. Online 语义合成（写时去重）[Paper]
+- D6. Intent-aware Retrieval [Paper]
+- D7. Budget-aware 压缩决策 [Paper]
+- D8. Near-constant memory（每轮整合 + 剪枝）[Paper]
+- D9. Step-level 压缩 + 计划重述 [Paper]
+- D10. 长 context（百万 token 级）协同 [Paper]
+
+**E. 提示与自定义**
+- E1. system/user/assistant prompt + 项目目录 prompt 文件（`.cursor/` / `.github/`）[§3 #5]
+- E2. Custom Instructions 三层（repo-wide / path-specific / cross-agent）[GHC]
+- E3. AGENTS.md 跨 AI agent 标准 [CC] [GHC]
+- E4. applyTo glob 路径触发 [GHC]
+- E5. excludeAgent 按 agent 类型禁用指令 [GHC]
+- E6. Rules 三层（project / user / team）[Cursor]
+- E7. 自定义 prompt files（`.prompt.md`）[GHC] [Cursor]
+
+**F. Tools 与扩展**
+- F1. 自实现 tools（RAG / web search 等）[§3 #6]
+- F2. 把外部插件当作工具 [§3 #6]
+- F3. Skills 标准（agentskills.io）[§3 #7]
+- F4. Skill 完整内容预加载到 subagent context [CC]
+- F5. MCP 标准支持 [§3 #8]
+- F6. MCP 仓库级 JSON 配置 + secrets + toolsets header [GHC]
+- F7. MCP scope 到 subagent [CC]
+- F8. Browser-as-tool（Browser MCP / Stagehand / browser-use）[CU]
+- F9. Computer Use（截屏 + 鼠键控任意 desktop 应用）[CU]
+- F10. Browser-only Agent（隔离 Chromium）[Operator] [Mariner]
+- F11. Deep Research 工具集（search / open / find / scrape / cite）[Paper]
+
+**G. 反思 / 自检 / 自改进 / Harness**
+- G1. Harness（基础自检/重问/修正）[§3 #10]
+- G2. Prospective Reflection（plan 阶段就反思）[Paper]
+- G3. Retrospective Reflection（动后反思，Reflexion 经典）[Paper]
+- G4. Intra-reflection（动前自查）+ Inter-reflection（动后跨 agent）[Paper]
+- G5. Principle + Procedural Reflection 单循环合并 [Paper]
+- G6. Verifier Agent（独立验证子任务/最终答案）[Paper]
+- G7. Test-time Verifier（自验，未过则继续推）[Paper]
+- G8. Critic 子代理（plan 评审 / code review 评审）[Devin]
+- G9. Editable Meta-Improvement [Paper]
+
+**H. 沙箱 / 隔离 / 执行环境**
+- H1. Sandbox 支持 [§3.x TBD]
+- H2. 云 VM 全套（shell + editor + browser）[Devin]
+- H3. 多 OS（Linux / Windows / Android Emulator）[Devin] [Manus]
+- H4. Worktree 级隔离 [CC]
+- H5. Auto-Run Allowlist [Cursor]
+- H6. Permission Mode 6 档 [CC]
+- H7. 隔离 Chromium [Operator] [Mariner]
+
+**I. 长任务 / 异步 / 后台**
+- I1. 长任务异步跑（云上跑、邮件/desktop/Slack 通知）[Cursor] [Devin]
+- I2. 自动开 `agent/<task>` 分支并提 PR [Cursor] [Devin] [GHC]
+- I3. 多 agent 并行任务监控页 [Cursor]
+- I4. 长 horizon（百~千轮 tool call）稳定运行 [Paper]
+
+**J. 安全 / 防注入 / 治理**
+- J1. 防 Prompt Injection [§3 #11]
+- J2. 命令白名单 + 网络白名单 [Cursor] [Devin]
+- J3. 沙箱隔离防 data exfiltration [Devin]
+- J4. 敏感操作前置 user prompt [CU] [Operator]
+- J5. 团队级 policy 配置（managed settings）[CC]
+- J6. CnP Refinement（基础 prompt 卫生）[§3 #12]
+
+**K. 评估 / 评测**
+- K1. Eval 框架（已有，TODO 后续扩）[新登记]
+- K2. Agent Benchmark 跑分：SWE-bench / OSWorld / WebVoyager / GAIA / BrowseComp / Terminal-Bench [Paper] [新登记]
+- K3. Token / Cost 计量 + budget 控制 [CC] [Paper]
+- K4. Trajectory 日志结构化（便于回放、回归、训练）[Paper]
+- K5. Code review agent / Bugbot 风格的 PR 级评审 [Cursor] [GHC]
+
+**L. Thinking / 推理可视化**
+- L1. Extended Thinking 模式（折叠 / 流式）[§3 #9]
+- L2. 多模型 thinking 支持 [§3 #9]
+- L3. Streaming token + thinking 分流（事件总线）[已实现 §4.5.4]
+
+**M. UI / 表现层**
+- M1. CLI 模式（已有）
+- M2. Chainlit Web UI（已有）
+- M3. Agents Window（并行任务面板）[Cursor]
+- M4. Design Mode（UI 草图 → 代码）[Cursor]
+- M5. PR review lifecycle 可视化 [Cursor]
+- M6. Interactive Planning（Devin v2 风格）[Devin]
+
+**N. Workflow / 编排**
+- N1. 用户自定义 Workflow（声明式 YAML / DSL / 可视化 Flow）[§3.x TBD]
+- N2. Hook lifecycle 自动化（PreToolUse / PostToolUse / Stop 等）[CC]
+- N3. Slash command / 自定义快捷指令 [CC] [Cursor]
 
 ## 4.7. 确定 AgentA 中 Agent 部分的需求
 
 确定哪些是本项目应该支持，能够支持，值得支持的。
 
-输入：[3.x 12 项必做] + [4.6 候选清单]
+### 4.7.1. 项目定位
 
-1. Review 4.6 输出
-2. 决策：
-   - **12 项必做**：排优先级（先做哪个、后做哪个）
-   - **候选清单**：选 3~5 个深做（Q1=B 原则，找有教学/展示亮点的）
-3. 未选中的候选 → 作为知识积累
+**定位**：**个人学习者的私有 AI 助手**（个人知识管理 + 主动学习）。
 
-## 4.8. 如何评估 Agent 实现
-给出评估 Agent 的方案
+**核心用户画像**：技术从业者/IT工程师 —— 平时积累大量论文、博客、技术书、笔记、代码片段；既需要"快速查旧资料"，也需要"主动学新东西"。
+
+**场景（按 phase 演进）**
+
+| Phase | 场景 | 增量 |
+|---|---|---|
+| Phase 1 | 个人知识助手 | RAG 能力 + 基础 Agent loop + Memory + 引用展示 |
+| Phase 2 | + 学习/研究助理 | 在个人知识助手上叠加：**Plan**（学习计划）/ **SRS**（Spaced Repetition 主动复习）/ **Quiz**（出题） |
+
+**两个场景共享 ~80%+ 代码**：RAG / Agent loop / EventBus / UI / Memory / Skill / MCP 全部共用；增量只在"学习闭环"业务逻辑（plan / SRS 调度 / quiz）。
+
+
+- 个人知识助手是私有版 NotebookLM，叠加**主动学习/研究助理（Plan + SRS + Quiz）**
+- 场景差异化：NotebookLM 只是被动 Q&A，本项目加入"主动陪你学"的循环，且全本地、隐私可控
+
+
+### 4.7.2. 选定 Feature 列表
+**已有 feature 优化**
+
+| # | feature | 来源 | 实施位置 | 优化重点 |
+|---|---|---|---|---|
+| 1 | LLM API调用 | [§3 #1] | 可选项 → [Phase 3.4](#473-实施顺序) | 现状保留；可选加本地 LLM（呼应"全本地、隐私可控"卖点） |
+| 2 | Agent 循环 | [§3 #2] | [Phase 2.1](#473-实施顺序) | 现状 ReAct 保留，Phase 2 引入 Plan-Execute（Plan 业务依赖） |
+| 3 | Session | [§3 #3] | [Phase 1.1](#473-实施顺序) | 列表 / 搜索 / 恢复跨次对话 |
+| 4 | Memory | [§3 #4] | [Phase 1.2](#473-实施顺序) | 单层 → user / project / local 三层（参考 Claude Code）；从被动 extract 升级为主动 consolidation |
+| 5 | Prompt | [§3 #5] | [Phase 1.3](#473-实施顺序) | 用户偏好文件 `.agenta/rules.md`（参考 Cursor Rules / Copilot Custom Instructions） |
+| 6 | Tools | [§3 #6] | 新增 tool 在 [Phase 2.2/2.3/2.4](#473-实施顺序) | 现有 RAG / web_search 保留；为 Phase 2 新增 plan_tracker / quiz_grader / srs_scheduler |
+| 7 | Skills | [§3 #7] | [Phase 1.5](#473-实施顺序) | 框架强化（Skill 清单 / 自动加载 / Skill registry），承载 C3 的 quiz_maker / review_card / study_planner 等 |
+| 8 | Thinking 模式 | [§3 #9] | [Phase 3.1](#473-实施顺序) | **本期仅做 CLI 渲染优化**（thinking 段分隔标记、流式分块输出）；WebUI 端的可折叠/展开等渲染留待 [design.md §4.2 WebUI](design.md#42webui) 单独优化任务 |
+
+**新增 feature**
+
+| # | feature | 类别 | 来源 | 实施位置 | 备注 |
+|---|---|---|---|---|---|
+| 1 | MCP | 基础设施 | [§3 #8] | [Phase 3.2](#473-实施顺序) | 至少接 1-2 个标杆 server（fetch / filesystem / 第三方知识源） |
+| 2 | 防 prompt injection | 安全 | [§3 #11] | [Phase 3.3](#473-实施顺序) | RAG 召回内容过滤 + 命令白名单 |
+| 3 | Harness（自检 / 反思） | 通用能力 | [§3 #10] + [§4.6.2 G1/G3] | [Phase 2.5](#473-实施顺序) | Reflexion 风格：Quiz 答案自评、Plan 执行回顾、RAG 召回判定 |
+| 4 | 引用展示（jump to source） | C1 UX | [§4.6.2 衍生] | [Phase 1.4](#473-实施顺序) | 输出格式约定：每条回答含 `[source: file#section]`，UI 可点击跳转原文 |
+| 5 | **Plan**：学习计划生成 | C3 业务 | [新] + [§4.6.2 A2] | [Phase 2.2](#473-实施顺序) | 用户给出目标（如"准备 ML 面试"）→ Agent 生成阶段性计划 + 进度跟踪 |
+| 6 | **SRS**：Spaced Repetition 主动复习调度 | C3 业务 | [新] + [§4.6.2 C8 风格] | [Phase 2.4](#473-实施顺序) | 后台 scheduler 按遗忘曲线主动触发复习；与被动 Q&A 拉开根本差距 |
+| 7 | **Quiz**：出题 | C3 业务 | [新] + [§4.6.2 F1/F3] | [Phase 2.3](#473-实施顺序) | 基于知识库内容自动出题（多选/简答），结合 Harness 自评 |
+
+
+### 4.7.3. 实施顺序
+
+按 [§4.7.1 phase 演进表](#471-项目定位) 分 3 块，每块内部按"依赖 → 业务 → 增强"排序。每个 feature 标 P0/P1/P2 优先级（同 phase 内）：P0 = phase 出口必备、P1 = 强化、P2 = 锦上添花。
+
+**Phase 1: 个人知识助手 **
+个人笔记 + 阅读笔记 + 收藏文章的自然语言问答 + 主动复盘
+
+| 序 | feature | 类型 | 优先级 | 出口判据 |
+|---|---|---|---|---|
+| 1.1 | Session 列表/搜索/恢复 | 已有强化 | P0 | CLI 能 `/sessions list` 看历史会话并恢复 |
+| 1.2 | Memory 三层 + 主动 consolidation | 已有强化 | P0 | 跨次对话能记住"用户喜欢中文回答""偏好引用论文页码" |
+| 1.3 | Prompt 用户偏好（`.agenta/rules.md`）| 已有强化 | P1 | 项目根放 rules.md 自动注入 |
+| 1.4 | 引用展示（jump to source）| 新 | P0 | 每条回答末尾列 `[source: file#section]`，Chainlit 可点击 |
+| 1.5 | Skills 框架强化（registry / 自动加载）| 已有强化 | P0 | 为 Phase 2 的 Quiz/Plan Skill 铺路 |
+
+**Phase 1 目标**：能塞个人文档 → 自然语言查 → 跨 session 记得偏好 → 答案带可跳转引用。
+
+**Phase 2: 学习/研究助理 **
+个人书籍/论文/课程笔记 → 检索 + 总结 + 测验 + 复习计划
+
+| 序 | feature | 类型 | 优先级 | 出口判据 |
+|---|---|---|---|---|
+| 2.1 | Agent 循环升级（Plan-Execute） | 已有强化 | P0 | 2.2 前置依赖；Agent 能执行多步骤计划 |
+| 2.2 | **Plan**：学习计划生成 | 新 P0 业务 | P0 | 用户给目标（"准备 ML 面试"）→ Agent 输出阶段计划 + 跟踪进度 |
+| 2.3 | **Quiz**：出题（Skill + tool） | 新 P0 业务 | P0 | 基于 KB 内容自动出 5~10 题（多选/简答），用户答完给反馈 |
+| 2.4 | **SRS**：主动复习调度 | 新 P0 业务 | P0 | 后台 scheduler 按遗忘曲线提醒复习；可对接通知（邮件 / 系统 toast） |
+| 2.5 | **Harness**：自检 / 反思 | 新 | P1 | Quiz 答案自评、Plan 执行后回顾、RAG 召回相关性自判 |
+
+**Phase 2 目标**：用户给学习目标 → 生成计划 → 出题 → 复习 → 自检循环，全程 Agent 主动驱动。
+
+**Phase 3: 工具和安全补强**
+
+| 序 | feature | 类型 | 优先级 | 出口判据 |
+|---|---|---|---|---|
+| 3.1 | Thinking 模式 **CLI 渲染优化**（段分隔标记 / 流式分块输出） | 已有强化 | P1 | CLI 跑带 thinking 的 query 时，thinking 段有清晰起止标记 + 与正文 token 不混；WebUI 渲染**不在本期 scope**，留待 [design.md §4.2 WebUI](design.md#42webui) |
+| 3.2 | MCP（接入 1-2 个标杆 server） | 新 | P0 | 至少 fetch + filesystem 能跑通；求职硬通货 |
+| 3.3 | 防 prompt injection（召回过滤 + 命令白名单） | 新 | P1 | 面试能讲"safety 怎么做的" |
+| 3.4 | 本地 LLM 支持 | 已有强化 | P2 | 呼应"全本地、隐私可控"卖点；非必需 |
+
+## 4.8. 如何评估 Agent 实现（方法论）
+
+本节只产出评估方法论（评什么 / 怎么评 / 什么时候评）和工具列表，不写代码。
+要列清楚每个 feature 该评什么维度、每个 Phase 出口该达到的评估标准，要同时考虑复杂度和工作量。
+尽量考虑多feature综合评估，避免工具爆炸。
+
+### 4.8.1. 评估方法论
+
+**评什么（维度）**
+
+按 [§4.7.2 feature 列表](#472-选定-feature-列表) 倒推，agent 评估维度如下：
+
+| 维度 | 适用 feature | 说明 |
+|---|---|---|
+| 功能正确性 | 所有 | 输入→输出基础正确性 |
+| 记忆/检索准确性 | Memory / SRS / 引用展示 / RAG | 召回是否准、引用是否对得上原文 |
+| 推理质量 | Plan / Quiz / Harness / Agent 循环 | LLM 输出"好坏"（超出"对错"的主观判定） |
+| 安全性 | 防 prompt injection | 攻击样本是否被识别拦截 |
+| UX 流畅度 | Thinking CLI / Session / Skills | 主观体验 |
+| 性能 / 成本 | 所有 | 延迟、token、API 费用 |
+
+**怎么评（方法清单）**
+
+| 方法 | 描述 | 工作量 | 适用维度 |
+|---|---|---|---|
+| Unit Test | 函数级单测 | 低（pytest 已就位） | 功能正确性 |
+| Profiling | 延迟 / token / cost 自动采集 | 低 | 性能 / 成本 |
+| Golden Set | 标准 Q-A 对集合，自动跑 + match | 中 | 记忆 / 检索 / 引用 |
+| 人工评分 | 自己跑 + 1~5 评分 + 记笔记 | 低（费时） | UX |
+| LLM-as-Judge | frontier 模型评分（指定 judge prompt） | 中 | 推理质量 |
+| Trajectory Replay | 录 agent 完整事件流 → 离线分析 / 回放 / diff | 中 | 多轮交互复杂 feature |
+| Adversarial Test | 攻击样本库 + 拦截率统计 | 中 | 安全 |
+
+**什么时候评**
+
+| 时机 | 触发点 | 跑什么 |
+|---|---|---|
+| Feature 完成 | [§4.9](#49-开始实现) step 5 | 该 feature 的所有评估方法 |
+| Phase 出口 | Phase 末尾人工触发 | 该 phase 全部 feature 的**综合场景** eval |
+| Release 前 | [§4.11](#411-更新-readme) 前 | 跑全套，产出 report 作为求职亮点 |
+| CI 回归 | 每次代码改动 | 仅 Unit + Profiling（LLM-judge 因成本不上 CI） |
+
+**Feature × 评估方法 矩阵**
+
+✅ = 推荐做，○ = 可选，空白 = 不适用：
+
+| Feature | Unit | Profiling | Golden | Judge | Replay | 人工 | Adv |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| 1.1 Session | ✅ | ✅ | | | | ○ | |
+| 1.2 Memory | ✅ | ✅ | ✅ | | | | |
+| 1.3 Prompt | ✅ | | | | | ✅ | |
+| 1.4 引用展示 | ✅ | | ✅ | | | | |
+| 1.5 Skills | ✅ | | | | | ○ | |
+| 2.1 Plan-Execute | ✅ | ✅ | | | ✅ | | |
+| 2.2 Plan | ✅ | | | ✅ | ○ | | |
+| 2.3 Quiz | ✅ | | ✅ | ✅ | | | |
+| 2.4 SRS | ✅ | | ✅ | | | | |
+| 2.5 Harness | ✅ | | | ✅ | ✅ | | |
+| 3.1 Thinking CLI | ✅ | | | | | ✅ | |
+| 3.2 MCP | ✅ | ✅ | | | | | |
+| 3.3 防 prompt injection | ✅ | | | | | | ✅ |
+| 3.4 本地 LLM | ✅ | ✅ | | | | | |
+
+**Phase 出口标准**（综合场景 eval，非单 feature）
+
+| Phase | 出口判据 |
+|---|---|
+| Phase 1: 个人知识助手 | 跑 20 个真实个人知识查询场景：引用准确率 ≥ 90% / Memory 跨 session 召回 ≥ 80% / UX 自评 ≥ 4(满分5) |
+| Phase 2: 学习/研究助理 | 跑 1 个完整学习目标闭环（如"准备 ML 面试"）：Plan 生成 → 3 轮 Quiz → SRS 调度 → 进度可视化全程无中断；Plan / Quiz judge 评分 ≥ 4 |
+| Phase 3: 工具和安全补强 | feature × eval 矩阵全跑通；性能/成本数据齐全；adversarial test 100 样本拦截率 ≥ 95% |
+
+
+### 4.8.2. 评估工具列表
+
+按"多 feature 综合复用"原则组织，**避免每 feature 一个独立工具**。
+
+**Framework 层（[§4.10](#410-配套-toolstoolsagent_eval) 实现）—— 跨 feature 通用基础设施**
+
+| 工具 | 用途 | 谁用 |
+|---|---|---|
+| `runner` | 统一 eval 入口（按 feature / phase / full 选择） | 所有 eval |
+| `report` | 渲染 markdown / JSON 报告 | 所有 eval |
+| `judge` | LLM-as-Judge 通用模块（judge prompt + 待评内容 → 分数 + 理由） | Plan / Quiz / Harness |
+| `trajectory` | 录制 agent run 完整事件流 / 离线回放 / diff | Plan-Execute / Harness / 任何多轮 feature |
+| `profiler` | 延迟、token、cost 自动采集 | 所有 |
+| `golden_loader` | golden set 加载 / 版本管理 | Memory / 引用展示 / SRS |
+| `adversarial_runner` | 攻击样本批跑 + 拦截率统计 | 防 prompt injection |
+
+**Feature 专属层（[§4.9](#49-开始实现) 各子章节实现）—— 只放 dataset + 该 feature 专属 metric**
+
+每个 feature 在 `tools/agent_eval/features/<feature>/` 下放：
+- `dataset.json`（golden set / judge prompt / 攻击样本，按需）
+- `metric.py`（专属打分逻辑，调 framework 通用模块）
+
+**跨 feature 的工具复用关系**
+
+| 复用关系 | 共享对象 |
+|---|---|
+| Plan / Quiz / Harness | 共享 `judge` framework，各自 judge prompt 不同 |
+| Memory / 引用展示 / SRS | 共享 `golden_loader`，各自 dataset schema 略不同 |
+| Plan-Execute / Harness | 共享 `trajectory` 录制回放 |
+| 全部 feature | 共享 `runner` / `report` / `profiler` |
+
+**避免工具爆炸的硬约束**
+
+1. **不为单一 feature 新增 framework 工具**：除非至少 2 个 feature 能用
+2. **Dataset 走声明式 JSON/YAML**：不写 dataset 加载代码，统一用 `golden_loader`
+3. **Judge prompt 走文件**：`tools/agent_eval/features/plan/judge.txt` 这种，不硬编码进 Python
+4. **新工具进 framework 前先在 feature 层重复 2 次**：第 2 次出现复制粘贴才上升为 framework
+
+
 
 ## 4.9. 开始实现
-1. 根据前面的评估，给出 Agent部分的需求分析（需要支持的功能，以及优先级）
-2. 逐功能实现
-    2.0 评估 feature 重要性：Showcase(找工作重点讲)/Learning(学习用,能跑通即可)/Foundation(基础设施)
-    2.1 Review 当前代码，如已有初步实现，给出优化建议
-    2.2 如是新需求，给出实施计划
-    2.3 按计划实现功能
-    2.4 测试功能（**必加 unit**，遵循 [§4.4.3](#443-ut-refinement) C 规则）
-    2.5 更新design文档
-    2.6 评估是否需要新加工具，在 [配套 tools](#410配套-tools) 实现
+按[4.7.3](#473-实施顺序)的实施顺序，逐功能实现：
+1. Review 当前代码，如已有初步实现，给出优化建议，写到对应子章节，如 [4.9.1 Session 列表/搜索/恢复(phase 1.1)](#491-session-列表搜索恢复phase-11)
+2. 如是新需求，给出实施计划，写到对应子章节，如 [4.9.1 Session 列表/搜索/恢复(phase 1.1)](#491-session-列表搜索恢复phase-11)
+3. 按计划实现代码
+4. 添加 UT 进行初步验证
+5. 按 [§4.8 评估方法](#48-如何评估-agent-实现方法论)进行评估，工具在 `tools/agent_eval/` 统一管理。
+6. 更新design文档 到 [design.md](design.md) 对应子章节， 如 [Session 管理](design.md#33-session-管理)。desgin 文件要写的简练，抓住重点，风格要跟原来的章节统一。
 
-## 4.10. 配套 tools(参考/tools下的 RAG tool)
-1. Review 9.2.6 累积的工具候选清单 → 合并、取舍、定优先级
-2. 逐工具实现
+
+### 4.9.1 Session 列表/搜索/恢复(phase 1.1)
+
+
+### 4.9.2 Memory 三层 + 主动 consolidation(phase 1.2)
+
+### ...
+
+
+## 4.10. 配套 tools（tools/agent_eval）
+这里只包含 Agent 评估工具框架，具体feature 的工具在对应[4.9](#49-开始实现)子章节实现。
+
 
 ## 4.11. 更新 README
+
+
+## 4.12. CnP 优化
+性能优化
+
+
+# 5. Future
+
+本节登记当前 scope 之外、本架构可扩展但暂不实现的方向，供未来评估。
+
+## 5.1. C4 企业内 Q&A
+
+**场景**：把 AgentA 部署为公司内部 HR / IT / 销售知识库的多轮问答助手，员工自然语言提问，Agent 检索 + 多轮澄清 + 流程引导。
+
+**复用**：RAG / Agent loop / EventBus / UI / Memory / Skill / MCP 全部沿用，无需重构。
+
+**增量**：权限过滤（按用户角色裁剪可见知识库）/ 审计日志（每次查询/回答留痕）/ SSO 集成 / 多用户 session 隔离 / 流程引导 Skill（如"年假申请流程"）。
+
+**为何当前不做**
+
+- 演示数据需伪造，面试故事性弱（不如 C1/C3 是"自己每天在用"）
+- 增量代码是"企业 infra 维度"（权限/审计/SSO），与本项目想展示的 RAG + Agent 技术深度无强相关
+- 三场景全做会让 [项目定位](#471-项目定位) 散掉（同时面向"个人学习者"和"企业员工"，定位不聚焦）
+
+**何时考虑做**：找企业 AI 应用 / SaaS 方向岗位时，作为"我做过的扩展性验证"加补丁实现；或拿到真实企业数据集（去敏后）可用时。
