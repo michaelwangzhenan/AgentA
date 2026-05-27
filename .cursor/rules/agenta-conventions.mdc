@@ -1,0 +1,155 @@
+---
+description: AgentA 项目工程公约 — 代码注释 / 文件命名 / 测试 / 文档同步。所有针对本仓库的代码生成与修改都要遵守。
+alwaysApply: true
+---
+
+# AgentA 工程公约
+
+本项目是个人学习用 RAG + Agent 实验工程，作者优先级：**简洁可读 > 全面**。所有为本仓库写代码或文档的 AI agent / 协作者都需按本规则执行。**违反时被简化掉，而不是被讨论。**
+
+权威定义在仓库文档：
+
+- 代码规范以本文件为准
+- **设计文档**（`docs/design.md`）风格详 [§3.0](../../docs/design.md#30-设计文档风格)
+- **实现文档**（`docs/iter_2.md`）风格详 [§4.9.0](../../docs/iter_2.md#490-实现文档风格)
+
+冲突时以这两份为准；本文件是"操作指引"，docs 是"风格契约"。
+
+---
+
+## 1. 代码注释
+
+### 1.1 配置项（`src/config.py` 中的 `os.getenv` 行）
+
+只写**配置项本身的意义和可选值**，不写设计思想 / 历史背景 / Phase 来源。每项 1-2 行注释足够。
+
+```python
+# ✅ 好：说明意义 + 类型 / 默认行为
+# 是否启用项目级 rules 注入（可选值：true / false）
+USER_RULES_ENABLED: bool = os.getenv("USER_RULES_ENABLED", "true").lower() == "true"
+
+# rules 文件路径（相对项目根；文件不存在静默跳过）
+USER_RULES_FILE: str = os.getenv("USER_RULES_FILE", ".agenta/rules.md")
+```
+
+```python
+# ❌ 差：解释设计思想 / Phase / 跟其他模块的关系
+# 项目级用户偏好（详 iter_2.md §4.9.3）：在项目根放 .agenta/rules.md，启动时一次性
+# 加载并注入到 system prompt 的 <project_rules> 块。与 user_memory（动态学到的偏好）
+# 形成两层：rules 是稳定基础设定，memory 在其之后注入做临时覆写。
+USER_RULES_ENABLED: bool = ...
+```
+
+设计思想放在 `docs/design.md` 的对应章节，Phase 来源放在 `docs/iter_2.md` 的 §4.9.x；config.py 里只写"这个开关是干什么的"。
+
+### 1.2 函数 / 类 docstring
+
+- **函数**：1 句话讲做什么；参数 / 返回 / 异常需要时再列，不需要时不要硬凑
+- **类**：1-2 句话讲职责边界；不复述模块 docstring
+- 避免"逐行复述代码"的 docstring，例如 `def upsert(...)` 写成 "Upserts a record"
+
+### 1.3 行内注释
+
+- 解释**为什么**这么写，不解释**什么代码做了什么**
+- ❌ `# 自增计数器` `# 调用 LLM` `# 返回结果`
+- ✅ `# 显式触发不消耗也不重置 auto 计数器 —— 两条流水线独立`
+
+### 1.4 中英文
+
+注释默认中文（用户母语 + 工程语境）；行内 code identifier / 错误消息 / 库术语用英文（`config` / `tokenizer` / `prompt injection`）。
+
+---
+
+## 2. 文件 / 模块命名
+
+| 类型 | 位置 | 命名 |
+|---|---|---|
+| Agent core helper | `src/agent/core/` | `*_manager.py` / `*_engine.py` / `*_policy.py` / `*_bus.py` / `*_loader.py` |
+| 数据持久化 | `src/memory/` | `<name>.py` 含 `<Name>Store` 类（如 `UserMemoryStore`） |
+| CLI 命令处理 | `src/cli/handlers.py` | `handle_<command>` 函数 |
+| LLM 调用入口 | `src/llm/provider.py` | 一个 `chat(...)` 函数为主出口 |
+| 评估脚本 | `tools/agent_eval/<feature>/` | `<task>.py`（如 `recall_golden.py` / `perf_eval.py`） |
+| 评估报告 | `tools/agent_eval/reports/` | `<feature>-<target>-<YYYYMMDD-HHMMSS>.md`（**强制 Markdown，禁 JSON**，详 iter_2.md §4.10） |
+| 单元测试 | `tests/test_<module>.py` | Test 类名 `Test<Behavior>`，方法 `test_<scenario>` |
+
+不允许引入新的 helper / store / manager 类型时再开新文件；先尝试在已有文件添加。
+
+---
+
+## 3. 测试
+
+- 用 `pytest`，markers 在 `pytest.ini` 里 deselect 默认 integration / langchain / autogpt / extended_providers — 跑 `pytest -q` 默认走 fast UT 集
+- 用 `MagicMock` mock 外部依赖（LLM / DB / 文件 IO），不要在 UT 里真发 LLM call
+- 评估闭环（recall / perf）放 `tools/agent_eval/`，不放 `tests/`
+- 新加 feature 必须有 UT 覆盖核心路径；触发节流 / 顺序契约这类"行为约束"要有独立 Test 类锁住
+
+---
+
+## 4. 错误处理
+
+- **fail-fast schema 错误**用 `RuntimeError` + 简洁可执行的修复指引（不必含完整路径或字段名，由用户根据语义自己定位）
+- LLM / 网络等**外部调用**用 `try/except Exception` + log warning，不向上传播让主流程崩
+- 文件 IO 缺失 / 空 / 损坏一律 **graceful**（返回 `None` 或空，不抛异常），由调用方判断是否兜底
+
+---
+
+## 5. 文档同步
+
+代码 / 配置 / CLI 命令改动时同步更新：
+
+| 改动类型 | 同步到 |
+|---|---|
+| 新 config 项 | `src/config.py` **+ `.env.example` + `.env`（三处必须同步，缺一不可）**；详 §5.1 |
+| 新 CLI 命令 | `src/cli/ui.py` help + `src/cli/tab_complete.py` + `docs/design.md` 对应小节 CLI 表 |
+| 新 feature | `docs/iter_2.md §4.9.x` 按 §4.9.0 风格 + `docs/design.md` 按 §3.0 风格 + `README.md §1.2 Agent` 一句话 bullet |
+| 评估工具 | `tools/agent_eval/reports/` 落 Markdown 报告（**禁 JSON**，详 iter_2.md §4.10）；entry point 必须 `load_dotenv(override=True)` |
+
+### 5.1 新 config 项三处同步（强制）
+
+新增 `os.getenv("XXX", ...)` 时**必须**同步三个文件，缺一不可：
+
+| 文件 | 内容 | 不同步的后果 |
+|---|---|---|
+| `src/config.py` | 定义 + 注释（按 §1.1 风格） | — |
+| `.env.example` | 列出 key + 默认值 + 用途短注释 | 新用户克隆仓库后不知道有这项可调 |
+| `.env` | 实际值（即便用默认值也写一行注释提示存在） | **当前运行环境漏配，跑到这段代码时取默认值而不是用户期望值**；尤其涉及 API key / 路径 / feature flag 时会静默走错分支 |
+
+`.env` 不进 git（被 `.gitignore` 忽略），但**本地必须有这行**。AI 改完 `config.py` 必须主动检查 `.env` 是否已含对应 key；缺则补一行（值用 `.env.example` 默认值），不要等用户运行时才发现。
+
+---
+
+## 6. AI 决策边界（遇歧途必须 ask）
+
+执行任务时遇到下表所列**有多条可行路径**的决策，**先用 AskQuestion 让用户拍板，不要默认替用户选** — 尤其不要默认选"看起来更保守 / 更兼容"的路径。本项目的工程偏好是**简洁 > 兼容**，不是反过来。
+
+| 决策场景 | 默认错误倾向 | 必须问什么 |
+|---|---|---|
+| **向后兼容 vs 激进清理**（schema 字段 / dead code / 弃用 API） | 默认保留旧字段 / dead code 维持兼容 | "保留旧 schema + dead code 维持兼容，还是删 DB 重建 + 全清？" |
+| **破坏性操作**（删 DB / 删未跟踪文件 / 改 schema / `git clean`） | 默认替用户执行 | 先列出受影响范围 + 是否可逆，让用户确认后才动 |
+| **scope 蔓延**（用户问 A，是否顺手处理相关 B） | 默认顺手做完 | "B 现在也处理一下吗？还是这次只动 A？" |
+
+**反例 ❌**：处理废弃 `advanced/prompts/` 时遇到 `chat_history.sessions.prompt_name` schema 字段，**默认选了**"保留 schema + dead code 维持向后兼容"路径，没问用户；用户实际偏好"删 DB 重建 + 全清"，导致返工。
+
+**正例 ✅**：[§4.9.3 Step 7](../../docs/iter_2.md#493-prompt-管理-phase-13) 处理 `advanced/prompts/` 和 `advanced/skills/` 时，先用 AskQuestion 让用户在 "废弃 / 搬迁 / 保留" 3 选项里拍板，再动手。
+
+---
+
+## 7. 红线（违反 = 必须修正）
+
+- ❌ 评估报告落 JSON / CSV / TSV（详 iter_2.md §4.10 "评估报告输出约定"）
+- ❌ `tools/agent_eval/reports/` 下批量删除文件（详 iter_2.md §4.10 "Agent 禁止主动清理 reports/"）
+- ❌ `tools/agent_eval/**` entry point 不调 `load_dotenv()`（会导致 LLM 调用 401）
+- ❌ 新增 `os.getenv(...)` 只改 `src/config.py`，不同步 `.env.example` 和 `.env`（违反本文件 §5.1）
+- ❌ 不问用户就默认选向后兼容路径 / 默认执行破坏性操作 / 默认 scope 蔓延（违反本文件 §6）
+- ❌ config 注释解释设计思想 / Phase 来源（违反本文件 §1.1）
+- ❌ `docs/design.md` 出现 "Phase X 完成 Y" / "本期实现" 等时效字眼（违反 design.md §3.0）
+- ❌ `docs/design.md` 插代码块（违反 design.md §3.0，行内 ` `` ` 引用文件 / 类除外）
+- ❌ `docs/iter_2.md §4.9.x` 写业界对比 / 方案选型推理这种过程描述（违反 iter_2.md §4.9.0）
+
+---
+
+## 8. 不在本文件管的事
+
+- API key / 密钥 → 走 `.env`，永不进 git
+- LLM provider 切换 → 改 `.env` 的 `LLM_PROVIDER`，业务代码零改动
+- Agent 内核切换（PYTHON / LANGCHAIN / AUTOGPT）→ 改 `.env` 的 `IMP_METHOD`

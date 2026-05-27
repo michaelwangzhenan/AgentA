@@ -40,7 +40,6 @@ for _noisy in ("httpx", "httpcore", "openai", "chromadb", "sentence_transformers
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 
 from src.cli import handlers
-from src.cli.prompt_loader import scan_prompts
 from src.cli.skill_loader import SkillInfo, scan_skills
 from src.cli.ui import HELP_TEXT
 from src.memory.chat_history import ChatHistoryStore
@@ -55,7 +54,6 @@ from src.agent.agent import SYSTEM_PROMPT, ThinkingConfig
 
 logger = logging.getLogger(__name__)
 
-PROMPTS_DIR: str = config.PROMPTS_DIR
 SKILLS_DIR: str = config.SKILLS_DIR
 
 
@@ -94,22 +92,18 @@ class AppState:
         self,
         *,
         chat_history: ChatHistoryStore,
-        custom_prompts: dict[str, str],
         skills_map: dict[str, SkillInfo],
         skill_cmds: dict[str, str],
         thinking_cfg: ThinkingConfig,
         user_memory: UserMemoryStore | None,
         agent: Any,
-        active_prompt_name: str | None = None,
     ) -> None:
         self.chat_history = chat_history
-        self.custom_prompts = custom_prompts
         self.skills_map = skills_map
         self.skill_cmds = skill_cmds
         self.thinking_cfg = thinking_cfg
         self.user_memory = user_memory
         self.agent = agent
-        self.active_prompt_name = active_prompt_name
 
 
 class _OutputCollector:
@@ -136,20 +130,12 @@ def _get_state() -> AppState:
     return state
 
 
-def _build_base_prompt(state: AppState) -> str:
-    if state.active_prompt_name:
-        cmd = f"/{state.active_prompt_name}"
-        return state.custom_prompts.get(cmd, SYSTEM_PROMPT)
-    return SYSTEM_PROMPT
-
-
 def _make_agent(state: AppState, session_id: str | None = None) -> Any:
     return handlers.make_agent(
         chat_history=state.chat_history,
         skills_map=state.skills_map,
         thinking_cfg=state.thinking_cfg,
-        system_prompt=_build_base_prompt(state),
-        prompt_name=state.active_prompt_name or "",
+        system_prompt=SYSTEM_PROMPT,
         session_id=session_id,
         user_memory=state.user_memory,
         verbose=False,
@@ -292,7 +278,6 @@ async def _handle_command(state: AppState, user_input: str) -> bool:
             return True
         case "/clear":
             await asyncio.to_thread(state.chat_history.clear, state.agent.session_id)
-            state.active_prompt_name = None
             state.agent = _make_agent(state)
             _set_state(state)
             await cl.Message(
@@ -306,11 +291,10 @@ async def _handle_command(state: AppState, user_input: str) -> bool:
             return True
         case "/session":
             session_arg = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""
-            result = await asyncio.to_thread(
+            new_agent = await asyncio.to_thread(
                 handlers.switch_session,
                 state.chat_history,
                 session_arg,
-                state.custom_prompts,
                 SYSTEM_PROMPT,
                 state.skills_map,
                 state.thinking_cfg,
@@ -318,8 +302,8 @@ async def _handle_command(state: AppState, user_input: str) -> bool:
                 collector.write,
                 False,
             )
-            if result:
-                state.agent, state.active_prompt_name = result
+            if new_agent is not None:
+                state.agent = new_agent
                 _set_state(state)
             await _send_collected("Session 操作结果", collector, actions=_get_actions())
             return True
@@ -341,19 +325,12 @@ async def _handle_command(state: AppState, user_input: str) -> bool:
                 await cl.Message(content="⚠️  该操作会清空全部会话（不可恢复）。请使用 `/clean-session yes` 确认执行。").send()
                 return True
             count = await asyncio.to_thread(state.chat_history.clean_all_sessions)
-            state.active_prompt_name = None
             state.agent = _make_agent(state)
             _set_state(state)
             await cl.Message(
                 content=f"🗑️  已清空全部 {count} 个 session。新 Session: `{state.agent.session_id}`",
                 actions=_get_actions(),
             ).send()
-            return True
-        case "/reload-prompts":
-            state.custom_prompts = await asyncio.to_thread(scan_prompts, PROMPTS_DIR)
-            _set_state(state)
-            cmds_str = ", ".join(state.custom_prompts) if state.custom_prompts else "（无）"
-            await cl.Message(content=f"🔄 Prompt 已重新加载，共 {len(state.custom_prompts)} 个：{cmds_str}", actions=_get_actions()).send()
             return True
         case "/reload-skills":
             state.skills_map = await asyncio.to_thread(scan_skills, SKILLS_DIR)
@@ -385,21 +362,6 @@ async def _handle_command(state: AppState, user_input: str) -> bool:
             await _send_collected("用户记忆", collector, actions=_get_actions())
             return True
 
-    # Prompt 切换命令
-    if cmd_name in state.custom_prompts:
-        question = user_input[len(cmd_name):].strip()
-        state.active_prompt_name = cmd_name[1:]
-        state.agent = _make_agent(state)
-        _set_state(state)
-        await cl.Message(
-            content=f"🎭 已切换到 Prompt：`{state.active_prompt_name}`（新 Session: `{state.agent.session_id}`）",
-            actions=_get_actions(),
-        ).send()
-        if question:
-            answer, answer_msg = await _stream_agent_reply(state, question)
-            await answer_msg.update()
-        return True
-
     # Skill 手动激活命令
     if cmd_name in state.skill_cmds:
         question = user_input[len(cmd_name):].strip()
@@ -418,7 +380,6 @@ async def _handle_command(state: AppState, user_input: str) -> bool:
 @cl.on_chat_start
 async def on_chat_start() -> None:
     chat_history = ChatHistoryStore()
-    custom_prompts = scan_prompts(PROMPTS_DIR)
     skills_map = scan_skills(SKILLS_DIR)
     skill_cmds = {f"/{name}": info.body for name, info in skills_map.items()}
     thinking_cfg = ThinkingConfig.from_config()
@@ -426,7 +387,6 @@ async def on_chat_start() -> None:
 
     state = AppState(
         chat_history=chat_history,
-        custom_prompts=custom_prompts,
         skills_map=skills_map,
         skill_cmds=skill_cmds,
         thinking_cfg=thinking_cfg,
@@ -442,13 +402,12 @@ async def on_chat_start() -> None:
     )
     _set_state(state)
 
-    prompt_hint = f"已加载 Prompts: {', '.join(custom_prompts)}\n" if custom_prompts else ""
     skill_hint = f"已加载 Skills: {', '.join(skill_cmds)}\n" if skill_cmds else ""
     await cl.Message(
         content=(
             "AgentA Chainlit UI 已启动。\n\n"
             f"当前 Session: `{state.agent.session_id}`\n"
-            f"{prompt_hint}{skill_hint}"
+            f"{skill_hint}"
             "输入 `/help` 查看命令列表。"
         ),
         actions=_get_actions(),
@@ -560,12 +519,6 @@ async def action_clean_sessions_cancel(_: cl.Action) -> None:
 async def action_sessions(_: cl.Action) -> None:
     state = _get_state()
     await _handle_command(state, "/session")
-
-
-@cl.action_callback("reload_prompts")
-async def action_reload_prompts(_: cl.Action) -> None:
-    state = _get_state()
-    await _handle_command(state, "/reload-prompts")
 
 
 @cl.action_callback("reload_skills")

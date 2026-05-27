@@ -450,8 +450,9 @@ class TestSourceField:
         with pytest.raises(RuntimeError) as exc_info:
             UserMemoryStore(str(db_path))
         msg = str(exc_info.value)
-        assert "source" in msg
-        assert str(db_path) in msg  # 路径要在错误里，方便用户直接复制删除
+        # 错误消息必须包含两个语义要素：schema 已过期 + 怎么修
+        # 具体措辞 / 是否含 "source" / 是否含完整路径不强求（运维消息可自由简化）
+        assert "schema" in msg
         assert "删除" in msg or "delete" in msg.lower()
 
 

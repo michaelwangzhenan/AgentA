@@ -184,16 +184,15 @@ def list_sessions(
 
     title_suffix = f"（共 {len(sessions)} 个，过滤 {query!r}）" if query else f"（共 {len(sessions)} 个）"
     out(f"\n📚 历史 Session 列表{title_suffix}：")
-    out(f"  {'':<2}{'ID':<10}  {'Create On':<14}  {'msgs':<6}  {'Prompt':<16}  {'1st Question':<40}")
-    out(f"  {'':<2}{'-'*8:<10}  {'-'*14:<14}  {'-'*6:<6}  {'-'*16:<16}  {'-'*40}")
+    out(f"  {'':<2}{'ID':<10}  {'Create On':<14}  {'msgs':<6}  {'1st Question':<40}")
+    out(f"  {'':<2}{'-'*8:<10}  {'-'*14:<14}  {'-'*6:<6}  {'-'*40}")
     for s in sessions:
         sid = s["session_id"]
         marker = "▶ " if current_session_id and sid == current_session_id else "  "
         sid_short = sid[:8]
         created = _format_relative_time(s["created_at"])
-        prompt_label = s["prompt_name"] or "默认"
         first_msg = (s["first_user_msg"] or "（无用户消息）")[:40]
-        out(f"  {marker}{sid_short:<10}  {created:<14}  {s['msg_count']:<6}  {prompt_label:<16}  {first_msg:<40}")
+        out(f"  {marker}{sid_short:<10}  {created:<14}  {s['msg_count']:<6}  {first_msg:<40}")
     out("")
 
 
@@ -202,7 +201,6 @@ def make_agent(
     skills_map: "dict[str, SkillInfo]",
     thinking_cfg: "ThinkingConfig",
     system_prompt: str,
-    prompt_name: str = "",
     session_id: str | None = None,
     user_memory: "UserMemoryStore | None" = None,
     verbose: bool = True,
@@ -215,7 +213,6 @@ def make_agent(
             chat_history=chat_history,
             session_id=session_id,
             system_prompt=system_prompt,
-            prompt_name=prompt_name,
             skills=skills_map or None,
             thinking_config=thinking_cfg,
             user_memory=user_memory,
@@ -227,7 +224,6 @@ def make_agent(
             chat_history=chat_history,
             session_id=session_id,
             system_prompt=system_prompt,
-            prompt_name=prompt_name,
             skills=skills_map or None,
             thinking_config=thinking_cfg,
             user_memory=user_memory,
@@ -238,7 +234,6 @@ def make_agent(
         chat_history=chat_history,
         session_id=session_id,
         system_prompt=system_prompt,
-        prompt_name=prompt_name,
         skills=skills_map or None,
         thinking_config=thinking_cfg,
         user_memory=user_memory,
@@ -343,49 +338,38 @@ def handle_thinking_cfg(
 def switch_session(
     chat_history: ChatHistoryStore,
     session_arg: str,
-    custom_prompts: dict[str, str],
     default_system_prompt: str,
     skills_map: "dict[str, SkillInfo]",
     thinking_cfg: "ThinkingConfig",
     user_memory: "UserMemoryStore | None" = None,
     out: OutputFn = _stdout,
     verbose: bool = True,
-) -> "tuple[Agent, str | None] | None":
-    """切换到指定 session 并恢复对应 Prompt 上下文。
+) -> "Agent | None":
+    """切换到指定 session 并恢复上下文。
 
     无参兜底 `/session` → list 已废弃；list 由 main.py 路由到独立的 `/sessions` 命令
     （见 [iter_2.md §4.9.1](../../docs/iter_2.md#491-session-列表搜索恢复phase-11)），
     本函数保留对空 session_arg 的防御性返回 None，但不再回退到 list。
 
     Returns:
-        (新 Agent, active_prompt_name)；session_arg 为空时返回 None。
+        新 Agent；session_arg 为空时返回 None。
     """
     if not session_arg:
         out("⚠️  /session 需要 session id。用 /sessions 查看列表。\n")
         return None
 
-    sessions_info = {s["session_id"]: s for s in chat_history.list_sessions()}
-    saved_prompt = sessions_info.get(session_arg, {}).get("prompt_name", "")
-    active_prompt_name: str | None = saved_prompt or None
-    restored_prompt = (
-        custom_prompts.get(f"/{saved_prompt}")
-        if saved_prompt and f"/{saved_prompt}" in custom_prompts
-        else None
-    )
     agent = make_agent(
         chat_history=chat_history,
         skills_map=skills_map,
         thinking_cfg=thinking_cfg,
-        system_prompt=restored_prompt or default_system_prompt,
-        prompt_name=saved_prompt or "",
+        system_prompt=default_system_prompt,
         session_id=session_arg,
         user_memory=user_memory,
         verbose=verbose,
     )
     history = chat_history.load(session_arg)
     msg_count = len([m for m in history if m["role"] != "system"])
-    prompt_hint = f"  Prompt: {active_prompt_name}" if active_prompt_name else ""
-    out(f"✅ 已切换到 Session: {session_arg}（共 {msg_count} 条历史消息）{prompt_hint}")
+    out(f"✅ 已切换到 Session: {session_arg}（共 {msg_count} 条历史消息）")
 
     preview_msgs = [
         m for m in history
@@ -399,7 +383,7 @@ def switch_session(
             preview = content[:_SWITCH_PREVIEW_LEN] + ("…" if len(content) > _SWITCH_PREVIEW_LEN else "")
             out(f"     {role_label}: {preview}")
     out("")
-    return agent, active_prompt_name
+    return agent
 
 
 _MEMORY_USAGE = (

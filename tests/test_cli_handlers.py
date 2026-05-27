@@ -136,7 +136,7 @@ class TestSwitchSessionPreview:
         # 用 patch 防止真的去构造 Agent（依赖 LLM provider 配置）
         with patch.object(handlers, "make_agent") as m:
             result = handlers.switch_session(
-                store, "", custom_prompts={}, default_system_prompt="sys",
+                store, "", default_system_prompt="sys",
                 skills_map={}, thinking_cfg=None, out=lines.append,
             )
         assert result is None
@@ -153,7 +153,7 @@ class TestSwitchSessionPreview:
         lines: list[str] = []
         with patch.object(handlers, "make_agent", return_value=object()):
             handlers.switch_session(
-                store, sid, custom_prompts={}, default_system_prompt="sys",
+                store, sid, default_system_prompt="sys",
                 skills_map={}, thinking_cfg=None, out=lines.append,
             )
         full = "\n".join(lines)
@@ -167,7 +167,7 @@ class TestSwitchSessionPreview:
         lines: list[str] = []
         with patch.object(handlers, "make_agent", return_value=object()):
             handlers.switch_session(
-                store, "empty-sid", custom_prompts={}, default_system_prompt="sys",
+                store, "empty-sid", default_system_prompt="sys",
                 skills_map={}, thinking_cfg=None, out=lines.append,
             )
         full = "\n".join(lines)

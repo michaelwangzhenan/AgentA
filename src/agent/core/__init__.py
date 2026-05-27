@@ -9,6 +9,7 @@ Agent 公共层 helpers —— 三种 Agent 实现（Python / LangChain / AutoGP
 模块清单（随 §4.5 重构逐步落地）：
 - history_manager.py      HistoryManager     历史截断 + skill_pair 保护 + system 拼接
 - memory_manager.py       MemoryManager      UserMemory 触发 + 提取 + 注入 system_prompt
+- rules_loader.py         load_project_rules  项目根 .agenta/rules.md 一次性加载 + 截断
 - event_bus.py            EventBus           统一事件分发（多订阅 + 异常隔离）
 - tool_call_engine.py     ToolCallEngine     工具调用编排（执行 + 格式化 + 引导提示 + 写历史）
 - thinking_policy.py      ThinkingPolicy     adaptive thinking budget 估算

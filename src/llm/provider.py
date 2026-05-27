@@ -93,6 +93,9 @@ def chat(
 
     if on_token_chunk is not None:
         kwargs["stream"] = True
+        # 流式响应里把 usage 放到最后一个 chunk，否则 prompt_tokens / completion_tokens
+        # 都拿不到（kimi / qwen 等 OpenAI 兼容 provider 默认不推 usage）
+        kwargs["stream_options"] = {"include_usage": True}
         return _openai_call(
             provider_config,
             need_proxy,

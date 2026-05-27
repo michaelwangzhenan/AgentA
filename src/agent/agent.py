@@ -27,6 +27,7 @@ from src.agent.core.event_bus import (
 )
 from src.agent.core.history_manager import HistoryManager
 from src.agent.core.memory_manager import MemoryManager
+from src.agent.core.rules_loader import build_rules_block, load_project_rules
 from src.agent.core.thinking_policy import ThinkingConfig, ThinkingPolicy  # noqa: F401 — re-export
 from src.agent.core.tool_call_engine import ToolCallEngine
 from src.agent.tools import get_tools
@@ -53,6 +54,10 @@ _chat_history: ChatHistoryStore | None = None
 _shared_user_memory: UserMemoryStore | None = None
 _shared_user_memory_lock = __import__("threading").Lock()
 
+# 模块级缓存的项目 rules 文本（进程启动后只读一次，重启进程才会刷新）
+_shared_project_rules: str | None = None
+_shared_project_rules_loaded: bool = False
+
 
 def _get_shared_chat_history() -> ChatHistoryStore:
     """获取模块级共享 ChatHistoryStore，首次调用时懒加载初始化。"""
@@ -76,6 +81,19 @@ def _get_shared_user_memory() -> UserMemoryStore | None:
             if _shared_user_memory is None:
                 _shared_user_memory = UserMemoryStore(_cfg.USER_MEMORY_DB_PATH)
     return _shared_user_memory
+
+
+def _get_shared_project_rules() -> str | None:
+    """获取项目 rules 文本，首次调用时一次性加载，后续命中缓存。
+
+    返回 `None` 表示 disabled / 文件缺失 / 空。重新加载需重启进程
+    （Phase 1.3 设计上不做 watch / 热加载）。
+    """
+    global _shared_project_rules, _shared_project_rules_loaded
+    if not _shared_project_rules_loaded:
+        _shared_project_rules = load_project_rules()
+        _shared_project_rules_loaded = True
+    return _shared_project_rules
 
 # Agent 系统提示：指导 LLM 的行为策略
 SYSTEM_PROMPT = """你是用户的**个人私有知识库助手**。知识库里装的是**当前用户本人**的全部资料：
@@ -174,7 +192,6 @@ class Agent:
         session_id: str | None = None,
         max_history_turns: int = 20,
         chat_history: ChatHistoryStore | None = None,
-        prompt_name: str = "",
         skills: dict[str, SkillInfo] | None = None,
         thinking_config: ThinkingConfig | None = None,
         user_memory: UserMemoryStore | None = None,
@@ -190,7 +207,6 @@ class Agent:
         self.verbose = verbose
         self.session_id: str = session_id or str(uuid.uuid4())
         self.max_history_turns = max_history_turns
-        self._prompt_name = prompt_name
         # 支持从外部传入 chat_history（便于测试 mock），默认使用模块级共享实例
         self._chat_history: ChatHistoryStore = (
             chat_history if chat_history is not None else _get_shared_chat_history()
@@ -272,9 +288,11 @@ class Agent:
         history_mgr = HistoryManager(self._chat_history, self.session_id, self.max_history_turns)
         history = history_mgr.load_truncated()
 
-        # 构建 system 消息：若有用户记忆，注入为只读上下文（防注入隔离）
+        # 构建 system 消息：base → <project_rules>（静态偏好）→ <user_context>（动态记忆）
+        # rules 在前 / memory 在后：memory 是会话中学到的临时偏好，可覆写 rules 的稳定基础
         memory_mgr = MemoryManager(self._user_memory, self._chat_history, self.session_id, chat)
-        system_content = memory_mgr.build_system_prompt(self.system_prompt)
+        base_with_rules = self.system_prompt + build_rules_block(_get_shared_project_rules())
+        system_content = memory_mgr.build_system_prompt(base_with_rules)
 
         # 构建当前轮完整 messages
         messages: list[dict[str, Any]] = [
@@ -283,11 +301,10 @@ class Agent:
             {"role": "user", "content": user_input},
         ]
 
-        # 将当前轮用户输入写入 DB，并在首次创建 session 时带入 prompt_name
+        # 将当前轮用户输入写入 DB（首次会自动创建 session 记录）
         self._chat_history.append(
             self.session_id,
             {"role": "user", "content": user_input},
-            prompt_name=self._prompt_name,
         )
 
         tool_rounds = 0  # 已消耗的工具调用轮次计数

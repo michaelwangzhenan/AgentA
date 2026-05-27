@@ -77,6 +77,58 @@ class TestBuildSystemPrompt:
         um.load_for_context.assert_called_once_with(_cfg.USER_MEMORY_MAX_CHARS)
 
 
+# ── Phase 1.3：rules + memory 拼接顺序契约 ──────────────────────────────
+#
+# Agent.run() 实际拼接代码（src/agent/agent.py）：
+#     base_with_rules = self.system_prompt + build_rules_block(load_project_rules())
+#     system_content  = memory_mgr.build_system_prompt(base_with_rules)
+#
+# 这里测的是同一拼接序列的**纯逻辑**，避免依赖 Agent 实例化重型路径。
+# 契约：rules 段在 user_context 段**之前**（rules=稳定基础 / memory=临时覆写）。
+
+from src.agent.core.rules_loader import build_rules_block
+
+
+class TestRulesMemoryCompositionOrder:
+    """验证 base → <project_rules> → <user_context> 三层注入顺序。"""
+
+    @staticmethod
+    def _compose(base: str, rules: str | None, memory_text: str) -> str:
+        """复现 Agent.run() 的拼接序列。"""
+        um = MagicMock()
+        um.load_for_context.return_value = memory_text
+        mgr = _mk_mgr(user_memory=um if memory_text else None)
+        return mgr.build_system_prompt(base + build_rules_block(rules))
+
+    def test_base_only(self) -> None:
+        out = self._compose("BASE", rules=None, memory_text="")
+        assert out == "BASE"
+
+    def test_base_plus_rules_no_memory(self) -> None:
+        out = self._compose("BASE", rules="始终中文回答", memory_text="")
+        assert out.startswith("BASE")
+        assert "<project_rules>" in out
+        assert "始终中文回答" in out
+        assert "<user_context>" not in out
+
+    def test_base_plus_memory_no_rules(self) -> None:
+        out = self._compose("BASE", rules=None, memory_text="偏好简洁")
+        assert out.startswith("BASE")
+        assert "<project_rules>" not in out
+        assert "<user_context>" in out
+        assert "偏好简洁" in out
+
+    def test_base_plus_rules_plus_memory_order(self) -> None:
+        """关键契约：rules 段必须出现在 user_context 段**之前**。"""
+        out = self._compose("BASE", rules="始终中文", memory_text="偏好简洁")
+        rules_idx = out.index("<project_rules>")
+        ctx_idx = out.index("<user_context>")
+        assert rules_idx < ctx_idx, "rules 必须在 memory 之前注入，让 memory 能覆写 rules"
+        # 两段内容都存在且不互相破坏
+        assert "始终中文" in out
+        assert "偏好简洁" in out
+
+
 # ── try_extract：触发逻辑 ────────────────────────────────────────────────
 
 class TestTryExtract:

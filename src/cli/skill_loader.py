@@ -1,7 +1,7 @@
 """
 Skills 发现与解析模块
 
-扫描 advanced/skills/ 下的 **/SKILL.md，解析 YAML frontmatter，
+扫描 .agenta/skills/ 下的 **/SKILL.md，解析 YAML frontmatter，
 返回按 name 索引的 SkillInfo 字典。
 
 规范参考: https://agentskills.io/specification

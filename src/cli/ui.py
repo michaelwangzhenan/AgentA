@@ -21,9 +21,7 @@ HELP_TEXT = """
   /session <id>              切换到指定 session 并恢复历史
   /del-session <id>          彻底删除指定历史 session 的所有记录（不可恢复）
   /clean-session             清空所有历史 session 的记录（不可恢复）
-  /reload-prompts            重新扫描 advanced/prompts/ 目录，刷新自定义 Prompt 命令
-  /reload-skills             重新扫描 advanced/skills/ 目录，刷新 Skill 列表
-  /<prompt_name> [问题]      切换到指定自定义 Prompt 并重置 Agent，可附带首个问题
+  /reload-skills             重新扫描 .agenta/skills/ 目录，刷新 Skill 列表
   /<skill_name> [问题]       激活指定 Skill（注入 Skill 指令到当前会话），可附带首个问题
   /save <文件名>             导出当前 session 完整对话到 history/<文件名>.md
   /thinking                  查看 Extended Thinking 状态
@@ -43,12 +41,12 @@ HELP_TEXT = """
 #   en  →  all-MiniLM-L6-v2   英文/多语言
 #   zh  →  BAAI/bge-small-zh   中文优化
 
-# 自定义 Prompt：
-#   在 advanced/prompts/ 目录下放置 <名称>.prompt.md 文件即可。
-#   文件名即命令名（如 5g-expert.prompt.md → /5g-expert），名称只允许字母、数字、- 和 _。
+# 项目偏好（Project Rules）：
+#   在项目根放 .agenta/rules.md，写入项目级静态偏好（语言/格式/背景等）。
+#   进程启动一次性加载，按 base → <project_rules> → <user_context> 顺序注入 system prompt。
 
 # Skills：
-#   在 advanced/skills/<名称>/SKILL.md 放置符合 agentskills.io 规范的 Skill。
+#   在 .agenta/skills/<名称>/SKILL.md 放置符合 agentskills.io 规范的 Skill。
 #   Agent 会自动发现并在合适时调用；也可用 /<skill_name> [问题] 手动激活。
 
 # 直接输入问题即可开始对话。

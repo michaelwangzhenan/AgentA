@@ -17,8 +17,7 @@
     sessions(
         session_id    TEXT     PRIMARY KEY,
         created_at    TEXT     NOT NULL,
-        first_user_msg TEXT   NOT NULL DEFAULT '',  -- 首条用户消息摘要，便于展示
-        prompt_name   TEXT     NOT NULL DEFAULT ''  -- 当前激活的自定义 prompt 名称，空表示使用默认提示
+        first_user_msg TEXT   NOT NULL DEFAULT ''   -- 首条用户消息摘要，便于展示
     )
 """
 
@@ -86,8 +85,7 @@ class ChatHistoryStore:
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id    TEXT PRIMARY KEY,
                 created_at    TEXT NOT NULL,
-                first_user_msg TEXT NOT NULL DEFAULT '',
-                prompt_name   TEXT NOT NULL DEFAULT ''
+                first_user_msg TEXT NOT NULL DEFAULT ''
             );
         """)
         self._conn.commit()
@@ -108,17 +106,16 @@ class ChatHistoryStore:
 
     # ── 核心接口 ──────────────────────────────────────────────────────────────
 
-    def append(self, session_id: str, msg: dict[str, Any], prompt_name: str = "") -> None:
+    def append(self, session_id: str, msg: dict[str, Any]) -> None:
         """
         将单条 message 追加到指定 session。
 
         自动处理 tool_calls（assistant role）和 tool_call_id（tool role）的序列化。
-        若 session 不存在则自动创建，并将 prompt_name 一并写入。
+        若 session 不存在则自动创建。
 
         Args:
             session_id: 会话 ID。
             msg: 标准 OpenAI messages 格式的单条消息 dict。
-            prompt_name: 当前 session 使用的自定义 prompt 名称，默认为空字符串。
         """
         role: str = msg.get("role", "")
         content: str = msg.get("content") or ""
@@ -134,8 +131,8 @@ class ChatHistoryStore:
             ).fetchone()
             if not existing:
                 self._conn.execute(
-                    "INSERT INTO sessions(session_id, created_at, first_user_msg, prompt_name) VALUES(?,?,?,?)",
-                    (session_id, now, content[:_FIRST_MSG_PREVIEW_LEN] if role == "user" else "", prompt_name),
+                    "INSERT INTO sessions(session_id, created_at, first_user_msg) VALUES(?,?,?)",
+                    (session_id, now, content[:_FIRST_MSG_PREVIEW_LEN] if role == "user" else ""),
                 )
 
             # 追加消息
@@ -192,22 +189,6 @@ class ChatHistoryStore:
         ).fetchall()
 
         return [self._row_to_message(row) for row in reversed(rows)]
-
-    def set_prompt_name(self, session_id: str, prompt_name: str) -> None:
-        """
-        更新指定 session 对应的 prompt_name。
-
-        session 不存在时静默忽略（不报错）。
-
-        Args:
-            session_id: 会话 ID。
-            prompt_name: 要写入的 prompt 名称（不含 / 前缀）。
-        """
-        with self._conn:
-            self._conn.execute(
-                "UPDATE sessions SET prompt_name = ? WHERE session_id = ?",
-                (prompt_name, session_id),
-            )
 
     def clear(self, session_id: str) -> None:
         """
@@ -282,11 +263,10 @@ class ChatHistoryStore:
             limit: 可选返回上限。None 表示返回全部。
 
         Returns:
-            list of dict，每项包含 session_id、created_at、first_user_msg、
-            prompt_name、msg_count。
+            list of dict，每项包含 session_id、created_at、first_user_msg、msg_count。
         """
         sql = """
-            SELECT s.session_id, s.created_at, s.first_user_msg, s.prompt_name,
+            SELECT s.session_id, s.created_at, s.first_user_msg,
                    COUNT(m.id) AS msg_count
             FROM sessions s
             LEFT JOIN messages m ON s.session_id = m.session_id

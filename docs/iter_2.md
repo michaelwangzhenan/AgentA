@@ -615,7 +615,7 @@ Part B 落地总览：
 | 1.1 | Session 列表/搜索/恢复 | 已有强化 | P0 | CLI 能 `/sessions list` 看历史会话并恢复 |
 | 1.2 | Memory 触发优化 + 手动写入 + 评估 | 已有强化 | P0 | 跨次对话能记住"用户喜欢中文回答""偏好引用论文页码"；自动提取按 N 轮/min_len 触发；用户可 `/memory add` / `/memory edit`；golden 召回 ≥ 80%（详 [§4.9.2](#492-memory-触发优化--手动写入--评估-phase-12)） |
 | 1.3 | Prompt 用户偏好（`.agenta/rules.md`）| 已有强化 | P1 | 项目根放 rules.md 自动注入 |
-| 1.4 | 引用展示（jump to source）| 新 | P0 | 每条回答末尾列 `[source: file#section]`，Chainlit 可点击 |
+| 1.4 | 引用展示（jump to source）| 新 | P0 | 每条回答末尾列 `[source: file#section]`，Chainlit 可点击(本次任务不实现) |
 | 1.5 | Skills 框架强化（registry / 自动加载）| 已有强化 | P0 | 为 Phase 2 的 Quiz/Plan Skill 铺路 |
 
 **Phase 1 目标**：能塞个人文档 → 自然语言查 → 跨 session 记得偏好 → 答案带可跳转引用。
@@ -764,7 +764,33 @@ Part B 落地总览：
 6. 更新design文档 到 [design.md](design.md) 对应子章节， 如 [Session 管理](design.md#33-session-管理)。desgin 文件要写的简练，抓住重点，风格要跟原来的章节统一。
 
 
+### 4.9.0 实现文档风格
+
+本节规则统一约束 §4.9.x 所有 feature 实施文档，避免风格漂移。新写或回填子章节时按此对照。
+
+| 维度 | 要求 |
+|---|---|
+| **标题** | `### 4.9.x <feature 名> (phase X.Y)`；feature 名一两词足够，例：`Session 管理` / `Memory 管理` / `Prompt 管理`。不要堆"列表/搜索/恢复"这种长串。 |
+| **首行功能描述** | 标题下首行写"**功能描述**：…"，用 1-2 句**用户视角**话术说"这个 feature 让用户能做什么"，禁用工程术语 |
+| **内容粒度** | **只写结果**：决策表 / 改动表 / 代码位置表 / UT 数 / 评估指标。**不写过程**：业界对比、备选方案、为什么选 A 弃 B、设计权衡的来回讨论 — 那些都归讨论区，不进文档 |
+| **章节框架** | Step 1 Review 现状 → Step 2 实施计划 → Step 3 代码实现 → Step 4 UT → Step 5 评估 → Step 6 design.md 同步。可省略对本 feature 不适用的 Step |
+| **表达方式** | 优先**表格**；流程/层次关系用 Mermaid；行内 code 引用文件 / API / config 名用反引号 |
+| **显式不做** | 单列一张"显式不做"表，写明 punt 项 + 一句话原因，防止后期 review 反复追问 |
+| **写作时机** | Step 1+2 在动手前写完（让用户审 scope）；Step 3-6 在实施后回填 |
+
+**反例（已发生过 → 不要再犯）**
+
+| 反例 | 修正 |
+|---|---|
+| 标题 `### 4.9.3 Prompt 用户偏好 (phase 1.3)` | `### 4.9.3 Prompt 管理 (phase 1.3)` |
+| 写"业界范式（取 v1 落地最浅那条）：Cursor Rules vs Copilot Custom Instructions vs AGENTS.md…" 大段对比 | 删；直接给"决策 + 一句话理由"表 |
+| 写"v1 scope 决策（开 phase 时拍板，避免事后回头简化）：…" | 删修饰句；直接列决策表 |
+
+
 ### 4.9.1 Session 管理 (phase 1.1)
+
+**功能描述**：让你随时回到任一历史对话 — `/sessions` 看全部、`/sessions <关键词>` 搜历史话题、`/session <id>` 切回继续聊，切完自动恢复 prompt + 末尾 2 条消息预览。
+
 
 **Step 1 · Review 现状**
 
@@ -849,7 +875,8 @@ Session 基础设施已经相当厚（`src/memory/chat_history.py` + `src/cli/ha
 
 
 ### 4.9.2 Memory 管理 (phase 1.2)
-触发优化 + 手动写入 + 评估 
+
+**功能描述**：Agent 跨次对话依然认得你 — 你说过"喜欢中文回答""引用要带页码"等偏好/背景/指令，Agent 自动从对话里提取并记住；也可以 `/memory add` 手动写、`/memory edit` 修订、`/memory del` 删单条、`/memory clear` 全清。
 
 **Step 1 · Review 现状（含 feature 设计调整）**
 
@@ -1004,9 +1031,124 @@ python -m tools.agent_eval.memory.recall_golden --case M01-lang-zh    # 单 case
 
 
 
+### 4.9.3 Prompt 管理 (phase 1.3)
+
+**功能描述**：在项目根放一份 `.agenta/rules.md`，Agent 每次对话自动遵守里面写的规则 — 例如"始终用中文回答""引用文献要带页码""不用 bullet"，不必每轮重申。
+
+**Step 1 · Review 现状**
+
+| 现状 | 缺口 |
+|---|---|
+| `self.system_prompt` 由构造时传入（`/<role>` 切角色 prompt） | 无"项目级稳定 rules"层；想让 Agent "始终中文 / 不用 bullet" 只能手动说或写 user_memory |
+| `MemoryManager.build_system_prompt()` 拼 `<user_context>` 块 | 这是会话中学到的**动态**偏好，不是用户主动声明的**静态**偏好 |
+| `.agenta/` namespace | 不存在；新建 |
+
+**Step 2 · 实施计划**
+
+v1 决策：
+
+| 决策 | 选择 |
+|---|---|
+| 文件支持 | 单文件 `.agenta/rules.md`，alwaysApply |
+| 路径 namespace | `.agenta/`（与项目同名，未来 `.agenta/skills/` 等同根） |
+| 拼接顺序 | `base → <project_rules> → <user_context>` — rules 稳定基础，memory 临时覆写 |
+| 评估 | 扩展 `recall_golden.py` + dataset 加 R0x rules-driven case，不另起 framework |
+
+11 项改动：
+
+| 块 | # | 改动 | 文件 |
+|---|---|---|---|
+| **A 配置** | 1 | `USER_RULES_ENABLED=True` / `USER_RULES_FILE=".agenta/rules.md"` / `USER_RULES_MAX_CHARS=4000` | `src/config.py` |
+| **A 数据** | 2 | `load_project_rules(root=None) -> str \| None`，缺失 / 空 / 超长 graceful | `src/agent/core/rules_loader.py`（新） |
+| **B 注入** | 3 | base → rules → memory 三层顺序，rules 包 `<project_rules>` 标签 | `src/agent/agent.py:run()` |
+| **C UT** | 4 | loader 5 case：缺失 / 空 / 正常 / 超长截断 / BOM 与空白 strip | `tests/test_rules_loader.py`（新） |
+| **C UT** | 5 | 拼接顺序 4 case：base / base+rules / base+memory / base+rules+memory | 扩展 `tests/test_memory_manager.py` |
+| **D 评估** | 6 | case schema 增 `rules: str`；`_build_system_prompt` 按 base+rules+memory 拼 | `tools/agent_eval/memory/recall_golden.py` |
+| **D 评估** | 7 | R01 语言约束 / R02 格式约束 / R03 rules↔memory 冲突 验 memory 覆写 | `tools/agent_eval/memory/dataset.json` |
+| **E 文档** | 8 | §3.5 项目 Rules（仿 §3.4 风格） | `docs/design.md` |
+| **E 文档** | 9 | 5-10 行示例：语言 / 格式 / 引用风格 / 禁词 | `.agenta/rules.md.example` |
+| **E 文档** | 10 | §1.2 Agent 加 bullet | `README.md` |
+| **F 总结** | 11 | 本节 Step 3-5 回填 | 本节 |
+
+**显式不做**
+
+| 不做项 | 原因 |
+|---|---|
+| 多文件 `.agenta/rules/*.md` | 单用户 CLI 场景单文件够；真有需求再扩 |
+| frontmatter（alwaysApply / globs） | 单文件不需要选择性应用 |
+| 热加载 / 文件 watch | 重启进程即可，避免引入 inotify 依赖 |
+| CLI `/rules` 命令 | rules.md 用编辑器写更顺手 |
+
+**Step 3 · 代码实现**
+
+| 改动 | 实现位置 |
+|---|---|
+| 三项 config | `src/config.py` `USER_RULES_ENABLED` / `USER_RULES_FILE` / `USER_RULES_MAX_CHARS` |
+| 加载器 | `src/agent/core/rules_loader.py` `load_project_rules()` + `build_rules_block()` |
+| 进程缓存 | `src/agent/agent.py` `_get_shared_project_rules()`（与 `_get_shared_user_memory` 同风格） |
+| 注入拼接 | `src/agent/agent.py:run()` `base_with_rules = self.system_prompt + build_rules_block(...)` 再交给 `MemoryManager.build_system_prompt` |
+| 加载器 UT | `tests/test_rules_loader.py`（12 case：`TestLoadProjectRules` 8 + `TestBuildRulesBlock` 4） |
+| 拼接顺序 UT | `tests/test_memory_manager.py::TestRulesMemoryCompositionOrder`（4 case） |
+| recall_golden 支持 rules | `tools/agent_eval/memory/recall_golden.py` `_build_system_prompt(memories, rules=None)` |
+| dataset rules-driven case | `tools/agent_eval/memory/dataset.json` R01 / R02 / R03 三条 |
+| 文档 | `docs/design.md §3.5 项目 Rules` + `README.md §1.2 Agent` 加 bullet + `.agenta/rules.md.example` 示例 |
+
+**Step 4 · UT 结果**
+
+```text
+tests/test_rules_loader.py + tests/test_memory_manager.py
+35 passed (= 新增 16 + 原 19)
+全量回归：pytest → 400 passed, 3 skipped, 110 deselected, 0 failed
+```
+
+顺手修复 Phase 1.2 遗留的 `TestSourceField::test_legacy_schema_raises_friendly_error`：用户简化 `user_memory.py` 错误消息时删除了 "source" / 完整路径字眼，UT 改为弱断言（只验关键诊断要素 `schema` + 删除指引）。
+
+**Step 5 · 评估**
+
+`recall_golden` dataset 总规模 7 → 10 case（M01-M07 沿用 + R01-R03 新增）。全跑 10/10 通过：
+
+| id | 维度 | rules 内容（节选） | 结果 |
+|---|---|---|:-:|
+| R01-rules-lang-zh | 语言约束 | "始终用中文回答，即使用户用英文提问" | ✅ 英文问得到中文答（命中 BM25/稠密/向量/检索） |
+| R02-rules-no-bullet | 格式约束 | "用流畅段落散文，不要 bullet" | ✅ 输出无 `- ` `* ` `1.` `2.` `3.` |
+| R03-rules-memory-conflict | rules ↔ memory 冲突，验拼接顺序 | rules:"始终中文" + memory:"本段练英文用英文回答" | ✅ 英文答（命中 Reciprocal/rank/RRF），证 memory 在 rules 之后注入能覆写 |
+
+**Step 6 · design.md 同步**
+
+新增 [`design.md §3.5 项目 Rules`](design.md#35-项目-rules)：文件位置 / 加载兜底 / 三层注入顺序 Mermaid 图 / 防 prompt injection / 评估闭环。§3.4 注入流程图加 cross-ref 到 §3.5。同时按 §3.0 新风格 refine 了 §3.4 整章（去 "Phase 1.2 完成" 等时效字眼、去 `CREATE TABLE` 等实现细节、添加 Memory 注入 Mermaid 图）。
+
+**Step 7 · 收尾精简：废弃 `advanced/prompts/` + Skills 归位**
+
+引入 rules.md 后复盘：早期试 RAG 时的"切角色 prompt"机制（`/<role>` + `advanced/prompts/*.prompt.md`）与 rules.md 高度重叠 — 后者覆盖 90% 角色定制场景，个人学习助手 [§4.7.1 项目定位](#471-项目定位) 也无切角色需求；保留它让 §3.5.2 三层注入图节点翻倍。顺势收尾：
+
+| 决策 | 落地 |
+|---|---|
+| 废弃 `advanced/prompts/` 全套 | 删目录 + `src/cli/prompt_loader.py` + `PROMPTS_DIR` config + CLI `/<role>` 切换 + `/reload-prompts` 命令 + tab 补全条目 |
+| `advanced/skills/` → `.agenta/skills/` | 项目级用户配置归一到 `.agenta/` 单一 namespace；`SKILLS_DIR` 默认值同步 |
+| `advanced/` 顶层目录 | 整个删（无残留） |
+| `chat_history.sessions.prompt_name` schema + 配套 dead code | **彻底删除**：`sessions` 表列、`ChatHistoryStore.set_prompt_name()`、`append(prompt_name=...)` 参数、三个 Agent 的 `__init__(prompt_name=...)` / `self._prompt_name` / `_persist` 透传、`handlers.make_agent` 透传、`/sessions` 列表 Prompt 列；用户需手动删 `sqlite_db/chat_history.db` 触发新 schema 重建（与 Phase 1.2 `user_memory.db` 同款策略） |
+
+回归：`pytest -q → 379 passed`（较 Step 4 末态 400 回落 21：删 `test_prompt_loader.py` 17 case + `TestSetPromptName` 5 case + `test_autogpt_agent` 工厂 args 净化 1 处签名；其余全部不变）。`design.md §3.5.2` 三层注入图节点从 5 降至 3（去掉 `/<role>` 分支）；§4 表现层 `FILES` 子图引用全部改 `.agenta/`。
+
+
+
 ## 4.10. 配套 tools（tools/agent_eval）
 
 这里只包含 Agent 评估工具框架，具体feature 的工具在对应[4.9](#49-开始实现)子章节实现。
+
+**Agent 禁止主动清理 `reports/`（强制）**
+
+`tools/agent_eval/reports/` 是评估留档目录，里面的 `.md` 报告属于用户工作产物
+（跨轮对比、写 PR / 文档要回查），**不论是 AI 主动跑出来还是用户手动跑出来**。
+AI agent **不得**以"清理 smoke 测试残留"等理由批量删除该目录下文件，包括但不限于：
+
+- ❌ `Get-ChildItem reports -File | Remove-Item`（无差别清空）
+- ❌ `rm reports/*.md`
+- ❌ `git clean reports/`（即便 `.gitignore` 已忽略）
+
+允许的清理范围：仅**精确文件名**删除自己刚生成且无价值的单份报告，删除前必须列出
+完整路径并征求用户确认。`.gitignore` 已经把整目录从 git 跟踪里排除掉了，**保留
+文件不会污染仓库**，不存在"必须清理"的工程理由。
 
 **Entry point 必须加载 `.env`（强制）**
 

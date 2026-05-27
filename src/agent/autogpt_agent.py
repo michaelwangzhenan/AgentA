@@ -136,7 +136,6 @@ class AutoGPTAgent:
         verbose: bool = True,
         session_id: str | None = None,
         chat_history: ChatHistoryStore | None = None,
-        prompt_name: str = "",
         skills: dict[str, SkillInfo] | None = None,
         thinking_config: ThinkingConfig | None = None,
         user_memory: UserMemoryStore | None = None,
@@ -150,7 +149,6 @@ class AutoGPTAgent:
         )
         self.last_usage: TokenUsage | None = None
 
-        self._prompt_name = prompt_name
         self._system_prompt = system_prompt
 
         # Skill 支持：提取 bodies，将含 description 的 catalog 追加到 system_prompt
@@ -497,7 +495,6 @@ class AutoGPTAgent:
         self._chat_history.append(
             self.session_id,
             {"role": "user", "content": user_input},
-            prompt_name=self._prompt_name,
         )
         self._chat_history.append(
             self.session_id,

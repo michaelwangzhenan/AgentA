@@ -633,7 +633,6 @@ class TestMakeAgentFactory:
             skills_map={},
             thinking_cfg=ThinkingConfig(),
             system_prompt=SYSTEM_PROMPT,
-            prompt_name="",
             session_id="factory-session",
             user_memory=None,
         )

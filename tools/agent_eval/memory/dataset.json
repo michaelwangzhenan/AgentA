@@ -84,5 +84,40 @@
       "must_contain_any": ["BM25", "dense", "稠密"],
       "must_not_contain": ["- ", "* "]
     }
+  },
+  {
+    "id": "R01-rules-lang-zh",
+    "note": "Phase 1.3 rules：项目 .agenta/rules.md 写明始终中文，英文问也要中文答。",
+    "rules": "## 语言\n- 始终用中文回答用户的问题，即使用户用英文提问。",
+    "memories": [],
+    "question": "What is the difference between BM25 and dense retrieval in one sentence?",
+    "expected": {
+      "must_contain_any": ["BM25", "稠密", "向量", "检索"],
+      "must_not_contain": []
+    }
+  },
+  {
+    "id": "R02-rules-no-bullet",
+    "note": "Phase 1.3 rules：rules.md 写明禁用 bullet / 编号列表，回答必须散文。",
+    "rules": "## 格式\n- 回答用流畅的段落散文，不要使用 bullet points 或编号列表。\n- 不要用 `- ` `* ` `1.` 这样的列表符号。",
+    "memories": [],
+    "question": "请用中文总结一下 RAG 与微调（fine-tuning）的三个差异。",
+    "expected": {
+      "must_contain_any": ["RAG", "微调"],
+      "must_not_contain": ["- ", "* ", "1.", "2.", "3."]
+    }
+  },
+  {
+    "id": "R03-rules-memory-conflict",
+    "note": "Phase 1.3 rules ↔ memory 冲突：rules 写中文，memory 写本次切英文 — 验证 memory 覆写 rules（注入顺序使然）。",
+    "rules": "## 语言\n- 始终用中文回答。",
+    "memories": [
+      {"category": "preference", "key": "language_override", "value": "本段对话我正在练习英文写作，请这一轮用英文回答。"}
+    ],
+    "question": "What is Reciprocal Rank Fusion in one sentence?",
+    "expected": {
+      "must_contain_any": ["Reciprocal", "rank", "fusion", "ranking", "RRF"],
+      "must_not_contain": []
+    }
   }
 ]

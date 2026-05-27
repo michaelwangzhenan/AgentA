@@ -51,6 +51,7 @@ load_dotenv(override=True)
 
 import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
 from src.agent.core.memory_manager import MemoryManager  # noqa: E402
+from src.agent.core.rules_loader import build_rules_block  # noqa: E402
 from src.llm.provider import chat  # noqa: E402
 from src.memory.user_memory import UserMemoryStore  # noqa: E402
 
@@ -64,11 +65,20 @@ def _load_dataset(path: Path) -> list[dict[str, Any]]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _build_system_prompt(memories: list[dict[str, str]]) -> str:
-    """构造一次性的、含 <user_context> 块的 system prompt。
+def _build_system_prompt(
+    memories: list[dict[str, str]],
+    rules: str | None = None,
+) -> str:
+    """构造一次性 system prompt，复现 `Agent.run()` 的三层拼接：
 
-    用临时 UserMemoryStore + MemoryManager 走真实的注入路径，不走 mock，
-    确保评估的是端到端真实行为（含 _sanitize、防注入 guard 等）。
+        base → <project_rules>（可选）→ <user_context>
+
+    用真实的 `UserMemoryStore` + `MemoryManager` + `build_rules_block`，
+    不走 mock，确保评估的是端到端行为（含 `_sanitize`、防注入 guard）。
+
+    Args:
+        memories: case 里写的 user_memory 条目列表。
+        rules: case 可选 `rules` 字段；`None` / 空串 → 不注入 `<project_rules>` 块。
     """
     base_prompt = "你是一个有用的 AI 助手。"
     with tempfile.TemporaryDirectory() as td:
@@ -82,7 +92,8 @@ def _build_system_prompt(memories: list[dict[str, str]]) -> str:
                 session_id="eval-session",
                 llm_chat=MagicMock(),
             )
-            return mgr.build_system_prompt(base_prompt)
+            base_with_rules = base_prompt + build_rules_block(rules)
+            return mgr.build_system_prompt(base_with_rules)
         finally:
             store.close()
 
@@ -116,7 +127,8 @@ def _check_expectations(answer: str, expected: dict[str, list[str]]) -> tuple[bo
 
 def _run_case(case: dict[str, Any]) -> dict[str, Any]:
     """跑单 case，返回结果 dict。"""
-    system_prompt = _build_system_prompt(case["memories"])
+    # Phase 1.3：可选 rules 字段，用于 R0x rules-driven case
+    system_prompt = _build_system_prompt(case["memories"], rules=case.get("rules"))
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": case["question"]},

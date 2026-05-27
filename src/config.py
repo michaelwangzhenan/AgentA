@@ -177,8 +177,7 @@ def iter_active_embeddings() -> list[tuple[str, str, str]]:
 
 
 # ── CLI 目录 ──────────────────────────────────────────────────────────────────
-PROMPTS_DIR: str = "advanced/prompts"
-SKILLS_DIR: str = "advanced/skills"
+SKILLS_DIR: str = ".agenta/skills"
 
 # 默认 (model_name, collection_name)，供未指定时使用
 DEFAULT_EMBEDDING_MODEL: str
@@ -316,13 +315,17 @@ USER_MEMORY_DB_PATH: str = os.getenv("USER_MEMORY_DB_PATH", "./sqlite_db/user_me
 USER_MEMORY_MAX_CHARS: int = int(os.getenv("USER_MEMORY_MAX_CHARS", "1500"))
 # true 每次对话结束后自动提取记忆（每轮额外一次 LLM 调用，默认关闭需手动开启）
 USER_MEMORY_AUTO_EXTRACT: bool = os.getenv("USER_MEMORY_AUTO_EXTRACT", "false").lower() == "true"
-# 自动提取触发频率（Phase 1.2 触发优化，详 iter_2.md §4.9.2）：
-# 每 N 轮（user 消息计）才触发一次自动提取，降低 LLM 调用成本；显式触发（"请记住"）
-# 不受此限制。设为 1 等同每轮触发（旧行为）。
+# 自动提取触发频率：每 N 轮 user 消息才触发一次（显式触发"请记住"不受此限）
 USER_MEMORY_EXTRACT_EVERY_N: int = int(os.getenv("USER_MEMORY_EXTRACT_EVERY_N", "5"))
-# 用户输入短于此长度（字符数）不触发自动提取（短问题如"什么是 RAG"无值得记忆的个人信息）。
-# 显式触发同样不受此限制。设为 0 禁用此过滤。
+# 用户输入短于此字符数不触发自动提取（显式触发不受此限；设为 0 禁用）
 USER_MEMORY_EXTRACT_MIN_INPUT_LEN: int = int(os.getenv("USER_MEMORY_EXTRACT_MIN_INPUT_LEN", "20"))
+
+# 是否启用项目级 rules 注入（可选值：true / false）
+USER_RULES_ENABLED: bool = os.getenv("USER_RULES_ENABLED", "true").lower() == "true"
+# rules 文件路径（相对项目根；文件不存在静默跳过）
+USER_RULES_FILE: str = os.getenv("USER_RULES_FILE", ".agenta/rules.md")
+# 注入字符上限，超出截断（防止占用过多 context）
+USER_RULES_MAX_CHARS: int = int(os.getenv("USER_RULES_MAX_CHARS", "4000"))
 
 
 def get_active_config() -> ProviderConfig:

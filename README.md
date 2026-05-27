@@ -25,7 +25,8 @@
 - **多 Provider 切换**：通过 `.env` 中 `LLM_PROVIDER` 一行切换 Kimi / Qwen / DeepSeek / GLM / MiniMax / Ollama / OpenAI / Grok / Claude，业务代码零改动。
 - **Extended Thinking**：支持 Claude / Qwen3 的深度思考模式，可手动设置 budget 或开启 Adaptive 模式按问题复杂度自动估算。
 - **跨 Session 记忆**：独立 SQLite 存储用户偏好/事实，可自动提取也可通过"记住这个"指令即时触发。
-- **Skills & Prompts**：兼容 agentskills.io 规范的 Skill 加载机制，配合自定义 Prompt 可一键切换"5G 专家""代码助手"等角色。
+- **项目偏好规则**：项目根放一份 `.agenta/rules.md`（参考 Cursor Rules / AGENTS.md），Agent 启动时自动注入到 system prompt，例如"始终用中文""引用要带页码"，不必每轮重申；可被会话中临时偏好覆写。
+- **Skills 加载**：`.agenta/skills/<name>/SKILL.md` 兼容 agentskills.io 规范，Agent 自动发现并按需调用，也支持 `/<skill_name>` 手动激活。
 - **三套实现可选**：`PYTHON`（手写 ReAct，默认）/ `LANGCHAIN`（create_agent 驱动）/ `AUTOGPT`（Plan-Execute 双循环）。
 
 

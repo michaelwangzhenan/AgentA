@@ -32,7 +32,6 @@ for _noisy in ("httpx", "httpcore", "openai", "chromadb", "sentence_transformers
 # src.* 模块必须在 load_dotenv() 之后导入，确保 src.config 读取到 .env 的值
 from src.cli.ui import BANNER, HELP_TEXT
 from src.cli.tab_complete import make_completer
-from src.cli.prompt_loader import scan_prompts
 from src.cli.skill_loader import scan_skills, SkillInfo
 from src.cli import handlers
 from src.memory.chat_history import ChatHistoryStore
@@ -42,8 +41,6 @@ import src.config as config
 if config.USER_MEMORY_ENABLED:
     from src.memory.user_memory import UserMemoryStore
 
-# 自定义 Prompt 配置目录 / Skills 目录（从 config 统一管理）
-PROMPTS_DIR: str = config.PROMPTS_DIR
 SKILLS_DIR: str = config.SKILLS_DIR
 
 
@@ -77,11 +74,6 @@ def main() -> None:
     # 共享 ChatHistoryStore 实例，整个进程生命周期内复用
     chat_history = ChatHistoryStore()
 
-    # 启动时扫描自定义 Prompt 目录
-    custom_prompts: dict[str, str] = scan_prompts(PROMPTS_DIR)
-    if custom_prompts:
-        print(f"🎭 已加载自定义 Prompt：{', '.join(custom_prompts)}\n")
-
     # 启动时扫描 Skills 目录
     skills_map: dict[str, SkillInfo] = scan_skills(SKILLS_DIR)
     # 供 CLI 匹配的 {/name: body} 字典（tab 补全 + 手动激活）
@@ -105,21 +97,17 @@ def main() -> None:
     agent = handlers.make_agent(chat_history, skills_map, thinking_cfg, SYSTEM_PROMPT, user_memory=user_memory)
     print(f"💬 当前 Session: {agent.session_id}\n")
 
-    # 当前激活的 prompt 名称（None 表示使用默认提示符 "你"）
-    active_prompt_name: str | None = None
-
     prompt_session: PromptSession[str] = PromptSession(
         history=InMemoryHistory(),
-        completer=make_completer(chat_history, custom_prompts, list(skill_cmds.keys())),
+        completer=make_completer(chat_history, list(skill_cmds.keys())),
         complete_while_typing=False,  # 仅 Tab 触发，不干扰正常输入
     )
 
     while True:
         try:
             # 每轮刷新补全器，确保新建/删除的 session id 即时更新
-            prompt_session.completer = make_completer(chat_history, custom_prompts, list(skill_cmds.keys()))
-            input_label = f"{active_prompt_name}: " if active_prompt_name else "你: "
-            user_input = prompt_session.prompt(input_label).strip()
+            prompt_session.completer = make_completer(chat_history, list(skill_cmds.keys()))
+            user_input = prompt_session.prompt("你: ").strip()
         except (KeyboardInterrupt, EOFError):
             print("👋 再见1！")
             handlers.quit_sys(chat_history, user_memory)
@@ -140,7 +128,6 @@ def main() -> None:
             case "/clear":
                 chat_history.clear(agent.session_id)
                 agent = handlers.make_agent(chat_history, skills_map, thinking_cfg, SYSTEM_PROMPT, user_memory=user_memory)
-                active_prompt_name = None
                 print(f"✅ 对话历史已清空，Agent 已重置。\n💬 新 Session: {agent.session_id}\n")
                 continue
             case "/history":
@@ -159,12 +146,12 @@ def main() -> None:
                 if not session_arg:
                     print("⚠️  /session 需要 session id 参数。用 /sessions 查看列表，或 /sessions <关键词> 搜索。\n")
                     continue
-                result = handlers.switch_session(
-                    chat_history, session_arg, custom_prompts, SYSTEM_PROMPT, skills_map,
+                new_agent = handlers.switch_session(
+                    chat_history, session_arg, SYSTEM_PROMPT, skills_map,
                     thinking_cfg, user_memory=user_memory
                 )
-                if result:
-                    agent, active_prompt_name = result
+                if new_agent is not None:
+                    agent = new_agent
                 continue
             case "/del-session":
                 target_id = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""
@@ -189,28 +176,17 @@ def main() -> None:
                         count = chat_history.clean_all_sessions()
                         # 当前 Agent 的历史也已被清除，重建一个新 session
                         agent = handlers.make_agent(chat_history, skills_map, thinking_cfg, SYSTEM_PROMPT, user_memory=user_memory)
-                        active_prompt_name = None
                         print(f"🗑️  已清空全部 {count} 个 session 记录。新 Session: {agent.session_id}\n")
                     else:
                         print("已取消。\n")
-                continue
-            case "/reload-prompts":
-                custom_prompts = scan_prompts(PROMPTS_DIR)
-                cmds_str = ', '.join(custom_prompts) if custom_prompts else '（无）'
-                print(f"🔄 Prompt 已重新加载，共 {len(custom_prompts)} 个：{cmds_str}\n")
                 continue
             case "/reload-skills":
                 skills_map = scan_skills(SKILLS_DIR)
                 skill_cmds = {f"/{name}": info.body for name, info in skills_map.items()}
                 # 重建 Agent，使 system_prompt 中的 catalog 立即刷新
-                _base_prompt = (
-                    custom_prompts.get(f"/{active_prompt_name}", SYSTEM_PROMPT)
-                    if active_prompt_name
-                    else SYSTEM_PROMPT
-                )
                 agent = handlers.make_agent(
                     chat_history, skills_map, thinking_cfg,
-                    _base_prompt, active_prompt_name or "", agent.session_id,
+                    SYSTEM_PROMPT, session_id=agent.session_id,
                     user_memory=user_memory,
                 )
                 cmds_str = ', '.join(skill_cmds) if skill_cmds else '（无）'
@@ -236,20 +212,6 @@ def main() -> None:
                     handlers.handle_memory(user_memory, cmd_parts)
                 continue
         
-        # ── 用户显式 Prompt 切换 ──────────────────────────────────────────────
-        if cmd_name in custom_prompts:
-            question = user_input[len(cmd_name):].strip()
-            active_prompt_name = cmd_name[1:]  # 去掉 / 前缀，如 "5g-expert"
-            agent = handlers.make_agent(
-                chat_history, skills_map, thinking_cfg,
-                custom_prompts[cmd_name], active_prompt_name,
-                user_memory=user_memory,
-            )
-            print(f"🎭 已切换到 Prompt：{active_prompt_name}  (新 Session: {agent.session_id})\n")
-            if question:
-                handlers.run_query(agent, question)
-            continue
-
         # ── 用户显式 Skill 激活 ──────────────────────────────────────────────
         if cmd_name in skill_cmds:
             question = user_input[len(cmd_name):].strip()

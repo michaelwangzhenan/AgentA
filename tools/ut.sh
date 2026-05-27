@@ -25,7 +25,6 @@ usage() {
   -tools      工具层（search/fetch）            (tests/test_tools.py)
   -agent      Agent ReAct 循环                 (tests/test_agent.py)
   -memory     ChatHistoryStore CRUD            (tests/test_memory.py)
-  -prompt     自定义 Prompt 加载               (tests/test_prompt_loader.py)
   -skill      Skills 加载与激活                (tests/test_skill_loader.py)
   -save       对话导出 _save_history           (tests/test_save_history.py)
   -history    HistoryManager 行为基线           (tests/test_history_manager.py)
@@ -57,7 +56,6 @@ case "$1" in
     -tools)   $PYTEST tests/test_tools.py ;;
     -agent)   $PYTEST tests/test_agent.py ;;
     -memory)  $PYTEST tests/test_memory.py ;;
-    -prompt)  $PYTEST tests/test_prompt_loader.py ;;
     -skill)   $PYTEST tests/test_skill_loader.py ;;
     -save)    $PYTEST tests/test_save_history.py ;;
     -history) $PYTEST tests/test_history_manager.py ;;

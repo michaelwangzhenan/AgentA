@@ -453,37 +453,3 @@ class TestLoadLastN:
         result_b = store.load_last_n_messages("sb", 2)
         assert all(m["content"].startswith("a") for m in result_a)
         assert all(m["content"].startswith("b") for m in result_b)
-
-
-# ── 单元测试：set_prompt_name ─────────────────────────────────────────────────
-
-class TestSetPromptName:
-    """测试 set_prompt_name() 持久化与 list_sessions() 返回 prompt_name 字段。"""
-
-    def test_set_prompt_name_updates_value(self, store: ChatHistoryStore) -> None:
-        store.append("s1", {"role": "user", "content": "hello"})
-        store.set_prompt_name("s1", "5g-expert")
-        sessions = {s["session_id"]: s for s in store.list_sessions()}
-        assert sessions["s1"]["prompt_name"] == "5g-expert"
-
-    def test_set_prompt_name_can_overwrite(self, store: ChatHistoryStore) -> None:
-        store.append("s1", {"role": "user", "content": "hello"})
-        store.set_prompt_name("s1", "5g-expert")
-        store.set_prompt_name("s1", "code-assistant")
-        sessions = {s["session_id"]: s for s in store.list_sessions()}
-        assert sessions["s1"]["prompt_name"] == "code-assistant"
-
-    def test_set_prompt_name_nonexistent_session_is_ignored(self, store: ChatHistoryStore) -> None:
-        # session 不存在时不报错，list_sessions 结果不变
-        store.set_prompt_name("no-such-session", "5g-expert")
-        assert store.list_sessions() == []
-
-    def test_list_sessions_includes_prompt_name_field(self, store: ChatHistoryStore) -> None:
-        store.append("s1", {"role": "user", "content": "hello"})
-        sessions = store.list_sessions()
-        assert "prompt_name" in sessions[0]
-
-    def test_list_sessions_prompt_name_default_is_empty(self, store: ChatHistoryStore) -> None:
-        store.append("s1", {"role": "user", "content": "hello"})
-        sessions = store.list_sessions()
-        assert sessions[0]["prompt_name"] == ""

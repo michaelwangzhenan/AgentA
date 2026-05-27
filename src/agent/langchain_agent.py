@@ -58,7 +58,6 @@ class LangChainAgent:
         verbose: bool = True,
         session_id: str | None = None,
         chat_history: Any = None,  # 接口对齐，本实现走 SQLiteChatMessageHistory 不直读 ChatHistoryStore
-        prompt_name: str = "",
         skills: dict | None = None,
         thinking_config: Any = None,  # 接口对齐，LangChain 子实现暂不启用 thinking
         user_memory: Any = None,
@@ -67,7 +66,6 @@ class LangChainAgent:
         self._session_id: str = session_id or str(uuid.uuid4())
         self._system_prompt: str = system_prompt or _default_system_prompt()
         self.verbose = verbose
-        self._prompt_name = prompt_name
         self.thinking_cfg = thinking_config
         self._skill_bodies: dict[str, str] = {}
         if skills:
