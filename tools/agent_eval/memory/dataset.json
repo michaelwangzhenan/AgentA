@@ -119,5 +119,64 @@
       "must_contain_any": ["Reciprocal", "rank", "fusion", "ranking", "RRF"],
       "must_not_contain": []
     }
+  },
+  {
+    "id": "C01-single-citation",
+    "note": "Phase 1.4：单 mock hit 模拟 RAG 召回；验证 LLM 看到 [1] 编号会写 [1]，最终回答附带 sources 块。",
+    "memories": [],
+    "mock_hits": [
+      {
+        "source": "src/rag/retriever.py",
+        "heading_path": "Hybrid 检索 / _rrf_fuse",
+        "document": "RRF（Reciprocal Rank Fusion，倒数排名融合）把多路检索结果按 score = sum(1/(k + rank_i)) 累加得到融合分；本项目用它合并 dense 与 BM25 两路 top-K，k 取 60。"
+      }
+    ],
+    "question": "什么是 RRF？请基于知识库内容用一句话回答，并按 prompt 里给出的引用规范标注来源。",
+    "expect_citation_block": true,
+    "expected": {
+      "must_contain_any": ["RRF", "排名", "融合", "倒数"],
+      "must_not_contain": []
+    }
+  },
+  {
+    "id": "C02-merge-multi-citation",
+    "note": "Phase 1.4：3 个 mock hits，其中 2 个同 source+heading 应被 CitationBuilder 合并为同一编号；验证多源支撑 + 合并语义。",
+    "memories": [],
+    "mock_hits": [
+      {
+        "source": "docs/design.md",
+        "heading_path": "2.1.5 Retrieve+Rerank",
+        "page_no": 7,
+        "document": "混合检索流水线：dense 向量召回 + BM25 关键词召回，两路结果通过 RRF 融合，再走 cross-encoder rerank 精排。"
+      },
+      {
+        "source": "docs/design.md",
+        "heading_path": "2.1.5 Retrieve+Rerank",
+        "page_no": 7,
+        "document": "Per-source 去重：每个文件至多保留 K_PER_SOURCE 条片段，避免单文档霸屏；K_PER_SOURCE 默认 3。"
+      },
+      {
+        "source": "src/rag/retriever.py",
+        "heading_path": "Hybrid 检索 / search",
+        "document": "search() 入口：query 扩展（multi-query + HyDE）→ 多 query 召回 → RRF 同库融合 → 跨库 round-robin → dense 阈值过滤 → 可选 rerank → per-source 去重 → 截断 top_k。"
+      }
+    ],
+    "question": "请基于知识库材料，用 2-3 句话说明 dense+BM25 混合检索的完整流水线，并标注每条主张的来源编号。",
+    "expect_citation_block": true,
+    "expected": {
+      "must_contain_any": ["dense", "BM25", "RRF"],
+      "must_not_contain": []
+    }
+  },
+  {
+    "id": "C03-no-rag-no-sources",
+    "note": "Phase 1.4：无 mock_hits 的纯闲聊问题；LLM 不应调任何 RAG，最终回答必须不含 `— sources —` 块（验证 sources 不会无来由出现）。",
+    "memories": [],
+    "question": "你好，请用一句话介绍你自己（不要使用任何 [n] 引用格式）。",
+    "expect_citation_block": false,
+    "expected": {
+      "must_contain_any": ["助手", "AI", "知识", "帮助", "我"],
+      "must_not_contain": ["[1]", "[2]", "— sources —"]
+    }
   }
 ]

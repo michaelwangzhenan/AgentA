@@ -497,15 +497,21 @@ def search(
     return final
 
 
-def format_search_results(hits: list[Hit]) -> str:
+def format_search_results(
+    hits: list[Hit],
+    citation_nums: list[int] | None = None,
+) -> str:
     """
     将检索命中列表格式化为 LLM 可消费的字符串。
 
-    新增展示信息：retrievers（哪些检索器召回）、heading_path 与 page_no（如有），
+    展示信息：retrievers（哪些检索器召回）、heading_path 与 page_no（如有），
     便于 LLM 自我评估命中质量并在回答中给出精准引用。
 
     Args:
-        hits: search() 返回的命中列表，为空时返回提示文本。
+        hits:          search() 返回的命中列表，为空时返回提示文本。
+        citation_nums: 可选编号列表，长度与 `hits` 等长；传入时第 i 段前缀
+                       使用 `[citation_nums[i]]`（用于 Phase 1.4 跨 tool_call
+                       的全局编号）；不传则退化为 1..N 局部 enumerate。
 
     Returns:
         格式化文本，每条独立一段，段间用 "---" 分隔。
@@ -535,8 +541,11 @@ def format_search_results(hits: list[Hit]) -> str:
             loc_bits.append(f"页={meta['page_no']}")
         loc_str = ("，" + "，".join(loc_bits)) if loc_bits else ""
 
+        # Phase 1.4：传入 citation_nums 时改用 builder 分配的全局编号，
+        # 让 LLM 的引用编号与 Agent.run() 末尾渲染的 sources 块对齐
+        n = citation_nums[i - 1] if citation_nums is not None else i
         parts.append(
-            f"[{i}] 来源: {hit.source}（相关性: {score_str}，库: {hit.collection}{loc_str}）\n"
+            f"[{n}] 来源: {hit.source}（相关性: {score_str}，库: {hit.collection}{loc_str}）\n"
             f"{hit.document}"
         )
     return "\n\n---\n\n".join(parts)

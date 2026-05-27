@@ -13,4 +13,5 @@ Agent 公共层 helpers —— 三种 Agent 实现（Python / LangChain / AutoGP
 - event_bus.py            EventBus           统一事件分发（多订阅 + 异常隔离）
 - tool_call_engine.py     ToolCallEngine     工具调用编排（执行 + 格式化 + 引导提示 + 写历史）
 - thinking_policy.py      ThinkingPolicy     adaptive thinking budget 估算
+- citation_builder.py     CitationBuilder    RAG 引用展示编排（注册 / 提取 / 渲染 sources 块）
 """

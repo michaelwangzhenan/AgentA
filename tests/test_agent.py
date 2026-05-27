@@ -231,7 +231,12 @@ class TestSystemPromptWebSearch:
 
         tool_calls: list[str] = []
 
-        def mock_execute_tool(name: str, args: dict, skill_bodies: dict | None = None) -> ToolResult:
+        def mock_execute_tool(
+            name: str,
+            args: dict,
+            skill_bodies: dict | None = None,
+            **kwargs,  # 容纳 Phase 1.4 新增的 citation_builder 等关键字参数
+        ) -> ToolResult:
             tool_calls.append(name)
             if name == "search_knowledge":
                 return ToolResult(status="empty", content="知识库为空，未找到相关内容。")

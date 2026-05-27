@@ -878,6 +878,46 @@ Session 基础设施已经相当厚（`src/memory/chat_history.py` + `src/cli/ha
 
 **功能描述**：Agent 跨次对话依然认得你 — 你说过"喜欢中文回答""引用要带页码"等偏好/背景/指令，Agent 自动从对话里提取并记住；也可以 `/memory add` 手动写、`/memory edit` 修订、`/memory del` 删单条、`/memory clear` 全清。
 
+数据流（关键时序）：
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant A as Agent.run()
+    participant H as HistoryManager
+    participant MM as MemoryManager
+    participant UMS as UserMemoryStore
+    participant L as LLM
+
+    Note over A,MM: ── 注入流程：每轮对话开头 ──
+    U->>A: 提问
+    A->>H: load_truncated(session_id)
+    H-->>A: history[]
+    A->>MM: build_system_prompt(base)
+    MM->>UMS: load_for_context()
+    UMS-->>MM: memories[]
+    MM-->>A: system_prompt（含 <user_context> 块）
+
+    Note over A,L: ── LLM 推理（含 tool_calls 多轮，本图省略 tool 细节）──
+    A->>L: messages
+    L-->>A: final_answer
+
+    Note over A,UMS: ── 提取流程：每轮对话末尾，3 路决策 ──
+    A->>MM: try_extract(user_input, final_answer)
+    alt 命中显式触发词（"记住"/"don't forget"/"remember"...）
+        MM->>L: 二次 LLM 调用：抽取结构化 memory
+        L-->>MM: extracted[]
+        MM->>UMS: upsert(category, key, value, source="auto")
+    else 满足 N 轮 + min_input_len throttling（自动节流）
+        MM->>L: 二次 LLM 调用：抽取结构化 memory
+        L-->>MM: extracted[]
+        MM->>UMS: upsert(..., source="auto")
+    else 既无触发词也未到 throttling 阈值
+        MM-->>A: 跳过（节省 token，避免每轮都调 LLM）
+    end
+    A-->>U: final_answer
+```
+
 **Step 1 · Review 现状（含 feature 设计调整）**
 
 [§4.7.3 Phase 1.2](#473-实施顺序) 原 feature 名 "Memory 三层 + 主动 consolidation"。Review 现有代码 + 评估两个增量在当前场景的必要性后，得出结论：
@@ -1130,6 +1170,164 @@ tests/test_rules_loader.py + tests/test_memory_manager.py
 
 回归：`pytest -q → 379 passed`（较 Step 4 末态 400 回落 21：删 `test_prompt_loader.py` 17 case + `TestSetPromptName` 5 case + `test_autogpt_agent` 工厂 args 净化 1 处签名；其余全部不变）。`design.md §3.5.2` 三层注入图节点从 5 降至 3（去掉 `/<role>` 分支）；§4 表现层 `FILES` 子图引用全部改 `.agenta/`。
 
+
+### 4.9.4 引用展示 (phase 1.4)
+
+**功能描述**：每次 RAG 召回，Agent 回答正文带 `[1] [2]` 行内标号，末尾自动追加 `— sources —` 块，写明引自哪个文件、哪个章节、（PDF 有则带）哪一页，让用户能从答案直接溯源到原文。
+
+**Step 1 · Review 现状**
+
+| 现状 | 缺口 |
+|---|---|
+| `src/rag/retriever.py::Hit` 已携带 `source` / `metadata.heading_path` / `metadata.page_no` / `id` | 信息止步于 retriever 层；LLM 看到的是裸 chunk 文本，answer 里没有任何来源标记 |
+| `rag_search` tool 把 chunk 文本拼进 prompt 给 LLM | 没有编号契约 — 即便 LLM 想引用也不知道用哪个编号、引到什么粒度 |
+| Agent loop 内能看到 tool 返回结果（`agent.py:run()` 主循环） | 没有"收集 Hit → 渲染 sources 块"的流水线消费这些结果 |
+| `SYSTEM_PROMPT` 仅描述 Agent 身份 | 没有"用 RAG 时如何引用"的默认契约 |
+| `.agenta/rules.md`（[§3.5](design.md#35-项目-rules)） | 用户能自由覆写 base，意味着引用规则放哪一层会触发 Phase 1.3 ↔ 1.4 设计冲突，[Step 2 决策](#step-2--实施计划) 里专门定夺 |
+
+**Step 2 · 实施计划**
+
+v1 决策（含 D1-D6 高层 + DD1-DD4 细节全部敲定项）：
+
+| 决策维度 | 选择 | 含义 / 取舍 |
+|---|---|---|
+| **D1** 展示格式 | `[1][2]` 行内标号 + 文末 `— sources —` 块 | 学术论文风：行内简洁、块状信息完整；A 字面 `[source: ...]` 多引用时拥挤 |
+| **D2** 信息粒度 | `file + heading + page_no`（有则带） | 用户跳转三件套；chunk_id 噪音大不进 LLM 回答 |
+| **D3** 生成者 | **程序后置追加 sources 块**；LLM 只管正文行内 `[n]` 标号 | 反幻觉、可控；不依赖 LLM 自觉 |
+| **D4** Tool 数据传递 | Agent 在 loop 内拦截 `rag_search` tool 返回的 Hit 列表，不改 tool 接口 | 改动最小、向后兼容；通过新增 `CitationBuilder` 承接 |
+| **D5** 评估 | 扩 `recall_golden.py` + dataset 加 C0x case + `CitationBuilder` 单元 UT | 端到端验"答案带引用" + 单元验"拼接函数行为正确" |
+| **D6** UI 同步 | 本期不做 | 路线图明确推迟到后续 webui 优化任务 |
+| **DD1** sources 列哪条 | 只列正文出现的 `[n]` 对应 Hit | 克制干净；LLM 没用上的就不列 |
+| **DD2** 同 source 合并 | 同 file+heading 合并为一条引用，标 `(chunks=N)` | 1 文件 1 条引用更干净 |
+| **DD3** 编号作用域 | 每轮独立从 `[1]` 起 | 无状态、简单 |
+| **DD4** sources 进历史 | 进历史 | LLM 跨轮可复用统一来源 |
+| **Phase 1.3 ↔ 1.4 冲突** | **不处理**，按 [§3.5.2](design.md#352-三层注入顺序) 覆盖契约走 | 用户主权 > 系统默认 — rules 覆盖 base 是 §3.5.2 本意；引用规则放 base，用户想关引用就在 rules.md 写一行 |
+
+**最终用户体验示例**（CLI 一次问答）：
+
+```text
+> 解释一下 RRF 在本项目里怎么用？
+
+RRF (Reciprocal Rank Fusion，倒数排名融合) 是一种把多个排序结果合并的方法，
+对每个候选取 1/(k+rank) 累加得到融合分 [1]。本项目用它把 dense 召回（向量
+相似）和 BM25 召回（关键词）的两路 top-K 合并成统一排序 [1][2]，再走 rerank
+精排和 per-source 去重 [2]。
+
+— sources —
+[1] src/rag/retriever.py § Hybrid 检索 / _rrf_fuse  (chunks=2)
+[2] docs/design.md § 2.1.5 Retrieve+Rerank  (p.7, chunks=1)
+```
+
+数据流（关键时序）：
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant A as Agent.run()
+    participant T as rag_search tool
+    participant R as Retriever
+    participant CB as CitationBuilder
+    participant L as LLM
+
+    U->>A: 提问
+    A->>T: tool_call(rag_search)
+    T->>R: search()
+    R-->>T: Hits[N]（含 source/heading/page）
+    T->>CB: register(Hits)
+    CB-->>T: 分配编号 [1]/[2]/...
+    T-->>A: 编号化 chunk 文本 "[1] (file §heading p.N): ..."
+    A->>L: messages（含 tool_result）
+    L-->>A: answer 正文 "...[1][2]..."
+    A->>CB: extract_used(answer)
+    CB-->>A: sources 块文本（仅 [n] 命中条目）
+    A->>A: answer += "\n\n— sources —\n..."
+    A-->>U: 最终回答（含 sources，写入 chat_history）
+```
+
+10 项改动：
+
+| 块 | # | 改动 | 文件 |
+|---|---|---|---|
+| **A 数据** | 1 | `CitationBuilder`：编号分配 + 同 file+heading 合并 + 正文 `[n]` / `【n】` 提取 + sources 块渲染 | `src/agent/core/citation_builder.py`（新） |
+| **A 数据** | 2 | `rag_search` tool 返回值给 LLM 前按 `[n] (source §heading p.N): chunk text` 编号；同时调 `CitationBuilder.register(Hits)` | `src/agent/tools.py`（或 RAG tool 包装层） |
+| **B 注入** | 3 | `SYSTEM_PROMPT` 加默认引用规则一段（约 5 行）：用 RAG 时写 `[n]` 标号、未引到的不要假造、引用编号取自 prompt 提供的清单 | `src/agent/agent.py` |
+| **B 注入** | 4 | `Agent.run()` 每轮实例化 `CitationBuilder`；run 末尾把 sources 块拼到 answer + 写历史 | `src/agent/agent.py:run()` |
+| **C UT** | 5 | `CitationBuilder`：编号分配 / 合并 / `[n]`+`【n】` 提取 / 渲染 / 0 引用 / 多 tool_call 跨 call 编号连续 / 未分配编号静默丢弃 | `tests/test_citation_builder.py`（新） |
+| **D 评估** | 6 | case schema 增 `expect_citation_block: bool`；通过后验 sources 块格式（`— sources —` 标题 + `[n]` 列表） | `tools/agent_eval/memory/recall_golden.py` |
+| **D 评估** | 7 | C01 单引用 / C02 多引用合并 / C03 非 RAG 问答不出 sources 块 三 case | `tools/agent_eval/memory/dataset.json` |
+| **E 文档** | 8 | 新增 §3.6 引用展示（仿 §3.5 风格：数据来源 / 编号契约 / 反幻觉 / 评估闭环）+ §3.5.2 补一句"覆盖契约 = 用户主权 > 系统默认" | `docs/design.md` |
+| **E 文档** | 9 | §1.2 Agent 加 bullet "答案带可溯源引用" | `README.md` |
+| **F 总结** | 10 | 本节 Step 3-6 回填 | 本节 |
+
+**Step 3 · 代码实现**
+
+| 改动 | 实现位置 |
+|---|---|
+| 引用编排器 | `src/agent/core/citation_builder.py`：`Citation` dataclass + `CitationBuilder`（`register` / `extract_used` / `render`）+ `_extract_heading` / `_extract_page_no` / `_render_one` 私有工具 |
+| `core/__init__.py` 模块清单 | 追加 `citation_builder.py` 一行 |
+| 默认引用规范 | `src/agent/agent.py:SYSTEM_PROMPT` 末尾新增 "## 引用规范" 段（4 条规则）：复用 prompt 给出的 `[n]` 编号、禁造编号、不要自写 references 块、用户偏好优先 |
+| Retriever 格式化层 | `src/rag/retriever.py:format_search_results(hits, citation_nums=None)`：新增可选 `citation_nums` 参数；非 None 时用全局编号替代 1..N enumerate |
+| RAG tool 注入 | `src/agent/tools.py:_tool_search_knowledge` 加 `citation_builder` 可选参；命中时调 `builder.register(hits)` 拿全局编号传给 `format_search_results`。`execute_tool` 同步加可选参，仅 `search_knowledge` 分支透传 |
+| ToolCallEngine 透传 | `src/agent/core/tool_call_engine.py`：`__init__` 加 `citation_builder` 可选参；`process()` 内仅当非 `None` 时走 kwargs 分支调 `execute_tool`，保证旧 mock 测试不破 |
+| Agent.run() 接入 | `src/agent/agent.py:run()` 每轮 `new CitationBuilder()` → 传给 `ToolCallEngine` → 拿到 final_answer 后 `extract_used` + `render` 拼到末尾 → 整段（含 sources 块）写入 `chat_history` 与 `EVENT_FINAL_ANSWER` 事件 |
+| 加载器 UT | `tests/test_citation_builder.py`（36 case 分 6 类：`TestRegister` 7 + `TestCrossCallNumbering` 2 + `TestExtractUsed` 9 + `TestRender` 9 + `TestMetadataEdgeCases` 6 + `TestEndToEnd` 3） |
+| 既有测试微调 | `tests/test_agent.py::test_web_search_triggered_when_kb_empty` 的 `mock_execute_tool` 加 `**kwargs` 容纳新增 `citation_builder` 关键字参数（测试卫生改进，无业务变更） |
+| recall_golden 扩展 | `tools/agent_eval/memory/recall_golden.py` 新增 `_build_mock_hits()` / `_check_citation_block()` 助手；`_run_case` 支持 `mock_hits` + `expect_citation_block` 两个 dataset 字段，复现 `Agent.run()` 末尾的 sources 拼接 |
+| dataset 三条 C0x case | `tools/agent_eval/memory/dataset.json`：C01 单引用 / C02 多引用合并（含同 `(source, heading)` 合并 chunks=2）/ C03 非 RAG 不出 sources |
+| 文档同步 | `docs/design.md`：§3.5.2 增 "覆盖契约 = 用户主权 > 系统默认" 段 + 新增 §3.6 引用展示（5 子节：数据来源 / 编号契约 / 反幻觉 / 与 rules 关系 / 评估闭环），含 Mermaid sequenceDiagram。`README.md §1.2 Agent`：新增 "答案带可溯源引用" bullet |
+
+**Step 4 · UT 结果**
+
+```text
+tests/test_citation_builder.py
+36 passed（TestRegister 7 + TestCrossCallNumbering 2 + TestExtractUsed 9 + TestRender 9 + TestMetadataEdgeCases 6 + TestEndToEnd 3）
+全量回归：pytest -q → 415 passed, 3 skipped, 110 deselected, 0 failed
+```
+
+较 Phase 1.3 Step 7 末态（379 passed）净增 36，全部来自新增的 `test_citation_builder.py`，0 退化。
+
+**Step 5 · 评估**
+
+代码已就绪，dataset 总规模从 10 → 13 case（M01-M07 + R01-R03 沿用 + C01-C03 新增）。运行命令：
+
+```bash
+.venv\Scripts\python -m tools.agent_eval.memory.recall_golden                           # 全跑 13 case
+.venv\Scripts\python -m tools.agent_eval.memory.recall_golden --case C01-single-citation
+.venv\Scripts\python -m tools.agent_eval.memory.recall_golden --case C02-merge-multi-citation
+.venv\Scripts\python -m tools.agent_eval.memory.recall_golden --case C03-no-rag-no-sources
+```
+
+报告落盘 `tools/agent_eval/reports/recall-<ts>.md`，含 fail 用例的 question / system_prompt / answer 截断与触发的 reasons。判据通过率 ≥ 80% → 13 case 需 ≥ 11 通过算合格。
+
+C0x 人工跑实测（Provider: qwen）：
+
+| id | 维度 | 实测结果 |
+|---|---|:-:|
+| C01-single-citation | 单引用 | ✅ `must_contain_any` 命中 `['RRF', '排名', '融合', '倒数']`；`expect_citation_block: ✓ (has)` |
+| C02-merge-multi-citation | 多引用合并 | ✅ `must_contain_any` 命中 `['dense', 'BM25', 'RRF']`；`expect_citation_block: ✓ (has)` |
+| C03-no-rag-no-sources | 非 RAG 不出引用 | ✅ `must_contain_any` 命中 `['我']`；`must_not_contain: ✓`（无 `[1]/[2]/— sources —`）；`expect_citation_block: ✓ (no)` |
+
+**3/3 全过**。详细的 system_prompt / answer / sources 块落盘到 `tools/agent_eval/reports/recall-20260527-1618xx.md` 三份报告。配合 [Step 4 UT](#step-4--ut-结果) 415 passed，Phase 1.4 全链路验收闭环。
+
+**Step 6 · design.md 同步**
+
+新增 [`design.md §3.6 引用展示`](design.md#36-引用展示citation)：数据来源 / 编号契约（每轮独立 + 同轮累计 + 同源合并）三契约 + Mermaid sequenceDiagram + 反幻觉三道防线 + 与 §3.5 rules 协作（用户主权契约下的覆盖关系）+ 评估闭环（test_citation_builder.py + recall_golden C0x）。同时 [`§3.5.2 三层注入顺序`](design.md#352-三层注入顺序) 显式补 "覆盖契约 = 用户主权 > 系统默认" 段，为后续所有 phase 提供决策原则参考。
+
+
+**显式不做**
+
+| 不做项 | 原因 |
+|---|---|
+| Chainlit / CLI 把 `[n]` 渲染成超链接 | 路线图明确推迟到后续 webui 优化任务，[§4.7.3 Phase 1.4](#473-实施顺序) 出口已写"本次任务不实现" |
+| `chunk_id` 进 LLM 回答 | 噪音大、用户不关心；只在 `CitationBuilder` 内部用 |
+| 跨轮 sources 累计编号（DD3 否决方案 b） | 状态复杂、不直观；每轮独立 `[1]` 起最易理解 |
+| LLM 引用真假回环校验 | 程序后置生成 + LLM 只能从 prompt 抄编号，结构上规避；如 LLM 写了 `[7]` 但 builder 没分配，静默丢弃该 `[n]` |
+| Memory / project_rules / web_search 等非 RAG 来源的引用 | scope 失控；本期只针对 `rag_search` tool 一种来源 |
+| sources 块 token 预算控制 | 每条引用 ~80 字符，10 条 ~800 字，远低于 ctx；超阈值再优化 |
+| Phase 1.3 prompt 冲突处理（base/rules"系统保留区"机制） | 按 §3.5.2 用户主权契约走 — rules 覆盖 base 是设计本意，"沉默关闭引用"是用户合法决定，不是 bug |
+| `.agenta/rules.md.example` 加引用规则示例 | 默认引用规则放 base 即足够；example 保持极简，由用户自行决定是否覆盖 |
+| 引用粒度自适应（按文件类型/长度变化） | scope 失控；统一 `file + heading + page_no` 一种粒度 |
+| Phase 1.5 Skills 调用结果的引用展示 | Skills 是另一类 tool，等 Phase 1.5 一并设计；本期接口预留 `CitationBuilder.register()` 方法，不专门为 skill 适配 |
 
 
 ## 4.10. 配套 tools（tools/agent_eval）

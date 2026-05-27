@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.agent.core.event_bus import (
     EVENT_TOOL_CALL_END,
@@ -24,6 +24,9 @@ from src.agent.core.event_bus import (
 )
 from src.agent.tools import execute_tool, ToolResult
 from src.memory.chat_history import ChatHistoryStore
+
+if TYPE_CHECKING:
+    from src.agent.core.citation_builder import CitationBuilder  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +45,13 @@ class ToolCallEngine:
     工具调用编排 helper。
 
     Args:
-        chat_history:   ChatHistoryStore 实例（CRUD 依赖）。
-        session_id:     当前会话 ID。
-        skill_bodies:   已加载的 skill 正文映射，传给 execute_tool 用于 load_skill。
-        verbose:        是否打印调用 / 结果预览（CLI 调试用）。
-        events:         可选 EventBus；非 None 时发出 tool_call_start / tool_call_end 事件。
+        chat_history:     ChatHistoryStore 实例（CRUD 依赖）。
+        session_id:       当前会话 ID。
+        skill_bodies:     已加载的 skill 正文映射，传给 execute_tool 用于 load_skill。
+        verbose:          是否打印调用 / 结果预览（CLI 调试用）。
+        events:           可选 EventBus；非 None 时发出 tool_call_start / tool_call_end 事件。
+        citation_builder: 可选 Phase 1.4 引用编排器；非 None 时透传给 execute_tool，
+                          仅 search_knowledge 路径会注册 hits、分配编号。
     """
 
     def __init__(
@@ -56,12 +61,14 @@ class ToolCallEngine:
         skill_bodies: dict[str, str],
         verbose: bool = False,
         events: EventBus | None = None,
+        citation_builder: "CitationBuilder | None" = None,
     ) -> None:
         self._chat_history = chat_history
         self._session_id = session_id
         self._skill_bodies = skill_bodies
         self._verbose = verbose
         self._events = events
+        self._citation_builder = citation_builder
 
     def process(self, message: Any, messages: list[dict[str, Any]]) -> None:
         """
@@ -91,7 +98,15 @@ class ToolCallEngine:
                     payload={"name": tool_name, "args": tool_args, "call_id": tool_call.id},
                 ))
 
-            result: ToolResult = execute_tool(tool_name, tool_args, self._skill_bodies)
+            # 仅当持有 citation_builder 时才走 kwarg 路径，否则保持现有 3-arg
+            # 签名调用，避免破坏外部 mock execute_tool 的测试 fixture
+            if self._citation_builder is not None:
+                result: ToolResult = execute_tool(
+                    tool_name, tool_args, self._skill_bodies,
+                    citation_builder=self._citation_builder,
+                )
+            else:
+                result = execute_tool(tool_name, tool_args, self._skill_bodies)
 
             if self._verbose:
                 preview = result.content[:_TOOL_PREVIEW_LEN].replace("\n", " ").replace("\r", " ")

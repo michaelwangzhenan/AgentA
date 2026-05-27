@@ -1,8 +1,8 @@
 """
-Memory Recall Golden 评估 (Phase 1.2)
+Memory Recall Golden 评估 (Phase 1.2 / 1.3 / 1.4 共用)
 
-要回答的问题：写入 UserMemoryStore 的记忆，能否被 system_prompt 正确注入并被
-LLM 回答所遵循？（≈ ChatGPT/Cursor Memories 的"用户偏好被记住"指标）
+要回答的问题：写入 UserMemoryStore 的记忆 / 项目 rules / RAG 引用展示，
+能否被 system_prompt 正确注入并被 LLM 回答所遵循？
 
 设计：
     1) 每个 case 描述若干条"已有记忆 + 一个新问题"
@@ -12,7 +12,15 @@ LLM 回答所遵循？（≈ ChatGPT/Cursor Memories 的"用户偏好被记住"�
     4) 用 must_contain_any (OR) + must_not_contain (NOT) 关键词检查 answer 是否
        遵循了记忆里的偏好/指令
 
-判据：通过率 ≥ 80%（dataset.json 现 7 case → ≥ 6 通过算合格）
+Phase 1.3 扩展：case 可加 `rules: str` 字段模拟项目根 `.agenta/rules.md`，
+通过 `build_rules_block` 拼入 `<project_rules>` 块；R0x 系列 case 验证。
+
+Phase 1.4 扩展：case 可加 `mock_hits: [...]` 字段模拟 `search_knowledge` 工具
+返回，走 `CitationBuilder` 编号 → 格式化为带 [n] 的 RAG 上下文 → 让 LLM 写
+[n] 引用 → 复现 `Agent.run()` 末尾的 sources 块拼接；配合 `expect_citation_block`
+布尔字段校验最终回答是否带 `— sources —` 块；C0x 系列 case 验证。
+
+判据：通过率 ≥ 80%（dataset.json 当前 13 case → ≥ 11 通过算合格）
 
 使用：
     python -m tools.agent_eval.memory.recall_golden -h
@@ -50,10 +58,12 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(override=True)
 
 import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
+from src.agent.core.citation_builder import CitationBuilder  # noqa: E402
 from src.agent.core.memory_manager import MemoryManager  # noqa: E402
 from src.agent.core.rules_loader import build_rules_block  # noqa: E402
 from src.llm.provider import chat  # noqa: E402
 from src.memory.user_memory import UserMemoryStore  # noqa: E402
+from src.rag.retriever import Hit, format_search_results  # noqa: E402
 
 
 _DEFAULT_DATASET = Path(__file__).parent / "dataset.json"
@@ -125,18 +135,71 @@ def _check_expectations(answer: str, expected: dict[str, list[str]]) -> tuple[bo
     return (ok_any and ok_not), reasons
 
 
+def _build_mock_hits(specs: list[dict[str, Any]]) -> list[Hit]:
+    """把 dataset 里 `mock_hits` 子段转成真实 `Hit` 对象，模拟 RAG 召回。
+
+    Phase 1.4：用于评估"LLM 看到编号化 RAG 结果 → 写 [n] → 程序拼 sources"
+    端到端链路，**不依赖真实知识库**（无需 ingest、跨环境稳定）。
+    """
+    return [
+        Hit(
+            source=s["source"],
+            document=s.get("document", ""),
+            distance=s.get("distance", 0.1),
+            collection=s.get("collection", "kb_mock"),
+            metadata={
+                "heading_path": s.get("heading_path"),
+                "page_no": s.get("page_no"),
+            },
+        )
+        for s in specs
+    ]
+
+
+def _check_citation_block(answer: str, expect: bool) -> tuple[bool, str]:
+    """校验最终回答里 `— sources —` 块的出现 / 缺席是否符合 `expect`。"""
+    has_block = "— sources —" in answer
+    if expect and not has_block:
+        return False, "expect_citation_block: ❌ 期望含 `— sources —` 块但未出现"
+    if (not expect) and has_block:
+        return False, "expect_citation_block: ❌ 期望无 `— sources —` 块但出现了"
+    return True, f"expect_citation_block: ✓ ({'has' if has_block else 'no'})"
+
+
 def _run_case(case: dict[str, Any]) -> dict[str, Any]:
-    """跑单 case，返回结果 dict。"""
+    """跑单 case，返回结果 dict。
+
+    支持三种 case 形态：
+    - 仅 `memories` / `rules`（Phase 1.2/1.3 风格）：纯 system prompt 注入评估；
+    - 加 `mock_hits` + `expect_citation_block`（Phase 1.4）：把 mock hits 走
+      `CitationBuilder` + `format_search_results` 拼到 user message 里模拟
+      `search_knowledge` 工具返回，LLM 回答后再走 `extract_used` + `render`
+      拼接 sources 块，最终回答（含或不含 sources）参与关键词与块校验。
+    """
     # Phase 1.3：可选 rules 字段，用于 R0x rules-driven case
     system_prompt = _build_system_prompt(case["memories"], rules=case.get("rules"))
+
+    # Phase 1.4：mock_hits 存在时走 citation 评估路径
+    builder: CitationBuilder | None = None
+    user_content = case["question"]
+    if "mock_hits" in case and case["mock_hits"]:
+        builder = CitationBuilder()
+        hits = _build_mock_hits(case["mock_hits"])
+        nums = builder.register(hits)
+        rag_block = format_search_results(hits, citation_nums=nums)
+        user_content = (
+            f"{case['question']}\n\n"
+            f"[search_knowledge 返回结果]\n{rag_block}"
+        )
+
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": case["question"]},
+        {"role": "user", "content": user_content},
     ]
 
     try:
         resp = chat(messages, temperature=0.7)
-        answer = resp.choices[0].message.content or ""
+        answer = (resp.choices[0].message.content or "").strip()
     except Exception as e:
         return {
             "id": case["id"],
@@ -147,13 +210,27 @@ def _run_case(case: dict[str, Any]) -> dict[str, Any]:
             "reasons": [f"LLM 调用失败: {e}"],
         }
 
-    passed, reasons = _check_expectations(answer, case.get("expected", {}))
+    # Phase 1.4：复现 `Agent.run()` 末尾的 sources 拼接
+    final_answer = answer
+    if builder is not None:
+        used = builder.extract_used(final_answer)
+        final_answer = final_answer + builder.render(used)
+
+    passed, reasons = _check_expectations(final_answer, case.get("expected", {}))
+
+    # Phase 1.4：可选 expect_citation_block 校验（True / False / 不写 = 不校验）
+    expect_cb = case.get("expect_citation_block")
+    if expect_cb is not None:
+        cb_ok, cb_reason = _check_citation_block(final_answer, bool(expect_cb))
+        passed = passed and cb_ok
+        reasons.append(cb_reason)
+
     return {
         "id": case["id"],
         "pass": passed,
         "question": case["question"],
         "system_prompt": system_prompt,
-        "answer": answer,
+        "answer": final_answer,
         "reasons": reasons,
         "note": case.get("note", ""),
     }

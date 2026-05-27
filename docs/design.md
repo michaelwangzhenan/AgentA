@@ -610,6 +610,8 @@ flowchart LR
 
 **顺序约束**：`base → <project_rules> → <user_context>`。Memory 在 Rules 之后注入是有意为之 — 让 Memory 能临时覆写 Rules 的稳定基础设定。
 
+**覆盖契约：用户主权 > 系统默认**。"后注入覆盖前注入"是有意设计 — AgentA 提供的默认能力（base）可被项目偏好（rules）覆盖，项目偏好可被会话偏好（memory）覆盖。即便覆盖会关闭某些系统默认能力（如 Phase 1.4 引用展示要求 LLM 写 `[n]`，用户写 rules.md 禁用 bullet/编号格式后会一并关闭引用），也属于用户合法决定，不视为 bug。
+
 示例：rules.md 写"始终用中文"，用户在某次对话说"这段练习英文写作请用英文" → 该偏好被提取进 user_memory → 后续轮次 `<user_context>` 在 `<project_rules>` 之后注入 → LLM 优先采用更近的指令，用英文回答。
 
 ### 3.5.3 防 prompt injection
@@ -622,6 +624,76 @@ flowchart LR
 |---|---|---|
 | 正确性 | `tests/test_rules_loader.py` + `test_memory_manager.py::TestRulesMemoryCompositionOrder` | 加载兜底 + 三层拼接顺序全过 |
 | 召回 | `tools/agent_eval/memory/recall_golden.py`（dataset 中 R0x 系列 case） | rules 注入后 LLM 行为符合预期；通过率 ≥ 80% |
+
+
+## 3.6 引用展示（Citation）
+
+让用户从 Agent 的回答能直接追溯到知识库原文。每次 RAG（Retrieval-Augmented Generation）召回后，回答正文带 `[n]` 行内标号，末尾自动追加一段 `— sources —` 块写明引自哪个文件、哪个章节、哪一页，省去手动翻查的成本。
+
+不为 `web_search` / `fetch_url` 等非 RAG 来源做引用 — 它们的"来源"是 URL，已在工具结果里自然带出，不走本节定义的编号机制。
+
+### 3.6.1 数据来源
+
+引用所需元数据由 [§2.1.4 Split](#214split分块) 阶段写入并由 [§2.1.5 Retrieve+Rerank](#215retriverank) 透传，本节只**消费**不**生产**：
+
+| 字段 | 来源 | 用于 |
+|---|---|---|
+| `source` | ingest 时的相对路径（如 `src/rag/retriever.py`） | 引用条目主键 |
+| `metadata.heading_path` | Splitter 提取的标题层级 | 章节级定位 |
+| `metadata.page_no` | PDF / DOCX ingest 写入 | 页码级定位（Markdown 来源无此字段，省略不显示） |
+| `id` | chunk 唯一 ID | builder 内部去重；不进 LLM 回答 |
+
+### 3.6.2 编号契约
+
+引用编号 `[n]` 由 `CitationBuilder` 统一分配，遵循三条契约：
+
+| 契约 | 含义 |
+|---|---|
+| **每轮独立** | 每次 `Agent.run()` 实例化新 builder，编号从 `[1]` 起；不跨轮累计 |
+| **同轮累计** | 同一轮内多次 `search_knowledge` tool_call 共用一个 builder，编号连续递增（第一次 [1][2]，第二次接着 [3][4]） |
+| **同源合并** | 同 `(source, heading_path)` 的多个 chunk 共享同一编号，在展示行附 `chunks=N` |
+
+数据流：
+
+```mermaid
+sequenceDiagram
+    participant A as Agent.run()
+    participant T as search_knowledge tool
+    participant CB as CitationBuilder
+    participant L as LLM
+
+    A->>CB: new()（每轮一次）
+    A->>T: tool_call
+    T->>CB: register(Hits)
+    CB-->>T: 分配编号 [n]
+    T-->>A: 编号化 chunk 文本
+    A->>L: prompt（含 [n] 上下文）
+    L-->>A: answer（含 [n] 标号）
+    A->>CB: extract_used(answer)
+    CB-->>A: sources 块
+    A-->>A: answer += sources 块
+```
+
+### 3.6.3 反幻觉
+
+LLM "造引用"是已知风险（写 `[7]` 但实际只有 `[3]`，或编造不存在的文件路径）。三道防线：
+
+| 防线 | 机制 |
+|---|---|
+| **编号源头唯一** | `[n]` 完全由 builder 分配；LLM 只能从 prompt 给的"可见编号"里选 |
+| **未分配静默丢弃** | `extract_used` 只回填 builder 已分配过的编号；LLM 写了 `[99]` 直接被滤掉 |
+| **sources 块程序生成** | 块内容（文件路径 / heading / page）从 builder 内部存的真实 Hit 取，LLM 写不动这部分 |
+
+### 3.6.4 与项目 Rules 的关系
+
+引用规则定义在 [base SYSTEM_PROMPT](../src/agent/agent.py)；按 [§3.5.2 覆盖契约](#352-三层注入顺序)，用户的 rules.md / memory 可以覆盖该规则（如写"不要使用 [n] 引用格式"会让 LLM 不再写编号，sources 块也随之为空）。这是用户主权的合法体现，**不是 bug**。
+
+### 3.6.5 评估闭环
+
+| 维度 | 工具 | 判据 |
+|---|---|---|
+| 正确性 | `tests/test_citation_builder.py` | 编号分配 / 合并 / 提取 / 渲染 / 跨 call 累计 / 防幻觉全过 |
+| 端到端 | `tools/agent_eval/memory/recall_golden.py`（dataset 中 C0x 系列 case + `expect_citation_block` 字段） | LLM 看到带 `[n]` 的 RAG 上下文后能正确引用并被程序拼成 sources 块；通过率纳入总判据 ≥ 80% |
 
 
 # 4.表现层

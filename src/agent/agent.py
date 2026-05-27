@@ -15,6 +15,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
+from src.agent.core.citation_builder import CitationBuilder
 from src.agent.core.event_bus import (
     ALL_EVENT_TYPES,
     EVENT_ERROR,
@@ -161,9 +162,17 @@ F. **top_k**：默认让它用 8，**绝对不要传 1 或 2**（你看不到全
 ## 回答要求
 
 - **凡是关于用户本人的事实，必须 100% 来自 search_knowledge 返回内容**——不要从你训练数据里的"通识"补全，不要反问用户"您能告诉我吗"。
-- 回答中引用知识库内容时，标注来源文件名（必要时含章节/页号），便于用户复核。
 - 若工具确实未返回有效信息，如实告知"知识库中暂无相关内容"，**不要编造、不要把弱相关结果硬套成答案**。
 - 回答简洁、准确，使用中文（除非用户用其他语言提问）。
+
+## 引用规范（使用 search_knowledge 时强制）
+
+`search_knowledge` 的返回结果会以 `[1] (source §heading p.N): ...` 形式给出每条片段的全局编号。引用规则：
+
+1. 正文里**直接复用这些编号**，写成 `[1]` `[2]` 等行内标号，紧跟在引用论据后；多源支撑写成 `[1][2]`。
+2. **只能引用 prompt 里出现过的编号**——绝不要造 `[7]` `[99]` 这种没分配过的；超出范围的会被静默丢弃。
+3. **不要自己在回答末尾手写 references / sources 列表**，系统会程序化追加 `— sources —` 块，重复手写会出现两份。
+4. 若用户偏好（rules / memory）显式要求不写引用，遵循用户偏好优先。
 """
 
 # 最大工具调用轮次，防止 LLM 陷入工具调用死循环
@@ -309,9 +318,12 @@ class Agent:
 
         tool_rounds = 0  # 已消耗的工具调用轮次计数
         _prompt_tokens = _comp_tokens = 0  # 本次 run() 各轮累计 token
+        # Phase 1.4：每轮 new CitationBuilder，跨同轮多次 search_knowledge 累计编号
+        citation_builder = CitationBuilder()
         tool_engine = ToolCallEngine(
             self._chat_history, self.session_id, self._skill_bodies,
             verbose=self.verbose, events=self.events,
+            citation_builder=citation_builder,
         )
         thinking_policy = ThinkingPolicy(self.thinking_cfg)
 
@@ -368,22 +380,34 @@ class Agent:
             final_answer = message.content or ""
             if final_answer.strip():
                 logger.info("[Agent] 第 %d 轮得到最终回答，退出循环", iteration)
-                # 将最终回答写入 DB
+                # Phase 1.4：扫 LLM 正文实际引到的 [n]，按 builder 已注册的编号
+                # 渲染 sources 块并拼到 answer 末尾；无引用时 sources_block 为空，
+                # 答案保持原样（用户写 rules 禁引时的合法输出）
+                final_answer = final_answer.strip()
+                used_nums = citation_builder.extract_used(final_answer)
+                sources_block = citation_builder.render(used_nums)
+                if sources_block:
+                    # 把 sources 块也作为 token_chunk emit，让 CLI / Chainlit
+                    # 等流式 UI 能在正文 token 流完后继续渲染 sources 块；非流式
+                    # UI（EventBus 无 TOKEN_CHUNK 订阅者）这次 publish 静默无副作用
+                    self._on_token_chunk(sources_block)
+                final_answer = final_answer + sources_block
+                # 将最终回答（含 sources 块）写入 DB，下一轮 LLM 可见统一来源
                 self._chat_history.append(
                     self.session_id,
-                    {"role": "assistant", "content": final_answer.strip()},
+                    {"role": "assistant", "content": final_answer},
                 )
                 self.last_usage = (
                     TokenUsage(_prompt_tokens, _comp_tokens, _prompt_tokens + _comp_tokens)
                     if (_prompt_tokens or _comp_tokens) else None
                 )
                 # 跨 session 记忆提取：显式触发词 or 自动提取开关
-                memory_mgr.try_extract(user_input, final_answer.strip())
+                memory_mgr.try_extract(user_input, final_answer)
                 self.events.publish(AgentEvent(
                     type=EVENT_FINAL_ANSWER,
-                    payload={"text": final_answer.strip(), "usage": self.last_usage},
+                    payload={"text": final_answer, "usage": self.last_usage},
                 ))
-                return final_answer.strip()
+                return final_answer
 
             # LLM 返回了空内容（异常情况），退出
             logger.warning("[Agent] LLM 返回空内容，提前退出")

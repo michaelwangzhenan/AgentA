@@ -12,13 +12,17 @@
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import requests
 from bs4 import BeautifulSoup
 
 import src.config as _cfg
 from src.rag.retriever import search, format_search_results
+
+if TYPE_CHECKING:
+    # 仅用于类型注解；运行期不依赖，避免 retriever → agent.core 反向导入循环
+    from src.agent.core.citation_builder import CitationBuilder  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -269,6 +273,7 @@ def _tool_search_knowledge(
     query: str,
     top_k: int = 8,
     where: dict | None = None,
+    citation_builder: "CitationBuilder | None" = None,
 ) -> ToolResult:
     """
     调用 RAG 检索层（query 扩展 → dense + BM25 混合召回 → 可选 rerank），
@@ -281,9 +286,13 @@ def _tool_search_knowledge(
     列表第 0 项永远是原 query；expand_queries 或 search 异常时退化为单 query。
 
     Args:
-        query: 检索查询语句。
-        top_k: 返回的最大片段数（1~MAX_SEARCH_TOP_K，超出会截断）。
-        where: 可选 metadata 过滤子句，透传给 retriever，支持 ChromaDB 等值/$in/$ne 算子。
+        query:             检索查询语句。
+        top_k:             返回的最大片段数（1~MAX_SEARCH_TOP_K，超出会截断）。
+        where:             可选 metadata 过滤子句，透传给 retriever，支持 ChromaDB 等值/$in/$ne 算子。
+        citation_builder:  Phase 1.4 引用编排器；传入时把 hits 注册进去拿到
+                           跨 tool_call 累计的全局编号，并把这些编号写到给
+                           LLM 看的格式化文本里（替代默认的 enumerate 1..N）。
+                           不传则保持向后兼容行为。
 
     Returns:
         ToolResult：有命中结果 → status="ok"；知识库为空/无命中 → status="empty"。
@@ -318,7 +327,15 @@ def _tool_search_knowledge(
 
     hits = search(query, top_k=top_k, where=where, queries=expanded_queries)
     if hits:
-        return ToolResult(status="ok", content=format_search_results(hits))
+        # Phase 1.4：若上层传入 CitationBuilder，把 hits 注册进去拿到全局
+        # 编号，让 LLM 看到的 [n] 与最终 sources 块的 [n] 对齐
+        citation_nums = (
+            citation_builder.register(hits) if citation_builder is not None else None
+        )
+        return ToolResult(
+            status="ok",
+            content=format_search_results(hits, citation_nums=citation_nums),
+        )
     return ToolResult(status="empty", content="知识库中未找到相关内容。")
 
 
@@ -493,6 +510,7 @@ def execute_tool(
     name: str,
     args: dict[str, Any],
     skill_bodies: dict[str, str] | None = None,
+    citation_builder: "CitationBuilder | None" = None,
 ) -> ToolResult:
     """
     根据工具名称路由执行对应工具函数。
@@ -501,6 +519,8 @@ def execute_tool(
         name: 工具名称，对应 TOOLS 列表中的 function.name。
         args: 工具参数字典，由 LLM 的 tool_calls 解析而来。
         skill_bodies: {skill_name: body} 映射，供 load_skill 工具使用。
+        citation_builder: Phase 1.4 引用编排器；仅 search_knowledge 路径透传，
+                          其它工具无引用语义直接忽略。
 
     Returns:
         ToolResult：status 为 "ok"/"empty"/"error"，content 为工具输出内容。
@@ -515,6 +535,7 @@ def execute_tool(
                     query=args["query"],
                     top_k=args.get("top_k", 8),
                     where=args.get("where"),
+                    citation_builder=citation_builder,
                 )
             case "web_search":
                 return _tool_web_search(

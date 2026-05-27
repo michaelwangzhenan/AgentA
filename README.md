@@ -26,6 +26,7 @@
 - **Extended Thinking**：支持 Claude / Qwen3 的深度思考模式，可手动设置 budget 或开启 Adaptive 模式按问题复杂度自动估算。
 - **跨 Session 记忆**：独立 SQLite 存储用户偏好/事实，可自动提取也可通过"记住这个"指令即时触发。
 - **项目偏好规则**：项目根放一份 `.agenta/rules.md`（参考 Cursor Rules / AGENTS.md），Agent 启动时自动注入到 system prompt，例如"始终用中文""引用要带页码"，不必每轮重申；可被会话中临时偏好覆写。
+- **答案带可溯源引用**：使用 RAG 召回时，正文带 `[1] [2]` 行内标号，回答末尾自动追加 `— sources —` 块写明文件 / 章节 / 页号，可直接溯源到知识库原文；同源 chunk 自动合并，反 LLM 幻觉引用。
 - **Skills 加载**：`.agenta/skills/<name>/SKILL.md` 兼容 agentskills.io 规范，Agent 自动发现并按需调用，也支持 `/<skill_name>` 手动激活。
 - **三套实现可选**：`PYTHON`（手写 ReAct，默认）/ `LANGCHAIN`（create_agent 驱动）/ `AUTOGPT`（Plan-Execute 双循环）。
 
