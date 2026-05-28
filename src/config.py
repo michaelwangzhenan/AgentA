@@ -314,6 +314,12 @@ USER_MEMORY_MAX_CHARS: int = int(os.getenv("USER_MEMORY_MAX_CHARS", "1500"))
 USER_MEMORY_AUTO_EXTRACT: bool = os.getenv("USER_MEMORY_AUTO_EXTRACT", "false").lower() == "true"
 # 自动提取触发频率：每 N 轮 user 消息才触发一次（显式触发"请记住"不受此限）
 USER_MEMORY_EXTRACT_EVERY_N: int = int(os.getenv("USER_MEMORY_EXTRACT_EVERY_N", "5"))
+
+# ── 学习计划（Phase 2.2）配置 ────────────────────────────────────────────────
+# 学习计划 SQLite 数据库路径（与对话历史 / 用户记忆独立存储，便于单独 backup / migration）
+LEARNING_PLAN_DB_PATH: str = os.getenv("LEARNING_PLAN_DB_PATH", "./sqlite_db/learning.db")
+# 注入 system prompt 的 active 学习计划文本最大字符数（超出截断）
+LEARNING_PLAN_MAX_INJECT_CHARS: int = int(os.getenv("LEARNING_PLAN_MAX_INJECT_CHARS", "1500"))
 # 用户输入短于此字符数不触发自动提取（显式触发不受此限；设为 0 禁用）
 USER_MEMORY_EXTRACT_MIN_INPUT_LEN: int = int(os.getenv("USER_MEMORY_EXTRACT_MIN_INPUT_LEN", "20"))
 

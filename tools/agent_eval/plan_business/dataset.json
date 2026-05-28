@@ -1,0 +1,66 @@
+[
+  {
+    "id": "L01-create-ml-8w",
+    "category": "create",
+    "question": "我想 8 周准备机器学习面试，帮我系统规划一下",
+    "expected_first_tool": ["make_plan", "create_study_plan"],
+    "judge_after": true,
+    "note": "明确学习目标 + 周期 → 应触发 make_plan 走嵌套 4 步（D5），或直接 create_study_plan"
+  },
+  {
+    "id": "L02-create-rag-eng",
+    "category": "create",
+    "question": "我想系统学习 RAG 工程，包括召回、rerank、评估三块",
+    "expected_first_tool": ["make_plan", "create_study_plan"],
+    "judge_after": true,
+    "note": "明确学习目标 + 模块拆分 → 应触发 make_plan 嵌套"
+  },
+  {
+    "id": "L03-create-py-4w",
+    "category": "create",
+    "question": "我想 4 周入门 Python，从零基础到能写脚本",
+    "expected_first_tool": ["make_plan", "create_study_plan"],
+    "judge_after": true,
+    "note": "明确学习目标 + 周期 + 起点终点 → 应触发 make_plan 嵌套"
+  },
+  {
+    "id": "L04-create-5g-nr",
+    "category": "create",
+    "question": "我想入门 5G NR 物理层协议，没基础，给我个学习路线",
+    "expected_first_tool": ["make_plan", "create_study_plan"],
+    "judge_after": true,
+    "note": "明确学习目标 + 领域 → 应触发 make_plan 嵌套；可结合 KB 检索"
+  },
+  {
+    "id": "L05-create-pmp",
+    "category": "create",
+    "question": "我打算 2 个月备考 PMP，怎么安排复习？",
+    "expected_first_tool": ["make_plan", "create_study_plan"],
+    "judge_after": true,
+    "note": "明确学习目标 + 周期 → 应触发 make_plan 嵌套"
+  },
+  {
+    "id": "L06-negative-email",
+    "category": "negative",
+    "question": "我的邮箱是多少？",
+    "expected_first_tool_not": ["create_study_plan", "make_plan"],
+    "judge_after": false,
+    "note": "单实体查询 → 不应建学习计划；应直接 search_knowledge"
+  },
+  {
+    "id": "L07-negative-rag-define",
+    "category": "negative",
+    "question": "RAG 是什么意思？",
+    "expected_first_tool_not": ["create_study_plan", "make_plan"],
+    "judge_after": false,
+    "note": "单一事实回答 → 不应建学习计划；最多 search_knowledge / web_search"
+  },
+  {
+    "id": "L08-negative-chitchat",
+    "category": "negative",
+    "question": "你好，最近怎么样？",
+    "expected_first_tool_not": ["create_study_plan", "make_plan"],
+    "judge_after": false,
+    "note": "闲聊 → 不应建学习计划；应直接回答"
+  }
+]

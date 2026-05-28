@@ -81,10 +81,13 @@ def get_tools(skill_bodies: dict[str, str] | None = None) -> list[dict[str, Any]
     """
     返回当前可用的工具列表。
 
-    永远包含基础 4 tool + 3 个 plan tool（make_plan / update_step / abort_plan）。
+    永远包含：
+      - 基础 3 tool（search_knowledge / web_search / fetch_url）
+      - Phase 2.1 plan-execute 3 tool（make_plan / update_step / abort_plan）
+      - Phase 2.2 学习计划业务 3 tool（create_study_plan / update_study_progress / query_study_status）
     若传入 skill_bodies，再追加 load_skill 工具定义（name 字段限定为已有名称枚举）。
     """
-    tools = list(TOOLS) + list(_PLAN_TOOLS)
+    tools = list(TOOLS) + list(_PLAN_TOOLS) + list(_STUDY_PLAN_TOOLS)
     if skill_bodies:
         tools.append(_build_load_skill_def(list(skill_bodies.keys())))
     return tools
@@ -290,6 +293,142 @@ _PLAN_TOOLS: list[dict[str, Any]] = [
                     "reason": {
                         "type": "string",
                         "description": "中止原因摘要（≤ 60 字），将出现在 plan 总结里给用户看。",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+]
+
+
+# ── Phase 2.2 — 学习计划业务三 tool JSON Schema ──────────────────────────────
+# 与 _PLAN_TOOLS（单次问答内"用完即弃"的执行计划）相对：本组 tool 操作的是
+# **跨 session 长期持久化的学习计划**（learning_plans / learning_tasks 表）。
+# 触发主路径见 [study-planner skill](../../.agenta/skills/study-planner/SKILL.md)。
+
+_STUDY_PLAN_TOOLS: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "create_study_plan",
+            "description": (
+                "新建一个**跨 session 持久化的学习计划**，把目标 + 阶段任务清单一次性落库。"
+                "适用：用户表达明确学习目标（如『8 周准备 ML 面试』/『学透 RAG』），"
+                "Agent 已在前几轮收集到领域知识 / 整理出阶段拆分。"
+                "**不要**直接用本 tool —— 应先按 study-planner skill 引导用 make_plan 拆解"
+                "（查领域 → 列阶段 → 列任务 → 落库），落库即调本 tool。"
+                "新建的 plan 自动设为 active；同时仅一个 active plan，旧 active 自动 archive。"
+                "返回新 plan_id 与 task 总数。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "goal": {
+                        "type": "string",
+                        "description": "学习目标的一句话描述，如 \"8 周准备 ML 面试\" / \"系统学习 RAG 工程\"",
+                    },
+                    "weeks": {
+                        "type": "integer",
+                        "description": "计划总周数；用户未指定可填 0（表示无明确周期）。",
+                        "default": 0,
+                        "minimum": 0,
+                    },
+                    "tasks": {
+                        "type": "array",
+                        "description": (
+                            "全部任务清单（按阶段顺序）；每项 {stage_idx, order_idx, title}。"
+                            "stage_idx：阶段编号从 1 起，对应 Week 1 / Stage 1 等；"
+                            "order_idx：阶段内顺序从 1 起；"
+                            "title：任务一句话描述（10-40 字），动词起头如 \"完成 Pandas 官方 10min 教程\"。"
+                            "建议 ≤ 12 阶段、每阶段 3-6 任务。"
+                        ),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "stage_idx": {"type": "integer", "minimum": 1},
+                                "order_idx": {"type": "integer", "minimum": 1},
+                                "title": {"type": "string"},
+                            },
+                            "required": ["stage_idx", "order_idx", "title"],
+                        },
+                        "minItems": 1,
+                    },
+                },
+                "required": ["goal", "tasks"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_study_progress",
+            "description": (
+                "更新某个学习任务的完成状态。"
+                "适用：用户口头报告完成 / 跳过任务（如『今天看完了 FastAPI 文档』/『这周太忙跳过 X』）。"
+                "调用前若不确定 task_id，先调 query_study_status 查清。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "plan_id": {
+                        "type": "integer",
+                        "description": "任务所属的 plan_id（双重校验防误更新）。",
+                        "minimum": 1,
+                    },
+                    "task_id": {
+                        "type": "integer",
+                        "description": "要更新的 task_id（从 query_study_status 结果取得）。",
+                        "minimum": 1,
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["success", "skipped", "pending"],
+                        "description": (
+                            "success=完成 / skipped=主动跳过 / pending=回退为未完成（很少用）。"
+                            "学习任务无 \"failed\" 概念（不像执行 plan）"
+                        ),
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "可选备注（≤ 200 字），如关键收获 / 跳过原因。",
+                    },
+                },
+                "required": ["plan_id", "task_id", "status"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_study_status",
+            "description": (
+                "查询学习计划进度。"
+                "适用：用户问 \"我学到哪了 / 下一步该干啥 / 我有哪些学习计划\"。"
+                "**不传 plan_id 默认查当前 active plan**；想看任一 plan 全貌传 plan_id；"
+                "想看全部 plan 列表传 list_all=true。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "plan_id": {
+                        "type": "integer",
+                        "description": "可选；不传则查当前 active plan。",
+                        "minimum": 1,
+                    },
+                    "list_all": {
+                        "type": "boolean",
+                        "description": "true 时返回所有 plan 摘要列表（覆盖 plan_id）。",
+                        "default": False,
+                    },
+                    "detail": {
+                        "type": "boolean",
+                        "description": (
+                            "true 返回完整任务清单（含 task_id / 状态 / 备注）；"
+                            "false 仅返回 plan 元信息 + 进度统计 + 下一步建议。"
+                            "默认 false 以节省 context"
+                        ),
+                        "default": False,
                     },
                 },
                 "required": [],
@@ -674,6 +813,234 @@ def _tool_abort_plan(
     )
 
 
+# ── Phase 2.2 — 学习计划业务 tool 实现 ───────────────────────────────────────
+# 实现采用"按需 import + 复用共享 store"模式：避免 tools.py 顶层引入 store 后
+# 拖累冷启动 / 测试 mock 复杂度；进程内共享 `learning_plan_store.get_shared_store()`
+# 单例，与 agent.py 注入 system block 时读到的是同一实例 / 同一连接。
+
+
+def _get_study_plan_store() -> Any:
+    """延迟 import，返回 learning_plan_store 模块级共享 store。"""
+    from src.memory.learning_plan_store import get_shared_store
+    return get_shared_store()
+
+
+def _tool_create_study_plan(
+    goal: Any,
+    tasks: Any,
+    weeks: Any = 0,
+) -> ToolResult:
+    """新建跨 session 持久化学习计划 + 全量任务，自动设为 active 并 archive 旧 active。"""
+    if not isinstance(goal, str) or not goal.strip():
+        return ToolResult(
+            status="error",
+            content="create_study_plan(goal) 必须是非空字符串，如 \"8 周准备 ML 面试\"",
+        )
+    if not isinstance(weeks, int) or weeks < 0:
+        return ToolResult(
+            status="error",
+            content=f"create_study_plan(weeks) 必须是 ≥0 整数，收到：{weeks!r}",
+        )
+    if not isinstance(tasks, list) or not tasks:
+        return ToolResult(
+            status="error",
+            content=(
+                "create_study_plan(tasks) 必须是非空列表，每项 {stage_idx, order_idx, title}"
+            ),
+        )
+    cleaned: list[dict[str, Any]] = []
+    for i, t in enumerate(tasks):
+        if not isinstance(t, dict):
+            return ToolResult(
+                status="error",
+                content=f"tasks[{i}] 不是 dict，收到：{type(t).__name__}",
+            )
+        stage_idx = t.get("stage_idx")
+        order_idx = t.get("order_idx")
+        title = t.get("title")
+        if (not isinstance(stage_idx, int) or stage_idx < 1
+                or not isinstance(order_idx, int) or order_idx < 1
+                or not isinstance(title, str) or not title.strip()):
+            return ToolResult(
+                status="error",
+                content=(
+                    f"tasks[{i}] 字段非法（stage_idx/order_idx 必须 ≥1 整数、title 必须非空字符串），"
+                    f"收到：{t!r}"
+                ),
+            )
+        cleaned.append({"stage_idx": stage_idx, "order_idx": order_idx, "title": title.strip()})
+
+    store = _get_study_plan_store()
+    try:
+        plan_id = store.create_plan(goal=goal.strip(), weeks=weeks, set_active=True)
+        added = store.add_tasks(plan_id, cleaned)
+    except Exception as e:
+        return ToolResult(status="error", content=f"持久化学习计划失败 — {e}")
+
+    weeks_suffix = f"（共 {weeks} 周）" if weeks else ""
+    return ToolResult(
+        status="ok",
+        content=(
+            f"✓ 已创建学习计划 plan_id={plan_id}：\"{goal.strip()}\"{weeks_suffix}，"
+            f"含 {added} 个任务，已设为当前 active plan。\n"
+            "→ 可向用户简要展示计划概要并提示：完成任务时告诉我，"
+            "我会用 update_study_progress 帮你打勾。"
+        ),
+    )
+
+
+def _tool_update_study_progress(
+    plan_id: Any,
+    task_id: Any,
+    status: Any,
+    note: str = "",
+) -> ToolResult:
+    """更新单个学习任务状态；status 仅 success / skipped / pending。"""
+    if not isinstance(plan_id, int) or plan_id < 1:
+        return ToolResult(
+            status="error",
+            content=f"update_study_progress(plan_id) 必须是 ≥1 整数，收到：{plan_id!r}",
+        )
+    if not isinstance(task_id, int) or task_id < 1:
+        return ToolResult(
+            status="error",
+            content=f"update_study_progress(task_id) 必须是 ≥1 整数，收到：{task_id!r}",
+        )
+    if status not in ("success", "skipped", "pending"):
+        return ToolResult(
+            status="error",
+            content=(
+                f"update_study_progress(status) 必须是 success / skipped / pending 之一，"
+                f"收到：{status!r}"
+            ),
+        )
+
+    store = _get_study_plan_store()
+    ok = store.update_task_status(plan_id, task_id, status, note=note or "")
+    if not ok:
+        return ToolResult(
+            status="error",
+            content=(
+                f"未找到 task_id={task_id}（或不属于 plan_id={plan_id}）。"
+                "请先调 query_study_status 确认 id 后重试。"
+            ),
+        )
+
+    # 重新查 plan 给 LLM 进度反馈 + 下一步建议
+    plan = store.get_plan_with_tasks(plan_id)
+    if plan is None:
+        return ToolResult(status="ok", content=f"✓ 已更新 task_id={task_id} 状态为 {status}。")
+    tasks = plan.get("tasks", [])
+    total = len(tasks)
+    done = sum(1 for t in tasks if t["status"] == "success")
+    pending = [t for t in tasks if t["status"] == "pending"]
+    icon = {"success": "✓", "skipped": "⏭", "pending": "☐"}[status]
+    head = f"{icon} task_id={task_id} → {status}（plan \"{plan['goal']}\"）"
+
+    if not pending:
+        # 全部 success / skipped — 自动 mark plan 完成
+        if all(t["status"] == "success" for t in tasks):
+            store.complete_plan(plan_id)
+            return ToolResult(
+                status="ok",
+                content=f"{head}\n\n🎉 plan 全部完成（{done}/{total}），已自动标记 completed。",
+            )
+        return ToolResult(
+            status="ok",
+            content=f"{head}\n\nplan 内任务都已处理完（{done} 完成 / {total - done} 跳过）。",
+        )
+
+    nxt = pending[0]
+    return ToolResult(
+        status="ok",
+        content=(
+            f"{head}\n\n当前进度：{done}/{total}\n"
+            f"→ 下一个待办：[task_id={nxt['id']}] Stage {nxt['stage_idx']}.{nxt['order_idx']} — {nxt['title']}"
+        ),
+    )
+
+
+def _render_plan_summary(plan: dict[str, Any], include_tasks: bool) -> str:
+    """渲染单个 plan 文本块（query_study_status 内部 helper）。"""
+    weeks = plan.get("weeks", 0)
+    weeks_suffix = f"，{weeks} 周" if weeks else ""
+    active_tag = " [active]" if plan.get("is_active") else ""
+    status_tag = f" [{plan['status']}]" if plan.get("status") != "active" else ""
+    head = f"### plan_id={plan['id']}{active_tag}{status_tag}\n- 目标：{plan['goal']}{weeks_suffix}"
+
+    tasks = plan.get("tasks", [])
+    if not tasks and not include_tasks:
+        # list_plans 路径用预聚合字段
+        total = plan.get("task_count", 0)
+        done = plan.get("done_count", 0)
+        head += f"\n- 进度：{done}/{total}"
+        return head
+
+    total = len(tasks)
+    done = sum(1 for t in tasks if t["status"] == "success")
+    skipped = sum(1 for t in tasks if t["status"] == "skipped")
+    head += f"\n- 进度：{done}/{total} 完成"
+    if skipped:
+        head += f"（跳过 {skipped}）"
+
+    if not include_tasks:
+        pending = [t for t in tasks if t["status"] == "pending"]
+        if pending:
+            nxt = pending[0]
+            head += (
+                f"\n- 下一个待办：[task_id={nxt['id']}] "
+                f"Stage {nxt['stage_idx']}.{nxt['order_idx']} — {nxt['title']}"
+            )
+        return head
+
+    # detail=True：列全部 task
+    lines = [head, ""]
+    current_stage = None
+    for t in tasks:
+        if t["stage_idx"] != current_stage:
+            current_stage = t["stage_idx"]
+            lines.append(f"**Stage {current_stage}**")
+        icon = {"pending": "☐", "success": "✓", "skipped": "⏭"}.get(t["status"], "?")
+        note_suffix = f" — {t['note']}" if t["note"] else ""
+        lines.append(f"- {icon} [task_id={t['id']}] {t['title']}{note_suffix}")
+    return "\n".join(lines)
+
+
+def _tool_query_study_status(
+    plan_id: Any = None,
+    list_all: bool = False,
+    detail: bool = False,
+) -> ToolResult:
+    """查学习计划进度：默认 active plan；plan_id 查指定；list_all 列全部摘要。"""
+    store = _get_study_plan_store()
+
+    if list_all:
+        plans = store.list_plans(include_abandoned=False)
+        if not plans:
+            return ToolResult(status="empty", content="暂无任何学习计划。")
+        blocks = [_render_plan_summary(p, include_tasks=False) for p in plans]
+        return ToolResult(status="ok", content="\n\n".join(blocks))
+
+    if plan_id is None:
+        plan = store.get_active()
+        if plan is None:
+            return ToolResult(
+                status="empty",
+                content="当前没有 active 学习计划。可让用户描述目标后用 create_study_plan 新建。",
+            )
+    else:
+        if not isinstance(plan_id, int) or plan_id < 1:
+            return ToolResult(
+                status="error",
+                content=f"query_study_status(plan_id) 必须是 ≥1 整数，收到：{plan_id!r}",
+            )
+        plan = store.get_plan_with_tasks(plan_id)
+        if plan is None:
+            return ToolResult(status="error", content=f"plan_id={plan_id} 不存在")
+
+    return ToolResult(status="ok", content=_render_plan_summary(plan, include_tasks=detail))
+
+
 def _tool_load_skill(name: str, skill_bodies: dict[str, str]) -> ToolResult:
     """
     加载 Skill 的完整指令正文，返回 <skill_content> 包裹的内容。
@@ -762,6 +1129,25 @@ def execute_tool(
                 return _tool_abort_plan(
                     reason=args.get("reason", ""),
                     messages=messages,
+                )
+            case "create_study_plan":
+                return _tool_create_study_plan(
+                    goal=args.get("goal"),
+                    tasks=args.get("tasks"),
+                    weeks=args.get("weeks", 0),
+                )
+            case "update_study_progress":
+                return _tool_update_study_progress(
+                    plan_id=args.get("plan_id"),
+                    task_id=args.get("task_id"),
+                    status=args.get("status"),
+                    note=args.get("note", ""),
+                )
+            case "query_study_status":
+                return _tool_query_study_status(
+                    plan_id=args.get("plan_id"),
+                    list_all=args.get("list_all", False),
+                    detail=args.get("detail", False),
                 )
             case _:
                 return ToolResult(

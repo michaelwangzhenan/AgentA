@@ -217,6 +217,10 @@ def main() -> None:
                 else:
                     handlers.handle_memory(user_memory, cmd_parts)
                 continue
+            case "/study":
+                from src.memory.learning_plan_store import get_shared_store as _get_lp_store
+                handlers.handle_study(_get_lp_store(), cmd_parts)
+                continue
         
         # ── 用户显式 Skill 激活 ──────────────────────────────────────────────
         if cmd_name in skill_cmds:

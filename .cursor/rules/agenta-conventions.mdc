@@ -58,6 +58,21 @@ USER_RULES_ENABLED: bool = ...
 
 注释默认中文（用户母语 + 工程语境）；行内 code identifier / 错误消息 / 库术语用英文（`config` / `tokenizer` / `prompt injection`）。
 
+**保持单一语言**：中文叙述里不要随手夹英文词；只有以下情况才允许保留英文：
+
+1. **代码标识符 / API 名**：`get_tools()` / `chat_history` / `EventBus`
+2. **行业专有名词无好译**：`RAG` / `LLM` / `ReAct` / `RAG` / `prompt injection` / `ReWoo`
+3. **翻译后不准确或带歧义**：当中文译法不止一种或译后失真时保留英文 + 首次出现给个中文解释
+
+| ❌ 中英夹杂 | ✅ 单一语言 |
+|---|---|
+| 单 query 内 ephemeral plan | 单次问答内**用完即弃**的 plan |
+| pending / active / archived 状态 | 待执行 / 进行中 / 已归档（首次出现可加括号原文） |
+| LLM 自主 trigger plan | LLM 自主**触发** plan |
+| over-engineering for MVP | **过度设计**（MVP 阶段不必要） |
+
+判定准则：能用中文准确表达就用中文；保留英文必须满足上面 3 条之一。
+
 ### 1.5 用词通俗（代码注释 + 文档 + 对话回复都适用）
 
 避免拗口、过度抽象的工程化词；能用日常词就不用术语：

@@ -36,6 +36,11 @@ CLI_COMMANDS: list[str] = [
     "/memory edit",
     "/memory del",
     "/memory clear",
+    "/study",
+    "/study list",
+    "/study show",
+    "/study switch",
+    "/study abandon",
     "/quit",
     "/exit",
 ]

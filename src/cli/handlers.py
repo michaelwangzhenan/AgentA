@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import src.config as config
 from src.memory.chat_history import ChatHistoryStore
+from src.memory.learning_plan_store import LearningPlanStore
 from src.memory.user_memory import UserMemoryStore
 
 # 历史记录预览截断长度
@@ -550,3 +551,162 @@ def handle_memory(
 
         case _:
             out(_MEMORY_USAGE)
+
+
+# ── Phase 2.2 — /study 命令组 ────────────────────────────────────────────────
+
+_STUDY_USAGE = (
+    "⚠️  未知子命令。用法：\n"
+    "    /study                            列出全部学习计划（不含 abandoned）\n"
+    "    /study list                       同上\n"
+    "    /study show [plan_id]             查看 active plan / 指定 plan 全貌（含全部任务）\n"
+    "    /study switch <plan_id>           切换 active plan\n"
+    "    /study abandon <plan_id>          放弃指定 plan（标 abandoned，不删除数据）\n"
+)
+
+_TASK_STATUS_ICON: dict[str, str] = {"pending": "☐", "success": "✓", "skipped": "⏭"}
+
+
+def _format_plan_brief(plan: dict[str, Any]) -> str:
+    """一行 plan 摘要：active 标记 + id + 进度 + goal 前 40 字。"""
+    marker = "▶ " if plan.get("is_active") else "  "
+    pid = plan["id"]
+    status_tag = "" if plan["status"] == "active" else f"[{plan['status']}]"
+    total = plan.get("task_count", 0)
+    done = plan.get("done_count", 0)
+    goal = (plan["goal"] or "").replace("\n", " ")
+    goal_short = goal[:40] + ("…" if len(goal) > 40 else "")
+    weeks_suffix = f" · {plan['weeks']}周" if plan.get("weeks") else ""
+    return f"  {marker}[{pid:>3d}]{status_tag} {done}/{total}{weeks_suffix}  {goal_short}"
+
+
+def _print_plan_list(store: LearningPlanStore, out: OutputFn = _stdout) -> None:
+    """`/study` / `/study list`：按 active 优先 + 创建时间倒序列出全部 plan。"""
+    plans = store.list_plans(include_abandoned=False)
+    if not plans:
+        out("📭 暂无学习计划。可在对话中说\"我想 8 周准备 ML 面试\"等让 Agent 帮你新建。\n")
+        return
+    out(f"\n📚 学习计划列表（共 {len(plans)} 个）：")
+    out(f"  {'':<2}{'ID':<6}  {'进度':<8}  {'目标':<40}")
+    out(f"  {'':<2}{'-'*4:<6}  {'-'*6:<8}  {'-'*40}")
+    for p in plans:
+        out(_format_plan_brief(p))
+    out("")
+
+
+def _print_plan_detail(plan: dict[str, Any], out: OutputFn = _stdout) -> None:
+    """`/study show`：plan 元信息 + 按 stage 分组的全部任务清单。"""
+    active_tag = " [active]" if plan.get("is_active") else ""
+    status_tag = f" [{plan['status']}]" if plan["status"] != "active" else ""
+    weeks_suffix = f"，共 {plan['weeks']} 周" if plan.get("weeks") else ""
+    out(f"\n📖 plan_id={plan['id']}{active_tag}{status_tag}")
+    out(f"   目标：{plan['goal']}{weeks_suffix}")
+    tasks = plan.get("tasks", [])
+    total = len(tasks)
+    done = sum(1 for t in tasks if t["status"] == "success")
+    skipped = sum(1 for t in tasks if t["status"] == "skipped")
+    out(f"   进度：{done}/{total} 完成（跳过 {skipped}）")
+    out(f"   创建：{_format_relative_time(plan['created_at'])}    更新：{_format_relative_time(plan['updated_at'])}")
+    if not tasks:
+        out("   （暂无任务）\n")
+        return
+    out("")
+    current_stage = None
+    for t in tasks:
+        if t["stage_idx"] != current_stage:
+            current_stage = t["stage_idx"]
+            out(f"   ── Stage {current_stage} ──")
+        icon = _TASK_STATUS_ICON.get(t["status"], "?")
+        note_suffix = f"  ({t['note']})" if t["note"] else ""
+        out(f"     {icon} [id={t['id']:>3d}] {t['title']}{note_suffix}")
+    out("")
+
+
+def _parse_plan_id(rest: str, out: OutputFn) -> int | None:
+    """从命令参数串解析正整数 plan_id；失败时打印提示并返回 None。"""
+    if not rest:
+        out("⚠️  请提供 plan_id。\n")
+        return None
+    try:
+        pid = int(rest.split()[0])
+    except ValueError:
+        out(f"❌ 无效 plan_id：{rest!r}，应为整数。\n")
+        return None
+    if pid < 1:
+        out(f"❌ plan_id 必须 ≥ 1，收到 {pid}。\n")
+        return None
+    return pid
+
+
+def handle_study(
+    store: LearningPlanStore,
+    cmd_parts: list[str],
+    out: OutputFn = _stdout,
+) -> None:
+    """
+    处理 /study 子命令组（list / show / switch / abandon）。
+
+    Args:
+        store: LearningPlanStore 实例（main.py 传入共享单例）。
+        cmd_parts: prompt_toolkit `input.split(maxsplit=1)` 的结果 — `["/study"]`
+                   或 `["/study", "show 3"]`。
+    """
+    raw = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""
+    if not raw:
+        _print_plan_list(store, out)
+        return
+
+    head, _, rest = raw.partition(" ")
+    sub_cmd = head.lower()
+    rest = rest.strip()
+
+    match sub_cmd:
+        case "list":
+            _print_plan_list(store, out)
+
+        case "show":
+            if not rest:
+                plan = store.get_active()
+                if plan is None:
+                    out("📭 当前没有 active 学习计划。用 /study list 查看全部，或新建一个。\n")
+                    return
+                _print_plan_detail(plan, out)
+                return
+            pid = _parse_plan_id(rest, out)
+            if pid is None:
+                return
+            plan = store.get_plan_with_tasks(pid)
+            if plan is None:
+                out(f"❌ plan_id={pid} 不存在。\n")
+                return
+            _print_plan_detail(plan, out)
+
+        case "switch":
+            pid = _parse_plan_id(rest, out)
+            if pid is None:
+                return
+            if store.switch_active(pid):
+                out(f"✅ 已切换 active plan → plan_id={pid}\n")
+            else:
+                out(f"❌ 切换失败：plan_id={pid} 不存在或已 abandoned。\n")
+
+        case "abandon":
+            pid = _parse_plan_id(rest, out)
+            if pid is None:
+                return
+            plan = store.get_plan(pid)
+            if plan is None:
+                out(f"❌ plan_id={pid} 不存在。\n")
+                return
+            if plan["status"] == "abandoned":
+                out(f"⚠️  plan_id={pid} 已是 abandoned 状态。\n")
+                return
+            confirm = input(f"⚠️  即将放弃 plan_id={pid} \"{plan['goal']}\"（数据保留可后续 show 查看），确认请输入 yes：").strip().lower()
+            if confirm == "yes":
+                store.abandon_plan(pid)
+                out(f"🗑️  plan_id={pid} 已标记 abandoned。\n")
+            else:
+                out("已取消。\n")
+
+        case _:
+            out(_STUDY_USAGE)

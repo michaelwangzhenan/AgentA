@@ -33,6 +33,10 @@ HELP_TEXT = """
   /memory edit <id> <新内容>        修正指定记忆条目的内容
   /memory del <id>           删除指定记忆条目
   /memory clear              清空全部用户记忆
+  /study                     列出全部学习计划（▶ 标记 active）
+  /study show [plan_id]      查看 active plan / 指定 plan 全貌
+  /study switch <plan_id>    切换 active plan
+  /study abandon <plan_id>   放弃指定 plan（标记 abandoned，不删数据）
   /quit                      退出程序
   /exit                      退出程序（同 /quit）
 

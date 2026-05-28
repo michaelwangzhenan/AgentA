@@ -40,7 +40,6 @@ from __future__ import annotations
 import argparse
 import json
 import platform
-import re
 import subprocess
 import sys
 from datetime import datetime
@@ -53,6 +52,7 @@ load_dotenv(override=True)
 import src.config as config  # noqa: E402
 from src.agent.tools import get_tools  # noqa: E402
 from src.llm.provider import chat  # noqa: E402
+from tools.agent_eval.judge import judge_with_llm  # noqa: E402
 
 
 _DEFAULT_DATASET = Path(__file__).parent / "dataset.json"
@@ -85,23 +85,12 @@ _BASE_PROMPT = """你是一个善于使用工具的 AI 助手。可用工具包�
 简单任务请**直接回答**或最多调一次业务 tool；不要为了显得复杂而强行 make_plan。
 """
 
-# LLM-judge prompt：评 plan 结构（粒度 / 顺序 / 覆盖度 / 业务对齐）
-_JUDGE_PROMPT = """你是一个 Agent plan-execute 流程的评委。下面给你看：
-1. 用户问题
-2. 一个 LLM 自动生成的 plan（按编号顺序列出的 3-7 个步骤）
-
-请按以下 4 个维度评分（每项 0/0.5/1，加权后总分 0-5）：
-
-- **粒度合适**（满分 1.5）：每步动作明确、可独立执行；既不过于宽泛（"先研究一下"）也不过于琐碎（"打开浏览器"）。
+# LLM-judge 评分维度：plan 结构（粒度 / 顺序 / 覆盖度 / 业务对齐）；
+# 调用走 [`tools.agent_eval.judge.judge_with_llm`](../judge/llm_judge.py) 公共 helper
+_JUDGE_CRITERIA = """- **粒度合适**（满分 1.5）：每步动作明确、可独立执行；既不过于宽泛（"先研究一下"）也不过于琐碎（"打开浏览器"）。
 - **顺序合理**（满分 1）：前后依赖关系正确，关键步骤不缺位。
 - **覆盖度**（满分 1.5）：完成 plan 后能产出用户真正想要的答案；不缺少综合/对比/总结这类收口步骤。
-- **业务对齐**（满分 1）：步骤与用户问题语义对齐，没有跑题或自我重复。
-
-输出**严格的 JSON**，格式：
-
-{"score": <0.0-5.0 浮点>, "reason": "<≤ 80 字简评>"}
-
-只输出 JSON，不要带 markdown 代码块、不要前后说明。"""
+- **业务对齐**（满分 1）：步骤与用户问题语义对齐，没有跑题或自我重复。"""
 
 
 # ── 数据加载 ─────────────────────────────────────────────────────────────────
@@ -187,37 +176,22 @@ def _judge_recall(
 def _llm_judge_plan_structure(
     question: str, steps: list[str],
 ) -> tuple[float | None, str]:
-    """调一次 LLM judge，返回 (score, reason)。失败时返回 (None, error_msg)。"""
-    plan_block = "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(steps))
-    user_msg = (
-        f"## 用户问题\n{question}\n\n"
-        f"## LLM 生成的 plan\n{plan_block}\n\n"
-        "请按上面 4 个维度评分，输出严格 JSON。"
-    )
-    judge_msgs = [
-        {"role": "system", "content": _JUDGE_PROMPT},
-        {"role": "user", "content": user_msg},
-    ]
-    try:
-        resp = chat(judge_msgs, temperature=0.0)
-        raw = (resp.choices[0].message.content or "").strip()
-    except Exception as e:  # noqa: BLE001
-        return None, f"judge LLM 调用失败：{e}"
+    """
+    调一次 LLM judge，返回 (score, reason)。失败时返回 (None, error_msg)。
 
-    # 容错解析：剥离 markdown 代码块，仅取第一段 {...}
-    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.MULTILINE).strip()
-    m = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
-    if not m:
-        return None, f"judge 返回非 JSON：{raw[:200]!r}"
-    try:
-        data = json.loads(m.group(0))
-        score = float(data.get("score", -1))
-        if not (0.0 <= score <= 5.0):
-            return None, f"judge score 越界：{score}"
-        reason = str(data.get("reason", "")).strip() or "（无）"
-        return score, reason
-    except (json.JSONDecodeError, ValueError, TypeError) as e:
-        return None, f"judge JSON 解析失败：{e}；raw={raw[:200]!r}"
+    走 [`tools.agent_eval.judge.judge_with_llm`](../judge/llm_judge.py) 公共 helper，
+    与 Phase 2.2 学习计划质量 judge 共享同一抽象（[§4.9.7 D6 / D11](../../docs/iter_2.md#497-学习计划生成-phase-22)）。
+    """
+    plan_block = "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(steps))
+    res = judge_with_llm(
+        role_intro="你是一个 Agent plan-execute 流程的评委",
+        prompt=question,
+        output=plan_block,
+        criteria=_JUDGE_CRITERIA,
+    )
+    return res.score, res.reason
+
+
 
 
 # ── 单 case 执行 ─────────────────────────────────────────────────────────────
