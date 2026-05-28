@@ -101,7 +101,7 @@ Review 完整实现 @AgentA 目录
    - `README.md` / `docs/iter_0.md`：`/ingest` 引用同步改为 `tools/rag_cli.py ingest`
    - `tests/test_cli_handlers.py`：`run_ingest` 相关用例移除
 
-2. **`LangChainAgent.chat()` alias 删除** —— `run()` 的赤裸别名，三 impl 中只此一家，破坏 duck-typed 契约统一性。
+2. **`LangChainAgent.chat()` alias 删除** —— `run()` 的赤裸别名，三 impl 中只此一家，破坏 duck-typed 约定统一性。
    - 删 `src/agent/langchain_agent.py:64-65`
    - 改 `tests/test_langchain_agent.py:80` 用 `.run('hi')`
 
@@ -200,7 +200,7 @@ Review 完整实现 @AgentA 目录
 |---|---|---|
 | A1. `HistoryManager` 行为基线 UT | 把 `agent.py:_load_truncated_history` 的所有分支（按 turn 截断、skill_pair 完整性保护、system 拼接、空历史）固化为单测；重构后直接复用 | 中 |
 | A2. `MemoryManager` 行为基线 UT | 覆盖：N 轮后自动触发抽取的时机判定、立即触发关键词（"请记住"/"remember this"）、抽取后注入 system_prompt 的位置 | 中 |
-| A3. `EventBus` 契约 UT | 单订阅 / 多订阅 / 取消订阅 / 单个订阅者抛异常不影响其他订阅者 / 事件类型枚举 | 低（纯逻辑） |
+| A3. `EventBus` 约定 UT | 单订阅 / 多订阅 / 取消订阅 / 单个订阅者抛异常不影响其他订阅者 / 事件类型枚举 | 低（纯逻辑） |
 
 **B. 本步可顺手加（覆盖关键缺口，与 4.5 无强绑定）**
 
@@ -221,7 +221,7 @@ Review 完整实现 @AgentA 目录
 
 **执行结果**
 
-5 个新增测试文件，全部默认套件中跑：55 passed + 1 skipped（LangChain import 失败）+ 2 xfailed（EventBus 未抽出前的契约 placeholder）。
+5 个新增测试文件，全部默认套件中跑：55 passed + 1 skipped（LangChain import 失败）+ 2 xfailed（EventBus 未抽出前的约定 placeholder）。
 
 | 文件 | 用例数 | 覆盖点 |
 |---|---|---|
@@ -587,7 +587,7 @@ Part B 落地总览：
 | 4 | Memory | [§3 #4] | [Phase 1.2](#473-实施顺序) | 单层 → user / project / local 三层（参考 Claude Code）；从被动 extract 升级为主动 consolidation |
 | 5 | Prompt | [§3 #5] | [Phase 1.3](#473-实施顺序) | 用户偏好文件 `.agenta/rules.md`（参考 Cursor Rules / Copilot Custom Instructions） |
 | 6 | Tools | [§3 #6] | 新增 tool 在 [Phase 2.2/2.3/2.4](#473-实施顺序) | 现有 RAG / web_search 保留；为 Phase 2 新增 plan_tracker / quiz_grader / srs_scheduler |
-| 7 | Skills | [§3 #7] | [Phase 1.5](#473-实施顺序) | 框架强化（Skill 清单 / 自动加载 / Skill registry），承载 C3 的 quiz_maker / review_card / study_planner 等 |
+| 7 | Skills | [§3 #7] | [Phase 1.5](#473-实施顺序) | 框架强化（Skill 清单 / 自动加载 / Skill registry），承载 Phase 2 学习/研究助理（Plan / SRS / Quiz）的 quiz_maker / review_card / study_planner 等 |
 | 8 | Thinking 模式 | [§3 #9] | [Phase 3.1](#473-实施顺序) | **本期仅做 CLI 渲染优化**（thinking 段分隔标记、流式分块输出）；WebUI 端的可折叠/展开等渲染留待 [design.md §4.2 WebUI](design.md#42webui) 单独优化任务 |
 
 **新增 feature**
@@ -597,10 +597,10 @@ Part B 落地总览：
 | 1 | MCP | 基础设施 | [§3 #8] | [Phase 3.2](#473-实施顺序) | 至少接 1-2 个标杆 server（fetch / filesystem / 第三方知识源） |
 | 2 | 防 prompt injection | 安全 | [§3 #11] | [Phase 3.3](#473-实施顺序) | RAG 召回内容过滤 + 命令白名单 |
 | 3 | Harness（自检 / 反思） | 通用能力 | [§3 #10] + [§4.6.2 G1/G3] | [Phase 2.5](#473-实施顺序) | Reflexion 风格：Quiz 答案自评、Plan 执行回顾、RAG 召回判定 |
-| 4 | 引用展示（jump to source） | C1 UX | [§4.6.2 衍生] | [Phase 1.4](#473-实施顺序) | 输出格式约定：每条回答含 `[source: file#section]`，UI 可点击跳转原文 |
-| 5 | **Plan**：学习计划生成 | C3 业务 | [新] + [§4.6.2 A2] | [Phase 2.2](#473-实施顺序) | 用户给出目标（如"准备 ML 面试"）→ Agent 生成阶段性计划 + 进度跟踪 |
-| 6 | **SRS**：Spaced Repetition 主动复习调度 | C3 业务 | [新] + [§4.6.2 C8 风格] | [Phase 2.4](#473-实施顺序) | 后台 scheduler 按遗忘曲线主动触发复习；与被动 Q&A 拉开根本差距 |
-| 7 | **Quiz**：出题 | C3 业务 | [新] + [§4.6.2 F1/F3] | [Phase 2.3](#473-实施顺序) | 基于知识库内容自动出题（多选/简答），结合 Harness 自评 |
+| 4 | 引用展示（jump to source） | RAG 体验增强 | [§4.6.2 衍生] | [Phase 1.4](#473-实施顺序) | 输出格式约定：每条回答含 `[source: file#section]`，UI 可点击跳转原文 |
+| 5 | **Plan**：学习计划生成 | 学习/研究助理（Phase 2 业务） | [新] + [§4.6.2 A2] | [Phase 2.2](#473-实施顺序) | 用户给出目标（如"准备 ML 面试"）→ Agent 生成阶段性计划 + 进度跟踪 |
+| 6 | **SRS**：Spaced Repetition 主动复习调度 | 学习/研究助理（Phase 2 业务） | [新] + [§4.6.2 C8 风格] | [Phase 2.4](#473-实施顺序) | 后台 scheduler 按遗忘曲线主动触发复习；与被动 Q&A 拉开根本差距 |
+| 7 | **Quiz**：出题 | 学习/研究助理（Phase 2 业务） | [新] + [§4.6.2 F1/F3] | [Phase 2.3](#473-实施顺序) | 基于知识库内容自动出题（多选/简答），结合 Harness 自评 |
 
 
 ### 4.7.3. 实施顺序
@@ -755,12 +755,14 @@ Part B 落地总览：
 
 
 ## 4.9. 开始实现
-按[4.7.3](#473-实施顺序)的实施顺序，逐功能实现：
+按[4.7.3](#473-实施顺序)的实施顺序，逐功能实现。每个 feature 走完 **Step 0 → Step 6** 才算关 phase：
+
+0. **需求规格 (Requirements)** — 用 4 行表锁定**用户视角的约定**：用户故事 / 验收标准 / Scope（**本期做** + 暂时不做 / 显式不做 cross-ref §4.13）/ 依赖。详细写法详 [§4.9.0 实现文档风格](#490-实现文档风格)。⚠️ 三点强约束：(a) `§4.7.3` 的"出口判据"是早期粗粒度规划，**不能直接当需求**，必须基于当前项目状态独立起草；(b) Scope 中的"**暂时不做** / **显式不做**"项必须**同步登记到 [§4.13 Backlog](#413-backlog集中-punt-入口)** 对应子节（§4.13.1 / §4.13.2），作为所有 punt 项的唯一入口，章节正文不复述详情；(c) 正确区分"**暂时不做**（计划分阶段做 → §4.13.1）"与"**显式不做**（永久 punt → §4.13.2）"，错分会导致 backlog 漏项或永久不做项被重复讨论。
 1. Review 当前代码，如已有初步实现，给出优化建议，写到对应子章节，如 [4.9.1 Session 列表/搜索/恢复(phase 1.1)](#491-session-列表搜索恢复phase-11)
 2. 如是新需求，给出实施计划，写到对应子章节，如 [4.9.1 Session 列表/搜索/恢复(phase 1.1)](#491-session-列表搜索恢复phase-11)
 3. 按计划实现代码
 4. 添加 UT 进行初步验证
-5. 按 [§4.8 评估方法](#48-如何评估-agent-实现方法论)进行评估，工具在 `tools/agent_eval/` 统一管理。
+5. 按 [§4.8 评估方法](#48-如何评估-agent-实现方法论)进行评估，工具在 `tools/agent_eval/` 统一管理。**评估 case 必须对照 Step 0 验收标准**，不能脱钩。
 6. 更新design文档 到 [design.md](design.md) 对应子章节， 如 [Session 管理](design.md#33-session-管理)。desgin 文件要写的简练，抓住重点，风格要跟原来的章节统一。
 
 
@@ -771,12 +773,14 @@ Part B 落地总览：
 | 维度 | 要求 |
 |---|---|
 | **标题** | `### 4.9.x <feature 名> (phase X.Y)`；feature 名一两词足够，例：`Session 管理` / `Memory 管理` / `Prompt 管理`。不要堆"列表/搜索/恢复"这种长串。 |
-| **首行功能描述** | 标题下首行写"**功能描述**：…"，用 1-2 句**用户视角**话术说"这个 feature 让用户能做什么"，禁用工程术语 |
-| **内容粒度** | **只写结果**：决策表 / 改动表 / 代码位置表 / UT 数 / 评估指标。**不写过程**：业界对比、备选方案、为什么选 A 弃 B、设计权衡的来回讨论 — 那些都归讨论区，不进文档 |
-| **章节框架** | Step 1 Review 现状 → Step 2 实施计划 → Step 3 代码实现 → Step 4 UT → Step 5 评估 → Step 6 design.md 同步。可省略对本 feature 不适用的 Step |
+| **首行功能描述** | 标题下首行写"**功能描述**：…"，1-2 句**用户视角** TL;DR；详细需求规格在 Step 0 |
+| **内容粒度** | **只写结果**：需求规格 / 决策表 / 改动表 / 代码位置表 / UT 数 / 评估指标。**不写过程**：业界对比、备选方案、为什么选 A 弃 B、设计权衡的来回讨论 — 那些都归讨论区，不进文档 |
+| **章节框架** | Step 0 需求规格 → Step 1 Review 现状 → Step 2 实施计划 → Step 3 代码实现 → Step 4 UT → Step 5 评估 → Step 6 design.md 同步。可省略对本 feature 不适用的 Step；**Step 0 不可省**（典范见 [§4.9.4 Step 0](#494-引用展示-phase-14)） |
+| **Step 0 结构** | 用 4 行表锁定需求约定：① **用户故事**（who / what / why，"作为…用户，我希望…，这样我能…"）② **验收标准**（用户视角可观察的条件，Step 5 评估时直接对照）③ **Scope**（2 段：**本期做** + **暂时不做 / 显式不做 cross-ref [§4.13](#413-backlog集中-punt-入口)**，都是用户视角）④ **依赖**（前置 feature / 已有 API / 第三方库）。**来源采用混合策略**：AI 先列 [§4.7.3](#473-实施顺序) / [§4.7.2](#472-选定-feature-列表) / [§4.6.2](#462-候选-feature) 早期想法作"历史参照"，再独立起草现在的规格，用户在新规格基础上修正 |
+| **Scope 字段写法** | **本期做**：列具体内容（catalog discovery / L1 注入 / ...）<br>**暂时不做 / 显式不做**：**只 cross-ref [§4.13.1](#4131-deferred-backlog暂时不做) / [§4.13.2](#4132-dropped永久不做)** 对应编号（如"详 §4.13.1 #7 #8 / §4.13.2 #21-#24"），**不复述项详情**。详情统一在 §4.13 唯一登记 |
 | **表达方式** | 优先**表格**；流程/层次关系用 Mermaid；行内 code 引用文件 / API / config 名用反引号 |
-| **显式不做** | 单列一张"显式不做"表，写明 punt 项 + 一句话原因，防止后期 review 反复追问 |
-| **写作时机** | Step 1+2 在动手前写完（让用户审 scope）；Step 3-6 在实施后回填 |
+| **Punt 项归集（强约束）** | §4.9.x 各章节**不允许**单列"显式不做"表或"实现层显式不做"段；所有暂时 / 永久不做项**一律**进 [§4.13](#413-backlog集中-punt-入口) 统一登记，feature 章节正文只 cross-ref 编号 |
+| **写作时机** | Step 0+1+2 在动手前写完（让用户审约定 + 计划）；Step 3-6 在实施后回填 |
 
 **反例（已发生过 → 不要再犯）**
 
@@ -785,6 +789,10 @@ Part B 落地总览：
 | 标题 `### 4.9.3 Prompt 用户偏好 (phase 1.3)` | `### 4.9.3 Prompt 管理 (phase 1.3)` |
 | 写"业界范式（取 v1 落地最浅那条）：Cursor Rules vs Copilot Custom Instructions vs AGENTS.md…" 大段对比 | 删；直接给"决策 + 一句话理由"表 |
 | 写"v1 scope 决策（开 phase 时拍板，避免事后回头简化）：…" | 删修饰句；直接列决策表 |
+| Step 0 写"本 feature 实现 X 功能"（实现视角） | 改写为"作为…用户，我希望…，这样我能…"（用户视角，含动机） |
+| Step 0 验收标准写"API 调用成功 / 单元测试覆盖率 ≥ 80%"（实现视角） | 改写为"用户看到答案末尾出现 sources 块"（用户视角可观察条件） |
+| Step 0 直接照抄 §4.7.3 出口判据 | 早期判据仅作历史参照；Step 0 必须基于当前项目状态独立起草 |
+| 在 §4.9.x 章节正文里单列"显式不做"表，复述 punt 项详情 | 删表；所有 punt 项一律进 [§4.13](#413-backlog集中-punt-入口) 统一登记，章节正文只 cross-ref 编号 |
 
 
 ### 4.9.1 Session 管理 (phase 1.1)
@@ -805,9 +813,6 @@ Session 基础设施已经相当厚（`src/memory/chat_history.py` + `src/cli/ha
 | B | 时间用 ISO 字符串 | 不直观 |
 | B | 当前活跃 session 在 list 里无标记 | 一眼看不出在哪 |
 | B | 切换后无最近消息预览 | 切回旧 session 必须再敲 `/history` |
-| Punt | 分页 / Session 命名 / 标签 / 收藏 | over-engineering for MVP |
-| Punt | Chainlit 端同步 | 出口判据明写 "CLI 能"，留 [design.md §4.2 WebUI](design.md#42webui) 一并处理 |
-| Punt | Session 关联 project 层 | [Phase 1.2](#492-memory-触发优化--手动写入--评估-phase-12) 已 punt 三层方案，此项一并 punt（若未来真要做分层再加列）|
 
 **Step 2 · 实施计划**
 
@@ -871,7 +876,7 @@ Session 基础设施已经相当厚（`src/memory/chat_history.py` + `src/cli/ha
 
 - 改动量：6 个源文件 + 2 个测试文件 + 1 个 eval 脚本，无破坏性 API 变更
 - 出口判据：**已超出** [§4.7.3 Phase 1.1](#473-实施顺序) 字面 P0（"看 + 恢复"），补齐"搜索"+ UX 强化 5 项
-- Punt 项确认：分页 / Session 命名 / Chainlit 同步 / project 关联 留到对应 Phase 处理
+- Punt 项已登记 [§4.13.1](#4131-deferred-backlog暂时不做) #1-#3（分页 / Session 命名 / Chainlit 同步 / project 关联）
 
 
 ### 4.9.2 Memory 管理 (phase 1.2)
@@ -982,17 +987,9 @@ Memory 实际现状已经覆盖大部分  混合范式（用户记忆自动提�
 | 2.6 评估 | 改动 10a + 10b | recall ≥ 80% / perf 数据 |
 | 2.7 design.md 同步 | 改动 11 部分 | 文档对齐 |
 
-**显式不做（避免 scope 蔓延）**
-
-| 不做项 | 原因 |
-|---|---|
-| 三层 user/project/local | 单用户场景动机不成立（见 Step 1）|
-| LLM-driven consolidation | 30-100 条体量用不上 |
-| `/project` 切换 | 不分层就不需要 |
-| MD sidecar 双向 sync | over-engineering（200 行 sync 代码换批量编辑能力，单用户场景用不上）|
-| LLM-judge 评估 | 留 Phase 2 Plan/Quiz 第 2 次复用时再上 framework |
-| baseline 对比（with vs without）| 本期只做绝对召回，达 80% 即合格 |
-| Chainlit / WebUI 同步 | CLI only |
+**Punt 项**：所有暂时 / 永久不做项已登记 [§4.13 Backlog](#413-backlog集中-punt-入口) —
+[§4.13.1 #4 #5](#4131-deferred-backlog暂时不做)（暂时不做）、
+[§4.13.2 #1-#5](#4132-dropped永久不做)（永久不做）。
 
 **Step 3 · 实施结果（代码变更）**
 
@@ -1010,7 +1007,7 @@ Memory 实际现状已经覆盖大部分  混合范式（用户记忆自动提�
 | 测试 | `tests/test_memory_manager.py` | +8 case（TestExtractTriggerPolicy），3 旧 case 跟随调断言（多 source 参数）|
 | 测试 | `tests/test_cli_handlers.py` | +15 case（TestManualWrite 8 + TestMemoryOutput 7）|
 | 评估 | `tools/agent_eval/perf_eval.py` | 合并 session + memory 两 target；旧 `feature_session/session_perf_eval.py` 删除 |
-| 评估 | `tools/agent_eval/memory/recall_golden.py` + `dataset.json`（7 case） | 走真实 LLM 检验"记忆 → system_prompt → answer"闭环；keyword/regex check |
+| 评估 | `tools/agent_eval/memory/recall_golden.py` + `dataset.json`（7 case） | 走真实 LLM 端到端检验"记忆 → system_prompt → answer"链路；keyword/regex check |
 | 评估 | `tools/agent_eval/reports/.gitkeep` + `.gitignore` | reports/ 目录占位，自动生成的 `.md` 报告由 `.gitignore` 忽略 |
 
 **Step 4 · UT 结果**
@@ -1065,7 +1062,7 @@ load_ctx < 30 ms ✅、upsert/update < 10 ms ✅、render-list < 100 ms ✅。
 跑法：
 
 ```powershell
-python -m tools.agent_eval.memory.recall_golden                       # 跑全部并落盘 Markdown 报告
+python -m tools.agent_eval.memory.recall_golden                       # 跑全部并存储 Markdown 报告
 python -m tools.agent_eval.memory.recall_golden --case M01-lang-zh    # 单 case 调试
 ```
 
@@ -1110,14 +1107,7 @@ v1 决策：
 | **E 文档** | 10 | §1.2 Agent 加 bullet | `README.md` |
 | **F 总结** | 11 | 本节 Step 3-5 回填 | 本节 |
 
-**显式不做**
-
-| 不做项 | 原因 |
-|---|---|
-| 多文件 `.agenta/rules/*.md` | 单用户 CLI 场景单文件够；真有需求再扩 |
-| frontmatter（alwaysApply / globs） | 单文件不需要选择性应用 |
-| 热加载 / 文件 watch | 重启进程即可，避免引入 inotify 依赖 |
-| CLI `/rules` 命令 | rules.md 用编辑器写更顺手 |
+**Punt 项**：所有不做项已登记 [§4.13.2 #6-#9](#4132-dropped永久不做)。
 
 **Step 3 · 代码实现**
 
@@ -1155,7 +1145,7 @@ tests/test_rules_loader.py + tests/test_memory_manager.py
 
 **Step 6 · design.md 同步**
 
-新增 [`design.md §3.5 项目 Rules`](design.md#35-项目-rules)：文件位置 / 加载兜底 / 三层注入顺序 Mermaid 图 / 防 prompt injection / 评估闭环。§3.4 注入流程图加 cross-ref 到 §3.5。同时按 §3.0 新风格 refine 了 §3.4 整章（去 "Phase 1.2 完成" 等时效字眼、去 `CREATE TABLE` 等实现细节、添加 Memory 注入 Mermaid 图）。
+新增 [`design.md §3.5 项目 Rules`](design.md#35-项目-rules)：文件位置 / 加载兜底 / 三层注入顺序 Mermaid 图 / 防 prompt injection / 评估方法。§3.4 注入流程图加 cross-ref 到 §3.5。同时按 §3.0 新风格 refine 了 §3.4 整章（去 "Phase 1.2 完成" 等时效字眼、去 `CREATE TABLE` 等实现细节、添加 Memory 注入 Mermaid 图）。
 
 **Step 7 · 收尾精简：废弃 `advanced/prompts/` + Skills 归位**
 
@@ -1164,7 +1154,7 @@ tests/test_rules_loader.py + tests/test_memory_manager.py
 | 决策 | 落地 |
 |---|---|
 | 废弃 `advanced/prompts/` 全套 | 删目录 + `src/cli/prompt_loader.py` + `PROMPTS_DIR` config + CLI `/<role>` 切换 + `/reload-prompts` 命令 + tab 补全条目 |
-| `advanced/skills/` → `.agenta/skills/` | 项目级用户配置归一到 `.agenta/` 单一 namespace；`SKILLS_DIR` 默认值同步 |
+| `advanced/skills/` → `.agenta/skills/` | 项目级用户配置归一到 `.agenta/` 单一 namespace（路径写死在 `skill_loader.DEFAULT_SKILLS_DIR`） |
 | `advanced/` 顶层目录 | 整个删（无残留） |
 | `chat_history.sessions.prompt_name` schema + 配套 dead code | **彻底删除**：`sessions` 表列、`ChatHistoryStore.set_prompt_name()`、`append(prompt_name=...)` 参数、三个 Agent 的 `__init__(prompt_name=...)` / `self._prompt_name` / `_persist` 透传、`handlers.make_agent` 透传、`/sessions` 列表 Prompt 列；用户需手动删 `sqlite_db/chat_history.db` 触发新 schema 重建（与 Phase 1.2 `user_memory.db` 同款策略） |
 
@@ -1175,14 +1165,25 @@ tests/test_rules_loader.py + tests/test_memory_manager.py
 
 **功能描述**：每次 RAG 召回，Agent 回答正文带 `[1] [2]` 行内标号，末尾自动追加 `— sources —` 块，写明引自哪个文件、哪个章节、（PDF 有则带）哪一页，让用户能从答案直接溯源到原文。
 
+**Step 0 · 需求规格** _（典范，按 [§4.9.0 Step 0 结构](#490-实现文档风格) 4 行表）_
+
+| 维度 | 内容 |
+|---|---|
+| **用户故事** | 作为用 KB 问答的用户，我希望答案里的事实陈述能被追溯到原文位置，这样我能**验证 LLM 没乱编**、需要时也能**直接打开原文继续读** |
+| **验收标准** | ① 命中 RAG 的回答必须出现可识别的引用编号 `[1]` `[2]`（数字与 RAG 返回顺序对得上）<br>② 答案末尾必须有 `— sources —` 块，每条列出 file + heading + page_no（PDF 有则带）<br>③ 没调 RAG 的回答（纯闲聊 / 纯 chat history）不出现引用 / sources 块<br>④ 引用编号必须真实指向 RAG 实际返回的 hit；LLM 编出的不存在编号被**静默丢弃**，不污染 sources 块<br>⑤ 流式 UI（CLI / Chainlit）也能在正文 token 流完后完整看到 sources 块 |
+| **Scope** | **本期做**：CLI / Chainlit 文本显示；引用粒度 file + heading + page_no；同 source + 同 heading 的多 chunk 合并为一条<br>**暂时不做 / 显式不做**：详 [§4.13.1 #6](#4131-deferred-backlog暂时不做) 与 [§4.13.2 #10-#20](#4132-dropped永久不做) |
+| **依赖** | `Retriever` 已携带 `Hit.source` / `metadata.heading_path` / `metadata.page_no`；`SYSTEM_PROMPT` 注入机制；`EventBus.TOKEN_CHUNK` 流式事件 |
+
+> _历史参照_：[§4.7.3](#473-实施顺序) Phase 1.4 出口判据"每条回答末尾列 `[source: file#section]`，Chainlit 可点击(本次任务不实现)" — 仅作历史参照，本 Step 0 在此基础上独立起草更精细的约定。
+
 **Step 1 · Review 现状**
 
 | 现状 | 缺口 |
 |---|---|
 | `src/rag/retriever.py::Hit` 已携带 `source` / `metadata.heading_path` / `metadata.page_no` / `id` | 信息止步于 retriever 层；LLM 看到的是裸 chunk 文本，answer 里没有任何来源标记 |
-| `rag_search` tool 把 chunk 文本拼进 prompt 给 LLM | 没有编号契约 — 即便 LLM 想引用也不知道用哪个编号、引到什么粒度 |
+| `rag_search` tool 把 chunk 文本拼进 prompt 给 LLM | 没有编号规则 — 即便 LLM 想引用也不知道用哪个编号、引到什么粒度 |
 | Agent loop 内能看到 tool 返回结果（`agent.py:run()` 主循环） | 没有"收集 Hit → 渲染 sources 块"的流水线消费这些结果 |
-| `SYSTEM_PROMPT` 仅描述 Agent 身份 | 没有"用 RAG 时如何引用"的默认契约 |
+| `SYSTEM_PROMPT` 仅描述 Agent 身份 | 没有"用 RAG 时如何引用"的默认约定 |
 | `.agenta/rules.md`（[§3.5](design.md#35-项目-rules)） | 用户能自由覆写 base，意味着引用规则放哪一层会触发 Phase 1.3 ↔ 1.4 设计冲突，[Step 2 决策](#step-2--实施计划) 里专门定夺 |
 
 **Step 2 · 实施计划**
@@ -1196,12 +1197,12 @@ v1 决策（含 D1-D6 高层 + DD1-DD4 细节全部敲定项）：
 | **D3** 生成者 | **程序后置追加 sources 块**；LLM 只管正文行内 `[n]` 标号 | 反幻觉、可控；不依赖 LLM 自觉 |
 | **D4** Tool 数据传递 | Agent 在 loop 内拦截 `rag_search` tool 返回的 Hit 列表，不改 tool 接口 | 改动最小、向后兼容；通过新增 `CitationBuilder` 承接 |
 | **D5** 评估 | 扩 `recall_golden.py` + dataset 加 C0x case + `CitationBuilder` 单元 UT | 端到端验"答案带引用" + 单元验"拼接函数行为正确" |
-| **D6** UI 同步 | 本期不做 | 路线图明确推迟到后续 webui 优化任务 |
+| **D6** UI 同步 | 本期不做 | 暂时不做（分阶段实施），详 [§4.13 #6](#413-deferred-backlog) |
 | **DD1** sources 列哪条 | 只列正文出现的 `[n]` 对应 Hit | 克制干净；LLM 没用上的就不列 |
 | **DD2** 同 source 合并 | 同 file+heading 合并为一条引用，标 `(chunks=N)` | 1 文件 1 条引用更干净 |
 | **DD3** 编号作用域 | 每轮独立从 `[1]` 起 | 无状态、简单 |
 | **DD4** sources 进历史 | 进历史 | LLM 跨轮可复用统一来源 |
-| **Phase 1.3 ↔ 1.4 冲突** | **不处理**，按 [§3.5.2](design.md#352-三层注入顺序) 覆盖契约走 | 用户主权 > 系统默认 — rules 覆盖 base 是 §3.5.2 本意；引用规则放 base，用户想关引用就在 rules.md 写一行 |
+| **Phase 1.3 ↔ 1.4 冲突** | **不处理**，按 [§3.5.2](design.md#352-三层注入顺序) 覆盖约定走 | 用户主权 > 系统默认 — rules 覆盖 base 是 §3.5.2 本意；引用规则放 base，用户想关引用就在 rules.md 写一行 |
 
 **最终用户体验示例**（CLI 一次问答）：
 
@@ -1255,7 +1256,7 @@ sequenceDiagram
 | **C UT** | 5 | `CitationBuilder`：编号分配 / 合并 / `[n]`+`【n】` 提取 / 渲染 / 0 引用 / 多 tool_call 跨 call 编号连续 / 未分配编号静默丢弃 | `tests/test_citation_builder.py`（新） |
 | **D 评估** | 6 | case schema 增 `expect_citation_block: bool`；通过后验 sources 块格式（`— sources —` 标题 + `[n]` 列表） | `tools/agent_eval/memory/recall_golden.py` |
 | **D 评估** | 7 | C01 单引用 / C02 多引用合并 / C03 非 RAG 问答不出 sources 块 三 case | `tools/agent_eval/memory/dataset.json` |
-| **E 文档** | 8 | 新增 §3.6 引用展示（仿 §3.5 风格：数据来源 / 编号契约 / 反幻觉 / 评估闭环）+ §3.5.2 补一句"覆盖契约 = 用户主权 > 系统默认" | `docs/design.md` |
+| **E 文档** | 8 | 新增 §3.6 引用展示（仿 §3.5 风格：数据来源 / 编号规则 / 反幻觉 / 评估方法）+ §3.5.2 补一句"覆盖约定 = 用户主权 > 系统默认" | `docs/design.md` |
 | **E 文档** | 9 | §1.2 Agent 加 bullet "答案带可溯源引用" | `README.md` |
 | **F 总结** | 10 | 本节 Step 3-6 回填 | 本节 |
 
@@ -1274,7 +1275,7 @@ sequenceDiagram
 | 既有测试微调 | `tests/test_agent.py::test_web_search_triggered_when_kb_empty` 的 `mock_execute_tool` 加 `**kwargs` 容纳新增 `citation_builder` 关键字参数（测试卫生改进，无业务变更） |
 | recall_golden 扩展 | `tools/agent_eval/memory/recall_golden.py` 新增 `_build_mock_hits()` / `_check_citation_block()` 助手；`_run_case` 支持 `mock_hits` + `expect_citation_block` 两个 dataset 字段，复现 `Agent.run()` 末尾的 sources 拼接 |
 | dataset 三条 C0x case | `tools/agent_eval/memory/dataset.json`：C01 单引用 / C02 多引用合并（含同 `(source, heading)` 合并 chunks=2）/ C03 非 RAG 不出 sources |
-| 文档同步 | `docs/design.md`：§3.5.2 增 "覆盖契约 = 用户主权 > 系统默认" 段 + 新增 §3.6 引用展示（5 子节：数据来源 / 编号契约 / 反幻觉 / 与 rules 关系 / 评估闭环），含 Mermaid sequenceDiagram。`README.md §1.2 Agent`：新增 "答案带可溯源引用" bullet |
+| 文档同步 | `docs/design.md`：§3.5.2 增 "覆盖约定 = 用户主权 > 系统默认" 段 + 新增 §3.6 引用展示（5 子节：数据来源 / 编号规则 / 反幻觉 / 与 rules 关系 / 评估方法），含 Mermaid sequenceDiagram。`README.md §1.2 Agent`：新增 "答案带可溯源引用" bullet |
 
 **Step 4 · UT 结果**
 
@@ -1297,7 +1298,7 @@ tests/test_citation_builder.py
 .venv\Scripts\python -m tools.agent_eval.memory.recall_golden --case C03-no-rag-no-sources
 ```
 
-报告落盘 `tools/agent_eval/reports/recall-<ts>.md`，含 fail 用例的 question / system_prompt / answer 截断与触发的 reasons。判据通过率 ≥ 80% → 13 case 需 ≥ 11 通过算合格。
+报告存储 `tools/agent_eval/reports/recall-<ts>.md`，含 fail 用例的 question / system_prompt / answer 截断与触发的 reasons。判据通过率 ≥ 80% → 13 case 需 ≥ 11 通过算合格。
 
 C0x 人工跑实测（Provider: qwen）：
 
@@ -1307,27 +1308,260 @@ C0x 人工跑实测（Provider: qwen）：
 | C02-merge-multi-citation | 多引用合并 | ✅ `must_contain_any` 命中 `['dense', 'BM25', 'RRF']`；`expect_citation_block: ✓ (has)` |
 | C03-no-rag-no-sources | 非 RAG 不出引用 | ✅ `must_contain_any` 命中 `['我']`；`must_not_contain: ✓`（无 `[1]/[2]/— sources —`）；`expect_citation_block: ✓ (no)` |
 
-**3/3 全过**。详细的 system_prompt / answer / sources 块落盘到 `tools/agent_eval/reports/recall-20260527-1618xx.md` 三份报告。配合 [Step 4 UT](#step-4--ut-结果) 415 passed，Phase 1.4 全链路验收闭环。
+**3/3 全过**。详细的 system_prompt / answer / sources 块存储到 `tools/agent_eval/reports/recall-20260527-1618xx.md` 三份报告。配合 [Step 4 UT](#step-4--ut-结果) 415 passed，Phase 1.4 全链路验收通过。
 
 **Step 6 · design.md 同步**
 
-新增 [`design.md §3.6 引用展示`](design.md#36-引用展示citation)：数据来源 / 编号契约（每轮独立 + 同轮累计 + 同源合并）三契约 + Mermaid sequenceDiagram + 反幻觉三道防线 + 与 §3.5 rules 协作（用户主权契约下的覆盖关系）+ 评估闭环（test_citation_builder.py + recall_golden C0x）。同时 [`§3.5.2 三层注入顺序`](design.md#352-三层注入顺序) 显式补 "覆盖契约 = 用户主权 > 系统默认" 段，为后续所有 phase 提供决策原则参考。
+新增 [`design.md §3.6 引用展示`](design.md#36-引用展示citation)：数据来源 / 编号规则（每轮独立 + 同轮累计 + 同源合并）三约定 + Mermaid sequenceDiagram + 反幻觉三道防线 + 与 §3.5 rules 协作（用户主权约定下的覆盖关系）+ 评估方法（test_citation_builder.py + recall_golden C0x）。同时 [`§3.5.2 三层注入顺序`](design.md#352-三层注入顺序) 显式补 "覆盖约定 = 用户主权 > 系统默认" 段，为后续所有 phase 提供决策原则参考。
 
 
-**显式不做**
+**Punt 项**：所有暂时 / 永久不做项已登记 [§4.13 Backlog](#413-backlog集中-punt-入口) —
+[§4.13.1 #6](#4131-deferred-backlog暂时不做)（暂时不做：Chainlit / CLI 把 `[n]` 渲染成超链接）、
+[§4.13.2 #10-#20](#4132-dropped永久不做)（永久不做）。
 
-| 不做项 | 原因 |
+> 原"Phase 1.5 Skills 调用结果的引用展示"接口预留项已在 [§4.9.5 Step 0 验收标准 ⑥](#495-skills-框架强化-phase-15) 锁定为"skill 内调 `search_knowledge` 自动走 `CitationBuilder`"，无需额外适配。
+
+
+### 4.9.5 Agent Skills 强化 (phase 1.5)
+
+**功能描述**：让用户能通过写 markdown 文件就给 agent 加新能力（不改 Python 代码），agent 在用户提需求时主动认出该用哪个 skill，按里面的指令做事。
+
+**Step 0 · 需求规格**
+
+| 维度 | 内容 |
 |---|---|
-| Chainlit / CLI 把 `[n]` 渲染成超链接 | 路线图明确推迟到后续 webui 优化任务，[§4.7.3 Phase 1.4](#473-实施顺序) 出口已写"本次任务不实现" |
-| `chunk_id` 进 LLM 回答 | 噪音大、用户不关心；只在 `CitationBuilder` 内部用 |
-| 跨轮 sources 累计编号（DD3 否决方案 b） | 状态复杂、不直观；每轮独立 `[1]` 起最易理解 |
-| LLM 引用真假回环校验 | 程序后置生成 + LLM 只能从 prompt 抄编号，结构上规避；如 LLM 写了 `[7]` 但 builder 没分配，静默丢弃该 `[n]` |
-| Memory / project_rules / web_search 等非 RAG 来源的引用 | scope 失控；本期只针对 `rag_search` tool 一种来源 |
-| sources 块 token 预算控制 | 每条引用 ~80 字符，10 条 ~800 字，远低于 ctx；超阈值再优化 |
-| Phase 1.3 prompt 冲突处理（base/rules"系统保留区"机制） | 按 §3.5.2 用户主权契约走 — rules 覆盖 base 是设计本意，"沉默关闭引用"是用户合法决定，不是 bug |
-| `.agenta/rules.md.example` 加引用规则示例 | 默认引用规则放 base 即足够；example 保持极简，由用户自行决定是否覆盖 |
-| 引用粒度自适应（按文件类型/长度变化） | scope 失控；统一 `file + heading + page_no` 一种粒度 |
-| Phase 1.5 Skills 调用结果的引用展示 | Skills 是另一类 tool，等 Phase 1.5 一并设计；本期接口预留 `CitationBuilder.register()` 方法，不专门为 skill 适配 |
+| **用户故事** | 作为 AgentA 的用户，我希望能通过**写 markdown 文件**就给 agent 加新能力（不改 Python 代码），并且 agent 在我提需求时能**主动认出该用哪个 skill** 按里面的指令做事 — 比如我加个 `study-planner/SKILL.md`，下次问"帮我做 ML 学习计划"时 agent 自动按 skill 里的模板生成，不用我手动敲 `/study-planner` |
+| **验收标准** | ① **不写代码可发现**：我在 `.agenta/skills/<name>/SKILL.md` 放一份带 frontmatter（`name` + `description`）的 markdown，**重启 agent 后不写任何代码就能被发现**<br>② **主动认出**：我提问时 agent **主动认出**任务匹配某 skill（不用手动 `/cmd`），把 SKILL.md 内容当指令执行，回答里能看出"按 skill X 的指令在做"<br>③ **注入线性增长**：catalog 有 N 个 skill 时，启动注入 system prompt 的开销**与 N 大致线性增长（per skill 仅注入 frontmatter ~100-200 字）**，N=20 时不会爆 context<br>④ **失败可见**：skill 加载/激活失败时（SKILL.md 缺 frontmatter / yaml 解析错 等），错误信息能让我**看出是哪个 skill 哪一行出问题**，不静默吞错<br>⑤ **手动激活保留**：**可以手动激活** `/skill-name [问题]` <br>⑥ **skill 内 RAG 带引用**：skill 执行过程中如果调了 `search_knowledge` tool，输出自动带 phase 1.4 引用 `[n]` + sources 块（走统一 `CitationBuilder` 机制） |
+| **Scope** | **本期做**：catalog discovery（启动扫 `.agenta/skills/*/SKILL.md`）、L1 注入（清单进 system prompt）、L2 自主 activation（LLM 通过 tool 调用加载 SKILL.md 全文）、手动 `/skill-name` 命令保留、skill 内 RAG 走统一引用<br>**暂时不做 / 显式不做**：详 [§4.13.1 #7 #8](#4131-deferred-backlog暂时不做) 与 [§4.13.2 #21-#24](#4132-dropped永久不做) |
+| **依赖** | `.agenta/skills/` 目录已归位（[§4.9.3 Step 7](#493-prompt-管理-phase-13)）；`src/cli/skill_loader.py` 已有基础加载逻辑；`Agent.activate_skill(name)` API 已实现手动激活；`SYSTEM_PROMPT` 三层注入机制（base / `<project_rules>` / `<user_context>`）；phase 1.4 `CitationBuilder` 已部署在 tool 层（自动生效） |
+
+> _历史参照_：
+> [§4.7.2 #7](#472-选定-feature-列表) "框架强化（Skill 清单 / 自动加载 / Skill registry），承载 Phase 2 学习/研究助理（Plan / SRS / Quiz）的 quiz_maker / review_card / study_planner 等"；
+> [§4.7.3 Phase 1.5](#473-实施顺序) 出口判据 "为 Phase 2 的 Quiz/Plan Skill 铺路"；
+> [§3 #7](#3-当前-agenta-的-agent-部分) "支持标准 Skills 注入 (https://agentskills.io/home)"。早期措辞含糊或过程性，本节（[§4.9.5](#495-skills-框架强化-phase-15)）Step 0 独立起草用户视角约定。
+
+**Step 1 · Review 现状**
+
+> 缺口列的 ① ~ ⑥ 对应 Step 0 验收标准编号；**H1 / H2** 是 review 中识别的两个**额外问题**（非验收要求，Step 2 决定是否本期修）。
+
+| 现状 | 缺口（对照 Step 0 验收 ①-⑥） |
+|---|---|
+| `src/cli/skill_loader.py::scan_skills()` 递归扫 `.agenta/skills/*/SKILL.md`，yaml frontmatter 解析 + body 切分 | 同名 skill **静默覆盖 / 丢弃**（**H2**，非验收要求）；用户不感知 — 影响 ④（失败可见） |
+| `_parse_skill_md` 失败走 `logger.warning` | CLI 默认 INFO 级，**warning 用户看不到** — 直接影响 ④（失败可见） |
+| `build_skill_catalog()` 把 frontmatter 渲染为 XML 注入 `SYSTEM_PROMPT`（base 层，[§3.5.2](design.md#352-三层注入顺序)） | 注入位置 ✓；`activate_skill()` 后 catalog 不会移除该 skill（信息重复，**LLM 重复看 description**，但不影响正确性 — **H1**，非验收要求） |
+| `Agent.activate_skill(name)` 把 SKILL.md body 拼到 system_prompt；CLI `/skill-name` 命令走该路径 | 手动激活 ✓ — 满足 ⑤（手动激活保留）；自主激活靠 base 层 catalog + LLM 自行判断，**无验证集** — 影响 ②（主动认出） |
+| `main.py` 启动 `scan_skills()` 然后构造 Agent | console **不展示 "已发现 N 个 skill"** — 影响 ④（失败可见） |
+| `.agenta/skills/example-skill/SKILL.md` 占位 demo | 缺**真实业务 skill** — golden 集没载体；间接影响 ②（主动认出） |
+| phase 1.4 `CitationBuilder` 已在 tool 层 | skill 内 `search_knowledge` 走同一路径，**自动满足 ⑥**（skill 内 RAG 带引用），无需改动 |
+| `Hit / heading_path / page_no / SkillInfo / EventBus`（同 phase 1.4 依赖） | ✓ 全部就绪 |
+
+**Step 2 · 实施计划**
+
+决策（D1-D5 全部敲定）：
+
+| # | 维度 | 选择 | 取舍 |
+|---|---|---|---|
+| D1 | H1 catalog 未同步已激活 skill | **不修**，登记 [§4.13.1 #9](#4131-deferred-backlog暂时不做) | 用户不感知；信息重复不影响正确性；实测有问题再启动 |
+| D2 | H2 同名 skill 静默丢 | **修**，复用 ④ 的 failed 回显机制 | 边际成本低（+5 行）；保护用户对 skill 加载结果的可见性 |
+| D3 | 真实业务 skill | 新增 **1 个 study-planner** | 同时承载 ② golden 集主场景 + 为 phase 2.2 Plan 铺路 |
+| D4 | golden 集规模 + 阈值 | **小集 8-10 case + 80% 通过** | 与 phase 1.2 / 1.4 `recall_golden` 一致；正负样本 1:1 |
+| D5 | catalog 详细 log | **不加** | 避免 scope 蔓延；④ 的列表已足够 |
+| Q3 | catalog 注入层 | **维持 base 层**（现状即 [§3.5.2](design.md#352-三层注入顺序) base 段） | LLM 主动 activation 必须常驻可见；用户也能在 rules.md 局部覆盖 |
+| ⑥ 引用 | skill 内 RAG 引用 | **不改**，复用 phase 1.4 `CitationBuilder` | tool 层已统一，验证只需 golden case 路过 |
+
+**最终用户体验示例**（CLI 启动 + 一次主动激活）：
+
+```text
+$ .venv\Scripts\python main.py
+[skills] 已发现 2 个 skill: example-skill, study-planner
+[skills] 加载失败 0 个
+
+> 帮我做一份机器学习面试两周复习计划
+[agent] (主动激活 skill: study-planner)
+
+按 study-planner 的两周框架，结合 KB 里你之前的 ML 资料 [1]：
+
+Week 1（基础回顾）...
+Week 2（项目 + mock 面试）...
+
+— sources —
+[1] docs/ml_notes.md § 监督学习  (chunks=2)
+```
+
+数据流（启动 + 自主激活）：
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant M as main.py
+    participant SL as skill_loader
+    participant A as Agent
+    participant L as LLM
+    participant T as tool 层
+
+    U->>M: 启动
+    M->>SL: scan_skills(.agenta/skills/)
+    SL-->>M: (loaded, failed)
+    M-->>U: 打印 "已发现 N 个 skill: [...]" + failed 列表
+    M->>A: Agent(skills=loaded)
+    A->>A: build_skill_catalog → 注入 SYSTEM_PROMPT (base 层)
+
+    U->>A: "帮我做 ML 复习计划"
+    A->>L: messages（含 catalog + 用户问题）
+    L-->>A: tool_call(load_skill, name="study-planner")
+    A->>T: execute_tool(load_skill)
+    T-->>A: SKILL.md body
+    A->>L: messages（含 skill body）
+    L-->>A: tool_call(search_knowledge, ...)
+    Note over T,L: tool 层 CitationBuilder 自动收 Hits（phase 1.4 已就绪）
+    L-->>A: answer "...[1]..."
+    A-->>U: answer + sources 块
+```
+
+10 项改动：
+
+| 块 | # | 改动 | 文件 |
+|---|---|---|---|
+| **A 加载** | 1 | `scan_skills()` 返回 `(loaded: dict[str, SkillInfo], failed: list[SkillLoadFailure])`；同名 skill 进 failed（D2） | `src/cli/skill_loader.py` |
+| **A 加载** | 1.1 | 新增 `SkillLoadFailure` dataclass：`path / reason`（yaml 错 / 缺字段 / 同名冲突 等） | 同上 |
+| **B UI** | 2 | `main.py` 启动后 `print` "已发现 N 个 skill: [name1, name2]"；failed 非空时 print 红色失败列表 + 路径 + reason | `main.py` |
+| **B UI** | 3 | `chainlit_app.py` 启动 callback 同步打印（保持双端一致） | `chainlit_app.py` |
+| **C 业务** | 4 | 新增 `study-planner` 真实 skill：frontmatter（`name / description / when_to_use`）+ 两周复习模板 body + 默认结合 RAG 召回个人 KB | `.agenta/skills/study-planner/SKILL.md`（新） |
+| **D UT** | 5 | `tests/test_skill_loader.py`：scan / parse / yaml 错 / 缺 frontmatter / 同名冲突 / failed 字段格式 | `tests/test_skill_loader.py`（新或扩） |
+| **D UT** | 5.1 | `main.py` 启动打印逻辑 UT（capsys 抓 stdout，覆盖 0 skill / N skill / 含 failed 三场景） | 同上 |
+| **E 评估** | 6 | 新增 `tools/agent_eval/skills/recall_skill.py`：复用 phase 1.2 / 1.4 framework；判据 = LLM 是否调 `load_skill` + 调对了哪个 | `tools/agent_eval/skills/recall_skill.py`（新） |
+| **E 评估** | 7 | golden dataset（8 case）：4 positive（study-planner ×2 + example-skill ×2）+ 4 negative（纯闲聊 / 纯 RAG 不需激活 skill / 与 skill 主题相邻但不该激活 / `/manual` 已激活就别再自主激活）；阈值 ≥ 80% | `tools/agent_eval/skills/dataset.json`（新） |
+| **F 文档** | 8 | `docs/design.md` 新增 §3.7 Skills 框架（仿 §3.5/§3.6 风格：catalog 注入层 / 自主 vs 手动 / 失败回显 / 与 §3.6 引用协作 / 评估方法）；`README.md §1.2 Agent` 加 "支持 agentskills.io 风格 skill 自动激活" bullet | `docs/design.md` / `README.md` |
+| **G 总结** | 9 | 本节 Step 3-6 回填 | 本节 |
+
+**Step 3 · 代码实现**
+
+| 改动 | 实现位置 |
+|---|---|
+| `ScanResult` / `SkillLoadFailure` dataclass | `src/cli/skill_loader.py`：新增两个 frozen dataclass；`_parse_skill_md` 返回 `SkillInfo \| SkillLoadFailure` 精细化 reason（`missing_frontmatter` / `frontmatter_not_closed` / `yaml_parse_error: …` / `missing_description` / `missing_name` / `read_failed: …`）；`scan_skills` 返回 `ScanResult(loaded, failed)`，同名冲突追加 `duplicate_name: <name>` failure |
+| 共享 banner 文案 | `src/cli/skill_loader.py:format_scan_banner()`：渲染 `(success_line, failure_block)` 元组，CLI / WebUI 共用同套文字（避免双端文案漂移） |
+| CLI 启动 + /reload-skills | `main.py`：启动段把 banner 显式 print；`/reload-skills` 复用同一函数 |
+| Chainlit 启动 + /reload-skills | `chainlit_app.py:on_chat_start()` 同步打印 banner 到欢迎消息；`/reload-skills` 命令同步走 |
+| 真实业务 skill | `.agenta/skills/study-planner/SKILL.md`（新）：name + 触发关键词丰富的 description；body 含 when_to_use / 输出原则 / 短/长两套模板 / 流程约束 / 反模式，引用规则参照 phase 1.4 默认机制 |
+| 加载器 UT 扩展 | `tests/test_skill_loader.py`：新增 3 个测试类共 8 case — `TestScanResultFailures`（4 case：yaml 错 / frontmatter 不闭合 / name fallback / 多失败按顺序）+ `TestFormatScanBanner`（3 case：empty / loaded only / 含 failed 块）+ `TestRealAgentaSkills`（1 case：仓库内置 example-skill / study-planner 0 失败） |
+| 评估脚本 | `tools/agent_eval/skills/recall_skill.py`（新）：扫真实 skills → 拼 base + catalog system_prompt → 单步 `chat()` with `tools=get_tools(skill_bodies)` → 解析 `tool_calls` 抽 `load_skill(name=…)` 列表 → positive 判命中 / negative 判未触发；落盘 markdown 报告（核心指标 / 分组指标 / 全 case 总览 / Fail 详情，复用 `recall_golden.py` 风格） |
+| Golden dataset | `tools/agent_eval/skills/dataset.json`（新）：8 case，4 positive（study-planner ×3 中/速成/英文 + example-skill 规范问 ×1）+ 4 negative（greet / 纯事实 RAG / 相邻主题书单 / trivia） |
+| design.md / README | `docs/design.md` 新增 §3.7 Skills 框架（5 子节：数据来源 / 渐进披露 L1+L2 / 失败可见性 / 与 Rules+引用关系 / 评估方法 + Mermaid sequenceDiagram）；`README.md §1.2 Agent` 把"Skills 加载"bullet 改写为"Skills 框架"，覆盖启动回显 / 主动认出 / 引用复用三点新增能力 |
+
+> _Step 2 计划微调_：原计划 5.1 "main.py 启动打印 capsys UT" 取消 — 启动 banner 的核心字符串逻辑已由 `TestFormatScanBanner`（3 case）100% 覆盖；`main.py` 那段只是 3 行 trivial `print(success_line); if failure_block: print(failure_block); print()`，再单独造 main() stub 测它的边际价值低于 over-test 成本。
+
+**Step 4 · UT 结果**
+
+```text
+tests/test_skill_loader.py
+30 passed
+（净增 8：TestScanResultFailures 4 + TestFormatScanBanner 3 + TestRealAgentaSkills 1）
+
+全量回归：.venv\Scripts\python -m pytest -q
+→ 423 passed, 3 skipped, 110 deselected, 0 failed
+```
+
+较 Phase 1.4 末态（415 passed）净增 8，全部来自本节新增 case，0 退化。`ReadLints` 全 clean。
+
+**Step 5 · 评估**
+
+代码已就绪，dataset 8 case。运行命令：
+
+```bash
+.venv\Scripts\python -m tools.agent_eval.skills.recall_skill                              # 全跑 8 case
+.venv\Scripts\python -m tools.agent_eval.skills.recall_skill --case S01-positive-planner-zh
+.venv\Scripts\python -m tools.agent_eval.skills.recall_skill --no-report                  # 不存储报告
+```
+
+报告存储 `tools/agent_eval/reports/skill-recall-<ts>.md`，含核心指标 / positive vs negative 分组指标 / 全 case 总览（含实际 `load_skill(name=…)` 调用记录）/ Fail 用例详情。判据通过率 ≥ 80% → 8 case 需 ≥ 7 通过算合格。
+
+AI 跑过的单 case 烟雾（验证脚本不崩）：
+
+| id | 维度 | 实测结果 |
+|---|---|:-:|
+| S05-negative-greet | 纯闲聊不应激活 skill | ✅ `load_skill: ✓ 未触发（符合预期）` |
+
+完整 8 case 待用户在配好 API key 的环境跑一遍，结果回填本表。
+
+**Step 6 · design.md 同步**
+
+新增 [`design.md §3.7 Skills 框架`](design.md#37-skills-框架agentskills)：5 子节 — 数据来源与生命周期（含 `ScanResult` 结构）/ 渐进披露 L1+L2（Mermaid 时序）/ 失败可见性三通道 / 与 §3.5 Rules + §3.6 引用的关系（按用户主权约定 + 引用复用是免费的）/ 评估方法（test_skill_loader 30 case + recall_skill 8 case ≥ 80%）。`README.md §1.2 Agent` "Skills 加载" bullet 改写为 "Skills 框架"，三点新增能力一句话覆盖。
+
+**Punt 项**：H1（catalog 未同步）→ [§4.13.1 #9](#4131-deferred-backlog暂时不做)。L3 / 跨 catalog / 热重载 等本期不动项详 [§4.13.1 #7 #8](#4131-deferred-backlog暂时不做) 与 [§4.13.2 #21-#24](#4132-dropped永久不做)。
+
+
+### 4.9.6 Agent 循环升级 (phase 2.1)
+
+**功能描述**：在现有单层 ReAct 基础上叠加"**先列计划 → 分步执行 → 进度可见**"能力。复杂多步任务（多文档对比 / 学习计划 / 目标+步骤型）由 LLM 自主决定先 `make_plan`，再逐步推进、每步状态可见、失败不静默；简单查询继续走原 ReAct 不绕路。
+
+**Step 0 · 需求规格**
+
+> _历史参照_：
+> [§4.7.2 #2](#472-选定-feature-列表) "Agent 循环｜现状 ReAct 保留，Phase 2 引入 Plan-Execute（Plan 业务依赖）"；
+> [§4.7.3 Phase 2.1](#473-实施顺序) 出口判据 "2.2 前置依赖；Agent 能执行多步骤计划"；
+> [§4.6.2 A1 / A2](#462-合并后的所有可能-feature-列表) "基础 loop（ReAct / Plan-Execute / Loop）"与"Plan 模式（生成计划 → 用户/自动审批 → 执行）"；
+> [§3 #2](#3-当前-agenta-的-agent-部分) "Agent 循环/架构：ReAct, plan and execute, loop 等"。早期措辞仅作行业范式索引，本节（[§4.9.6](#496-agent-循环升级-phase-21)）Step 0 独立起草用户视角约定。
+
+| 维度 | 内容 |
+|---|---|
+| **用户故事** | 作为 AgentA 的用户，遇到**多步骤复杂任务**（如"对比我做过的 3 个 RAG 项目的召回策略"、"帮我做一份 ML 面试两周复习计划"），我希望 agent **先把要做的步骤列给我看**（3-5 步带标号），再分步执行；每步开始 / 完成 / 失败都看得见，做完哪步、错在哪步、整体进度一目了然——不再"黑盒等几十秒不知道在算啥"。**简单查询**（如"我邮箱"、"AgentA 是什么"）继续走原 ReAct，不强制规划、不引入额外延迟。 |
+| **验收标准** | ① **复杂任务有可见 plan 且质量过线**：我问"对比我做过的 3 个 RAG 项目"时，agent 在动手前**先输出带步骤编号的 plan**（CLI / Chainlit 均可见），且 plan 经 LLM-judge 评分（步骤合理性 / 覆盖度 / 顺序）≥ 4/5<br>② **简单任务不强制 plan**：单实体查询（"我邮箱"等）跳过 plan 直接 ReAct，**不增加任何额外 LLM 调用**（profiler 验证：plan 路径 vs ReAct 路径 token / 延迟对比）<br>③ **进度可见**（CLI 端）：plan 每步**开始 / 完成 / 失败**在 CLI 有清晰标记（☐→✓/✗），任意时刻看得出"现在第 N 步 / 共 M 步"；Chainlit 端本期沿用既有渲染方式（plan 文本可见即可，step UI 留 [§4.13.1 #11](#4131-deferred-backlog暂时不做)）<br>④ **LLM 自主判定准（≥ 80% 准确率）**：要不要 plan / 几步 / 每步是啥，全由 LLM 自主（通过 `make_plan` tool 调用），不靠外部规则 / 关键词 hard-code；Step 5 评估用人工标注的"该 plan / 不该 plan"golden set 验证 LLM 判定准确率 ≥ 80%<br>⑤ **失败不静默**：某步工具调用失败，**有明确错误标记 + 可恢复策略**（LLM 自主决定重试 / 跳过 / 中止三选一），错误信息能定位到哪步 + 失败原因<br>⑥ **plan 完整持久化进 chat_history**：plan 作为带结构化 payload 的特殊 assistant message 写库（含 `steps: list[{id, text, status, note?}]` JSON），每次 `update_step` 作为 tool message 写库；**下一轮 LLM 看 history 能完整 reconstruct plan 状态**；用户回看 session（`/sessions` 切回）也能看到上次 plan |
+| **Scope** | **本期做**：<br>① 新增 `make_plan(steps: list[str])` / `update_step(step_id, status, note?)` 两个 tool（LLM 自主调用，走现有 `ToolCallEngine` 通道）；<br>② `Agent.run()` 加 plan-aware 分支（识别到 active plan 后驱动 LLM 逐步推进）；<br>③ `EventBus` 新增 `plan_created` / `plan_step_start` / `plan_step_end` 三类事件；<br>④ CLI 渲染 plan checkbox 进度（Chainlit step UI 留 [§4.13.1 #11](#4131-deferred-backlog暂时不做)）；<br>⑤ `MAX_TOOL_ROUNDS` / `MAX_TOTAL_ROUNDS` 视 plan 步数自适应放大；<br>⑥ `SYSTEM_PROMPT` 加"何时该 `make_plan`"指导段；<br>⑦ Step 5 评估配套：`tools/agent_eval/plan/` 新建 golden set（plan / non-plan 各 5-8 case）+ plan 质量打分（LLM-judge 形式，是否抽 `judge` framework 留 Step 2 决策，呼应 [§4.13.1 #4](#4131-deferred-backlog暂时不做) "第 2 次复用时上 framework"）<br>**暂时不做 / 显式不做**：详 [§4.13.1 #10 #11](#4131-deferred-backlog暂时不做)（plan 执行前用户审批 / Chainlit step UI）与 [§4.13.2 #25 #26](#4132-dropped永久不做)（多 agent 分工 / plan 模板预制）|
+| **依赖** | `Agent.run()` ReAct loop（[`agent.py:283-444`](../src/agent/agent.py)）；`ToolCallEngine`（plan tool 走同一执行通道，[`tool_call_engine.py`](../src/agent/core/tool_call_engine.py)）；`EventBus`（[`event_bus.py`](../src/agent/core/event_bus.py)，新事件类型增量加）；`ChatHistoryStore`（plan 作为特殊 message 持久化，**不新建表**，复用现有 schema）；`CitationBuilder`（plan 步骤内 `search_knowledge` 复用现有引用编号机制）；`tools/agent_eval/` framework（[§4.10](#410-配套-toolstoolsagent_eval)） + 新建 `judge` 模块（[§4.8.2 评估工具列表](#482-评估工具列表)） |
+
+
+**Step 1 · Review 现状**
+
+
+
+**现状对照表** 
+- 左列 ①-⑥ 引 Step 0 验收
+- Scope ①-⑦ 引 Step 0 Scope
+- Gap 编号 `P21-G*` 是 Phase 2.1 局部命名（避免跟 [§4.6.2 G1-G9](#462-合并后的所有可能-feature-列表) / [§4.9.5 H1](#4131-deferred-backlog暂时不做) 重名）。
+
+| Step 0 条目 | 现状结论 | Gap |
+|---|---|---|
+| **验收 ①** 复杂任务有 plan + LLM-judge ≥ 4/5 | `Agent.run()` 单层 ReAct（[`agent.py:336-444`](../src/agent/agent.py)），LLM 无 plan 概念；`SYSTEM_PROMPT` 写死"完整工具使用策略"6 步启发式，非显式 plan；评估 framework 无 `judge` 模块 | G1 / G2 |
+| **验收 ②** 简单任务不强制 plan + 无额外 LLM 调用 | 现 ReAct 路径本身就是"无 plan"路径，**天然满足**；唯一风险是 plan 引入后 `SYSTEM_PROMPT` 改动可能诱导 LLM 给简单查询也 make_plan | — _（加 plan 后需保护）_ |
+| **验收 ③** CLI plan 进度 ☐→✓/✗ + 当前/总步数 | `EventBus`（[`event_bus.py:27-43`](../src/agent/core/event_bus.py)）只有 7 类事件，**无 plan_* 事件**；CLI `main.py` 无 tool_call 事件订阅（靠 `ToolCallEngine.verbose=True` log）；Chainlit `_event_router`（[`chainlit_app.py:241-248`](../chainlit_app.py)）只分流 `thinking_chunk` / `token_chunk` | G3 / G4 |
+| **验收 ④** LLM 自主判定 plan/non-plan ≥ 80% | `tools/agent_eval/` 现 3 个 eval（`memory/recall_golden.py` / `skills/recall_skill.py` / `perf_eval.py`）；**无 `plan/` 目录、无 golden dataset**；3 脚本各自实现 `_load_dataset` / `_build_*` / `_render_markdown` / `main()`，**未抽出 `runner` / `report` / `judge` framework**（[§4.8.2 评估工具列表](#482-评估工具列表) 4 个 framework 工具均 0 行实现） | G5 / G6 |
+| **验收 ⑤** 失败不静默 + LLM 自决重试/跳过/中止 | `ToolCallEngine.process()`（[`tool_call_engine.py:73-139`](../src/agent/core/tool_call_engine.py)）单步失败已有 `TOOL_EMPTY_HINT` / `"[工具失败]"` 提示让 LLM 下轮决策，但**无 plan 维度的步级失败语义**（"跳过该步" / "中止整个 plan"）；`MAX_TOOL_ROUNDS=8` 硬编码，plan 步数多易撞顶 | G7 / G8 |
+| **验收 ⑥** plan 完整持久化 + 下一轮 reconstruct | `ChatHistoryStore.messages` schema（[`chat_history.py:7-22`](../src/memory/chat_history.py)）：`role / content / tool_calls(JSON) / tool_call_id / timestamp`，**无额外结构化 payload 列**；assistant `tool_calls` 字段语义专属"LLM 发的 function call"；plan 落位有 3 种候选（content 写 markdown / 借位 tool_calls JSON / 加新列 `payload`），影响 reconstruct 路径 | G9 |
+| **Scope ①** `make_plan` / `update_step` 两 tool | `src/agent/tools.py` 现 4 tool + `get_tools(skill_bodies)` 已支持运行时动态追加（`load_skill` 套路）；`execute_tool` 用 `match name:` 路由 — 新 tool 加法和 `load_skill` 同套路 | — _（路径清晰）_ |
+| **Scope ②** Agent.run() plan-aware 分支 | 现 loop 二分支：`if message.tool_calls: ... else: 最终回答`；plan-aware 第三态（"plan 在执行中"）需嵌入 | G10 |
+| **Scope ③** EventBus 三类新事件 | 同验收 ③（G3） | — |
+| **Scope ④** CLI 渲染 plan checkbox | 同验收 ③（G4） | — |
+| **Scope ⑤** `MAX_TOOL_ROUNDS` 自适应放大 | 硬编码 `MAX_TOOL_ROUNDS=8` / `MAX_TOTAL_ROUNDS=12`（[`agent.py:179-181`](../src/agent/agent.py)），无 plan 步数感知 | G8 _（与验收 ⑤ 合并）_ |
+| **Scope ⑥** `SYSTEM_PROMPT` 加 make_plan 指导段 | 现 `SYSTEM_PROMPT` ~80 行（[`agent.py:100-176`](../src/agent/agent.py)），结构是"工具使用策略 + 引用规范"；plan 指导段需独立小节 | G1 |
+| **Scope ⑦** `tools/agent_eval/plan/` golden + judge | 同验收 ④（G5 / G6） | — |
+
+**Gap 列表**
+
+| # | Gap | 涉及位置 | 粒度 |
+|---|---|---|---|
+| **P21-G1** | `SYSTEM_PROMPT` 无"何时 make_plan / 怎么 make_plan / make_plan 后下一步"的 LLM 指导段 | [`agent.py:100-176`](../src/agent/agent.py) `SYSTEM_PROMPT` 常量 | 小（prompt 段 ~30-50 行） |
+| **P21-G2** | LLM 完全无 plan 概念，依赖纯启发式串联多步 — 验收 ① "先列计划再动手"形态从根上不存在 | `Agent.run()` loop 全程 | 大（loop 控制流改造） |
+| **P21-G3** | `EventBus` 7 类事件无 `plan_created` / `plan_step_start` / `plan_step_end` | [`event_bus.py:27-43`](../src/agent/core/event_bus.py) 常量 + `ALL_EVENT_TYPES` 元组 | 小（追加 3 常量 + 元组成员） |
+| **P21-G4** | CLI / Chainlit 端均无 plan 事件订阅与渲染；CLI 当前连 `tool_call_*` 事件都没接（靠 `verbose` log） | `main.py`（订阅链路缺失）+ [`chainlit_app.py:241-248`](../chainlit_app.py) `_event_router` 分流表 | 中（CLI 0 → 有；Chainlit router 加 case） |
+| **P21-G5** | `tools/agent_eval/plan/` 目录、`dataset.json` golden（plan / non-plan 各 5-8 case）、`recall_plan.py` 评估脚本均不存在 | `tools/agent_eval/` 下新增子目录 | 中（仿 `skills/recall_skill.py` 套路） |
+| **P21-G6** | LLM-judge framework（[§4.8.2 评估工具列表](#482-评估工具列表) 的 `judge`）未抽出；呼应 [§4.13.1 #4](#4131-deferred-backlog暂时不做) "第 2 次复用时上 framework" — Phase 2.1 plan judge 是触发条件之一 | `tools/agent_eval/` 下新建 `judge.py`（或仿 [§4.10](#410-配套-toolstoolsagent_eval) 决策位置） | 中（"是否本期抽 framework vs 仅 ad-hoc"是 Step 2 决策） |
+| **P21-G7** | `ToolCallEngine.process()` 单步失败只往 messages 注入 hint 让 LLM 自然恢复 — 无 plan 维度的"step status=failed → LLM 看到失败信号 + 三选一控制权"语义 | 语义层在 `Agent.run()` plan-aware 分支管控；工具层（[`tool_call_engine.py:73-139`](../src/agent/core/tool_call_engine.py)）可不动 | 中 |
+| **P21-G8** | `MAX_TOOL_ROUNDS=8` / `MAX_TOTAL_ROUNDS=12` 硬编码，plan N=3-5 步任务易撞顶 | [`agent.py:179-181`](../src/agent/agent.py) 模块常量 | 小（改 plan-aware 自适应） |
+| **P21-G9** | `ChatHistoryStore.messages` schema 无结构化 payload 列；plan + step status 持久化 3 候选（content 写 markdown / 借位 tool_calls JSON / 加新列 `payload`）需 Step 2 拍板 | [`chat_history.py:70-90`](../src/memory/chat_history.py) `_create_tables` + `append/_row_to_message` | 中-大（取决于方案：A 0 schema 改动；B 加列 + migration；C 借位 0 改动但语义脏） |
+| **P21-G10** | `Agent.run()` loop 引入第三态"plan 在执行中" — LLM 调用前是否注入 plan-state 提示 / 每步完后是否 update_step / plan 完后回 final_answer 路径 | [`agent.py:336-444`](../src/agent/agent.py) 主循环 | 大（核心控制流） |
+
+**已覆盖项 / 无需动**
+
+| 项 | 状态 |
+|---|---|
+| Chainlit plan step UI | [§4.13.1 #11](#4131-deferred-backlog暂时不做) punt（Step 0 锁定） |
+| plan 执行前用户审批 | [§4.13.1 #10](#4131-deferred-backlog暂时不做) punt |
+| 多 agent 分工 / plan 模板预制 | [§4.13.2 #25 / #26](#4132-dropped永久不做) 永久 punt |
+| `CitationBuilder` 跨步引用复用 | OK — 现 builder 每轮 new instance、跨同轮多次 `search_knowledge` 累计编号（[`agent.py:322`](../src/agent/agent.py)），plan 内多步 search 天然走同一 builder |
+| `get_tools(skill_bodies)` 动态追加 | OK — `make_plan` / `update_step` 走 `load_skill` 同套路追加，无结构性阻碍 |
+| `ChatHistoryStore` schema 已兼容 tool message | 部分 OK — schema 兼容 tool role + tool_call_id；plan 整体如何"结构化"持久仍待 G9 拍板 |
+
+**Step 2 待拍板 gap 集中**：核心控制流 G2 / G10 + schema G9 + 评估 framework 抽象时机 G5 / G6。小-中增量 gap（G1 / G3 / G4 / G7 / G8）形状已定，跟随主决策走即可。
 
 
 ## 4.10. 配套 tools（tools/agent_eval）
@@ -1369,7 +1603,7 @@ import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
 
 **评估报告输出约定（强制）**
 
-所有 `tools/agent_eval/**` 下的评估脚本，落盘报告**必须**用 Markdown，禁止 JSON / CSV / TSV。后续新增工具一律照办，不再讨论。
+所有 `tools/agent_eval/**` 下的评估脚本，存储报告**必须**用 Markdown，禁止 JSON / CSV / TSV。后续新增工具一律照办，不再讨论。
 
 - **文件名**：`<feature>-<target>-<YYYYMMDD-HHMMSS>.md`（如 `perf-session-20260526-173529.md`、`recall-20260526-173615.md`）
 - **目录**：统一落 `tools/agent_eval/reports/`（由 `.gitignore` 整目录忽略，只 keep `.gitkeep`）
@@ -1394,11 +1628,85 @@ import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
 性能优化
 
 
+## 4.13. Backlog
+
+**性质**：集中登记 §4.9.x 实施过程中识别出来的**所有"不做项"**（包括暂时和永久）。是 §4.9.x Step 0 Scope 字段中"**暂时不做**"和"**显式不做**"项的**唯一入口** — §4.9.x 各章节不再保留 punt 详情，只 cross-ref 本节编号。
+
+**与 §5 Future 的边界**：
+
+| 容器 | 含义 |
+|---|---|
+| **[§4.13.1 Deferred Backlog](#4131-deferred-backlog暂时不做)** | 项目 scope 之内，**计划分阶段实施**，有明确触发条件 / 计划阶段 |
+| **[§4.13.2 Dropped](#4132-dropped永久不做)** | 项目 scope 之内，**永久 punt**（未来也不做） |
+| **[§5 Future](#5-future)** | 项目 scope **之外**的横向扩展方向（如[§5.1 企业内 Q&A](#51-企业内-qa)） |
+
+**新增条目时的强约束**：
+
+1. 每次 §4.9.x feature 写 Step 0，**Scope 字段中"暂时不做" / "显式不做"项**必须同步往本节对应子节加一条；§4.9.x 正文里**不复述** punt 详情，只写 "详 [§4.13.1 #x](#4131-deferred-backlog暂时不做)" 或 "详 [§4.13.2 #x](#4132-dropped永久不做)"
+2. **归类判定标准**：有**明确的触发条件**（如"等 webui 优化任务"）或**明确的计划阶段**（如"phase 2.x sandbox"）→ §4.13.1；都没有 → §4.13.2
+3. §4.13.1 deferred 条目完成实施后从本节**删除**（不留 closed 项历史，git log 自带）；§4.13.2 dropped 条目**永久保留**（防止未来重复讨论"要不要做 X"）
+
+---
+
+### 4.13.1 Deferred Backlog
+
+**字段**：项 / 来源 phase / 计划阶段 / 推迟原因
+
+| # | 项 | 来源 phase | 计划阶段 | 推迟原因 |
+|---|---|---|---|---|
+| 1 | Session 列表支持分页 / 命名 / 标签 / 收藏 | Phase 1.1 | Phase 2 / Phase 3 视用户实际 session 量决定 | MVP 阶段 session 量小（< 100）不需要；over-engineering for MVP |
+| 2 | Chainlit 端 Session 管理同步（list / search / switch） | Phase 1.1 | 后续 WebUI 优化任务（[design.md §4.2 WebUI](design.md#42webui)） | Phase 1.1 出口判据明写 "CLI 能"；WebUI 端统一在专门 WebUI 优化任务做 |
+| 3 | Session 关联 project 层（分层 Memory 的 session 维度） | Phase 1.1 | 待 Memory 分层方案重新启动后（当前 §4.13.2 已 Dropped 三层）| 上游"三层 user/project/local" 当前永久 punt（§4.13.2 #1），Session 分层无意义；如未来重启分层方案再考虑 |
+| 4 | LLM-judge 评估（Memory 召回打分） | Phase 1.2 | Phase 2 Plan / Quiz 第 2 次复用时一并上 framework | 单 feature 不上 LLM-judge framework；等第 2 个用例出现再上抽象（[§4.8.2 硬约束](#482-评估工具列表)） |
+| 5 | Chainlit / WebUI 端 Memory 管理同步 | Phase 1.2 | 后续 WebUI 优化任务（与 #2 同任务） | Phase 1.2 CLI only；同 #2 的逻辑 |
+| 6 | Chainlit / CLI 把引用 `[n]` 渲染成可点击超链接 | Phase 1.4 | 后续 WebUI 优化任务（与 #2 / #5 同任务） | [§4.7.3 Phase 1.4](#473-实施顺序) 出口已写 "本次任务不实现"；文本形式已足以验证溯源能力 |
+| 7 | Skills L3 — `scripts/` 自动执行（agent 主动跑 skill 里的 Python） | Phase 1.5 | Phase 2.x （sandbox / 权限机制设计完成后） | L3 涉及 code execution，需要 sandbox 设计 + 信任模型；本期资源不够 |
+| 8 | Skills L3 — `references/` 按需加载 | Phase 1.5 | Phase 2.x （与 #7 同阶段） | L3 渐进披露的副入口；本期 L1 + L2 已足够覆盖 study-planner / quiz_maker 等典型 skill 场景 |
+| 9 | Skill 激活后 catalog 同步移除该 skill 的 description 块（H1） | Phase 1.5 | 实测有 LLM 因为重复信息走偏 / context 紧张时再修 | 已激活的 skill body 已注入 system_prompt，catalog 里的 description 块成了重复信息；当前 LLM 实测未受影响 — over-engineering for MVP |
+| 10 | Plan 执行前用户审批 / 编辑（plan 出来后用户 yes / edit / no 三选一再执行，Cursor Plan Mode / CC plan permission mode 风格） | Phase 2.1 | Phase 2.5 Harness 或 Phase 3.3 防 prompt injection 时一起做 | 跟反思 / 安全 mode 强相关，单独做没收益；MVP 单用户场景每步审批反降 UX |
+| 11 | Chainlit plan step UI 渲染（plan 步骤 / 进度可视化到 Chainlit 端） | Phase 2.1 | 后续 WebUI 优化任务（与 #2 / #5 / #6 同任务，[design.md §4.2 WebUI](design.md#42webui)） | Phase 2.1 验收按 CLI 端 plan 可见即可；Chainlit 端 step UI 跟其他 WebUI 优化项统一在 WebUI 优化任务做（同 #2 / #5 / #6 逻辑） |
+
+---
+
+### 4.13.2 Dropped Features
+
+**字段**：项 / 来源 phase / 判定原因
+
+| # | 项 | 来源 phase | 判定原因 |
+|---|---|---|---|
+| 1 | 三层 user/project/local memory | Phase 1.2 | 单用户场景动机不成立（见 §4.9.2 Step 1） |
+| 2 | LLM-driven memory consolidation | Phase 1.2 | 30-100 条体量用不上 |
+| 3 | `/project` 切换 CLI 命令 | Phase 1.2 | 不分层（#1）就不需要 |
+| 4 | Memory MD sidecar 双向 sync | Phase 1.2 | over-engineering（200 行 sync 代码换批量编辑能力，单用户场景用不上） |
+| 5 | Memory 评估 baseline 对比（with vs without） | Phase 1.2 | 本期只做绝对召回，达 80% 即合格 |
+| 6 | 多文件 `.agenta/rules/*.md` | Phase 1.3 | 单用户 CLI 场景单文件够；真有需求再扩 |
+| 7 | rules frontmatter（`alwaysApply` / `globs`） | Phase 1.3 | 单文件不需要选择性应用 |
+| 8 | rules 热加载 / 文件 watch | Phase 1.3 | 重启进程即可，避免引入 inotify 依赖 |
+| 9 | CLI `/rules` 命令 | Phase 1.3 | rules.md 用编辑器写更顺手 |
+| 10 | `chunk_id` 进 LLM 回答 | Phase 1.4 | 噪音大、用户不关心；只在 `CitationBuilder` 内部用 |
+| 11 | 跨轮 sources 累计编号（DD3 否决方案 b） | Phase 1.4 | 状态复杂、不直观；每轮独立 `[1]` 起最易理解 |
+| 12 | LLM 引用真假回环校验 | Phase 1.4 | 程序后置生成 + LLM 只能从 prompt 抄编号，结构上规避；如 LLM 写了 `[7]` 但 builder 没分配，静默丢弃该 `[n]` |
+| 13 | Memory / project_rules / web_search 等非 RAG 来源的引用 | Phase 1.4 | scope 失控；本期只针对 `rag_search` tool 一种来源 |
+| 14 | sources 块 token 预算控制 | Phase 1.4 | 每条引用 ~80 字符，10 条 ~800 字，远低于 ctx；超阈值再优化 |
+| 15 | Phase 1.3 prompt 冲突处理（base/rules"系统保留区"机制） | Phase 1.4 | 按 [design.md §3.5.2](design.md#352-三层注入顺序) 用户主权约定走 — rules 覆盖 base 是设计本意 |
+| 16 | `.agenta/rules.md.example` 加引用规则示例 | Phase 1.4 | 默认引用规则放 base 即足够；example 保持极简，由用户自行决定是否覆盖 |
+| 17 | 引用粒度自适应（按文件类型/长度变化） | Phase 1.4 | scope 失控；统一 `file + heading + page_no` 一种粒度 |
+| 18 | PDF 行内高亮跳转 | Phase 1.4 | 跟点击跳转同性质但更深；CLI/Chainlit 文本溯源已足够 |
+| 19 | 跨 session 引用累计编号 | Phase 1.4 | 跟跨轮（#11）同理；引用编号是单 session 单轮的局部约定 |
+| 20 | sources 块多语言适配 | Phase 1.4 | 单用户场景；用户用什么语言提问，sources 字段（file/heading）就照原样显示即可 |
+| 21 | 跨 catalog 来源（git 拉远程 skill 包） | Phase 1.5 | 个人项目场景；不引入分发 / 依赖管理 |
+| 22 | skill 热重载 | Phase 1.5 | 重启 agent 即可，避免引入 watcher；同 #8 思路 |
+| 23 | 编辑 skill 的 UI | Phase 1.5 | SKILL.md 用编辑器写更顺手；同 #9 思路 |
+| 24 | skill 间显式调用链（skill A 内调用 skill B） | Phase 1.5 | LLM 自主激活已能复用 skill；显式调用引入依赖管理负担 |
+| 25 | 多 agent 分工（Planner + Executor 拆不同 LLM / 多模型流水线） | Phase 2.1 | 单 LLM 自主 `make_plan` 已够 Phase 2 业务；多模型流水线 cost / 调试复杂度暴涨；个人助手场景动机不成立（类比 #1 三层 memory） |
+| 26 | Plan 模板预制（按任务类型 hard-code"代码任务 X 步 / 学习任务 Y 步"等模板） | Phase 2.1 | 让 LLM 自由生成 plan 更 agent-y；模板沦为 hard-code 限制；如未来 LLM 自由 plan 太散乱再加（类比 #6 多文件 rules） |
+
+
 # 5. Future
 
 本节登记当前 scope 之外、本架构可扩展但暂不实现的方向，供未来评估。
 
-## 5.1. C4 企业内 Q&A
+## 5.1. 企业内 Q&A
 
 **场景**：把 AgentA 部署为公司内部 HR / IT / 销售知识库的多轮问答助手，员工自然语言提问，Agent 检索 + 多轮澄清 + 流程引导。
 
@@ -1408,7 +1716,7 @@ import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
 
 **为何当前不做**
 
-- 演示数据需伪造，面试故事性弱（不如 C1/C3 是"自己每天在用"）
+- 演示数据需伪造，面试故事性弱（不如个人知识助手 / 学习研究助理是"自己每天在用"）
 - 增量代码是"企业 infra 维度"（权限/审计/SSO），与本项目想展示的 RAG + Agent 技术深度无强相关
 - 三场景全做会让 [项目定位](#471-项目定位) 散掉（同时面向"个人学习者"和"企业员工"，定位不聚焦）
 

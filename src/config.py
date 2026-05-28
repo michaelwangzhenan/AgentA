@@ -97,7 +97,7 @@ PROVIDER_CONFIGS: dict[str, ProviderConfig] = {
     "qwen": ProviderConfig(
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         api_key=os.getenv("QWEN_API_KEY", ""),
-        model="qwen3-max",
+        model="qwen3-max-2026-01-23",
         extra_body={"enable_thinking": False},
     ),
     "minimax": ProviderConfig(
@@ -175,9 +175,6 @@ def iter_active_embeddings() -> list[tuple[str, str, str]]:
         return items
     return [(alias, mn, c) for alias, (mn, c) in EMBEDDING_MODELS.items()]
 
-
-# ── CLI 目录 ──────────────────────────────────────────────────────────────────
-SKILLS_DIR: str = ".agenta/skills"
 
 # 默认 (model_name, collection_name)，供未指定时使用
 DEFAULT_EMBEDDING_MODEL: str

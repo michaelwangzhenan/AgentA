@@ -17,7 +17,7 @@
 - **二阶段精排**：使用 `bge-reranker-base` Cross-Encoder 对召回结果做精排，并按 per-model 阈值过滤低质 chunk。
 - **Query 改写**：Multi-Query 同义改写、HyDE 假设性答案、跨语言翻译轴三档可独立开关。
 - **多格式解析**：覆盖 PDF / DOCX / PPTX / XLSX / Markdown / HTML / TXT 七种格式，PDF 扫描件自动 OCR 兜底（rapidocr-onnxruntime）。
-- **评估闭环**：`tools/rag_eval/runner.py` 内置黄金集 + `hit@1，hit@3，hit@k` / `MRR` 指标，每次调优结果落盘 Markdown 报告（含 Miss 用例诊断），便于跨轮 diff。
+- **评估方法**：`tools/rag_eval/runner.py` 内置黄金集 + `hit@1，hit@3，hit@k` / `MRR` 指标，每次调优结果存储 Markdown 报告（含 Miss 用例诊断），便于跨轮 diff。
 
 ### 1.2.Agent
 
@@ -27,7 +27,7 @@
 - **跨 Session 记忆**：独立 SQLite 存储用户偏好/事实，可自动提取也可通过"记住这个"指令即时触发。
 - **项目偏好规则**：项目根放一份 `.agenta/rules.md`（参考 Cursor Rules / AGENTS.md），Agent 启动时自动注入到 system prompt，例如"始终用中文""引用要带页码"，不必每轮重申；可被会话中临时偏好覆写。
 - **答案带可溯源引用**：使用 RAG 召回时，正文带 `[1] [2]` 行内标号，回答末尾自动追加 `— sources —` 块写明文件 / 章节 / 页号，可直接溯源到知识库原文；同源 chunk 自动合并，反 LLM 幻觉引用。
-- **Skills 加载**：`.agenta/skills/<name>/SKILL.md` 兼容 agentskills.io 规范，Agent 自动发现并按需调用，也支持 `/<skill_name>` 手动激活。
+- **Skills 框架**：`.agenta/skills/<name>/SKILL.md` 兼容 agentskills.io 规范；启动 banner 显式回显已加载 / 失败列表，LLM 主动按 description 认出该用哪个 skill 并按指令执行（也支持 `/<name>` 手动激活），skill 内调 `search_knowledge` 自动复用引用机制。
 - **三套实现可选**：`PYTHON`（手写 ReAct，默认）/ `LANGCHAIN`（create_agent 驱动）/ `AUTOGPT`（Plan-Execute 双循环）。
 
 

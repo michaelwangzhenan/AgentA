@@ -32,7 +32,7 @@ for _noisy in ("httpx", "httpcore", "openai", "chromadb", "sentence_transformers
 # src.* 模块必须在 load_dotenv() 之后导入，确保 src.config 读取到 .env 的值
 from src.cli.ui import BANNER, HELP_TEXT
 from src.cli.tab_complete import make_completer
-from src.cli.skill_loader import scan_skills, SkillInfo
+from src.cli.skill_loader import scan_skills, SkillInfo, format_scan_banner
 from src.cli import handlers
 from src.memory.chat_history import ChatHistoryStore
 import src.config as config
@@ -40,9 +40,6 @@ import src.config as config
 # 如果用户记忆功能开启，提前导入以备 main() 中直接使用
 if config.USER_MEMORY_ENABLED:
     from src.memory.user_memory import UserMemoryStore
-
-SKILLS_DIR: str = config.SKILLS_DIR
-
 
 def _warm_up_rag_models() -> None:
     """启动时预加载 embedding（及可选 reranker），并提示用户勿误以为卡死。"""
@@ -74,12 +71,17 @@ def main() -> None:
     # 共享 ChatHistoryStore 实例，整个进程生命周期内复用
     chat_history = ChatHistoryStore()
 
-    # 启动时扫描 Skills 目录
-    skills_map: dict[str, SkillInfo] = scan_skills(SKILLS_DIR)
+    # 启动时扫描 Skills 目录，并把"已加载 N 个 / 失败 N 个"显式打到 stdout，
+    # 让用户即便没看 log 也能感知 skill 状态（满足 Step 0 验收 ④ "失败可见"）
+    scan = scan_skills()
+    skills_map: dict[str, SkillInfo] = scan.loaded
     # 供 CLI 匹配的 {/name: body} 字典（tab 补全 + 手动激活）
     skill_cmds: dict[str, str] = {f"/{name}": info.body for name, info in skills_map.items()}
-    if skills_map:
-        print(f"🔧 已加载 Skills：{', '.join(skill_cmds)}\n")
+    success_line, failure_block = format_scan_banner(scan)
+    print(success_line)
+    if failure_block:
+        print(failure_block)
+    print()
 
     # Extended Thinking 运行时配置（初始值从 config 读取）
     thinking_cfg = ThinkingConfig.from_config()
@@ -181,7 +183,8 @@ def main() -> None:
                         print("已取消。\n")
                 continue
             case "/reload-skills":
-                skills_map = scan_skills(SKILLS_DIR)
+                scan = scan_skills()
+                skills_map = scan.loaded
                 skill_cmds = {f"/{name}": info.body for name, info in skills_map.items()}
                 # 重建 Agent，使 system_prompt 中的 catalog 立即刷新
                 agent = handlers.make_agent(
@@ -189,8 +192,11 @@ def main() -> None:
                     SYSTEM_PROMPT, session_id=agent.session_id,
                     user_memory=user_memory,
                 )
-                cmds_str = ', '.join(skill_cmds) if skill_cmds else '（无）'
-                print(f"🔄 Skills 已重新加载，共 {len(skill_cmds)} 个：{cmds_str}\n")
+                success_line, failure_block = format_scan_banner(scan)
+                print(f"🔄 Skills 已重新加载。{success_line}")
+                if failure_block:
+                    print(failure_block)
+                print()
                 continue
             case "/save":
                 save_arg = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""

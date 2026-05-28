@@ -40,7 +40,7 @@ for _noisy in ("httpx", "httpcore", "openai", "chromadb", "sentence_transformers
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 
 from src.cli import handlers
-from src.cli.skill_loader import SkillInfo, scan_skills
+from src.cli.skill_loader import SkillInfo, format_scan_banner, scan_skills
 from src.cli.ui import HELP_TEXT
 from src.memory.chat_history import ChatHistoryStore
 import src.config as config
@@ -53,8 +53,6 @@ else:  # pragma: no cover - 类型占位
 from src.agent.agent import SYSTEM_PROMPT, ThinkingConfig
 
 logger = logging.getLogger(__name__)
-
-SKILLS_DIR: str = config.SKILLS_DIR
 
 
 # ── Intercept /api/agenta/* before Chainlit's SPA catch-all ───────────────
@@ -333,12 +331,16 @@ async def _handle_command(state: AppState, user_input: str) -> bool:
             ).send()
             return True
         case "/reload-skills":
-            state.skills_map = await asyncio.to_thread(scan_skills, SKILLS_DIR)
+            scan = await asyncio.to_thread(scan_skills)
+            state.skills_map = scan.loaded
             state.skill_cmds = {f"/{name}": info.body for name, info in state.skills_map.items()}
             state.agent = _make_agent(state, session_id=state.agent.session_id)
             _set_state(state)
-            cmds_str = ", ".join(state.skill_cmds) if state.skill_cmds else "（无）"
-            await cl.Message(content=f"🔄 Skills 已重新加载，共 {len(state.skill_cmds)} 个：{cmds_str}", actions=_get_actions()).send()
+            success_line, failure_block = format_scan_banner(scan)
+            parts = [f"🔄 Skills 已重新加载。{success_line}"]
+            if failure_block:
+                parts.append(f"```\n{failure_block}\n```")
+            await cl.Message(content="\n\n".join(parts), actions=_get_actions()).send()
             return True
         case "/save":
             save_arg = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""
@@ -380,7 +382,8 @@ async def _handle_command(state: AppState, user_input: str) -> bool:
 @cl.on_chat_start
 async def on_chat_start() -> None:
     chat_history = ChatHistoryStore()
-    skills_map = scan_skills(SKILLS_DIR)
+    scan = scan_skills()
+    skills_map = scan.loaded
     skill_cmds = {f"/{name}": info.body for name, info in skills_map.items()}
     thinking_cfg = ThinkingConfig.from_config()
     user_memory = UserMemoryStore(config.USER_MEMORY_DB_PATH) if config.USER_MEMORY_ENABLED else None
@@ -402,16 +405,17 @@ async def on_chat_start() -> None:
     )
     _set_state(state)
 
-    skill_hint = f"已加载 Skills: {', '.join(skill_cmds)}\n" if skill_cmds else ""
-    await cl.Message(
-        content=(
-            "AgentA Chainlit UI 已启动。\n\n"
-            f"当前 Session: `{state.agent.session_id}`\n"
-            f"{skill_hint}"
-            "输入 `/help` 查看命令列表。"
-        ),
-        actions=_get_actions(),
-    ).send()
+    # Step 0 验收 ④"失败可见"：启动消息显式列出已加载 + 失败明细（与 CLI 同文案）
+    success_line, failure_block = format_scan_banner(scan)
+    parts = [
+        "AgentA Chainlit UI 已启动。",
+        f"当前 Session: `{state.agent.session_id}`",
+        success_line,
+    ]
+    if failure_block:
+        parts.append(f"```\n{failure_block}\n```")
+    parts.append("输入 `/help` 查看命令列表。")
+    await cl.Message(content="\n\n".join(parts), actions=_get_actions()).send()
     await _send_settings(state)
 
 

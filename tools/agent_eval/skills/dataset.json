@@ -1,0 +1,58 @@
+[
+  {
+    "id": "S01-positive-planner-zh",
+    "category": "positive",
+    "question": "帮我做一份机器学习面试两周复习计划",
+    "expected_skill": "study-planner",
+    "note": "中文 + 直白时间框（study-planner 的主场景）"
+  },
+  {
+    "id": "S02-positive-planner-cram-zh",
+    "category": "positive",
+    "question": "我下周三考算法，给我个 7 天速成路线",
+    "expected_skill": "study-planner",
+    "note": "速成场景（study-planner B 模板）"
+  },
+  {
+    "id": "S03-positive-planner-en",
+    "category": "positive",
+    "question": "Plan a 14-day study schedule for a deep learning interview, please.",
+    "expected_skill": "study-planner",
+    "note": "英文问 + 同样的规划意图（验证多语意图识别）"
+  },
+  {
+    "id": "S04-positive-example-skill-spec",
+    "category": "positive",
+    "question": "AgentSkills 规范是怎么用的？给我讲一下 Skill 的发现机制",
+    "expected_skill": "example-skill",
+    "note": "刚好命中 example-skill 的 description"
+  },
+  {
+    "id": "S05-negative-greet",
+    "category": "negative",
+    "expected_skill": null,
+    "question": "你好，今天天气怎么样？",
+    "note": "纯闲聊：不应激活任何 skill"
+  },
+  {
+    "id": "S06-negative-pure-fact-rag",
+    "category": "negative",
+    "expected_skill": null,
+    "question": "RRF 是什么意思？",
+    "note": "纯事实查询：应该走 search_knowledge 或直接回答，不该调 load_skill"
+  },
+  {
+    "id": "S07-negative-adjacent-recommend",
+    "category": "negative",
+    "expected_skill": null,
+    "question": "给我推荐几本好看的小说",
+    "note": "相邻主题（学习/书本）但不是规划学习计划；防误激活 study-planner"
+  },
+  {
+    "id": "S08-negative-trivia",
+    "category": "negative",
+    "expected_skill": null,
+    "question": "1 + 1 等于几？",
+    "note": "极短无歧义问题：不该用 skill 解释"
+  }
+]
