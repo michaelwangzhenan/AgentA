@@ -297,7 +297,7 @@ RAG_TRANSLATE_QUERY_ENABLED: bool = os.getenv("RAG_TRANSLATE_QUERY_ENABLED", "tr
 # true 开启 Extended Thinking；目前 Claude（原生 SDK）和 Qwen3 支持，其余 provider 静默降级
 THINKING_ENABLED: bool = os.getenv("THINKING_ENABLED", "false").lower() == "true"
 # thinking budget_tokens — 推荐：简单推理 1024~3000，复杂分析 8000~16000，AI Agent 32000+
-# 当 THINKING_ADAPTIVE=true 时，本值作为自动估算的上限（cap），而非固定值。
+# 当 THINKING_ADAPTIVE=true 时，本值作为自动估算的上限，而非固定值。
 THINKING_BUDGET: int = int(os.getenv("THINKING_BUDGET", "8000"))
 # true 开启 Adaptive Thinking：每次推理前自动估算合适的 budget，而非使用固定值。
 # 仅在 THINKING_ENABLED=true 时生效。

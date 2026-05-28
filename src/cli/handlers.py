@@ -247,6 +247,30 @@ def _print_token_usage(agent: "Agent", out: OutputFn = _stdout) -> None:
         out(f"  📊 Token：输入 {u.prompt_tokens} + 输出 {u.completion_tokens} = 合计 {u.total_tokens}\n")
 
 
+# Phase 2.1 — plan step 状态对应的 CLI 渲染图标
+_PLAN_STATUS_ICONS: dict[str, str] = {"success": "✓", "failed": "✗", "skipped": "⏭"}
+
+
+def _render_plan_created(payload: dict[str, Any]) -> None:
+    """CLI 渲染 plan_created：📋 + 所有未勾选 step checkbox 一次性打印。"""
+    steps = payload.get("steps") or []
+    if not steps:
+        return
+    sys.stdout.write("\n📋 Plan：\n")
+    for s in steps:
+        sys.stdout.write(f"  ☐ {s.get('id')}. {s.get('text', '')}\n")
+    sys.stdout.flush()
+
+
+def _render_plan_step_end(payload: dict[str, Any]) -> None:
+    """CLI 渲染 plan_step_end：✓/✗/⏭ + step_id + 可选 note。"""
+    icon = _PLAN_STATUS_ICONS.get(str(payload.get("status", "")), "•")
+    note = (payload.get("note") or "").strip()
+    suffix = f"（{note}）" if note else ""
+    sys.stdout.write(f"  {icon} 第 {payload.get('step_id')} 步{suffix}\n")
+    sys.stdout.flush()
+
+
 def run_query(agent: "Agent", question: str, out: OutputFn = _stdout) -> None:
     """执行一次问答并打印结果，捕获中断和运行时异常。"""
     out("")
@@ -265,13 +289,21 @@ def run_query(agent: "Agent", question: str, out: OutputFn = _stdout) -> None:
         sys.stdout.write(chunk)
         sys.stdout.flush()
 
-    # 用 AgentAPI 的统一事件入口：按 event.type 派发到 _on_token_chunk（仅 token_chunk）。
-    # 其它事件（thinking_chunk / tool_call_* / final_answer / error / info）在 CLI 这里不渲染。
+    # 用 AgentAPI 的统一事件入口：按 event.type 派发：
+    # - token_chunk:    流式正文
+    # - plan_created:   📋 plan checkbox 整块
+    # - plan_step_end:  ✓/✗/⏭ 单步状态行
+    # - plan_step_start: CLI 不渲染（GUI 端用于高亮当前步，CLI 静默）
+    # - 其它事件:        CLI 这里不渲染
     set_event_cb = getattr(agent, "set_event_callback", None)
 
     def _event_router(event) -> None:
         if event.type == "token_chunk":
             _on_token_chunk(event.payload.get("text", ""))
+        elif event.type == "plan_created":
+            _render_plan_created(event.payload)
+        elif event.type == "plan_step_end":
+            _render_plan_step_end(event.payload)
 
     if set_event_cb is not None:
         set_event_cb(_event_router)

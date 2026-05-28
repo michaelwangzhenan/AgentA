@@ -14,4 +14,5 @@ Agent 公共层 helpers —— 三种 Agent 实现（Python / LangChain / AutoGP
 - tool_call_engine.py     ToolCallEngine     工具调用编排（执行 + 格式化 + 引导提示 + 写历史）
 - thinking_policy.py      ThinkingPolicy     adaptive thinking budget 估算
 - citation_builder.py     CitationBuilder    RAG 引用展示编排（注册 / 提取 / 渲染 sources 块）
+- plan_manager.py         PlanState          Phase 2.1 Plan-Execute 状态封装 + reconstruct_from_messages
 """

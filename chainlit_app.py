@@ -202,12 +202,18 @@ async def _stream_agent_reply(state: AppState, user_input: str) -> tuple[str, cl
     loop = asyncio.get_running_loop()
     thinking_queue: asyncio.Queue[str | None] = asyncio.Queue()
     token_queue: asyncio.Queue[str | None] = asyncio.Queue()
+    # Phase 2.1: plan 事件桥接到 Chainlit 主消息流（plan_created/plan_step_end）；
+    # plan_step_start 仅用于 GUI step UI 高亮，本期不渲染（[iter_2.md §4.13.1 #11](../docs/iter_2.md#4131-deferred-backlog)）。
+    plan_queue: asyncio.Queue[tuple[str, dict] | None] = asyncio.Queue()
 
     def thinking_callback(chunk: str) -> None:
         loop.call_soon_threadsafe(thinking_queue.put_nowait, chunk)
 
     def token_callback(chunk: str) -> None:
         loop.call_soon_threadsafe(token_queue.put_nowait, chunk)
+
+    def plan_callback(event_type: str, payload: dict) -> None:
+        loop.call_soon_threadsafe(plan_queue.put_nowait, (event_type, payload))
 
     async def consume_thinking() -> None:
         msg: cl.Message | None = None
@@ -221,6 +227,31 @@ async def _stream_agent_reply(state: AppState, user_input: str) -> tuple[str, cl
             await msg.stream_token(token)
         if msg is not None:
             await msg.update()
+
+    async def consume_plan() -> None:
+        """plan_created → 推送 📋 整块 checkbox；plan_step_end → 推送单步完成消息。"""
+        while True:
+            item = await plan_queue.get()
+            if item is None:
+                break
+            event_type, payload = item
+            if event_type == "plan_created":
+                steps = payload.get("steps") or []
+                if not steps:
+                    continue
+                lines = ["📋 **Plan**", ""]
+                for s in steps:
+                    lines.append(f"- [ ] {s.get('id')}. {s.get('text', '')}")
+                await cl.Message(content="\n".join(lines)).send()
+            elif event_type == "plan_step_end":
+                icon = {"success": "✅", "failed": "❌", "skipped": "⏭️"}.get(
+                    str(payload.get("status", "")), "•",
+                )
+                note = (payload.get("note") or "").strip()
+                suffix = f" — {note}" if note else ""
+                await cl.Message(
+                    content=f"{icon} **Step {payload.get('step_id')}**{suffix}"
+                ).send()
 
     # 预建答案消息，流式写入 token
     answer_msg = cl.Message(content="")
@@ -243,12 +274,15 @@ async def _stream_agent_reply(state: AppState, user_input: str) -> tuple[str, cl
             thinking_callback(event.payload.get("text", ""))
         elif event.type == "token_chunk":
             token_callback(event.payload.get("text", ""))
+        elif event.type in ("plan_created", "plan_step_end"):
+            plan_callback(event.type, event.payload)
 
     if hasattr(state.agent, "set_event_callback"):
         state.agent.set_event_callback(_event_router)
 
     thinking_task = asyncio.create_task(consume_thinking())
     token_task = asyncio.create_task(consume_tokens())
+    plan_task = asyncio.create_task(consume_plan())
     try:
         answer = await asyncio.to_thread(state.agent.run, user_input)
     finally:
@@ -256,8 +290,10 @@ async def _stream_agent_reply(state: AppState, user_input: str) -> tuple[str, cl
             state.agent.set_event_callback(None)
         loop.call_soon_threadsafe(thinking_queue.put_nowait, None)
         loop.call_soon_threadsafe(token_queue.put_nowait, None)
+        loop.call_soon_threadsafe(plan_queue.put_nowait, None)
         await thinking_task
         await token_task
+        await plan_task
 
     # 若 provider 不支持流式（token_received=False），直接填充完整答案
     if not token_received:

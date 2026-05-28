@@ -81,9 +81,10 @@ def get_tools(skill_bodies: dict[str, str] | None = None) -> list[dict[str, Any]
     """
     返回当前可用的工具列表。
 
-    若传入 skill_bodies，追加 load_skill 工具定义（name 字段限定为已有名称枚举）。
+    永远包含基础 4 tool + 3 个 plan tool（make_plan / update_step / abort_plan）。
+    若传入 skill_bodies，再追加 load_skill 工具定义（name 字段限定为已有名称枚举）。
     """
-    tools = list(TOOLS)
+    tools = list(TOOLS) + list(_PLAN_TOOLS)
     if skill_bodies:
         tools.append(_build_load_skill_def(list(skill_bodies.keys())))
     return tools
@@ -209,6 +210,89 @@ TOOLS: list[dict[str, Any]] = [
                     },
                 },
                 "required": ["url"],
+            },
+        },
+    },
+]
+
+
+# ── Phase 2.1 — Plan-Execute 三 tool JSON Schema ─────────────────────────────
+
+_PLAN_TOOLS: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "make_plan",
+            "description": (
+                "对**多步骤复杂任务**（多文档对比 / 学习计划 / 目标+步骤型 / 多源资料综合等）"
+                "先列计划再动手执行；单实体查询、单事实回答、简单闲聊请**不要**调用本工具。"
+                "调用后会返回结构化 plan ack 与第 1 步指引；下一轮按指引调用对应业务 tool 执行第 1 步，"
+                "每完成一步调用 update_step 更新状态。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "steps": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "3-6 个步骤的简洁描述列表（每步一句话，10-30 字最佳），"
+                            "按执行先后顺序排列。例：['列出我的 RAG 项目', '各项目召回策略', '横向对比', '总结']"
+                        ),
+                        "minItems": 1,
+                    },
+                },
+                "required": ["steps"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_step",
+            "description": (
+                "完成 plan 的某一步后调用，标记该步状态。仅在已有 active plan（先调过 make_plan）时调用。"
+                "调用后会返回当前进度与下一步指引；若 plan 全部完成会提示进入总结。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "step_id": {
+                        "type": "integer",
+                        "description": "要更新的步骤编号（从 1 起，对应 make_plan 时的步骤顺序）",
+                        "minimum": 1,
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["success", "failed", "skipped"],
+                        "description": "步骤结果：success=完成、failed=失败（可重试或转下一步）、skipped=主动跳过",
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "可选备注（≤ 60 字），如失败原因摘要或本步关键发现。",
+                    },
+                },
+                "required": ["step_id", "status"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "abort_plan",
+            "description": (
+                "active plan 出现不可恢复错误（如多次失败、依赖前置数据完全缺失）时主动中止整个 plan。"
+                "中止后下一轮请基于已收集信息直接总结答案，并向用户说明未完成原因。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reason": {
+                        "type": "string",
+                        "description": "中止原因摘要（≤ 60 字），将出现在 plan 总结里给用户看。",
+                    },
+                },
+                "required": [],
             },
         },
     },
@@ -481,6 +565,115 @@ def _tool_fetch_url(url: str, max_chars: int = 3000) -> ToolResult:
     return result
 
 
+# ── Phase 2.1 — Plan-Execute tool 实现 ───────────────────────────────────────
+
+
+def _tool_make_plan(
+    steps: Any,
+    messages: list[dict[str, Any]] | None = None,
+) -> ToolResult:
+    """生成 plan。本轮仅记录步骤、不联动执行 step 1（D5 分轮执行 / two-stage）；下一轮 LLM 按 ack 指引推进。"""
+    if not isinstance(steps, list) or not steps:
+        return ToolResult(
+            status="error",
+            content="make_plan(steps) 必须是非空字符串列表，例如 steps=['列项目', '对比', '总结']",
+        )
+    if not all(isinstance(s, str) and s.strip() for s in steps):
+        return ToolResult(
+            status="error",
+            content="make_plan(steps) 每个元素必须是非空字符串。",
+        )
+    cleaned = [s.strip() for s in steps]
+    plan_block = "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(cleaned))
+    return ToolResult(
+        status="ok",
+        content=(
+            f"📋 已记录 plan，共 {len(cleaned)} 步：\n{plan_block}\n\n"
+            "请按 plan 顺序逐步执行：每完成一步调用 update_step 更新状态再继续下一步；"
+            "失败步可重试，多次失败考虑 abort_plan。\n"
+            f"→ 下一步：第 1 步 — {cleaned[0]}（请调用合适的业务 tool）"
+        ),
+    )
+
+
+def _tool_update_step(
+    step_id: Any,
+    status: Any,
+    note: str = "",
+    messages: list[dict[str, Any]] | None = None,
+) -> ToolResult:
+    """更新 plan 某步状态；从 messages reconstruct 当前 plan 后渲染进度 + 下一步指引。"""
+    if not isinstance(step_id, int) or step_id < 1:
+        return ToolResult(
+            status="error",
+            content=f"update_step(step_id) 必须是 ≥1 整数，收到：{step_id!r}",
+        )
+    if status not in ("success", "failed", "skipped"):
+        return ToolResult(
+            status="error",
+            content=(
+                "update_step(status) 必须是 success / failed / skipped 之一，"
+                f"收到：{status!r}"
+            ),
+        )
+
+    # 延迟 import 避免 src.agent.core 反向依赖（保持 tools.py 极简依赖链）
+    from src.agent.core.plan_manager import reconstruct_from_messages
+
+    state = reconstruct_from_messages(messages or [])
+    if state is None or not state.steps:
+        return ToolResult(
+            status="error",
+            content="未找到 active plan — 请先调用 make_plan 创建 plan，再 update_step。",
+        )
+    step = next((s for s in state.steps if s.id == step_id), None)
+    if step is None:
+        return ToolResult(
+            status="error",
+            content=(
+                f"step_id={step_id} 不在当前 plan 范围内"
+                f"（plan 共 {len(state.steps)} 步：1..{len(state.steps)}）"
+            ),
+        )
+
+    status_icon = {"success": "✓", "failed": "✗", "skipped": "⏭"}[status]
+    note_suffix = f"（{note.strip()}）" if note and note.strip() else ""
+    head = f"{status_icon} step {step_id}「{step.text}」状态：{status}{note_suffix}"
+
+    done, total = state.progress()
+    if state.is_complete():
+        return ToolResult(
+            status="ok",
+            content=(
+                f"{head}\n\nplan 已完成 ({done}/{total})。请综合 plan 各步骤结果总结最终答案。"
+            ),
+        )
+    nxt = state.next_pending_step()
+    assert nxt is not None  # is_complete() is False 蕴含
+    return ToolResult(
+        status="ok",
+        content=(
+            f"{head}\n\n当前进度：{done}/{total}\n"
+            f"→ 下一步：第 {nxt.id} 步 — {nxt.text}（请调用合适的业务 tool）"
+        ),
+    )
+
+
+def _tool_abort_plan(
+    reason: str = "",
+    messages: list[dict[str, Any]] | None = None,
+) -> ToolResult:
+    """中止 active plan；plan 状态由 reconstruct_from_messages 后续感知 aborted=True。"""
+    reason_suffix = f"，原因：{reason.strip()}" if reason and reason.strip() else ""
+    return ToolResult(
+        status="ok",
+        content=(
+            f"🛑 plan 已中止{reason_suffix}。请基于已收集的信息总结最终答案，"
+            "并向用户说明未完成的部分及原因。"
+        ),
+    )
+
+
 def _tool_load_skill(name: str, skill_bodies: dict[str, str]) -> ToolResult:
     """
     加载 Skill 的完整指令正文，返回 <skill_content> 包裹的内容。
@@ -511,16 +704,20 @@ def execute_tool(
     args: dict[str, Any],
     skill_bodies: dict[str, str] | None = None,
     citation_builder: "CitationBuilder | None" = None,
+    messages: list[dict[str, Any]] | None = None,
 ) -> ToolResult:
     """
     根据工具名称路由执行对应工具函数。
 
     Args:
-        name: 工具名称，对应 TOOLS 列表中的 function.name。
+        name: 工具名称，对应 TOOLS / `_PLAN_TOOLS` 中的 function.name。
         args: 工具参数字典，由 LLM 的 tool_calls 解析而来。
         skill_bodies: {skill_name: body} 映射，供 load_skill 工具使用。
         citation_builder: Phase 1.4 引用编排器；仅 search_knowledge 路径透传，
                           其它工具无引用语义直接忽略。
+        messages: 当前轮已累计的 messages（含本次 assistant tool_calls）；仅 plan
+                  tools（update_step / abort_plan）用于 reconstruct plan 状态。
+                  非 plan 工具忽略此参数。
 
     Returns:
         ToolResult：status 为 "ok"/"empty"/"error"，content 为工具输出内容。
@@ -551,6 +748,20 @@ def execute_tool(
                 return _tool_load_skill(
                     name=args["name"],
                     skill_bodies=skill_bodies or {},
+                )
+            case "make_plan":
+                return _tool_make_plan(steps=args.get("steps"), messages=messages)
+            case "update_step":
+                return _tool_update_step(
+                    step_id=args.get("step_id"),
+                    status=args.get("status"),
+                    note=args.get("note", ""),
+                    messages=messages,
+                )
+            case "abort_plan":
+                return _tool_abort_plan(
+                    reason=args.get("reason", ""),
+                    messages=messages,
                 )
             case _:
                 return ToolResult(

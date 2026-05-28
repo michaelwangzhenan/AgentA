@@ -108,6 +108,36 @@ SYSTEM_PROMPT = """你是用户的**个人私有知识库助手**。知识库里
 - web_search：通过搜索引擎查找互联网信息，返回真实 URL 列表及摘要
 - fetch_url：抓取指定网页正文（SPA 页面自动通过 Jina Reader 处理）
 
+## 第 0 步（最高优先级）：是否需要 make_plan？
+
+**收到任何用户问题，先按本节判断是否复杂任务；下方所有规则（必查场景 / 工具策略 / 引用规范）只在"判定为简单任务"或"已在某 plan step 内执行"时才适用。**
+
+**复杂任务（必须先 `make_plan(steps=[...])`，本轮不再调任何业务 tool）**：
+
+1. 多文档对比 / 多源资料综合（"对比我做过的 3 个项目"、"汇总 X 和 Y 的差异"）
+2. 学习计划 / 目标规划（"做一份 ML 面试两周复习计划"、"准备 X 考试"、"这个年龄如何学 X"）
+3. 目标 + 多步骤型（"分析 X 项目并给出改进建议"、"调研 X 技术栈并推荐方案"、"先查 X 再做 Y"）
+4. 涉及 ≥3 个独立子查询（每个子查询需单独调 `search_knowledge` / 其他业务 tool）
+
+**简单任务（**不要** make_plan，进入下方常规流程）**：
+
+1. 单实体查询（"我邮箱"、"AgentA 是什么"）
+2. 单一事实回答（"今天周几"、"X 的定义"）
+3. 闲聊（"你好"、"谢谢"、"再见"）
+4. 多轮上下文里的简单追问（"它的最大重传次数"、"再展开一下第 2 点"）
+
+**plan 执行规范**：
+
+- `make_plan(steps=["列项目", "各项目召回", "对比", "总结"])` — 3-6 步，每步 10-30 字，按顺序排列
+- **同一轮 LLM 调用中绝不能同时发 `make_plan` 和业务 tool**；`make_plan` 调完就 return，下一轮按 plan 第 1 步指引执行
+- 每完成一步：`update_step(step_id=1, status="success", note="可选简要发现")`
+- 某步失败：`update_step(step_id=N, status="failed", note="失败原因")` — 之后自主决定重试（重新调业务 tool）/ 跳过（`update_step(status="skipped")` 转下一步）/ 中止（`abort_plan(reason=...)`）
+- plan 全部完成后：直接综合各步骤的 tool 结果产出最终答案，**不再调 tool**
+
+---
+
+> 下面的"必须首先 search_knowledge / 完整工具使用策略 / 引用规范" **仅适用于**：（a）第 0 步判定为简单任务；或（b）当前正在执行某个 plan step 内的业务调用。
+
 ## 必须首先调用 search_knowledge 的场景（无条件、不解释、不反问）
 
 **只要满足任意一条，就必须先调 search_knowledge，再基于结果回答**：
@@ -125,6 +155,7 @@ SYSTEM_PROMPT = """你是用户的**个人私有知识库助手**。知识库里
 - 纯闲聊（"你好 / 谢谢 / 再见 / 现在几点"）；
 - 用户明确说"不用查 / 直接回答即可"；
 - 多轮对话中用户在追问刚才已经查过的内容（可基于上一轮的 search_knowledge 结果回答，但仍可二次确认）。
+- **本问题已被第 0 步判定为复杂任务**：此时把"先查"职责下放给 plan 第 1 步，本轮只发 `make_plan`。
 
 ## 调用 search_knowledge 前的 query 准备
 
@@ -143,7 +174,9 @@ F. **top_k**：默认让它用 8，**绝对不要传 1 或 2**（你看不到全
 
 ## 完整工具使用策略（严格遵守）
 
-1. 收到问题，先按 A~F 准备 query，**调用 `search_knowledge`**。
+> 前置门：先过第 0 步。若该问题已被判为复杂任务，本节 1~6 由 plan 的各 step 分别承担；本轮只发 `make_plan` 并 return。
+
+1. 收到问题（且第 0 步判为简单 / 或本轮在执行某 plan step），先按 A~F 准备 query，**调用 `search_knowledge`**。
 2. **看 source 与相关性分数再下判断**：
    - 如果 top 候选的 source 看起来与问题明显无关（比如问"我在哪家公司"却返回 `a2_SaS/0_SaS.md` 的三层架构 PPT），
      **不要硬把这条结果讲成答案**——回到第 3 步重试，或如实说"知识库中暂无相关内容"。
@@ -175,10 +208,16 @@ F. **top_k**：默认让它用 8，**绝对不要传 1 或 2**（你看不到全
 4. 若用户偏好（rules / memory）显式要求不写引用，遵循用户偏好优先。
 """
 
-# 最大工具调用轮次，防止 LLM 陷入工具调用死循环
+# 最大工具调用轮次（baseline，无 active plan 时使用），防止 LLM 陷入工具调用死循环
 MAX_TOOL_ROUNDS: int = 8
-# 含最终回答在内的总推理轮次上限
+# 含最终回答在内的总推理轮次上限（baseline）
 MAX_TOTAL_ROUNDS: int = 12
+# Phase 2.1 plan-aware 硬上限：plan 步数自适应放大也不超此值，防极端
+MAX_HARD_CAP_ROUNDS: int = 50
+# Phase 2.1 plan 步预算：每步预留 N 次 tool 调用（含业务 tool + update_step）
+_PLAN_ROUNDS_PER_STEP: int = 4
+# Plan-aware total 上限相对 tool 上限的额外余量（含 make_plan + final answer）
+_PLAN_TOTAL_HEADROOM: int = 4
 
 
 class Agent:
@@ -333,13 +372,20 @@ class Agent:
             payload={"message": "agent.run.start", "session_id": self.session_id},
         ))
 
-        for iteration in range(1, self.max_iterations + 1):
-            logger.info("[Agent] 第 %d 轮推理，messages 长度: %d", iteration, len(messages))
+        for iteration in range(1, MAX_HARD_CAP_ROUNDS + 1):
+            # Phase 2.1 — 每轮按 active plan 步数重算 tool/total 上限（无 plan 退化为 baseline）
+            eff_tool_max, eff_total_max = self._compute_effective_caps(messages)
+            if iteration > eff_total_max:
+                break  # 下方 fallback 路径处理"达最大迭代次数"
+            logger.info(
+                "[Agent] 第 %d 轮推理，messages 长度: %d，caps=(tool=%d, total=%d)",
+                iteration, len(messages), eff_tool_max, eff_total_max,
+            )
 
             # 工具轮次达上限时，去掉 tools 参数，让 LLM 强制生成文本回答
-            active_tools = get_tools(self._skill_bodies) if tool_rounds < MAX_TOOL_ROUNDS else None
+            active_tools = get_tools(self._skill_bodies) if tool_rounds < eff_tool_max else None
             if active_tools is None:
-                logger.warning("[Agent] 工具调用已达上限 %d 轮，强制生成最终回答", MAX_TOOL_ROUNDS)
+                logger.warning("[Agent] 工具调用已达上限 %d 轮（含 plan 自适应），强制生成最终回答", eff_tool_max)
 
             # 调用 LLM：开启 thinking 时走流式 thinking 分支，否则普通 chat()
             self._thinking_started = False
@@ -426,8 +472,8 @@ class Agent:
             ))
             return fallback
 
-        # 超过最大迭代次数
-        logger.warning("[Agent] 达到最大迭代次数 %d，强制返回", self.max_iterations)
+        # 超过自适应总迭代上限（含 plan 步数扩展）
+        logger.warning("[Agent] 达到自适应总轮次上限，强制返回")
         self.last_usage = (
             TokenUsage(_prompt_tokens, _comp_tokens, _prompt_tokens + _comp_tokens)
             if (_prompt_tokens or _comp_tokens) else None
@@ -442,6 +488,23 @@ class Agent:
             payload={"text": fallback, "usage": self.last_usage},
         ))
         return fallback
+
+    def _compute_effective_caps(self, messages: list[dict[str, Any]]) -> tuple[int, int]:
+        """
+        Phase 2.1 plan-aware：按当前 active plan 步数动态扩展 round 上限。
+
+        无 active plan / plan 已完结 → 退化为 baseline（`MAX_TOOL_ROUNDS`/`self.max_iterations`）。
+        active plan N 步 → 按 N × `_PLAN_ROUNDS_PER_STEP` 估算 tool 预算，加 baseline 取大；
+        total 上限相对 tool 上限加 `_PLAN_TOTAL_HEADROOM` 余量。任何情况下都不超 `MAX_HARD_CAP_ROUNDS`。
+        """
+        from src.agent.core.plan_manager import reconstruct_from_messages
+        plan = reconstruct_from_messages(messages)
+        if plan is None or not plan.steps or plan.is_complete():
+            return MAX_TOOL_ROUNDS, self.max_iterations
+        n = len(plan.steps)
+        eff_tool = min(MAX_HARD_CAP_ROUNDS, max(MAX_TOOL_ROUNDS, n * _PLAN_ROUNDS_PER_STEP + 2))
+        eff_total = min(MAX_HARD_CAP_ROUNDS, max(self.max_iterations, eff_tool + _PLAN_TOTAL_HEADROOM))
+        return eff_tool, eff_total
 
     def activate_skill(self, name: str, body: str) -> bool:
         """

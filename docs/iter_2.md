@@ -1506,7 +1506,7 @@ AI 跑过的单 case 烟雾（验证脚本不崩）：
 |---|---|
 | **用户故事** | 作为 AgentA 的用户，遇到**多步骤复杂任务**（如"对比我做过的 3 个 RAG 项目的召回策略"、"帮我做一份 ML 面试两周复习计划"），我希望 agent **先把要做的步骤列给我看**（3-5 步带标号），再分步执行；每步开始 / 完成 / 失败都看得见，做完哪步、错在哪步、整体进度一目了然——不再"黑盒等几十秒不知道在算啥"。**简单查询**（如"我邮箱"、"AgentA 是什么"）继续走原 ReAct，不强制规划、不引入额外延迟。 |
 | **验收标准** | ① **复杂任务有可见 plan 且质量过线**：我问"对比我做过的 3 个 RAG 项目"时，agent 在动手前**先输出带步骤编号的 plan**（CLI / Chainlit 均可见），且 plan 经 LLM-judge 评分（步骤合理性 / 覆盖度 / 顺序）≥ 4/5<br>② **简单任务不强制 plan**：单实体查询（"我邮箱"等）跳过 plan 直接 ReAct，**不增加任何额外 LLM 调用**（profiler 验证：plan 路径 vs ReAct 路径 token / 延迟对比）<br>③ **进度可见**（CLI 端）：plan 每步**开始 / 完成 / 失败**在 CLI 有清晰标记（☐→✓/✗），任意时刻看得出"现在第 N 步 / 共 M 步"；Chainlit 端本期沿用既有渲染方式（plan 文本可见即可，step UI 留 [§4.13.1 #11](#4131-deferred-backlog暂时不做)）<br>④ **LLM 自主判定准（≥ 80% 准确率）**：要不要 plan / 几步 / 每步是啥，全由 LLM 自主（通过 `make_plan` tool 调用），不靠外部规则 / 关键词 hard-code；Step 5 评估用人工标注的"该 plan / 不该 plan"golden set 验证 LLM 判定准确率 ≥ 80%<br>⑤ **失败不静默**：某步工具调用失败，**有明确错误标记 + 可恢复策略**（LLM 自主决定重试 / 跳过 / 中止三选一），错误信息能定位到哪步 + 失败原因<br>⑥ **plan 完整持久化进 chat_history**：plan 作为带结构化 payload 的特殊 assistant message 写库（含 `steps: list[{id, text, status, note?}]` JSON），每次 `update_step` 作为 tool message 写库；**下一轮 LLM 看 history 能完整 reconstruct plan 状态**；用户回看 session（`/sessions` 切回）也能看到上次 plan |
-| **Scope** | **本期做**：<br>① 新增 `make_plan(steps: list[str])` / `update_step(step_id, status, note?)` 两个 tool（LLM 自主调用，走现有 `ToolCallEngine` 通道）；<br>② `Agent.run()` 加 plan-aware 分支（识别到 active plan 后驱动 LLM 逐步推进）；<br>③ `EventBus` 新增 `plan_created` / `plan_step_start` / `plan_step_end` 三类事件；<br>④ CLI 渲染 plan checkbox 进度（Chainlit step UI 留 [§4.13.1 #11](#4131-deferred-backlog暂时不做)）；<br>⑤ `MAX_TOOL_ROUNDS` / `MAX_TOTAL_ROUNDS` 视 plan 步数自适应放大；<br>⑥ `SYSTEM_PROMPT` 加"何时该 `make_plan`"指导段；<br>⑦ Step 5 评估配套：`tools/agent_eval/plan/` 新建 golden set（plan / non-plan 各 5-8 case）+ plan 质量打分（LLM-judge 形式，是否抽 `judge` framework 留 Step 2 决策，呼应 [§4.13.1 #4](#4131-deferred-backlog暂时不做) "第 2 次复用时上 framework"）<br>**暂时不做 / 显式不做**：详 [§4.13.1 #10 #11](#4131-deferred-backlog暂时不做)（plan 执行前用户审批 / Chainlit step UI）与 [§4.13.2 #25 #26](#4132-dropped永久不做)（多 agent 分工 / plan 模板预制）|
+| **Scope** | **本期做**：<br>① 新增 `make_plan(steps: list[str])` / `update_step(step_id, status, note?)` / `abort_plan(reason?)` 三个 tool（LLM 自主调用，走现有 `ToolCallEngine` 通道）；<br>② `Agent.run()` 加 plan-aware 分支（识别到 active plan 后驱动 LLM 逐步推进）；<br>③ `EventBus` 新增 `plan_created` / `plan_step_start` / `plan_step_end` 三类事件；<br>④ CLI 渲染 plan checkbox 进度（Chainlit step UI 留 [§4.13.1 #11](#4131-deferred-backlog暂时不做)）；<br>⑤ `MAX_TOOL_ROUNDS` / `MAX_TOTAL_ROUNDS` 视 plan 步数自适应放大；<br>⑥ `SYSTEM_PROMPT` 加"何时该 `make_plan`"指导段；<br>⑦ Step 5 评估配套：`tools/agent_eval/plan/` 新建 golden set（plan / non-plan 各 5-8 case）+ plan 质量打分（LLM-judge 形式，是否抽 `judge` framework 留 Step 2 决策，呼应 [§4.13.1 #4](#4131-deferred-backlog暂时不做) "第 2 次复用时上 framework"）<br>**暂时不做 / 显式不做**：详 [§4.13.1 #10 #11](#4131-deferred-backlog暂时不做)（plan 执行前用户审批 / Chainlit step UI）与 [§4.13.2 #25 #26](#4132-dropped永久不做)（多 agent 分工 / plan 模板预制）|
 | **依赖** | `Agent.run()` ReAct loop（[`agent.py:283-444`](../src/agent/agent.py)）；`ToolCallEngine`（plan tool 走同一执行通道，[`tool_call_engine.py`](../src/agent/core/tool_call_engine.py)）；`EventBus`（[`event_bus.py`](../src/agent/core/event_bus.py)，新事件类型增量加）；`ChatHistoryStore`（plan 作为特殊 message 持久化，**不新建表**，复用现有 schema）；`CitationBuilder`（plan 步骤内 `search_knowledge` 复用现有引用编号机制）；`tools/agent_eval/` framework（[§4.10](#410-配套-toolstoolsagent_eval)） + 新建 `judge` 模块（[§4.8.2 评估工具列表](#482-评估工具列表)） |
 
 
@@ -1515,7 +1515,7 @@ AI 跑过的单 case 烟雾（验证脚本不崩）：
 
 
 **现状对照表** 
-- 左列 ①-⑥ 引 Step 0 验收
+- 验收 ①-⑥ 引 Step 0 验收
 - Scope ①-⑦ 引 Step 0 Scope
 - Gap 编号 `P21-G*` 是 Phase 2.1 局部命名（避免跟 [§4.6.2 G1-G9](#462-合并后的所有可能-feature-列表) / [§4.9.5 H1](#4131-deferred-backlog暂时不做) 重名）。
 
@@ -1527,7 +1527,7 @@ AI 跑过的单 case 烟雾（验证脚本不崩）：
 | **验收 ④** LLM 自主判定 plan/non-plan ≥ 80% | `tools/agent_eval/` 现 3 个 eval（`memory/recall_golden.py` / `skills/recall_skill.py` / `perf_eval.py`）；**无 `plan/` 目录、无 golden dataset**；3 脚本各自实现 `_load_dataset` / `_build_*` / `_render_markdown` / `main()`，**未抽出 `runner` / `report` / `judge` framework**（[§4.8.2 评估工具列表](#482-评估工具列表) 4 个 framework 工具均 0 行实现） | G5 / G6 |
 | **验收 ⑤** 失败不静默 + LLM 自决重试/跳过/中止 | `ToolCallEngine.process()`（[`tool_call_engine.py:73-139`](../src/agent/core/tool_call_engine.py)）单步失败已有 `TOOL_EMPTY_HINT` / `"[工具失败]"` 提示让 LLM 下轮决策，但**无 plan 维度的步级失败语义**（"跳过该步" / "中止整个 plan"）；`MAX_TOOL_ROUNDS=8` 硬编码，plan 步数多易撞顶 | G7 / G8 |
 | **验收 ⑥** plan 完整持久化 + 下一轮 reconstruct | `ChatHistoryStore.messages` schema（[`chat_history.py:7-22`](../src/memory/chat_history.py)）：`role / content / tool_calls(JSON) / tool_call_id / timestamp`，**无额外结构化 payload 列**；assistant `tool_calls` 字段语义专属"LLM 发的 function call"；plan 落位有 3 种候选（content 写 markdown / 借位 tool_calls JSON / 加新列 `payload`），影响 reconstruct 路径 | G9 |
-| **Scope ①** `make_plan` / `update_step` 两 tool | `src/agent/tools.py` 现 4 tool + `get_tools(skill_bodies)` 已支持运行时动态追加（`load_skill` 套路）；`execute_tool` 用 `match name:` 路由 — 新 tool 加法和 `load_skill` 同套路 | — _（路径清晰）_ |
+| **Scope ①** `make_plan` / `update_step` / `abort_plan` 三 tool | `src/agent/tools.py` 现 4 tool + `get_tools(skill_bodies)` 已支持运行时动态追加（`load_skill` 套路）；`execute_tool` 用 `match name:` 路由 — 新 tool 加法和 `load_skill` 同套路 | — _（路径清晰）_ |
 | **Scope ②** Agent.run() plan-aware 分支 | 现 loop 二分支：`if message.tool_calls: ... else: 最终回答`；plan-aware 第三态（"plan 在执行中"）需嵌入 | G10 |
 | **Scope ③** EventBus 三类新事件 | 同验收 ③（G3） | — |
 | **Scope ④** CLI 渲染 plan checkbox | 同验收 ③（G4） | — |
@@ -1558,10 +1558,169 @@ AI 跑过的单 case 烟雾（验证脚本不崩）：
 | plan 执行前用户审批 | [§4.13.1 #10](#4131-deferred-backlog暂时不做) punt |
 | 多 agent 分工 / plan 模板预制 | [§4.13.2 #25 / #26](#4132-dropped永久不做) 永久 punt |
 | `CitationBuilder` 跨步引用复用 | OK — 现 builder 每轮 new instance、跨同轮多次 `search_knowledge` 累计编号（[`agent.py:322`](../src/agent/agent.py)），plan 内多步 search 天然走同一 builder |
-| `get_tools(skill_bodies)` 动态追加 | OK — `make_plan` / `update_step` 走 `load_skill` 同套路追加，无结构性阻碍 |
+| `get_tools(skill_bodies)` 动态追加 | OK — `make_plan` / `update_step` / `abort_plan` 走 `load_skill` 同套路追加，无结构性阻碍 |
 | `ChatHistoryStore` schema 已兼容 tool message | 部分 OK — schema 兼容 tool role + tool_call_id；plan 整体如何"结构化"持久仍待 G9 拍板 |
 
 **Step 2 待拍板 gap 集中**：核心控制流 G2 / G10 + schema G9 + 评估 framework 抽象时机 G5 / G6。小-中增量 gap（G1 / G3 / G4 / G7 / G8）形状已定，跟随主决策走即可。
+
+
+**Step 2 · 实施计划**
+
+**决策矩阵（5 项均锁定）**
+
+| # | 决策点 | 锁定方案 | 一句话理由 |
+|---|---|---|---|
+| **D1** | plan 持久化 schema（[G9](#step-1--review-现状)） | plan 走标准 OpenAI Function Calling 通道：`user → assistant(tool_calls=[make_plan(arguments={steps:[...]})]) → tool(ack 文本)` 三条 message 自然落库；`update_step` 同套路。重建时读 `assistant.tool_calls[*].function.arguments` JSON 字符串解出 steps，不依赖 tool message 的 ack 文本 | OpenAI Function Calling 协议契合；**0 schema 改动**（兼容现 `chat_history.messages`）；reconstruct 遍历 `assistant.tool_calls` 即得 |
+| **D2** | plan-aware 控制流（[G2 + G10](#step-1--review-现状)） | 嵌入式 plan state：现 `Agent.run()` loop 加 `active_plan` 变量，每轮 LLM 调用前若 active 则注入"当前 step / plan 状态"提示，LLM 通过 `update_step` tool 自驱状态前进 | single loop + tool-driven state 是行业标准（OpenAI Runs / LangGraph）；跟现 ReAct 同形（"看 messages → LLM 决定 → tool 执行"）；现 loop 加 ~50 行即可 |
+| **D3** | 步级失败处理（[G7](#step-1--review-现状)） | 100% LLM 自决：失败信号注入 messages（沿用 `ToolCallEngine` 现有 hint 机制），LLM 自决重试 / `update_step(status=failed)` 跳过 / `abort_plan` 中止 | 跟 [`tool_call_engine.py:131-136`](../src/agent/core/tool_call_engine.py) 现有 hint 注入套路一致；符合 [Step 0 验收 ⑤](#496-agent-循环升级-phase-21) "LLM 自主决定三选一"路线；程序 0 干预 |
+| **D4** | LLM-judge framework 抽象时机（[G5 + G6](#step-1--review-现状)） | 本期仅 ad-hoc `tools/agent_eval/plan/recall_plan.py` 内联 judge（仿 `recall_skill` 套路）；framework 抽象留 Phase 2.2 Plan 业务时一并上 | 严守 [§4.8.2 评估工具列表](#482-评估工具列表) "**第 2 次复用时**上 framework" 硬约束；Phase 2.1 plan judge 是 LLM-judge **第 1 次**用（`recall_golden`/`recall_skill` 是关键词 check 不算）；Phase 2.2 Plan 业务正是第 2 次（兑现 [§4.13.1 #4](#4131-deferred-backlog暂时不做)） |
+| **D5** | `make_plan` 是否同轮执行第 1 步（G10 衍生） | **分轮执行**（two-stage）：`make_plan` tool response 仅返回 ack 文本（含步骤清单 + "下一步：第 1 步 — ..." 指引），LLM **下一轮**才执行 step 1 | LangGraph PlanAndExecute / OpenAI Assistant 标准两阶段；UX 自然（用户先看 plan 再看执行，匹配 [Step 0 用户故事](#496-agent-循环升级-phase-21) "先把要做的步骤列给我看，再分步执行"）；验收 ① "动手前先输出 plan" 自动满足；为未来 [§4.13.1 #10](#4131-deferred-backlog暂时不做) 用户审批预留 turn 分隔通道 |
+
+**端到端流程**
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as 用户
+    participant A as Agent.run()
+    participant L as LLM
+    participant T as Tools
+    participant E as EventBus
+    participant C as CLI
+
+    U->>A: "对比我做过的 3 个 RAG 项目"
+    A->>L: chat(messages + tools)
+    L-->>A: tool_call: make_plan(steps=[1..N])
+    A->>T: execute make_plan
+    T-->>A: ToolResult ack 文本（含步骤清单 + 下一步指引）
+    A->>E: publish plan_created
+    E->>C: 渲染 📋 Plan checkbox
+
+    Note over A,L: 下一轮（D5 = 分轮执行 / two-stage）
+
+    loop 每个 step
+        A->>L: chat(messages + plan 提示 + tools)
+        L-->>A: tool_call: search_knowledge / web_search / ...
+        A->>E: publish plan_step_start
+        A->>T: execute 业务 tool
+        T-->>A: ToolResult
+        A->>L: chat(messages + tool result)
+        L-->>A: tool_call: update_step(id, status)
+        A->>E: publish plan_step_end
+        E->>C: 渲染 ✓ / ✗
+    end
+
+    A->>L: chat（plan 完结）
+    L-->>A: 最终回答（走现 final_answer 路径）
+    A-->>U: 答案 + sources 块
+```
+
+**实施步骤拆解**（按 gap 编号映射，主控制流 → 周边）
+
+| 序 | 改动 | Gap / Scope | 文件 | 改动量 |
+|---|---|---|---|---|
+| 1 | `make_plan` / `update_step` / `abort_plan` 三 tool 定义 + `execute_tool` 路由 | Scope ① + D3 | [`src/agent/tools.py`](../src/agent/tools.py) | + ~80 行 |
+| 2 | `Agent.run()` loop 加 plan-aware 分支：active_plan 识别 + 每轮注入 plan 状态提示 + plan 步数自适应 `MAX_*_ROUNDS` | G2 / G10 / G8 | [`src/agent/agent.py:336-444`](../src/agent/agent.py) | + ~60 行 |
+| 3 | `SYSTEM_PROMPT` 加 "何时该 `make_plan`" 指导段 | G1 | [`src/agent/agent.py:100-176`](../src/agent/agent.py) | + ~30 行 |
+| 4 | `EventBus` 加 `plan_created` / `plan_step_start` / `plan_step_end` 三类事件 + `ALL_EVENT_TYPES` 同步 | G3 | [`src/agent/core/event_bus.py:27-43`](../src/agent/core/event_bus.py) | + ~5 行 |
+| 5 | plan reconstruct helper：从 messages 历史遍历 `make_plan` / `update_step` / `abort_plan` tool message 重建当前 plan 状态 | G9 + D1 | 新建 `src/agent/core/plan_state.py`（含 dataclass `PlanStep`/`PlanState` + `reconstruct_from_messages()`） | + ~80 行 |
+| 6 | CLI plan 渲染：订阅 plan_* 事件 → 输出 📋 / ☐ / ✓ / ✗ | G4 | [`main.py`](../main.py)（新增订阅 + 渲染函数） | + ~40 行 |
+| 7 | Chainlit plan 文本渲染：`_event_router` 增 plan_* case → `cl.Message` 推送 plan 文本（Chainlit step UI 留 [§4.13.1 #11](#4131-deferred-backlog暂时不做)） | G4 | [`chainlit_app.py:241-248`](../chainlit_app.py) | + ~30 行 |
+| 8 | UT：plan tool 行为 / loop plan-aware 分支 / EventBus 新事件 / reconstruct 正确性 | Step 4 配套 | `tests/test_plan_tools.py`（新）+ 扩 `tests/test_agent.py` / `test_event_bus.py` | + ~250 行 |
+| 9 | `tools/agent_eval/plan/recall_plan.py` + `dataset.json`：plan / non-plan 各 5-8 case + ad-hoc LLM-judge（仿 `recall_skill` 套路） | G5 / G6 / D4 | 新建 `tools/agent_eval/plan/` | + ~300 行 |
+| 10 | `design.md §3.x Agent 循环` 同步：新增"Plan-Execute 叠加层"小节（数据流 / 持久化 schema / 评估方法） | Step 6 | [`docs/design.md`](design.md) | + ~80 行 |
+
+**Step 3 · 代码实现**
+
+| 改动 | 实现位置 |
+|---|---|
+| Plan 状态封装（D1 reconstruct 入口） | 新建 [`src/agent/core/plan_manager.py`](../src/agent/core/plan_manager.py)：`PlanStep` / `PlanState` dataclass（`next_pending_step` / `is_complete` / `progress` / `update`）+ `reconstruct_from_messages()`（倒序找最新 `make_plan` → 正向叠加 `update_step` / `abort_plan`）+ `_tc_name` / `_tc_args` 容错 SDK 对象与 SQLite 反序列化 dict 两种 tool_call 形态。Step 2 实施步骤拆解的 `plan_state.py` 改名 `plan_manager.py`，对齐 [`agenta-conventions.mdc §2 公共层后缀`](../.cursor/rules/agenta-conventions.mdc) 的 `*_manager.py` 标准 |
+| `core/__init__.py` 模块清单 | 追加 `plan_manager.py` 一行 |
+| Plan 三 tool 定义 + 执行（Scope ① + D3） | [`src/agent/tools.py`](../src/agent/tools.py)：新增 `_PLAN_TOOLS` 三 JSON Schema（`make_plan` / `update_step` / `abort_plan`，含 enum 锁定 status 字段、numeric 校验 step_id、description 写明"何时该用 / 何时不该用"）+ `_tool_make_plan` / `_tool_update_step` / `_tool_abort_plan` 三函数（含 step_id 越界 / 非 int / status 非枚举 / 无 active plan 等 5 类入参校验 → `ToolResult(status="error")`；`update_step` 内部调 `reconstruct_from_messages` 给 LLM 返回进度 + 下一步指引；plan 完成态自动提示 "可总结"）；`execute_tool` 新增 `messages` kwarg + 三 case 路由；`get_tools()` 把 `_PLAN_TOOLS` 永远塞进返回列表 |
+| ToolCallEngine plan 事件叠加 + messages 透传 | [`src/agent/core/tool_call_engine.py`](../src/agent/core/tool_call_engine.py)：`process()` 调 `execute_tool` 时新增 `messages=messages` kwarg（给 plan tool reconstruct 用）；新增 `_maybe_publish_plan_events(tool_name, tool_args, messages)` 私有方法，仅当 `result.status == "ok"` 时按 tool name 分发：`make_plan` → 发 `plan_created` + `plan_step_start(1)`；`update_step` → 发 `plan_step_end` + 若仍有 pending 步发下一 `plan_step_start`；`abort_plan` 不发 plan 事件（终止信号由 final_answer 文案承载） |
+| Agent.run() plan-aware loop（G2 / G8 / G10） | [`src/agent/agent.py`](../src/agent/agent.py)：新增模块常量 `MAX_HARD_CAP_ROUNDS=50` / `_PLAN_ROUNDS_PER_STEP=4` / `_PLAN_TOTAL_HEADROOM=4`；新增 `_compute_effective_caps(messages) -> (tool_cap, total_cap)` 方法（无 plan / 已完成 / aborted → baseline；active plan N 步 → `max(8, N×4+2)` & 总上限 +4 余量，硬上限 50 兜底）；主 loop `for iteration in range(1, self.max_iterations+1)` 改为 `range(1, MAX_HARD_CAP_ROUNDS+1)` + 循环内每轮 `_compute_effective_caps()` 重算 + `if iteration > eff_total_max: break` 提前退；`active_tools` 判断改用 `eff_tool_max`；fallback 文案改 "达到自适应总轮次上限" |
+| SYSTEM_PROMPT make_plan 指导段（G1） | `src/agent/agent.py:SYSTEM_PROMPT`：在 `## 引用规范` 前插入 `## 何时使用 make_plan（Plan-Execute）` 段（约 30 行）：4 类复杂任务必触发 + 4 类简单任务禁用 + plan 执行规范（步数 / status 三选一 / 完成后总结 / 不要同轮 plan + 业务 tool 混发）|
+| EventBus 三类 plan 事件 | [`src/agent/core/event_bus.py`](../src/agent/core/event_bus.py)：追加 `EVENT_PLAN_CREATED` / `EVENT_PLAN_STEP_START` / `EVENT_PLAN_STEP_END` 三常量 + 写入 `ALL_EVENT_TYPES` 元组 |
+| CLI plan 渲染（G4） | [`src/cli/handlers.py`](../src/cli/handlers.py)：新增 `_PLAN_STATUS_ICONS = {"success": "✓", "failed": "✗", "skipped": "⏭"}` 字典 + `_render_plan_created(payload)` 打印 📋 + 所有 ☐ checkbox + `_render_plan_step_end(payload)` 打印 ✓/✗/⏭ + 可选 note；`run_query._event_router` 增 `plan_created` / `plan_step_end` 两 case（`plan_step_start` CLI 静默，留给 GUI 高亮用） |
+| Chainlit plan 文本桥接（G4） | [`chainlit_app.py:_stream_agent_reply`](../chainlit_app.py)：仿 thinking/token queue 模式新增 `plan_queue` + `plan_callback` + `consume_plan` 协程；`_event_router` 加 `plan_created` / `plan_step_end` case；`plan_created` 推 `📋 Plan` + markdown checkbox 块；`plan_step_end` 推 ✅/❌/⏭️ + step 编号 + note。`plan_step_start` 桥接位预留但本期不渲染（[§4.13.1 #11](#4131-deferred-backlog暂时不做) step UI 留到后续） |
+| 加载器 UT（plan_manager） | [`tests/test_plan_manager.py`](../tests/test_plan_manager.py)（新）：22 case 分 4 组 — `TestPlanStateBasics`（6 case：from_step_texts / 空 plan / next_pending / progress / 完成态 / aborted 含 pending）+ `TestPlanStateUpdate`（5 case：success+note / failed+note / unknown step_id / 非法 status / 禁止反向标 pending）+ `TestReconstructFromMessages`（9 case：空 / 无 make_plan / 全 pending / 含 update / 累积更新 / abort / 多 plan 取最新 / SDK 对象形态 / 非法 args 容错）+ `TestEdgeCases`（2 case：非 str step / 缺 steps arg） |
+| Plan tools UT | [`tests/test_tools.py`](../tests/test_tools.py)：扩 19 case — `TestPlanToolsSchema`（4 case：get_tools 含三 tool / steps 必填 / status enum 锁定 / abort 无必填）+ `TestMakePlanExecute`（5 case：valid + 第一步指引 / 空 steps / 非 list / 非 str 元素 / 空白元素）+ `TestUpdateStepExecute`（8 case：success 返回下一步 / 完成 plan / failed+note / skipped / 无 active plan / 越界 step_id / 非法 status / 非 int step_id）+ `TestAbortPlanExecute`（2 case：含 reason / 无 reason） |
+| EventBus plan 事件 UT | [`tests/test_event_bus.py`](../tests/test_event_bus.py)：扩 3 case — `TestPlanEventTypes`（in ALL_EVENT_TYPES / publish-subscribe 往返 / 异常隔离） |
+| Agent events plan UT | [`tests/test_agent_events.py`](../tests/test_agent_events.py)：扩 8 case — `TestPlanEventFlow`（4 case：make_plan 触发 plan_created + plan_step_start / update_step 触发 plan_step_end + 下一 plan_step_start / 完成 plan 只发 plan_step_end / abort 不发 plan 事件）+ `TestPlanAwareCaps`（4 case：无 plan baseline / active plan N=5 扩到 22 / 已完成回退 / aborted 回退） |
+| CLI 渲染器 UT | [`tests/test_cli_handlers.py`](../tests/test_cli_handlers.py)：扩 6 case — `TestPlanRenderers`（plan_created checkbox 块 / 空 steps noop / step_end success+note / failed without note / skipped 图标 / 未知 status 兜底 •） |
+| e2e UT：plan SQLite roundtrip | [`tests/test_memory.py`](../tests/test_memory.py)：扩 4 case — `TestPlanRoundtripFromSqlite`（make_plan-only reload / 完整生命周期 status+note 保留 / abort 持久化 / 多 plan 取最新）；锁住 D1 决策（plan 完全依赖 messages 历史 + 0 schema 改动）不退化 |
+| e2e UT：Agent 多轮 plan | [`tests/test_agent.py`](../tests/test_agent.py)：扩 3 case — `TestAgentPlanExecuteE2E`（two_step_plan_full_lifecycle 6 轮全跑 + 完整事件序列；plan_with_failed_step_then_recovers — LLM 看 failed 后自决 skipped；plan_aborted_mid_way_returns_final_text — abort 后正常出最终答）；mock execute_tool 按 tool name 分流（search_knowledge 假 hit + plan tools 走真实实现），保证 reconstruct 跨真 SQLite + 真 plan 逻辑 |
+| Plan eval runner | [`tools/agent_eval/plan/eval_plan.py`](../tools/agent_eval/plan/eval_plan.py)（新）：仿 `recall_skill.py` 套路 — 独立 `_BASE_PROMPT`（内嵌完整 make_plan 教学段，跟 SYSTEM_PROMPT 解耦避免漂移）+ `_extract_make_plan_args` / `_extract_other_tool_names` 解析 tool_calls + `_judge_recall` 按 category 判 positive/negative（含 min_steps / max_steps 范围校验）+ `_llm_judge_plan_structure`（LLM-judge 4 维度：粒度 / 顺序 / 覆盖度 / 业务对齐，0-5 分；容错剥离 markdown 代码块再 JSON 解析）+ Markdown 报告（核心指标 + positive/negative 分组 + 全 case 总览 + positive 通过 case 的 plan 详情 spot-check + Fail 详情）+ 双阈值退出码（识别率 ≥ 80% AND 结构均分 ≥ 3.5/5） |
+| Plan golden dataset | [`tools/agent_eval/plan/dataset.json`](../tools/agent_eval/plan/dataset.json)（新）：10 case，5 positive（多文档对比 / 学习计划 / 目标+建议 / 多源调研 / 多文档汇总，各含 `min_steps` / `max_steps` 范围）+ 5 negative（单实体 / 单事实 / 闲聊 / 追问 / 礼貌结束） |
+| design.md 同步 | [`docs/design.md`](design.md)：§3.1 AgentEvent 表加 plan_* 三行；**新增 §3.8 Plan-Execute** 完整章节（7 子节：3.8.1 数据载体与 reconstruct + PlanStep/PlanState 数据模型 / 3.8.2 三 tool 协议表 / 3.8.3 端到端 Mermaid sequenceDiagram（含 D5 分轮执行标注）/ 3.8.4 上限自适应表 / 3.8.5 失败恢复表 / 3.8.6 与其它模块关系表 / 3.8.7 评估方法）；§5 IMP 公共层表加 `plan_manager` 行 + `tools.py` / `EventBus` / `ToolCallEngine` 行加 plan 备注；§5 代码组织树加 `citation_builder.py` + `plan_manager.py` 两行；顺手修 `[§4.5 ToolCallEngine]` dead link |
+
+> _Step 2 计划微调_：① 新建文件名 `plan_state.py` → `plan_manager.py`（对齐 [agenta-conventions.mdc §2 公共层后缀](../.cursor/rules/agenta-conventions.mdc) 的 `*_manager.py` 标准，含数据 dataclass + reconstruct 函数语义偏 manager）。② 多写一个 `abort_plan` tool（Step 2 计划只列 `make_plan` + `update_step` 两 tool；Scope ① 写"两个 tool" — 实施时按 D3 "100% LLM 自决"语义补 `abort_plan` 让"中止整个 plan"成显式 tool 而非"反复 failed + 自然走 fallback"，跟 LLM 心智更对齐，UT/eval 同步覆盖）。③ Chainlit / chainlit_app.py 不写专门 UT — 跟现状一致（整个 chainlit_app.py 无 UT 覆盖），plan 事件桥接逻辑契约已由 `test_agent_events.py::TestPlanEventFlow` + `test_cli_handlers.py::TestPlanRenderers` 覆盖；省一份框架级 UT 维护成本。
+
+**Step 4 · UT 结果**
+
+```text
+新增模块 UT：
+  tests/test_plan_manager.py   22 passed（新文件）
+  tests/test_tools.py          +19 plan tool case（27 total，原 8）
+  tests/test_event_bus.py      +3 plan 事件 case（16 total，原 13）
+  tests/test_agent_events.py   +8 plan 集成 case（13 total，原 5）
+  tests/test_cli_handlers.py   +6 plan 渲染 case（39 total，原 33）
+  tests/test_memory.py         +4 plan SQLite roundtrip case
+  tests/test_agent.py          +3 plan e2e case（TestAgentPlanExecuteE2E）
+
+全量回归：.venv\Scripts\python -m pytest -m "not integration and not langchain and not autogpt and not extended_providers" -q
+→ 488 passed, 3 skipped, 110 deselected, 0 failed
+```
+
+较 Phase 1.5 末态（423 passed）净增 65（22+19+3+8+6+4+3 = 65），全部来自本节新增 case，0 退化。`ReadLints` 全部 clean。
+
+**Step 5 · 评估**
+
+代码已就绪，dataset 10 case（5 positive + 5 negative）。运行命令：
+
+```bash
+.venv\Scripts\python -m tools.agent_eval.plan.eval_plan                              # 全跑 10 case
+.venv\Scripts\python -m tools.agent_eval.plan.eval_plan --case P01-positive-compare-projects
+.venv\Scripts\python -m tools.agent_eval.plan.eval_plan --no-judge                   # 只看识别（省 LLM-judge 调用）
+.venv\Scripts\python -m tools.agent_eval.plan.eval_plan --no-report                  # 不存储报告
+```
+
+报告存储 `tools/agent_eval/reports/plan-eval-<ts>.md`，含核心指标（识别通过率 + plan 结构均分）/ positive vs negative 分组 / 全 case 总览（含 make_plan 步数 + 结构分）/ positive 通过 case 的 plan 详情 spot-check / Fail 用例详情。**双阈值判据**：识别通过率 ≥ 80%（10 case 需 ≥ 8 通过）AND positive 通过 case 的 plan 结构均分 ≥ 3.5/5，二者都达标才 exit 0。
+
+AI 跑过的 smoke 验证（`--help` 入口 + 模块 import + dataset JSON 解析）通过；完整 10 case 跑 + LLM-judge 评分待用户在配 API key 环境跑一遍，结果回填本表。
+
+**Step 6 · design.md 同步**
+
+新增 [`design.md §3.8 Plan-Execute`](design.md#38-plan-execute)：7 子节 — §3.8.1 数据载体与 reconstruct（含 PlanStep / PlanState dataclass 数据模型表 + 合法 status / 完成态 / 唯一性约定）/ §3.8.2 三 tool 协议表（参数 / 语义 / 返回内容）/ §3.8.3 端到端 Mermaid sequenceDiagram（含 D5 分轮执行标注 + ToolCallEngine 内部 reconstruct 数据流）/ §3.8.4 循环上限自适应表（无 plan baseline / active plan N 步 / 硬上限 50）/ §3.8.5 失败恢复表（LLM 看 update_step 返回后三选一）/ §3.8.6 与其它模块关系（AgentAPI / Session / Prompt / Citation / Skills 各自交互方式）/ §3.8.7 评估方法（UT 路径列举 + plan eval 双阈值判据）。同时 [`§3.1 AgentAPI`](design.md#31-agentapi) AgentEvent 表加 plan_* 三行（payload + 触发时机）；[`§5 IMP 公共层表`](design.md#5imp) 加 `plan_manager` 行 + `tools.py` / `EventBus` / `ToolCallEngine` 行加 plan 备注；§5 代码组织树加 `citation_builder.py` + `plan_manager.py`；顺手修 design.md 内一处 dead link（`[§4.5 ToolCallEngine]` — design.md 无此节，改为普通文本 + 指 §5 IMP 表）。
+
+**Punt 项**：[§4.13.1 #10](#4131-deferred-backlog暂时不做)（plan 执行前用户审批 — D5 分轮执行设计已为该项预留 turn 分隔通道）、[§4.13.1 #11](#4131-deferred-backlog暂时不做)（Chainlit plan step UI — 本期用 `cl.Message` 文本桥接，step UI "高亮当前步"留后续；plan_step_start 事件已 publish，渲染端接驳即可）、[§4.13.2 #25 / #26](#4132-dropped永久不做)（多 agent 分工 / plan 模板预制，永久 punt）。LLM-judge framework 抽象（D4）按 [§4.13.1 #4](#4131-deferred-backlog暂时不做) "第 2 次复用时上 framework" 推到 Phase 2.2 Plan 业务。
+
+
+### 4.9.7 Plan：学习计划生成 (phase 2.2)
+
+> Phase 2 学习/研究助理（[§4.7.1 项目定位](#471-项目定位)）的第 1 个业务 feature。
+> 区别于 [§4.9.6 Phase 2.1](#496-agent-循环升级-phase-21) 的"单 query 内 ephemeral plan"：本期做**跨 session 长期持久化的学习计划**（周/月级），用户给学习目标 → agent 生成阶段计划 → 跨 session 追踪进度。
+
+#### Step 0 — 需求规格 (Requirements)
+
+| 字段 | 内容 |
+|---|---|
+| **用户故事** | 我说"我想 8 周准备 ML 面试" / "我想学 RAG" → agent 用 `study-planner` skill 生成阶段性学习计划（含周次任务 / 里程碑）并**持久化到 SQLite**；后续任何 session 我问"我学到哪了 / 下一步该干啥" agent 能查出来告诉我；我说"今天完成了 X 任务" agent 能 update 进度 + 鼓励 + 推下一步；我说"我不学这个了"能 abandon 计划；同时支持多个学习目标并存（如同时学 ML 和 5G），通过 `/study switch` 切换 active plan |
+| **验收标准** | ① **计划生成质量**：给学习目标 → 自动出阶段计划（阶段数 ≤ 12 / 每阶段 3-6 任务），LLM-judge 评分（完整性 / 顺序合理性 / 可执行性 / 时间分配）≥ 4/5<br>② **跨 session 恢复**：当前 session 创建计划 → 重启 agent → 新 session 问"我学到哪了"能恢复出完整 plan + 进度，准确率 100%<br>③ **进度更新可用**：用户口头报告（"完成了 FastAPI 教程"）→ agent 调 `update_study_progress` 正确 mark 对应任务 + 推下一步，召回准确率 ≥ 80%（LLM-judge）<br>④ **多 plan 切换**：`/study list` 列出所有 plan、`/study switch <plan_id>` 切换 active plan、`/study show` 看当前 plan 全貌<br>⑤ **LLM-judge framework 抽出**：新建 `tools/agent_eval/judge/` 通用 helper（兑现 [§4.13.1 #4](#4131-deferred-backlog暂时不做) / [§4.9.6 D4](#496-agent-循环升级-phase-21) "第 2 次复用时上 framework"），本期至少覆盖 Plan 质量 judge + Phase 2.1 plan recall judge 改造接入（≥ 2 use case 验证抽象合理） |
+| **Scope** | **本期做**：<br>① 新建 `learning_plans` + `learning_tasks` 二表 + `LearningPlanStore` 数据层（D1）<br>② 3 个 tool：`create_study_plan(goal, weeks?)` / `update_study_progress(plan_id, task_id, status, note?)` / `query_study_status(plan_id?)`（D3 走 `study-planner` skill 内显式调用）<br>③ `study-planner` skill 强化：从纯 prompt 升级为接入新 tool 的 plan-aware skill；`create_study_plan` 内部走 Phase 2.1 plan-execute（D5 嵌套：① 查目标领域 KB / web → ② 列阶段 → ③ 列任务 → ④ 落库）<br>④ Agent 启动时若有 active learning_plan 注入 `<active_study_plan>` system context<br>⑤ CLI `/study` 命令组：`list` / `show [plan_id]` / `switch <plan_id>` / `abandon <plan_id>`（D2 多 plan）<br>⑥ `tools/agent_eval/judge/` helper 抽出（D6）+ Phase 2.1 plan judge 改造接入<br>⑦ Phase 2.2 golden set：`tools/agent_eval/plan_business/`（计划生成 / 进度更新各 5-8 case）<br>**暂时不做**：详 [§4.13.1 #12 #13 #14](#4131-deferred-backlog暂时不做)<br>**显式不做**：详 [§4.13.2 #27 #28 #29](#4132-dropped永久不做) |
+| **依赖** | [§4.9.6 Phase 2.1](#496-agent-循环升级-phase-21) plan-execute loop（D5 嵌套复用 `make_plan` / `update_step`）/ [§4.9.5 Phase 1.5](#495-skills-框架强化-phase-15) `study-planner` skill / `ChatHistoryStore` SQLite 复用底层（独立 table 但同库）/ [§4.9.2 Phase 1.2](#492-memory-管理-phase-12) `UserMemory`（学习偏好可叠加）/ [§4.10 配套 tools](#410-配套-toolstoolsagent_eval) framework + 新抽 `judge` 模块 |
+
+**关键决策摘要**（D1-D7，完整推导留 [Step 2](#step-2--实施计划-2)）：
+
+| # | 决策点 | 选用 | 一句话理由 |
+|---|---|---|---|
+| **D1** | 数据模型 | 独立 `learning_plans` + `learning_tasks` 二表 | 跨 session 长期持久化场景；与 Phase 2.1 寄生 messages **对症下药**（学习计划不能扫所有 session 才能查"我学到哪了"） |
+| **D2** | 多计划并存 | 多 plan 并存 + `/study switch` | 满足"同时学 ML 和 5G"；只多一个 `active_plan_id` 标记，复杂度可控 |
+| **D3** | Plan 创建路径 | `study-planner` skill 内显式调 `create_study_plan` tool | Phase 1.5 已验证 prompt 指引能让 LLM 正确调 plan tool |
+| **D4** | 进度更新粒度 | 任务级 | 行业标准（Anki / Todoist / Notion 一致）；阶段级太粗用户无成就感 |
+| **D5** | Plan 生成是否嵌套 Phase 2.1 plan-execute | 嵌套 | 学习计划生成本身就是复杂多源任务（查 KB / web / 整合），嵌套自然复用 Phase 2.1 |
+| **D6** | LLM-judge framework 抽象时机 | 本期抽 `tools/agent_eval/judge/` helper + Phase 2.1 ad-hoc 改造接入 | 兑现 [§4.13.1 #4](#4131-deferred-backlog暂时不做) "第 2 次复用时上 framework"；helper 30-50 行函数级别，不是 framework 重投入 |
+| **D7** | SRS（Phase 2.4）字段预留 | 不预留 | YAGNI；Phase 2.4 不一定还用同一表（Anki SRS card 与 task 不是 1:1），ALTER TABLE 在 SQLite 廉价；详 [§4.13.1 #14](#4131-deferred-backlog暂时不做) |
 
 
 ## 4.10. 配套 tools（tools/agent_eval）
@@ -1624,10 +1783,6 @@ import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
 ## 4.11. 更新 README
 
 
-## 4.12. CnP 优化
-性能优化
-
-
 ## 4.13. Backlog
 
 **性质**：集中登记 §4.9.x 实施过程中识别出来的**所有"不做项"**（包括暂时和永久）。是 §4.9.x Step 0 Scope 字段中"**暂时不做**"和"**显式不做**"项的**唯一入口** — §4.9.x 各章节不再保留 punt 详情，只 cross-ref 本节编号。
@@ -1665,6 +1820,9 @@ import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
 | 9 | Skill 激活后 catalog 同步移除该 skill 的 description 块（H1） | Phase 1.5 | 实测有 LLM 因为重复信息走偏 / context 紧张时再修 | 已激活的 skill body 已注入 system_prompt，catalog 里的 description 块成了重复信息；当前 LLM 实测未受影响 — over-engineering for MVP |
 | 10 | Plan 执行前用户审批 / 编辑（plan 出来后用户 yes / edit / no 三选一再执行，Cursor Plan Mode / CC plan permission mode 风格） | Phase 2.1 | Phase 2.5 Harness 或 Phase 3.3 防 prompt injection 时一起做 | 跟反思 / 安全 mode 强相关，单独做没收益；MVP 单用户场景每步审批反降 UX |
 | 11 | Chainlit plan step UI 渲染（plan 步骤 / 进度可视化到 Chainlit 端） | Phase 2.1 | 后续 WebUI 优化任务（与 #2 / #5 / #6 同任务，[design.md §4.2 WebUI](design.md#42webui)） | Phase 2.1 验收按 CLI 端 plan 可见即可；Chainlit 端 step UI 跟其他 WebUI 优化项统一在 WebUI 优化任务做（同 #2 / #5 / #6 逻辑） |
+| 12 | Chainlit 学习计划进度可视化（plan / task 进度推 Chainlit 端） | Phase 2.2 | 后续 WebUI 优化任务（同 #2 / #5 / #6 / #11 一并做） | Phase 2.2 验收按 CLI 端 `/study show` 文本可见即可；统一在 WebUI 优化任务做 |
+| 13 | 学习计划 export（导出为 Markdown / Anki 卡片 / Notion DB） | Phase 2.2 | 用户实际需求触发后做 | MVP 阶段 CLI 端 `/study show` 文本输出已足够；export 涉及目标格式适配 + 真用户痛点验证 |
+| 14 | `learning_tasks` 预留 SRS 字段（`srs_next_review` / `srs_ease` / `srs_interval`） | Phase 2.2 | Phase 2.4 SRS 启动时 ALTER TABLE 加 | [§4.9.7 D7](#497-plan学习计划生成-phase-22) 决策：YAGNI；Phase 2.4 不一定还用同一表（Anki SRS card 与 task 不是 1:1），ALTER TABLE 在 SQLite 廉价 |
 
 ---
 
@@ -1700,6 +1858,9 @@ import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
 | 24 | skill 间显式调用链（skill A 内调用 skill B） | Phase 1.5 | LLM 自主激活已能复用 skill；显式调用引入依赖管理负担 |
 | 25 | 多 agent 分工（Planner + Executor 拆不同 LLM / 多模型流水线） | Phase 2.1 | 单 LLM 自主 `make_plan` 已够 Phase 2 业务；多模型流水线 cost / 调试复杂度暴涨；个人助手场景动机不成立（类比 #1 三层 memory） |
 | 26 | Plan 模板预制（按任务类型 hard-code"代码任务 X 步 / 学习任务 Y 步"等模板） | Phase 2.1 | 让 LLM 自由生成 plan 更 agent-y；模板沦为 hard-code 限制；如未来 LLM 自由 plan 太散乱再加（类比 #6 多文件 rules） |
+| 27 | 自动学习时长追踪（agent 自动记录"每天学了几小时"） | Phase 2.2 | 数据来源不可靠（屏幕时间 / 进程监控 / 浏览器历史都侵入隐私且不准）；让用户在 `update_study_progress` 时备注 `note` 字段已足够 |
+| 28 | 多用户学习计划（社交 / 排行榜 / 共享 plan / 协作学习） | Phase 2.2 | 本项目永久单用户场景定位（类比 §4.13.2 #1 三层 memory） |
+| 29 | 计划自动调度提醒（push notification / email / 系统 toast） | Phase 2.2 | Phase 2.4 SRS 才做时间触发；通知机制涉及 OS 集成 / 邮件服务 / 跨平台适配，超 AgentA scope；如需要由用户外部工具（Cron / Reminders）触发 agent 查询即可 |
 
 
 # 5. Future

@@ -11,6 +11,8 @@ from src.cli.handlers import (
     _conversation_messages,
     _format_relative_time,
     _is_visible_assistant_message,
+    _render_plan_created,
+    _render_plan_step_end,
     _sanitize_cli_text,
 )
 from src.memory.chat_history import ChatHistoryStore
@@ -39,6 +41,54 @@ def test_conversation_messages_filters_tool_only_assistant() -> None:
     out = _conversation_messages(msgs)
     assert len(out) == 2
     assert out[1]["content"] == "最终回答"
+
+
+# ── Phase 2.1 — plan 渲染器 ──────────────────────────────────────────────────
+
+
+class TestPlanRenderers:
+    """`_render_plan_created` / `_render_plan_step_end` 输出到 stdout 的格式契约。"""
+
+    def test_plan_created_prints_checkbox_block(self, capsys) -> None:
+        _render_plan_created({
+            "steps": [
+                {"id": 1, "text": "列项目"},
+                {"id": 2, "text": "对比"},
+                {"id": 3, "text": "总结"},
+            ],
+        })
+        out = capsys.readouterr().out
+        assert "📋 Plan：" in out
+        assert "☐ 1. 列项目" in out
+        assert "☐ 2. 对比" in out
+        assert "☐ 3. 总结" in out
+
+    def test_plan_created_empty_steps_noop(self, capsys) -> None:
+        _render_plan_created({"steps": []})
+        assert capsys.readouterr().out == ""
+
+    def test_plan_step_end_success_with_note(self, capsys) -> None:
+        _render_plan_step_end({"step_id": 1, "status": "success", "note": "找到 3 个"})
+        out = capsys.readouterr().out
+        assert "✓ 第 1 步" in out
+        assert "（找到 3 个）" in out
+
+    def test_plan_step_end_failed_without_note(self, capsys) -> None:
+        _render_plan_step_end({"step_id": 2, "status": "failed", "note": ""})
+        out = capsys.readouterr().out
+        assert "✗ 第 2 步" in out
+        assert "（" not in out  # 无 note 不带括号
+
+    def test_plan_step_end_skipped_icon(self, capsys) -> None:
+        _render_plan_step_end({"step_id": 3, "status": "skipped"})
+        out = capsys.readouterr().out
+        assert "⏭ 第 3 步" in out
+
+    def test_plan_step_end_unknown_status_falls_back(self, capsys) -> None:
+        """未知 status 不应抛异常，用 • 兜底。"""
+        _render_plan_step_end({"step_id": 1, "status": "weird"})
+        out = capsys.readouterr().out
+        assert "• 第 1 步" in out
 
 
 # ── _format_relative_time ────────────────────────────────────────────────────

@@ -159,6 +159,153 @@ class TestAgentToolCall:
         assert any(m.get("tool_call_id") == "call_xyz" for m in tool_messages)
 
 
+class TestAgentPlanExecuteE2E:
+    """Phase 2.1 e2e：完整 plan 生命周期跑通（make_plan → 业务 tool × N → update_step × N → final）。
+
+    覆盖联动：
+    - Agent loop plan-aware 循环上限自适应未触发硬上限（plan 2 步 → eff_tool 10 ≥ 实际 6 轮）
+    - ToolCallEngine 按真实 plan tool 实现执行 + 发 plan_* 事件
+    - plan_manager.reconstruct_from_messages 在每次 update_step 内被调用并给出正确进度
+    - 最终 events 序列顺序：info → tool_call_start/end × 5 → plan_created → plan_step_start ×2 → plan_step_end × 2 → final_answer
+    """
+
+    def _route_real_plan_tools(self, search_returns: dict[str, str] | None = None):
+        """返回 execute_tool mock：search_knowledge 走假 hit，plan tools 走真实实现。"""
+        from src.agent.tools import execute_tool as real_execute_tool
+        hits = search_returns or {}
+
+        def mock_exec(name, args, *a, **kw):
+            if name == "search_knowledge":
+                q = args.get("query", "")
+                return ToolResult(status="ok", content=hits.get(q, f"假装找到 {q}"))
+            return real_execute_tool(name, args, *a, **kw)
+
+        return mock_exec
+
+    def test_two_step_plan_full_lifecycle(self) -> None:
+        from src.agent.core.event_bus import (
+            EVENT_FINAL_ANSWER,
+            EVENT_INFO,
+            EVENT_PLAN_CREATED,
+            EVENT_PLAN_STEP_END,
+            EVENT_PLAN_STEP_START,
+            EVENT_TOOL_CALL_END,
+            EVENT_TOOL_CALL_START,
+            AgentEvent,
+        )
+
+        agent = Agent(verbose=False)
+        captured: list[AgentEvent] = []
+        agent.set_event_callback(captured.append)
+
+        # 6 轮 LLM 响应脚本
+        responses = [
+            _make_tool_call_response("make_plan", {"steps": ["查 RAG", "查 Agent"]}, call_id="mp1"),
+            _make_tool_call_response("search_knowledge", {"query": "RAG"}, call_id="s1"),
+            _make_tool_call_response(
+                "update_step", {"step_id": 1, "status": "success", "note": "查到 RAG"}, call_id="u1",
+            ),
+            _make_tool_call_response("search_knowledge", {"query": "Agent"}, call_id="s2"),
+            _make_tool_call_response(
+                "update_step", {"step_id": 2, "status": "success", "note": "查到 Agent"}, call_id="u2",
+            ),
+            _make_text_response("RAG 是检索增强；Agent 是自主推理工具。"),
+        ]
+        chat_calls: list[int] = []
+
+        def fake_chat(messages, tools=None, **kwargs):
+            chat_calls.append(len(messages))
+            return responses.pop(0)
+
+        with patch("src.agent.agent.chat", side_effect=fake_chat), \
+             patch(
+                "src.agent.core.tool_call_engine.execute_tool",
+                side_effect=self._route_real_plan_tools(),
+             ):
+            answer = agent.run("对比 RAG 和 Agent")
+
+        assert answer.startswith("RAG 是检索增强")
+        assert len(chat_calls) == 6
+
+        # 事件序列：去重后必须包含 plan 全套
+        types = [e.type for e in captured]
+        # 顺序约束：plan_created 在 make_plan 的 tool_call_end 后；2 个 plan_step_start；2 个 plan_step_end
+        assert types[0] == EVENT_INFO
+        assert types[-1] == EVENT_FINAL_ANSWER
+        assert types.count(EVENT_TOOL_CALL_START) == 5
+        assert types.count(EVENT_TOOL_CALL_END) == 5
+        assert types.count(EVENT_PLAN_CREATED) == 1
+        assert types.count(EVENT_PLAN_STEP_START) == 2
+        assert types.count(EVENT_PLAN_STEP_END) == 2
+
+        # plan_step_start 顺序：step 1 在 step 2 之前
+        step_starts = [e for e in captured if e.type == EVENT_PLAN_STEP_START]
+        assert [e.payload["step_id"] for e in step_starts] == [1, 2]
+        step_ends = [e for e in captured if e.type == EVENT_PLAN_STEP_END]
+        assert [e.payload["step_id"] for e in step_ends] == [1, 2]
+        assert [e.payload["status"] for e in step_ends] == ["success", "success"]
+
+        # plan_created payload 含全部步骤
+        plan_created = next(e for e in captured if e.type == EVENT_PLAN_CREATED)
+        assert [s["text"] for s in plan_created.payload["steps"]] == ["查 RAG", "查 Agent"]
+
+    def test_plan_with_failed_step_then_recovers(self) -> None:
+        """中间步骤标记 failed，LLM 决策跳过到下一步，plan 仍可完成。"""
+        agent = Agent(verbose=False)
+
+        responses = [
+            _make_tool_call_response("make_plan", {"steps": ["a", "b", "c"]}, call_id="mp1"),
+            _make_tool_call_response("search_knowledge", {"query": "a"}, call_id="s1"),
+            _make_tool_call_response(
+                "update_step", {"step_id": 1, "status": "failed", "note": "查无结果"}, call_id="u1",
+            ),
+            _make_tool_call_response(
+                "update_step", {"step_id": 2, "status": "skipped", "note": "依赖前置"}, call_id="u2",
+            ),
+            _make_tool_call_response(
+                "update_step", {"step_id": 3, "status": "success"}, call_id="u3",
+            ),
+            _make_text_response("基于有限信息，给出部分答案。"),
+        ]
+
+        def fake_chat(messages, tools=None, **kwargs):
+            return responses.pop(0)
+
+        with patch("src.agent.agent.chat", side_effect=fake_chat), \
+             patch(
+                "src.agent.core.tool_call_engine.execute_tool",
+                side_effect=self._route_real_plan_tools(),
+             ):
+            answer = agent.run("尝试")
+
+        assert "部分答案" in answer
+
+    def test_plan_aborted_mid_way_returns_final_text(self) -> None:
+        """active plan 中途 abort_plan，Agent 仍正常出最终答（不卡死）。"""
+        agent = Agent(verbose=False)
+
+        responses = [
+            _make_tool_call_response("make_plan", {"steps": ["a", "b"]}, call_id="mp1"),
+            _make_tool_call_response("search_knowledge", {"query": "a"}, call_id="s1"),
+            _make_tool_call_response(
+                "abort_plan", {"reason": "依赖数据缺失"}, call_id="ab1",
+            ),
+            _make_text_response("无法继续，原因：依赖数据缺失。"),
+        ]
+
+        def fake_chat(messages, tools=None, **kwargs):
+            return responses.pop(0)
+
+        with patch("src.agent.agent.chat", side_effect=fake_chat), \
+             patch(
+                "src.agent.core.tool_call_engine.execute_tool",
+                side_effect=self._route_real_plan_tools(),
+             ):
+            answer = agent.run("尝试")
+
+        assert "依赖数据缺失" in answer
+
+
 class TestAgentMaxIterations:
     """测试最大迭代次数保护"""
 

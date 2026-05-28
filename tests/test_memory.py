@@ -117,6 +117,167 @@ class TestToolCallsSerialization:
         assert "tool_calls" not in loaded[0] or loaded[0].get("tool_calls") == []
 
 
+# ── Phase 2.1 — plan tool_calls 写库/读回后 plan_manager.reconstruct 仍正确 ──
+
+class TestPlanRoundtripFromSqlite:
+    """e2e：进程级 reload 后 reconstruct_from_messages 仍能拿到正确 PlanState。
+
+    覆盖路径：写入 make_plan/update_step/abort_plan assistant tool_calls 到 SQLite →
+    关闭 store → 新进程重开 store → load(session_id) → reconstruct → 状态一致。
+    防御 D1 决策（plan 完全依赖 messages 历史，0 schema 改动）的退化风险。
+    """
+
+    def _mk_assistant_tc(self, name: str, args: dict[str, Any], call_id: str) -> dict[str, Any]:
+        return {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": call_id,
+                "type": "function",
+                "function": {"name": name, "arguments": json.dumps(args, ensure_ascii=False)},
+            }],
+        }
+
+    def _mk_tool(self, call_id: str, content: str = "ok") -> dict[str, Any]:
+        return {"role": "tool", "tool_call_id": call_id, "content": content}
+
+    def test_make_plan_only_reload_reconstructs_initial_pending(
+        self, tmp_path: Path,
+    ) -> None:
+        from src.agent.core.plan_manager import reconstruct_from_messages
+
+        db_path = str(tmp_path / "plan_roundtrip.db")
+        store = ChatHistoryStore(db_path=db_path)
+        try:
+            store.append(SESSION, {"role": "user", "content": "对比项目"})
+            store.append(SESSION, self._mk_assistant_tc(
+                "make_plan", {"steps": ["列项目", "对比", "总结"]}, call_id="mp1",
+            ))
+            store.append(SESSION, self._mk_tool("mp1", "plan 已记录..."))
+        finally:
+            store.close()
+
+        # 模拟进程重启：新实例读
+        store2 = ChatHistoryStore(db_path=db_path)
+        try:
+            msgs = store2.load(SESSION)
+            state = reconstruct_from_messages(msgs)
+            assert state is not None
+            assert [s.text for s in state.steps] == ["列项目", "对比", "总结"]
+            assert state.progress() == (0, 3)
+            assert state.aborted is False
+        finally:
+            store2.close()
+
+    def test_full_plan_lifecycle_roundtrip_preserves_step_status_and_notes(
+        self, tmp_path: Path,
+    ) -> None:
+        """完整 plan 生命周期写库 → reload → reconstruct 应保留每步 status/note 与最新进度。"""
+        from src.agent.core.plan_manager import reconstruct_from_messages
+
+        db_path = str(tmp_path / "plan_full.db")
+        store = ChatHistoryStore(db_path=db_path)
+        try:
+            store.append(SESSION, {"role": "user", "content": "做任务"})
+            store.append(SESSION, self._mk_assistant_tc(
+                "make_plan", {"steps": ["a", "b", "c"]}, call_id="mp1",
+            ))
+            store.append(SESSION, self._mk_tool("mp1"))
+            store.append(SESSION, self._mk_assistant_tc(
+                "update_step",
+                {"step_id": 1, "status": "success", "note": "找到 3 个"},
+                call_id="u1",
+            ))
+            store.append(SESSION, self._mk_tool("u1"))
+            store.append(SESSION, self._mk_assistant_tc(
+                "update_step",
+                {"step_id": 2, "status": "failed", "note": "503 错误"},
+                call_id="u2",
+            ))
+            store.append(SESSION, self._mk_tool("u2"))
+        finally:
+            store.close()
+
+        store2 = ChatHistoryStore(db_path=db_path)
+        try:
+            msgs = store2.load(SESSION)
+            state = reconstruct_from_messages(msgs)
+            assert state is not None
+            assert [s.status for s in state.steps] == ["success", "failed", "pending"]
+            assert state.steps[0].note == "找到 3 个"
+            assert state.steps[1].note == "503 错误"
+            assert state.progress() == (2, 3)
+            # step 3 仍 pending
+            nxt = state.next_pending_step()
+            assert nxt is not None and nxt.id == 3 and nxt.text == "c"
+        finally:
+            store2.close()
+
+    def test_abort_plan_persists_after_reload(self, tmp_path: Path) -> None:
+        from src.agent.core.plan_manager import reconstruct_from_messages
+
+        db_path = str(tmp_path / "plan_abort.db")
+        store = ChatHistoryStore(db_path=db_path)
+        try:
+            store.append(SESSION, self._mk_assistant_tc(
+                "make_plan", {"steps": ["a", "b"]}, call_id="mp1",
+            ))
+            store.append(SESSION, self._mk_tool("mp1"))
+            store.append(SESSION, self._mk_assistant_tc(
+                "abort_plan", {"reason": "失败过多"}, call_id="ab1",
+            ))
+            store.append(SESSION, self._mk_tool("ab1"))
+        finally:
+            store.close()
+
+        store2 = ChatHistoryStore(db_path=db_path)
+        try:
+            msgs = store2.load(SESSION)
+            state = reconstruct_from_messages(msgs)
+            assert state is not None
+            assert state.aborted is True
+            assert state.is_complete() is True
+        finally:
+            store2.close()
+
+    def test_latest_plan_wins_when_multiple_plans_in_session_history(
+        self, tmp_path: Path,
+    ) -> None:
+        """同 session 历史里存在两次 make_plan，reload 后 reconstruct 应取最新那次。"""
+        from src.agent.core.plan_manager import reconstruct_from_messages
+
+        db_path = str(tmp_path / "plan_multi.db")
+        store = ChatHistoryStore(db_path=db_path)
+        try:
+            # 旧 plan 已完成
+            store.append(SESSION, self._mk_assistant_tc(
+                "make_plan", {"steps": ["old-1"]}, call_id="mp_old",
+            ))
+            store.append(SESSION, self._mk_tool("mp_old"))
+            store.append(SESSION, self._mk_assistant_tc(
+                "update_step", {"step_id": 1, "status": "success"}, call_id="u_old",
+            ))
+            store.append(SESSION, self._mk_tool("u_old"))
+            # 用户追问，触发新 plan
+            store.append(SESSION, {"role": "user", "content": "再做一件事"})
+            store.append(SESSION, self._mk_assistant_tc(
+                "make_plan", {"steps": ["new-1", "new-2"]}, call_id="mp_new",
+            ))
+            store.append(SESSION, self._mk_tool("mp_new"))
+        finally:
+            store.close()
+
+        store2 = ChatHistoryStore(db_path=db_path)
+        try:
+            msgs = store2.load(SESSION)
+            state = reconstruct_from_messages(msgs)
+            assert state is not None
+            assert [s.text for s in state.steps] == ["new-1", "new-2"]
+            assert state.progress() == (0, 2)
+        finally:
+            store2.close()
+
+
 # ── 单元测试：clear ───────────────────────────────────────────────────────────
 
 class TestClear:

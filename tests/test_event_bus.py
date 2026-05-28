@@ -21,9 +21,13 @@ import pytest
 from src.agent.agent import Agent
 from src.agent.core.event_bus import (
     ALL_EVENT_TYPES,
+    EVENT_PLAN_CREATED,
+    EVENT_PLAN_STEP_END,
+    EVENT_PLAN_STEP_START,
     EVENT_THINKING_CHUNK,
     EVENT_TOKEN_CHUNK,
     AgentEvent,
+    EventBus,
 )
 
 
@@ -61,7 +65,7 @@ class TestSetEventCallback:
     """`set_event_callback` 是 AgentAPI 定义的唯一事件入口。"""
 
     def test_installs_subscriber_for_every_event_type(self) -> None:
-        """一次调用应为全部 7 类事件各注册一个 wrapper handler。"""
+        """一次调用应为 ALL_EVENT_TYPES 中每类事件各注册一个 wrapper handler。"""
         agent = _mk_agent()
         agent.set_event_callback(lambda evt: None)
         for evt in ALL_EVENT_TYPES:
@@ -182,3 +186,52 @@ class TestEventBusExceptionIsolation:
         agent.events.subscribe(EVENT_THINKING_CHUNK, good.append)
         agent._on_thinking_chunk("x")
         assert good == [{"text": "x"}]
+
+
+# ── Phase 2.1 — Plan 事件类型（plan_created / plan_step_start / plan_step_end） ───
+
+class TestPlanEventTypes:
+    """三类 plan 事件必须满足 ALL_EVENT_TYPES 注册 + publish/subscribe 流向无差错。"""
+
+    def test_plan_events_are_in_all_event_types(self) -> None:
+        for evt in (EVENT_PLAN_CREATED, EVENT_PLAN_STEP_START, EVENT_PLAN_STEP_END):
+            assert evt in ALL_EVENT_TYPES
+
+    def test_plan_event_publish_and_subscribe_roundtrip(self) -> None:
+        """直接走 EventBus 发 3 类 plan 事件，订阅者按类型收到对应 payload。"""
+        bus = EventBus()
+        captured: dict[str, list[dict]] = {
+            EVENT_PLAN_CREATED: [],
+            EVENT_PLAN_STEP_START: [],
+            EVENT_PLAN_STEP_END: [],
+        }
+        for evt_type, sink in captured.items():
+            bus.subscribe(evt_type, sink.append)
+
+        bus.publish(AgentEvent(
+            type=EVENT_PLAN_CREATED,
+            payload={"steps": [{"id": 1, "text": "列项目"}, {"id": 2, "text": "对比"}]},
+        ))
+        bus.publish(AgentEvent(type=EVENT_PLAN_STEP_START, payload={"step_id": 1}))
+        bus.publish(AgentEvent(
+            type=EVENT_PLAN_STEP_END,
+            payload={"step_id": 1, "status": "success", "note": "找到 3 个项目"},
+        ))
+
+        assert len(captured[EVENT_PLAN_CREATED]) == 1
+        assert captured[EVENT_PLAN_CREATED][0]["steps"][0]["text"] == "列项目"
+        assert captured[EVENT_PLAN_STEP_START] == [{"step_id": 1}]
+        assert captured[EVENT_PLAN_STEP_END][0]["status"] == "success"
+
+    def test_plan_event_subscriber_isolation(self) -> None:
+        """plan 事件订阅者抛异常被 EventBus 吞掉，不影响其他订阅者。"""
+        bus = EventBus()
+        good: list[dict] = []
+
+        def bad(_payload) -> None:
+            raise RuntimeError("plan 订阅者炸了")
+
+        bus.subscribe(EVENT_PLAN_CREATED, bad)
+        bus.subscribe(EVENT_PLAN_CREATED, good.append)
+        bus.publish(AgentEvent(type=EVENT_PLAN_CREATED, payload={"steps": []}))
+        assert good == [{"steps": []}]

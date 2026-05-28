@@ -31,6 +31,10 @@ EVENT_TOOL_CALL_END = "tool_call_end"
 EVENT_FINAL_ANSWER = "final_answer"
 EVENT_ERROR = "error"
 EVENT_INFO = "info"
+# Phase 2.1 — Plan-Execute 三类事件（payload schema 见 design.md §3.x Plan-Execute 表）
+EVENT_PLAN_CREATED = "plan_created"
+EVENT_PLAN_STEP_START = "plan_step_start"
+EVENT_PLAN_STEP_END = "plan_step_end"
 
 ALL_EVENT_TYPES: tuple[str, ...] = (
     EVENT_THINKING_CHUNK,
@@ -40,6 +44,9 @@ ALL_EVENT_TYPES: tuple[str, ...] = (
     EVENT_FINAL_ANSWER,
     EVENT_ERROR,
     EVENT_INFO,
+    EVENT_PLAN_CREATED,
+    EVENT_PLAN_STEP_START,
+    EVENT_PLAN_STEP_END,
 )
 
 

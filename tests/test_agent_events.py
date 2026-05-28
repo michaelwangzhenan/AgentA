@@ -29,6 +29,9 @@ from src.agent.core.event_bus import (
     EVENT_ERROR,
     EVENT_FINAL_ANSWER,
     EVENT_INFO,
+    EVENT_PLAN_CREATED,
+    EVENT_PLAN_STEP_END,
+    EVENT_PLAN_STEP_START,
     EVENT_TOOL_CALL_END,
     EVENT_TOOL_CALL_START,
     AgentEvent,
@@ -167,3 +170,217 @@ class TestActivateSkillInfoEvent:
         agent.set_event_callback(captured.append)
         assert agent.activate_skill("demo", "body") is False
         assert captured == []
+
+
+# ── Phase 2.1 — Plan-Execute 事件流 ──────────────────────────────────────────
+
+
+class TestPlanEventFlow:
+    """make_plan / update_step 调用应叠加触发 plan_created / plan_step_start / plan_step_end。"""
+
+    def test_make_plan_emits_plan_created_and_first_step_start(self) -> None:
+        """第 1 轮 LLM 调 make_plan，第 2 轮直接回答（避免 plan 未完终止 warning）。"""
+        agent = _mk_agent()
+        captured: list[AgentEvent] = []
+        agent.set_event_callback(captured.append)
+
+        steps = ["列项目", "对比", "总结"]
+        responses = [
+            _tool_call_response("make_plan", {"steps": steps}, "mp1"),
+            _text_response("最终答"),
+        ]
+
+        def fake_chat(messages, tools=None, **kwargs):
+            return responses.pop(0)
+
+        with patch("src.agent.agent.chat", side_effect=fake_chat):
+            agent.run("对比项目")
+
+        types = [e.type for e in captured]
+        # plan_created / plan_step_start 必须在 tool_call_end 之后（即 plan tool 执行成功后）
+        assert EVENT_PLAN_CREATED in types
+        assert EVENT_PLAN_STEP_START in types
+        # 顺序：info → tool_call_start → tool_call_end → plan_created → plan_step_start → final_answer
+        plan_created_idx = types.index(EVENT_PLAN_CREATED)
+        plan_step_start_idx = types.index(EVENT_PLAN_STEP_START)
+        tool_end_idx = types.index(EVENT_TOOL_CALL_END)
+        assert tool_end_idx < plan_created_idx < plan_step_start_idx
+
+        # payload 关键字段
+        plan_created_ev = next(e for e in captured if e.type == EVENT_PLAN_CREATED)
+        assert [s["text"] for s in plan_created_ev.payload["steps"]] == steps
+        assert plan_created_ev.payload["steps"][0]["id"] == 1
+
+        first_step_start = next(e for e in captured if e.type == EVENT_PLAN_STEP_START)
+        assert first_step_start.payload == {"step_id": 1, "text": "列项目"}
+
+    def test_update_step_emits_step_end_and_next_step_start(self) -> None:
+        """update_step 后还有 pending 步：发 plan_step_end + plan_step_start(下一步)。"""
+        agent = _mk_agent()
+        captured: list[AgentEvent] = []
+        agent.set_event_callback(captured.append)
+
+        responses = [
+            _tool_call_response("make_plan", {"steps": ["a", "b", "c"]}, "mp1"),
+            _tool_call_response(
+                "update_step", {"step_id": 1, "status": "success", "note": "ok"}, "u1",
+            ),
+            _text_response("done"),
+        ]
+
+        def fake_chat(messages, tools=None, **kwargs):
+            return responses.pop(0)
+
+        with patch("src.agent.agent.chat", side_effect=fake_chat):
+            agent.run("做任务")
+
+        types = [e.type for e in captured]
+        # 期望出现：plan_step_end(id=1) 后紧跟 plan_step_start(id=2)
+        step_end_idx = types.index(EVENT_PLAN_STEP_END)
+        # plan_step_start 出现 2 次（make_plan 触发 step 1、update_step 触发 step 2）
+        step_starts = [e for e in captured if e.type == EVENT_PLAN_STEP_START]
+        assert len(step_starts) == 2
+        assert step_starts[0].payload == {"step_id": 1, "text": "a"}
+        assert step_starts[1].payload == {"step_id": 2, "text": "b"}
+
+        end_ev = next(e for e in captured if e.type == EVENT_PLAN_STEP_END)
+        assert end_ev.payload == {"step_id": 1, "status": "success", "note": "ok"}
+        # 顺序：plan_step_end 应在第二个 plan_step_start 之前
+        second_step_start_idx = [i for i, e in enumerate(captured) if e.type == EVENT_PLAN_STEP_START][1]
+        assert step_end_idx < second_step_start_idx
+
+    def test_update_step_completing_plan_emits_only_step_end(self) -> None:
+        """update_step 完成最后一步：只发 plan_step_end，不再发 plan_step_start。"""
+        agent = _mk_agent()
+        captured: list[AgentEvent] = []
+        agent.set_event_callback(captured.append)
+
+        responses = [
+            _tool_call_response("make_plan", {"steps": ["only"]}, "mp1"),
+            _tool_call_response("update_step", {"step_id": 1, "status": "success"}, "u1"),
+            _text_response("完成"),
+        ]
+
+        def fake_chat(messages, tools=None, **kwargs):
+            return responses.pop(0)
+
+        with patch("src.agent.agent.chat", side_effect=fake_chat):
+            agent.run("一步任务")
+
+        types = [e.type for e in captured]
+        # make_plan 触发 1 个 plan_step_start (id=1)；update_step 完成 plan，不再发新 start
+        step_starts = [e for e in captured if e.type == EVENT_PLAN_STEP_START]
+        assert len(step_starts) == 1
+        assert step_starts[0].payload["step_id"] == 1
+        assert EVENT_PLAN_STEP_END in types
+
+    def test_abort_plan_does_not_emit_plan_events(self) -> None:
+        """abort_plan 调用不应触发 plan_* 事件（plan 终止由 final_answer 文案承载）。"""
+        agent = _mk_agent()
+        captured: list[AgentEvent] = []
+        agent.set_event_callback(captured.append)
+
+        responses = [
+            _tool_call_response("make_plan", {"steps": ["a", "b"]}, "mp1"),
+            _tool_call_response("abort_plan", {"reason": "失败太多"}, "ab1"),
+            _text_response("已中止"),
+        ]
+
+        def fake_chat(messages, tools=None, **kwargs):
+            return responses.pop(0)
+
+        with patch("src.agent.agent.chat", side_effect=fake_chat):
+            agent.run("尝试")
+
+        # plan_created + plan_step_start(id=1) 来自 make_plan；abort_plan 不增加任何 plan_* 事件
+        plan_evs = [e for e in captured if e.type.startswith("plan_")]
+        assert {e.type for e in plan_evs} == {EVENT_PLAN_CREATED, EVENT_PLAN_STEP_START}
+        assert sum(1 for e in plan_evs if e.type == EVENT_PLAN_STEP_START) == 1
+
+
+# ── Phase 2.1 — Plan-aware 循环上限自适应 ─────────────────────────────────────
+
+
+class TestPlanAwareCaps:
+    """`_compute_effective_caps` 在不同 plan 状态下应给出预期上限。"""
+
+    def test_no_plan_uses_baseline_caps(self) -> None:
+        from src.agent.agent import MAX_TOOL_ROUNDS
+        agent = _mk_agent()
+        eff_tool, eff_total = agent._compute_effective_caps([])
+        assert eff_tool == MAX_TOOL_ROUNDS
+        assert eff_total == agent.max_iterations
+
+    def test_active_plan_expands_caps_proportional_to_steps(self) -> None:
+        from src.agent.agent import MAX_HARD_CAP_ROUNDS, MAX_TOOL_ROUNDS
+        agent = _mk_agent()
+        msgs = [
+            _mk_assistant_make_plan(["s1", "s2", "s3", "s4", "s5"], call_id="mp1"),
+        ]
+        eff_tool, eff_total = agent._compute_effective_caps(msgs)
+        # 5 步 × 4 + 2 = 22 > baseline 8
+        assert eff_tool == 22
+        assert eff_total >= eff_tool + 4
+        assert eff_tool <= MAX_HARD_CAP_ROUNDS
+
+    def test_completed_plan_falls_back_to_baseline(self) -> None:
+        from src.agent.agent import MAX_TOOL_ROUNDS
+        agent = _mk_agent()
+        # 2 步 plan，两步都标 success → is_complete()，上限退回 baseline
+        msgs = [
+            _mk_assistant_make_plan(["a", "b"], call_id="mp1"),
+            _mk_assistant_update_step(1, "success", call_id="u1"),
+            _mk_assistant_update_step(2, "success", call_id="u2"),
+        ]
+        eff_tool, eff_total = agent._compute_effective_caps(msgs)
+        assert eff_tool == MAX_TOOL_ROUNDS
+        assert eff_total == agent.max_iterations
+
+    def test_aborted_plan_falls_back_to_baseline(self) -> None:
+        from src.agent.agent import MAX_TOOL_ROUNDS
+        agent = _mk_agent()
+        msgs = [
+            _mk_assistant_make_plan(["a", "b", "c"], call_id="mp1"),
+            _mk_assistant_abort_plan("失败", call_id="ab1"),
+        ]
+        eff_tool, _ = agent._compute_effective_caps(msgs)
+        assert eff_tool == MAX_TOOL_ROUNDS
+
+
+def _mk_assistant_make_plan(steps: list[str], call_id: str) -> dict:
+    return {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{
+            "id": call_id,
+            "type": "function",
+            "function": {"name": "make_plan", "arguments": json.dumps({"steps": steps})},
+        }],
+    }
+
+
+def _mk_assistant_update_step(step_id: int, status: str, call_id: str) -> dict:
+    return {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{
+            "id": call_id,
+            "type": "function",
+            "function": {
+                "name": "update_step",
+                "arguments": json.dumps({"step_id": step_id, "status": status}),
+            },
+        }],
+    }
+
+
+def _mk_assistant_abort_plan(reason: str, call_id: str) -> dict:
+    return {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{
+            "id": call_id,
+            "type": "function",
+            "function": {"name": "abort_plan", "arguments": json.dumps({"reason": reason})},
+        }],
+    }

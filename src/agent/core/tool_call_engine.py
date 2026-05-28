@@ -17,6 +17,9 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from src.agent.core.event_bus import (
+    EVENT_PLAN_CREATED,
+    EVENT_PLAN_STEP_END,
+    EVENT_PLAN_STEP_START,
     EVENT_TOOL_CALL_END,
     EVENT_TOOL_CALL_START,
     AgentEvent,
@@ -99,14 +102,22 @@ class ToolCallEngine:
                 ))
 
             # 仅当持有 citation_builder 时才走 kwarg 路径，否则保持现有 3-arg
-            # 签名调用，避免破坏外部 mock execute_tool 的测试 fixture
+            # 签名调用，避免破坏外部 mock execute_tool 的测试 fixture。
+            # Phase 2.1: messages 透传给 plan tools（update_step / abort_plan）
+            # 用于 reconstruct plan 状态；非 plan 工具忽略此参数。messages 此时
+            # 已含本轮 assistant tool_calls（line 81 已 append），plan tool 在
+            # 内部 reconstruct 时能看到自己刚发的 update_step / abort_plan 调用。
             if self._citation_builder is not None:
                 result: ToolResult = execute_tool(
                     tool_name, tool_args, self._skill_bodies,
                     citation_builder=self._citation_builder,
+                    messages=messages,
                 )
             else:
-                result = execute_tool(tool_name, tool_args, self._skill_bodies)
+                result = execute_tool(
+                    tool_name, tool_args, self._skill_bodies,
+                    messages=messages,
+                )
 
             if self._verbose:
                 preview = result.content[:_TOOL_PREVIEW_LEN].replace("\n", " ").replace("\r", " ")
@@ -118,6 +129,12 @@ class ToolCallEngine:
                     type=EVENT_TOOL_CALL_END,
                     payload={"call_id": tool_call.id, "status": result.status, "preview": preview},
                 ))
+                # Phase 2.1：plan tool 调用成功后叠加发 plan_* 事件，供 CLI / Chainlit
+                # 渲染 plan checkbox 进度。reconstruct_from_messages 此时 messages
+                # 已含本轮 assistant tool_calls（line 81），所以 update_step 状态
+                # 即得最新 plan 视图。
+                if result.status == "ok":
+                    self._maybe_publish_plan_events(tool_name, tool_args, messages)
 
             # DB 写入干净内容（无引导提示），避免污染历史
             db_content = result.to_llm_str()
@@ -137,6 +154,46 @@ class ToolCallEngine:
 
             live_msg: dict[str, Any] = {**db_msg, "content": llm_content}
             messages.append(live_msg)
+
+    def _maybe_publish_plan_events(
+        self, tool_name: str, tool_args: dict[str, Any], messages: list[dict[str, Any]],
+    ) -> None:
+        """Phase 2.1：plan tool 调用成功后 publish 对应 plan_* 事件。"""
+        if self._events is None:
+            return
+        if tool_name == "make_plan":
+            steps = tool_args.get("steps") or []
+            if not (isinstance(steps, list) and all(isinstance(s, str) and s.strip() for s in steps)):
+                return
+            cleaned = [s.strip() for s in steps]
+            self._events.publish(AgentEvent(
+                type=EVENT_PLAN_CREATED,
+                payload={"steps": [{"id": i + 1, "text": t} for i, t in enumerate(cleaned)]},
+            ))
+            self._events.publish(AgentEvent(
+                type=EVENT_PLAN_STEP_START,
+                payload={"step_id": 1, "text": cleaned[0]},
+            ))
+        elif tool_name == "update_step":
+            step_id = tool_args.get("step_id")
+            status = tool_args.get("status")
+            note = tool_args.get("note", "") or ""
+            if not (isinstance(step_id, int) and isinstance(status, str)):
+                return
+            self._events.publish(AgentEvent(
+                type=EVENT_PLAN_STEP_END,
+                payload={"step_id": step_id, "status": status, "note": note},
+            ))
+            from src.agent.core.plan_manager import reconstruct_from_messages
+            state = reconstruct_from_messages(messages)
+            if state is not None and not state.is_complete():
+                nxt = state.next_pending_step()
+                if nxt is not None:
+                    self._events.publish(AgentEvent(
+                        type=EVENT_PLAN_STEP_START,
+                        payload={"step_id": nxt.id, "text": nxt.text},
+                    ))
+        # abort_plan 不发 plan_* 事件（plan 终结由 final_answer 渲染说明）
 
     @staticmethod
     def assistant_message(message: Any) -> dict[str, Any]:

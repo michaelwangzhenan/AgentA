@@ -441,6 +441,9 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 | `final_answer` | `{text, usage}` | 最终回答 |
 | `error` | `{message, recoverable, phase}` | 运行时异常 |
 | `info` | `{message, ...}` | session / skill 切换等元信息 |
+| `plan_created` | `{steps: [{id, text}, ...]}` | LLM 调 `make_plan` 成功后（见 [§3.8](#38-plan-execute)） |
+| `plan_step_start` | `{step_id, text}` | plan 创建后 step 1 立即触发；之后每次 `update_step` 完成且仍有 pending 步时触发下一步 |
+| `plan_step_end` | `{step_id, status, note}` | LLM 调 `update_step` 成功后；`status` ∈ `success` / `failed` / `skipped` |
 
 ## 3.2. RetrieverAPI
 
@@ -764,6 +767,124 @@ sequenceDiagram
 | 主动认出（验收 ②） | `tools/agent_eval/skills/recall_skill.py`（dataset 8 case，positive + negative） | LLM 看到 catalog 后能主动调 `load_skill(name=expected)`；通过率 ≥ 80%；negative 场景不误触发 |
 
 
+## 3.8 Plan-Execute
+
+复杂任务（多文档对比 / 学习计划 / 多步骤目标 / ≥3 子查询）下，Agent 先列计划再分步执行。LLM 自主调 `make_plan(steps=[...])` 列 3-6 步，之后每完成一步调 `update_step(step_id, status)` 更新进度；plan 全部完成或被 `abort_plan` 中止后再综合产出最终答案。范式对标 LangGraph PlanAndExecute / OpenAI Assistants 的"先规划后执行"模式，但实现上**完全不为 plan 新建持久化 schema** —— plan 状态从 messages 历史的 tool_calls 中按需 reconstruct。
+
+### 3.8.1 数据载体与 reconstruct
+
+Plan 不进 [§3.3 Session 管理](#33-session-管理) 的新表，完全寄生在已有 `messages.tool_calls` JSON 字段里。任意时点的 plan 状态由 `src/agent/core/plan_manager.py:reconstruct_from_messages(messages)` 算出。
+
+| 项 | 约定 |
+|---|---|
+| 数据载体 | `messages` 中 assistant 的 `tool_calls` 列表里 `make_plan` / `update_step` / `abort_plan` 三类调用 |
+| 持久化路径 | 跟普通 tool_call 一样由 `ChatHistoryStore.append` 写入 `messages.tool_calls` 列；进程重启后 `load(session_id)` → `reconstruct_from_messages()` 即恢复 |
+| 唯一性 | 同一 session 历史里允许多次 `make_plan`；reconstruct 始终取**最新**的 `make_plan` 作 plan 起点，老 plan 的 `update_step` 自动失效 |
+| Schema 改动 | 0 — 不新增表、不新增列，纯 messages 派生 |
+| 合法 step status | `pending`（初始）/ `success` / `failed` / `skipped`；`update` 拒绝把已完结 step 反向标回 `pending` |
+| 完成态 | 所有 step 非 `pending`，或 `aborted=True` |
+
+**数据模型**：
+
+| 类 | 字段 | 备注 |
+|---|---|---|
+| `PlanStep` | `id` (int 从 1 起) / `text` (str) / `status` (StepStatus) / `note` (str) | 单步状态 dataclass |
+| `PlanState` | `steps: list[PlanStep]` / `aborted: bool` | 整 plan 状态 dataclass；含 `next_pending_step()` / `is_complete()` / `progress()` / `update()` 几个查询/更新方法 |
+
+### 3.8.2 三 tool 协议
+
+Plan 用 OpenAI Function Calling 协议暴露给 LLM，跟普通业务 tool 同一 `get_tools()` 列表。三 tool 的 schema 与语义稳定，下表是 LLM 看到的合约：
+
+| tool | 必填参数 | 语义 | 返回内容（写回 LLM 的下一轮 prompt） |
+|---|---|---|---|
+| `make_plan` | `steps: list[str]` | 列计划（3-6 步，每步 10-30 字） | "已记录 plan，共 N 步" + 步骤清单 + "下一步：第 1 步 — xxx" 指引 |
+| `update_step` | `step_id` (int ≥1) / `status` ("success" \| "failed" \| "skipped") + 可选 `note` | 标记某步结果 | "✓/✗/⏭ step N..." + 当前进度 + 下一 pending 步指引（plan 完成则提示综合答案） |
+| `abort_plan` | （都可选） + 可选 `reason` | 主动放弃整个 plan | "🛑 plan 已中止" + "请综合已有信息总结答案" |
+
+**入参校验**：plan tool 内部对 `steps` 非 list / step_id 非 int / status 非枚举等非法入参一律返回 `ToolResult(status="error", content=...)`，LLM 在下一轮 prompt 里看到 error 后自决重试/换 tool（与现有业务 tool 失败处理同源，`ToolCallEngine` 的 `TOOL_*_HINT` 机制覆盖，见 [§5 IMP 公共层表](#5imp)）。
+
+### 3.8.3 端到端流程
+
+`make_plan` 采用**分轮执行**（two-stage）—— 本轮只回 ack + 第 1 步指引，**不在同一轮联动调任何业务 tool**；LLM 下一轮自行按 ack 指引调对应业务 tool 执行第 1 步。该约定让 plan 创建与 plan 执行天然落到两个 LLM 轮次，符合现有 ReAct loop 的"一轮一决策"心智模型，也方便后续接入"用户审批 plan 后再执行"扩展。
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant A as Agent.run()
+    participant L as LLM
+    participant TCE as ToolCallEngine
+    participant PM as plan_manager
+    participant EB as EventBus
+
+    U->>A: 复杂任务问题
+    A->>L: messages
+    L-->>A: tool_calls=[make_plan(steps=[a,b,c])]
+    A->>TCE: process(message)
+    TCE-->>TCE: execute_tool("make_plan", ...)
+    TCE->>EB: plan_created + plan_step_start(1)
+    TCE-->>A: tool_msg("已记录 plan...下一步：第 1 步 — a")
+
+    A->>L: messages（含 plan ack）
+    L-->>A: tool_calls=[search_knowledge(q=a)]
+    A->>TCE: process(message)
+    TCE-->>A: tool_msg(hits)
+
+    A->>L: messages
+    L-->>A: tool_calls=[update_step(1, success)]
+    A->>TCE: process(message)
+    TCE-->>TCE: execute_tool("update_step", ...)
+    TCE->>PM: reconstruct_from_messages(messages)
+    PM-->>TCE: PlanState(progress=1/3, next=step 2)
+    TCE->>EB: plan_step_end(1, success) + plan_step_start(2)
+    TCE-->>A: tool_msg("✓ step 1...下一步：第 2 步 — b")
+
+    Note over A,L: 重复 step 2 / step 3 同样模式
+
+    A->>L: messages（plan 已完成）
+    L-->>A: 最终答（无 tool_calls）
+    A-->>U: final_answer
+```
+
+### 3.8.4 循环上限自适应
+
+`Agent.run()` 的 ReAct loop 有两层上限：tool 轮次上限（达到后强制 LLM 出文本回答）与总轮次上限（达到后终止 loop）。Plan 步数越多越需要更大预算；按 plan 大小动态放大，避免一刀切的小上限拦掉合理 plan。
+
+| 状态 | tool 上限 | 总上限 | 硬上限（防极端） |
+|---|---|---|---|
+| 无 active plan / plan 已完成 / plan 已 aborted | `MAX_TOOL_ROUNDS` (8) | `Agent.max_iterations` (默认 12) | `MAX_HARD_CAP_ROUNDS` (50) |
+| 有 active plan N 步 | `max(8, N×4 + 2)` | `max(12, tool 上限 + 4)` | 同上 |
+
+计算时机：每轮 LLM 调用前重算（每轮都 reconstruct 一次 messages → PlanState）。reconstruct 是 O(messages 长度) 纯内存遍历，开销小可忽略。一旦超过总上限 loop 强制退出，走"达最大迭代次数" fallback 文本兜底。
+
+### 3.8.5 失败恢复
+
+Plan step 失败时**不由程序控制重试 / 跳过 / 中止**，完全交给 LLM 看 `update_step` 的返回后自决：
+
+| LLM 看到 | 可选动作 |
+|---|---|
+| `update_step(N, "failed", note="503 错误")` 的 ok 响应 | 1. 下一轮重新调同一业务 tool 重试；2. 直接发 `update_step(N+1, "skipped")` 跳过失败步继续推进；3. 发 `abort_plan(reason="...")` 中止整个 plan |
+| 多次失败后调 `abort_plan` | 下一轮综合已有信息直接回答，向用户说明未完成原因 |
+
+这跟 [§3.4 用户记忆](#34-用户记忆memory) 的"信号驱动 + 程序不替 LLM 做决定"思路一致：plan-execute 也只提供原语，不内置策略。
+
+### 3.8.6 与其他模块关系
+
+| 模块 | 交互方式 |
+|---|---|
+| **[§3.1 AgentAPI](#31-agentapi)** | plan 状态全部走 EventBus 三类 `plan_*` 事件对外暴露；表现层无需感知 PlanState 数据类，订阅事件即可 |
+| **[§3.3 Session 管理](#33-session-管理)** | plan 完全寄生 `messages.tool_calls`，进程重启 / session 切换后 `reconstruct_from_messages()` 即恢复，不依赖任何 plan 专用表 |
+| **[§3.5 Prompt 管理](#35-prompt-管理)** | "何时使用 make_plan" 的教学段属 base SYSTEM_PROMPT；用户的 `.agenta/rules.md` / user_memory 按 [§3.5.2 覆盖约定](#352-三层注入顺序) 可覆盖该教学（如 rules 明确"对任何问题都直接答" → LLM 会停用 plan，是合法用户主权） |
+| **[§3.6 引用展示](#36-引用展示citation)** | plan 内业务 tool（`search_knowledge` 等）正常走 CitationBuilder；plan tool 本身无引用语义 |
+| **[§3.7 Agent Skills](#37-agent-skills)** | Skill 与 plan 互不感知；同一轮里 LLM 可既加载 skill 又走 plan（如 skill 指令是"列研究计划" → skill body 进 prompt 后 LLM 自行 make_plan） |
+
+### 3.8.7 评估方法
+
+| 维度 | 工具 | 判据 |
+|---|---|---|
+| Plan 识别准确率 | `tools/agent_eval/plan/eval_plan.py`（dataset 10 case：5 positive + 5 negative） | 综合通过率 ≥ 80% — positive 必触发 make_plan 且步数在期望范围；negative 不得触发 |
+| Plan 结构质量 | 同上 `--judge` 模式（LLM-judge 4 维度：粒度 / 顺序 / 覆盖度 / 业务对齐） | positive 通过 case 平均得分 ≥ 3.5/5 |
+
+
 # 4.表现层
 
 表现层负责"采集输入 → 调用 Agent → 渲染输出"三件事，按 IO 形态分为 CLI / Web UI / SDK 三种形态，全部通过 `AgentAPI` 与 Agent core 通信。
@@ -830,15 +951,16 @@ flowchart TB
 
 | 共享组件 | 类型 | 职责 | Python | LangChain | AutoGPT |
 |---|---|---|---|---|---|
-| `tools.py`（工具实现） | 依赖 | 工具 JSON Schema 定义 + `execute_tool` 路由 + 各工具实现 | ✓ | ✓（StructuredTool 包装） | ✓ |
+| `tools.py`（工具实现） | 依赖 | 业务 tool（`search_knowledge` / `web_search` / `fetch_url` / `load_skill`）+ plan 三 tool（`make_plan` / `update_step` / `abort_plan`，详 [§3.8](#38-plan-execute)）JSON Schema 定义与 `execute_tool` 路由 | ✓ | ✓（StructuredTool 包装） | ✓ |
 | `LLMProvider` | 依赖 | 多 provider chat + Extended Thinking + 流式 token 抽象 | ✓ | △（可选，framework 自带） | ✓ |
 | `ChatHistoryStore` | 依赖 | session 内消息持久化与按 N 条加载（CRUD） | ✓ | ✓（adapter） | ✓ |
 | `UserMemoryStore` | 依赖 | 跨 session 用户偏好 / 背景持久化（CRUD） | ✓ | ✓ | ✓ |
-| `EventBus` | Helper | 统一流式事件分发（thinking / token / tool / final） | ✓ | ✓ | ✓ |
-| `ToolCallEngine` | Helper | 工具调用编排：执行 + 结果格式化 + 引导提示注入 + 写历史 | ✓ | ✓ | ✓ |
+| `EventBus` | Helper | 统一流式事件分发（thinking / token / tool / plan / final） | ✓ | ✓ | ✓ |
+| `ToolCallEngine` | Helper | 工具调用编排：执行 + 结果格式化 + 引导提示注入 + 写历史 + plan tool 调用后叠加发 `plan_*` 事件 | ✓ | ✓ | ✓ |
 | `HistoryManager` | Helper | 历史按轮截断 + skill_pair 完整性保护 + system 拼接 | ✓ | ✓ | △（用 summary 替代） |
 | `MemoryManager` | Helper | UserMemory 触发判定 + 提取 + 注入 system_prompt | ✓ | ✓ | ✓ |
 | `ThinkingPolicy` | Helper | adaptive thinking budget 估算（LOW / MED / HIGH 三档） | ✓ | ✓ | △（子任务不启用） |
+| `plan_manager` | Helper | `PlanStep` / `PlanState` dataclass + `reconstruct_from_messages()`；plan 状态从 messages 历史 reconstruct（详 [§3.8.1](#381-数据载体与-reconstruct)） | ✓ | ✓ | ✓ |
 
 > **类型说明**
 > - **依赖**：底层能力，不感知 Agent loop 语义（turn / skill_pair / thinking budget），可独立测试与替换实现（如 SQLite → Postgres）。命名约定：数据存储用 `*Store` 后缀。
@@ -853,9 +975,11 @@ src/agent/core/
 ├── __init__.py
 ├── history_manager.py        # HistoryManager
 ├── memory_manager.py         # MemoryManager
-├── event_bus.py              # EventBus（含 EVENT_* 类型常量）
+├── event_bus.py              # EventBus（含 EVENT_* 类型常量，含 plan_* 三类）
 ├── tool_call_engine.py       # ToolCallEngine（含 TOOL_EMPTY_HINT 常量）
-└── thinking_policy.py        # ThinkingPolicy + ThinkingConfig 数据类
+├── thinking_policy.py        # ThinkingPolicy + ThinkingConfig 数据类
+├── citation_builder.py       # CitationBuilder（详 §3.6）
+└── plan_manager.py           # PlanState / PlanStep + reconstruct_from_messages（详 §3.8）
 ```
 
 依赖层（`src/memory/chat_history.py` 的 `ChatHistoryStore` / `src/memory/user_memory.py` 的 `UserMemoryStore` / `src/llm/provider.py`）位置不动，被 helper 调用。

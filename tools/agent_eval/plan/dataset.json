@@ -1,0 +1,72 @@
+[
+  {
+    "id": "P01-positive-compare-projects",
+    "category": "positive",
+    "question": "对比一下我做过的 AgentA 和 RAG 知识库项目，在技术栈和架构上有什么差异？",
+    "min_steps": 3,
+    "max_steps": 6,
+    "note": "多文档对比 → 必触发 make_plan，应分『列两项 / 各自召回 / 对比 / 总结』"
+  },
+  {
+    "id": "P02-positive-study-plan",
+    "category": "positive",
+    "question": "帮我做一份机器学习面试两周复习计划，每周覆盖哪些主题？",
+    "min_steps": 3,
+    "max_steps": 7,
+    "note": "学习计划 → 必触发 make_plan，应按周/主题分步"
+  },
+  {
+    "id": "P03-positive-target-improvement",
+    "category": "positive",
+    "question": "分析我的 AgentA 项目当前 RAG 召回模块，并给出 3 条改进建议",
+    "min_steps": 3,
+    "max_steps": 6,
+    "note": "目标 + 多步骤型（先分析后建议） → 必触发 make_plan"
+  },
+  {
+    "id": "P04-positive-multi-query-stack",
+    "category": "positive",
+    "question": "调研 LangChain、LlamaIndex、Haystack 三个 RAG 框架的优劣，推荐适合个人知识库的选型",
+    "min_steps": 3,
+    "max_steps": 6,
+    "note": "≥3 个独立子查询（每框架一查 + 对比 + 推荐） → 必触发 make_plan"
+  },
+  {
+    "id": "P05-positive-multi-doc-summary",
+    "category": "positive",
+    "question": "汇总我历次和 AI 的对话里关于 Plan-Execute 的讨论，给出关键结论",
+    "min_steps": 2,
+    "max_steps": 5,
+    "note": "多文档综合 → 必触发 make_plan，应分『检索 / 抽取 / 汇总』"
+  },
+  {
+    "id": "P06-negative-single-entity",
+    "category": "negative",
+    "question": "我的邮箱是什么？",
+    "note": "单实体查询 → 不应调 make_plan；可直接回答或调 user_memory 相关 tool"
+  },
+  {
+    "id": "P07-negative-single-fact",
+    "category": "negative",
+    "question": "RAG 是什么意思？",
+    "note": "单一事实回答 → 不应调 make_plan；最多调一次 search_knowledge / web_search"
+  },
+  {
+    "id": "P08-negative-chitchat",
+    "category": "negative",
+    "question": "你好，今天感觉怎么样？",
+    "note": "纯闲聊 → 不应调 make_plan，也不应调任何业务 tool"
+  },
+  {
+    "id": "P09-negative-followup",
+    "category": "negative",
+    "question": "再展开一下第 2 点",
+    "note": "多轮上下文里的简单追问 → 不应调 make_plan（应基于已有上下文直接展开）"
+  },
+  {
+    "id": "P10-negative-greeting",
+    "category": "negative",
+    "question": "谢谢你的帮助！",
+    "note": "礼貌结束语 → 不应调 make_plan，也不应调任何 tool"
+  }
+]
