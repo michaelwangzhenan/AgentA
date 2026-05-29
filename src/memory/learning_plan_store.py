@@ -3,7 +3,7 @@
 
 将用户的学习计划（learning_plans）与学习任务（learning_tasks）持久化到本地独立的
 SQLite 数据库（默认 ./sqlite_db/learning.db）。区别于 Phase 2.1 plan-execute
-的"单次问答内用完即弃 plan"（寄生 messages，详 [iter_2.md §4.9.6 D1](../../docs/iter_2.md#496-agent-循环升级-phase-21)），
+的"单次问答内用完即弃 plan"（寄生 messages，详 [iter_2_agent.md §4.9.6 D1](../../docs/iter_2_agent.md#496-agent-循环升级-phase-21)），
 本期学习计划是**跨 session 长期持久化的 plan**，按周/月级生命周期管理。
 
 表结构：

@@ -1,5 +1,5 @@
 """
-Phase 2.3 Quiz 业务评估器（[§4.9.8 #8](../../../docs/iter_2.md#498-quiz-出题-phase-23)）
+Phase 2.3 Quiz 业务评估器（[§4.9.8 #8](../../../docs/iter_2_agent.md#498-quiz-出题-phase-23)）
 
 判定两件事（对应 Step 0 验收 ① + ②）：
 

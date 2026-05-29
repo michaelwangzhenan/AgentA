@@ -2,7 +2,7 @@
 Quiz 出题持久化模块 —— SQLite 存储层（Phase 2.3 §4.9.8 D1 / D9 / D10）
 
 将 Agent 给用户生成的 quiz_set + 每道 quiz_question 持久化到本地 SQLite
-（默认 ./sqlite_db/quiz.db）。区别于 [§4.9.7 学习计划](../../docs/iter_2.md#497-学习计划生成-phase-22)
+（默认 ./sqlite_db/quiz.db）。区别于 [§4.9.7 学习计划](../../docs/iter_2_agent.md#497-学习计划生成-phase-22)
 的"周/月级长期目标跟踪"，本期是"周期性自检练习"：一次性出 5-15 题、用户作答后批改、
 跨 session 留档用于复盘 / 喂 Phase 2.4 SRS。
 

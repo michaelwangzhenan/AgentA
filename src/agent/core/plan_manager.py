@@ -1,7 +1,7 @@
 """
 plan_manager —— Phase 2.1 Plan-Execute 状态封装与 reconstruct
 
-Plan 不在 ChatHistoryStore 新建表（[iter_2.md §4.9.6 D1](../../docs/iter_2.md#496-agent-循环升级-phase-21)），
+Plan 不在 ChatHistoryStore 新建表（[iter_2_agent.md §4.9.6 D1](../../docs/iter_2_agent.md#496-agent-循环升级-phase-21)），
 完全依赖 messages 历史中的 `make_plan` / `update_step` / `abort_plan`
 三类 tool call 自然落库：
 

@@ -225,7 +225,7 @@ class TestSwitchSessionPreview:
         assert "最近对话预览" not in full
 
 
-# ── Phase 1.2 /memory 子命令（iter_2.md §4.9.2） ──────────────────────────
+# ── Phase 1.2 /memory 子命令（iter_2_agent.md §4.9.2） ──────────────────────────
 
 from collections.abc import Iterator
 from src.memory.user_memory import UserMemoryStore

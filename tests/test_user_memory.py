@@ -397,7 +397,7 @@ class TestContextManager:
             assert len(s.load_all()) == 1
 
 
-# ── Phase 1.2：source 字段（iter_2.md §4.9.2） ────────────────────────────
+# ── Phase 1.2：source 字段（iter_2_agent.md §4.9.2） ────────────────────────────
 
 class TestSourceField:
     """upsert 接受 source 参数（auto/explicit/manual），落库可读，schema 自动迁移旧 DB。"""

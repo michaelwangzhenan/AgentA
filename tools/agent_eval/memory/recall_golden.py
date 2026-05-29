@@ -34,7 +34,7 @@ git / python / provider）+ 核心指标 + 全 case 总览 + Fail 用例详情
 
 为什么不用 LLM-judge？
     本期 7 case 规模小，关键词/regex 就能把 80% 准召出来；LLM-judge 留 Phase 2
-    Plan/Quiz feature 第二次复用时再上 framework（详 iter_2.md §4.9.2 显式不做项）。
+    Plan/Quiz feature 第二次复用时再上 framework（详 iter_2_agent.md §4.9.2 显式不做项）。
 """
 
 from __future__ import annotations

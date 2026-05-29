@@ -973,7 +973,7 @@ Memory 实际现状已经覆盖大部分  混合范式（用户记忆自动提�
 | **E 测试** | 9 | `TestExtractTriggerPolicy` + `TestSourceField` + `TestManualWrite` + `TestMemoryOutput` | `tests/` |
 | **F 评估** | 10a | 合并 `session_perf_eval` + `memory_perf_eval` → `tools/agent_eval/perf_eval.py`（`--target session/memory`）；删除旧 `feature_session/` | `tools/` |
 | | 10b | `tools/agent_eval/memory/recall_golden.py` + `dataset.json`（5-8 case）+ `reports/.gitkeep` + `.gitignore` | `tools/` |
-| **G 文档** | 11 | iter_2.md §4.9.2 实施结果回填；§4.7.3 feature 名同步；design.md 加 Memory 小节；§4.10 工具组织描述更新 | `docs/` |
+| **G 文档** | 11 | iter_2_agent.md §4.9.2 实施结果回填；§4.7.3 feature 名同步；design.md 加 Memory 小节；§4.10 工具组织描述更新 | `docs/` |
 
 **实施顺序**
 
@@ -1771,7 +1771,7 @@ AI 跑过的 smoke 验证（`--help` 入口 + 模块 import + dataset JSON 解�
 | 6 | LLM-judge helper 抽出 + Phase 2.1 内联实现改造接入 | G6 + D6 + D11 | 新建 [`tools/agent_eval/judge/__init__.py`](../tools/agent_eval/judge/__init__.py)（`judge_with_llm()` 函数 30-50 行）；改 [`tools/agent_eval/plan/eval_plan.py`](../tools/agent_eval/plan/eval_plan.py) 删 `_JUDGE_PROMPT` + `_llm_judge_plan_structure`，改调新 helper | +~50 / -~60 +~20 行 |
 | 7 | Phase 2.2 golden set + evaluator + Markdown 报告 | G7 | 新建 `tools/agent_eval/plan_business/dataset.json`（计划生成 5-8 case + 进度更新 5-8 case）+ `eval_plan_business.py`（仿 [`eval_plan.py`](../tools/agent_eval/plan/eval_plan.py) 套路 + 接入新 judge helper） | + ~400 行 |
 | 8 | UT 全套：`LearningPlanStore` CRUD / 业务 tool 三函数 / CLI `/study` 命令 / Agent 注入 / 跨 session 恢复 e2e | 所有 G | 新建 `tests/test_learning_plan_store.py`；扩 [`tests/test_tools.py`](../tests/test_tools.py) / [`tests/test_cli_handlers.py`](../tests/test_cli_handlers.py) / [`tests/test_agent.py`](../tests/test_agent.py) | + ~600 行 |
-| 9 | design.md 同步 + iter_2.md Step 3-6 落地 | 所有 G | 新增 [`docs/design.md`](design.md) §3.9 学习计划 + §5 IMP / 代码组织树同步；[`docs/iter_2.md`](iter_2.md) §4.9.7 Step 3-6 | + ~300 行 |
+| 9 | design.md 同步 + iter_2_agent.md Step 3-6 落地 | 所有 G | 新增 [`docs/design.md`](design.md) §3.9 学习计划 + §5 IMP / 代码组织树同步；[`docs/iter_2_agent.md`](iter_2_agent.md) §4.9.7 Step 3-6 | + ~300 行 |
 
 **Punt 项**（同步登记入 §4.13）：[§4.13.1 #12 #13 #14](#4131-deferred-backlog暂时不做)（Chainlit 进度可视化 / 学习计划 export / SRS 字段预留）、[§4.13.2 #27 #28 #29](#4132-dropped永久不做)（自动学习时长追踪 / 多用户学习计划 / 计划自动调度提醒）。
 
@@ -1939,7 +1939,7 @@ Phase 2.2 初版按"路线 A：自动注入 active plan"实现 —— 只要 DB 
 | 6 | Phase 2.3 评估器：`tools/agent_eval/quiz/dataset.json` 10 case（5 create：RAG / 5G NR / Python / ML 面试 / PMP + 3 negative：闲聊 / 单事实查 / "教我 X"歧义 + 2 grade case：标答对错混合）+ `eval_quiz.py`（双判定：触发识别率 + plan 质量 LLM-judge + 可选 grade 质量 judge；复用 `judge_with_llm` 第 3 次）+ `_QUIZ_QUALITY_CRITERIA`（相关性 / 难度 / 答案可推导 / 覆盖度）+ `_GRADE_QUALITY_CRITERIA`（识别 / 评分公平 / 反馈具体）；entry point 顶部 `load_dotenv(override=True)` | G6 + G7 + G8 + D6 | 新建 [`tools/agent_eval/quiz/__init__.py`](../tools/agent_eval/quiz/__init__.py) + [`tools/agent_eval/quiz/dataset.json`](../tools/agent_eval/quiz/dataset.json) + [`tools/agent_eval/quiz/eval_quiz.py`](../tools/agent_eval/quiz/eval_quiz.py) | + ~450 行 |
 | 7 | UT 全套：`QuizStore` CRUD / 三业务 tool 函数 / CLI 命令 / skill catalog（quiz-maker 是否被 scan_skills 发现） | 所有 G | 新建 [`tests/test_quiz_store.py`](../tests/test_quiz_store.py) ~30 case + [`tests/test_quiz_tools.py`](../tests/test_quiz_tools.py) ~25 case + [`tests/test_cli_handlers_quiz.py`](../tests/test_cli_handlers_quiz.py) ~15 case + 扩 [`tests/test_skill_loader.py`](../tests/test_skill_loader.py)（已有，加 1 case 确认 quiz-maker 被发现） | + ~600 行 |
 | 8 | 全量回归 + smoke 跑 evaluator（`--no-judge` 解析 dataset / `--case <id>` 单跑）+ ReadLints | — | `pytest -q --ignore=tests/test_rag.py --ignore=tests/test_llm.py` 应净增 ~70（543 + 70 = ~613）；0 退化 | — |
-| 9 | design.md 同步：新增 §3.10 测验业务（6-7 子节，仿 §3.9 学习计划业务结构）+ §5 IMP 表加 `QuizStore` 依赖行 + `tools.py` 加 Phase 2.3 三 tool 备注；iter_2.md Step 3-6 落地 | 所有 G | [`docs/design.md`](design.md) + [`docs/iter_2.md`](iter_2.md) | + ~300 行 |
+| 9 | design.md 同步：新增 §3.10 测验业务（6-7 子节，仿 §3.9 学习计划业务结构）+ §5 IMP 表加 `QuizStore` 依赖行 + `tools.py` 加 Phase 2.3 三 tool 备注；iter_2.md Step 3-6 落地 | 所有 G | [`docs/design.md`](design.md) + [`docs/iter_2_agent.md`](iter_2_agent.md) | + ~300 行 |
 
 **Punt 项**（同步登记入 §4.13）：[§4.13.1 #15 #16 #17 #18 #19](#4131-deferred-backlog暂时不做)（CLI `/quiz` 交互答题模式 / SRS 字段预留 / Harness 自评 / 测验 export / Chainlit 可视化）已登记；[§4.13.2 #30 #31 #32](#4132-dropped永久不做)（多用户排行榜 / 难度自适应 / 题目去重）永久 punt。
 
@@ -2028,6 +2028,164 @@ python -m tools.agent_eval.quiz.eval_quiz --no-judge   # 仅触发识别
 | **D7** | skill 承载 | **新建 srs-review skill**（与 study-planner / quiz-maker 平级） | 巩固"业务 = 对应 skill"约定（Phase 2.2 / 2.3 一致）；让 LLM 通过 scan_skills catalog + L2 load_skill 自然走 SRS 流程 |
 
 **Punt 项**（同步登记入 §4.13）：[§4.13.1 #21 #22 #23 #24 #25](#4131-deferred-backlog暂时不做)（Chainlit SRS 可视化 / FSRS 算法升级 / learning_task 进 SRS / SRS export / LLM-judge 复用）已登记；[§4.13.2 #29 #33](#4132-dropped永久不做)（后台 scheduler/OS 通知 — 既有 / 多用户 SRS + 多设备同步 — 本期新登记）。
+
+**Step 1 · Review 现状**
+
+> Gap 编号 `P24-G*` 是 Phase 2.4 局部命名，避免跟 [§4.6.2 G1-G9](#462-合并后的所有可能-feature-列表) / [§4.9.6 P21-G*](#496-agent-循环升级-phase-21) / [§4.9.7 P22-G*](#497-学习计划生成-phase-22) / [§4.9.8 P23-G*](#498-quiz-出题-phase-23) 重名。
+
+| # | Gap | 现状 | 影响（对应 Step 0 验收） |
+|---|---|---|---|
+| **P24-G1** | `SRSStore` + `srs_cards` 表 schema 不存在 | [`src/memory/`](../src/memory/) 已有 `chat_history.py` / `user_memory.py` / `learning_plan_store.py` / `quiz_store.py`；[`quiz_store.py`](../src/memory/quiz_store.py) 是完美模板（`_create_tables` 幂等 / `_row_to_*` 转换 / `with self._conn:` 事务 / `get_shared_store` 进程级单例 + `reset_shared_store_for_testing` 测试隔离） | D3 全部待新建，影响验收 ①②④ |
+| **P24-G2** | SM-2 算法核心 `srs_scheduler.py` 不存在 | [`src/agent/core/`](../src/agent/core/) 已有 `plan_manager.py` / `tool_call_engine.py` / `event_bus.py` / `citation_builder.py`；目录约定 `*_manager.py` / `*_engine.py` / `*_policy.py` 后缀（[agenta-conventions.mdc §2](../.cursor/rules/agenta-conventions.mdc)）；无 SM-2 / 调度类似算法核心 | D1 + D4 全部待新建，影响验收 ① |
+| **P24-G3** | SRS 业务 4 tool 不存在 | [`tools.py:_QUIZ_TOOLS`](../src/agent/tools.py) 是模板（JSON Schema 嵌套 / enum / minimum / minItems / `additionalProperties` 校验）；`_get_quiz_store()` 延迟 import 单例模式 + `execute_tool` match 路由 + `get_tools()` 永远塞入（[`tools.py:81-100`](../src/agent/tools.py)）| 影响验收 ②③ |
+| **P24-G4** | `.agenta/skills/srs-review/SKILL.md` 不存在 | [`.agenta/skills/quiz-maker/SKILL.md`](../.agenta/skills/quiz-maker/SKILL.md) 200 行模板（触发条件 + 6 类意图 × tool 映射 + D5 嵌套工作流 + 反模式 + 用户呈现层）；[`scan_skills`](../src/cli/skill_loader.py) 自动发现 + `build_skill_catalog` 拼 system block，无代码改动 | D7 + 验收 ②③ |
+| **P24-G5** | quiz-maker skill 批改后无"错题进 SRS"钩子 | [`quiz-maker/SKILL.md`](../.agenta/skills/quiz-maker/SKILL.md) 批改工作流第 4 步只到"友好反馈给用户"；[`_tool_grade_quiz`](../src/agent/tools.py) 返回 content 已含错题清单（题号 / q_type / 得分 / 反馈 / 题干 / 标答）— LLM 完全能据此自决调 `add_to_srs(source_type='quiz_question', source_ref=qid)`，关键是 skill 给出指引 | D5 钩子 + 验收 ② |
+| **P24-G6** | CLI `/srs` 命令组不存在 | [`handle_quiz`](../src/cli/handlers.py) (handlers.py:846-907) 完美模板（子命令 list / show / del + `_format_quiz_brief` / `_print_quiz_list` / `_print_quiz_detail` / `_parse_quiz_id` + `input("yes")` 二次确认）；[`handle_study`](../src/cli/handlers.py) (handlers.py:645) 提供更多子命令模式（list / show / switch / load / abandon 五子命令）| 验收 ④ |
+| **P24-G7** | tab 补全 / HELP_TEXT 缺 `/srs*` 行 | [`tab_complete.py:39-49`](../src/cli/tab_complete.py) 静态命令表只到 `/quiz*`；[`ui.py`](../src/cli/ui.py) HELP_TEXT 同理无 srs 说明 | 验收 ④ UX |
+| **P24-G8** | Phase 2.4 golden set + evaluator 不存在 | [`tools/agent_eval/quiz/eval_quiz.py`](../tools/agent_eval/quiz/eval_quiz.py) 416 行完美模板（`_EVAL_SYSTEM_PROMPT` 教学段 + `_PLAN_QUALITY_CRITERIA` 4 维 + `_extract_first_tool_call` + 双阈值 + Markdown 报告）；[`judge_with_llm`](../tools/agent_eval/judge/llm_judge.py) helper 已就绪（第 4 次复用，巩固 D6 抽象） | Step 5 评估 + 验收 ③ |
+| **P24-G9** | SYSTEM_PROMPT 没"何时调 SRS tool"指引 | [`agent.py:147-225`](../src/agent/agent.py) `SYSTEM_PROMPT` 第 0 步 make_plan 段提到了"学习计划 / 出题"，没提"SRS / 复习 / 回炉"；srs-review skill 加进 catalog 后 LLM 应能由 skill description 自决，但生产 SYSTEM_PROMPT 是否也加引导是浮现决策 | 验收 ③ 触发识别率 |
+| **P24-G10** | config 三段同步缺 `SRS_DB_PATH` / `SRS_DEFAULT_NEW_INTERVAL_DAYS` 等 | [`src/config.py:318-330`](../src/config.py) 既有 `LEARNING_PLAN_DB_PATH` / `QUIZ_DB_PATH` 模板（独立 SQLite 文件路径模式）；[`.env.example`](../.env.example) + `.env` 需三处同步（[agenta-conventions.mdc §5.1](../.cursor/rules/agenta-conventions.mdc) 强约束） | 配置层 |
+
+**复用资源**（不动）：
+
+- [`QuizStore`](../src/memory/quiz_store.py) 二表 schema 模板 + 进程级单例 + `with self._conn:` 事务 + `reset_shared_store_for_testing` UT 隔离 → `SRSStore` 全量套用
+- [`_QUIZ_TOOLS` / `_STUDY_PLAN_TOOLS`](../src/agent/tools.py) JSON Schema 写法 + `_get_quiz_store()` 延迟 import 模式 + 入参 ≥ 10 类校验 → `_SRS_TOOLS` 套用
+- [`handle_quiz`](../src/cli/handlers.py) 子命令分发 + `_parse_quiz_id` 整数校验 helper + `_format_quiz_brief` 一行摘要渲染 → `handle_srs` 仿写
+- [`scan_skills()`](../src/cli/skill_loader.py) catalog 自动发现 + L1 注入 → srs-review skill 自动接入
+- [`judge_with_llm`](../tools/agent_eval/judge/llm_judge.py) helper（第 4 次复用，巩固 [§4.9.7 D6](#497-学习计划生成-phase-22) 抽象）
+- [`build_active_study_plan_block`](../src/agent/agent.py) 注入模式（虽然 SRS D-θ 决策不注入 system block，但 helper 函数签名 + 软异常返空模式可参考；本期**不**新建对等 helper）
+- [`_tool_grade_quiz`](../src/agent/tools.py) 返回的错题清单结构 → D5 钩子直接基于 LLM 看 `grade_quiz` 返回 + srs-review skill 描述自决调 `add_to_srs`，无需 quiz-maker skill / grade_quiz tool 内部硬编码副作用
+
+**设计调整**：仅 1 处需要在 [Step 2](#step-2--实施计划-4) 决策（**D8** — `srs_cards` 是否含 `front` + `back` 冗余字段，影响"quiz 被 delete 后 SRS 卡能否独立 review"），其它路径清晰，无结构性阻碍。
+
+**Step 2 · 实施计划**
+
+新决策表（D8-D15，Step 1 review 后浮现的局部决策；用户已 batch 拍板"按推荐继续"，沿用推荐项）：
+
+| # | 决策 | 选用 | 一句话理由 |
+|---|---|---|---|
+| **D8** | `srs_cards` 是否冗余存 `front` + `back` 字段 | **冗余存**（独立 review 不依赖 source） | quiz `del` 不污染 SRS 复习生命周期；manual 卡天然需要 `front` + `back`，统一 schema；review 时省 JOIN 节延迟 |
+| **D9** | `srs_cards.status` 三态枚举 | `active` / `suspended` / `archived` | 跟 [§4.9.7 D9](#497-学习计划生成-phase-22) `learning_plans.status` / [§4.9.8 D9](#498-quiz-出题-phase-23) `quiz_sets.status` 三态同思路；suspended 是用户"暂停一段时间"语义，archived 是永久归档 |
+| **D10** | `next_review_at` / `last_reviewed_at` 时区 | **本地 ISO 8601 字符串**（同 `created_at` 现有约定） | 单用户场景；多设备同步永久 punt（[§4.13.2 #33](#4132-dropped永久不做)）；保持 store 写入 / 渲染对称性 |
+| **D11** | `review_srs_card` 是否设防抖 / 间隔下限 | **仅 ease_factor 硬下限 1.3 + interval 最小 1 天**（SM-2 原版约定，无额外冷却期） | SM-2 原版 ease 下限 1.3 是算法内禀约定；冷却期（"同 card 10min 内拒 review"）是产品特性，YAGNI |
+| **D12** | 生产 `SYSTEM_PROMPT` 是否加"何时调 SRS tool"引导段 | **不加** | 跟 [§4.9.7 / §4.9.8 study-planner / quiz-maker](#498-quiz-出题-phase-23) 做法一致，完全靠 srs-review skill catalog + L2 load_skill 自决；生产 SYSTEM_PROMPT 保持稳定 |
+| **D13** | `query_srs_due` 默认返回粒度 | 默认摘要 + `detail=True` 完整（题面 / 选项 / 答案）| 跟 [§4.9.7 D12](#497-学习计划生成-phase-22) `query_study_status` / [§4.9.8 query_quiz_history](#498-quiz-出题-phase-23) 一致；节 context |
+| **D14** | `add_to_srs` 入参对 quiz_question 是否支持批量 | **`question_ids` 数组批量** | 批改后 LLM 一次性把错题数组传入最自然；单卡场景退化为 length=1 数组；前置 source_type=manual 的入参用 `front` + `back` 单卡形态 |
+| **D15** | `query_srs_stats()` 返回什么 | **MVP 最简**：总数 + due 数 + 平均 ease | ease bucket 分布 / 最近 N 天 review 趋势属可视化范畴，留 [§4.13.1 #21](#4131-deferred-backlog暂时不做) Chainlit UI 一并做 |
+
+实施步骤（按依赖排序，**严格分 9 step**，每 step 出口判据明确）：
+
+| 序 | 实施内容 | 关联 Gap / D | 文件 | 估算行数 |
+|---|---|---|---|---|
+| 1 | config + `.env.example` + `.env` 三段同步：`SRS_DB_PATH`（默认 `./sqlite_db/srs.db`）+ `SRS_DEFAULT_DUE_QUERY_LIMIT`（默认 20）+ `SRS_FIRST_INTERVAL_DAYS` / `SRS_SECOND_INTERVAL_DAYS`（SM-2 公式起步两个 interval，默认 1 / 6） | [§5.1 三段同步](../.cursor/rules/agenta-conventions.mdc) | [`src/config.py`](../src/config.py) + [`.env.example`](../.env.example) + `.env` | + ~15 行 |
+| 2 | `srs_cards` 单表 schema + `SRSStore` 数据层（init / `add_card` / `get_card` / `list_cards` / `list_due` / `update_review_state` / `suspend` / `archive` / `delete`）+ 进程级单例 `get_shared_store()` / `reset_shared_store_for_testing()` | G1 + D3 + D8 + D9 + D10 | 新建 [`src/memory/srs_store.py`](../src/memory/srs_store.py) | + ~280 行 |
+| 3 | SM-2 算法核心：`schedule_review(card_state, rating)` 函数（Anki 4 档 mapping → SM-2 公式）+ `Rating` enum + `CardState` dataclass + `_clip_ease` / `_clip_interval` 边界保护 | G2 + D1 + D4 + D11 | 新建 [`src/agent/core/srs_scheduler.py`](../src/agent/core/srs_scheduler.py) | + ~120 行 |
+| 4 | 4 业务 tool JSON Schema + 实现函数 + `_get_srs_store()` 延迟 import + `execute_tool` 路由 + `get_tools()` 永远塞入：<br>① `add_to_srs(source_type, question_ids?, front?, back?, note?)` 入参 ≥ 8 类校验<br>② `query_srs_due(limit?, detail?)`<br>③ `review_srs_card(card_id, rating)` 调 `srs_scheduler.schedule_review`<br>④ `query_srs_stats()` 返回总数 + due 数 + 平均 ease | G3 + D5 + D11 + D13 + D14 + D15 | [`src/agent/tools.py`](../src/agent/tools.py) 加 `_SRS_TOOLS` + `_tool_add_to_srs` / `_tool_query_srs_due` / `_tool_review_srs_card` / `_tool_query_srs_stats` + `_render_card_brief` / `_render_card_detail` 共用 helper | + ~400 行 |
+| 5 | 新建 `.agenta/skills/srs-review/SKILL.md`（仿 quiz-maker SKILL 结构）+ quiz-maker SKILL 加"错题进 SRS"钩子段（在批改工作流末尾） | G4 + G5 + D5 + D7 | 新建 [`.agenta/skills/srs-review/SKILL.md`](../.agenta/skills/srs-review/SKILL.md)（~180 行）；改 [`.agenta/skills/quiz-maker/SKILL.md`](../.agenta/skills/quiz-maker/SKILL.md)（+ ~20 行） | + ~200 行 |
+| 6 | CLI `/srs` 命令组：`list [active\|suspended]` / `due` / `show <id>` / `stats` / `del <id>` + `_SRS_USAGE` + `_format_card_brief` / `_print_card_list` / `_print_card_detail` / `_parse_card_id` helper + `handle_srs` 主分发 + main.py case 路由 + tab 补全 + ui.py HELP_TEXT | G6 + G7 | [`src/cli/handlers.py`](../src/cli/handlers.py) + [`main.py`](../main.py) + [`src/cli/tab_complete.py`](../src/cli/tab_complete.py) + [`src/cli/ui.py`](../src/cli/ui.py) | + ~200 行 |
+| 7 | Phase 2.4 evaluator + golden set：仿 [`eval_quiz.py`](../tools/agent_eval/quiz/eval_quiz.py) 套路 — `_EVAL_SYSTEM_PROMPT` 内嵌 srs-review skill 模拟段 + 触发识别 judge + `judge_with_llm` 第 4 次复用（review path 不调 judge — D6 决策）+ Markdown 报告 + 双阈值退出码（触发识别率 ≥ 80%；SM-2 算法对齐由 UT 单独保 ≥ 95% 分支覆盖） | G8 + D6 复用 | 新建 [`tools/agent_eval/srs/__init__.py`](../tools/agent_eval/srs/__init__.py) + [`tools/agent_eval/srs/dataset.json`](../tools/agent_eval/srs/dataset.json) 12 case（5 due 查询 + 3 add_to_srs + 2 review + 2 negative）+ [`tools/agent_eval/srs/eval_srs.py`](../tools/agent_eval/srs/eval_srs.py) | + ~450 行 |
+| 8 | UT 全套：`SRSStore` CRUD / SM-2 算法核心（含 Anki 对齐表 ≥ 20 case 锁公式） / 4 业务 tool / CLI `/srs` 命令 / skill_loader 自动发现 srs-review / quiz → SRS 钩子集成测 | 所有 G | 新建 [`tests/test_srs_store.py`](../tests/test_srs_store.py) ~30 case + [`tests/test_srs_scheduler.py`](../tests/test_srs_scheduler.py) ~25 case + [`tests/test_srs_tools.py`](../tests/test_srs_tools.py) ~30 case + [`tests/test_cli_handlers_srs.py`](../tests/test_cli_handlers_srs.py) ~15 case + 扩 [`tests/test_skill_loader.py`](../tests/test_skill_loader.py) +1 case（srs-review 自动发现）| + ~700 行 |
+| 9 | 全量回归 + smoke 跑 evaluator（`--no-judge` + `--case <id>`）+ ReadLints；design.md 同步：新增 §3.11 SRS 业务（5-6 子节，仿 §3.9 / §3.10 结构）+ §5 IMP 表加 `SRSStore` + `srs_scheduler` 依赖行 + `tools.py` 行加 Phase 2.4 四 tool 备注；iter_2.md Step 3-6 落地 | 所有 G | `pytest -q --ignore=...` 应净增 ~100（677 + ~100 = ~777，0 业务退化）；[`docs/design.md`](design.md) + [`docs/iter_2_agent.md`](iter_2_agent.md) | + ~400 行 |
+
+**SM-2 公式快速预览**（D1 + D4 实现要点，留 Step 3 细节）：
+
+```
+mapping: again→q=1, hard→q=3, good→q=4, easy→q=5
+new_ease = clip(old_ease + (0.1 - (5-q)*(0.08 + (5-q)*0.02)), min=1.3, max=2.5)
+if q < 3:  # again
+    repetitions = 0
+    interval_days = 1
+else:
+    repetitions += 1
+    if repetitions == 1: interval_days = 1
+    elif repetitions == 2: interval_days = 6
+    else: interval_days = round(prev_interval * new_ease)
+    if rating == "hard":  interval_days = max(1, round(interval_days * 0.8))
+    elif rating == "easy": interval_days = round(interval_days * 1.3)
+next_review_at = now + interval_days days
+```
+
+UT 锁公式：对照 Anki 默认调度行为表 ≥ 20 case（初次 / 第二次 / 第三次累积 / again 重置 / easy bonus / hard penalty / ease 下限 1.3 等边界）。
+
+**Punt 项**（同步登记入 §4.13）：本 step 无新增 punt 项；既有 [§4.13.1 #21-#25](#4131-deferred-backlog暂时不做) + [§4.13.2 #29 #33](#4132-dropped永久不做) 已覆盖。
+
+#### Step 3 · 编码落地
+
+按 Step 2 的 9 实施步骤顺序完成，全程 `TodoWrite` 跟踪、每改完一个模块跑相关 UT + `ReadLints` 0 错。落地路径与最终行数（与 Step 2 估算对比）：
+
+| 步 | 文件 | 估算 | 实际 | 说明 |
+|---|---|---|---|---|
+| 1 | `src/config.py` + `.env.example` + `.env` | +15 | +18 | 4 个新 config 项；三段同步零差异 |
+| 2 | `src/memory/srs_store.py`（新建）| +280 | +361 | 加了 `card_exists_for_source` 防重复 + `resume` 反向操作 + `stats` 多字段聚合 |
+| 3 | `src/agent/core/srs_scheduler.py`（新建）| +120 | +213 | 加 `_RATING_QUALITY` 映射表 + `parse_rating` 宽松解析 + `card_state_from_dict` 转换 helper |
+| 4 | `src/agent/tools.py` | +400 | +334 | `_SRS_TOOLS` 4 schema + 4 实现函数 + `_render_card_brief` / `_render_card_detail` + `_get_srs_store` + execute_tool 4 路由分支 |
+| 5 | `.agenta/skills/srs-review/SKILL.md`（新建）+ `quiz-maker/SKILL.md` 改 | +200 | +208 | srs-review 含完整复习工作流 + manual 卡 + quiz 钩子；quiz-maker 批改末尾加"加 SRS"建议段 |
+| 6 | `src/cli/handlers.py` + `main.py` + `tab_complete.py` + `ui.py` | +200 | +172 | `handle_srs` + 5 helper + main.py case 1 行 + tab 补全 9 个新条目 + ui.py HELP 6 行 |
+| 7 | `tools/agent_eval/srs/`（新建）| +450 | +405 | `__init__.py` + `dataset.json` 12 case + `eval_srs.py`（不调 judge，单触发识别指标）|
+| 8 | `tests/test_srs_*.py`（4 新文件）+ 扩 `test_skill_loader.py` | +700 | +775 | 详 Step 4 |
+| 9 | `docs/design.md` + `docs/iter_2_agent.md` | +400 | +180 | design.md §3.11 SRS 业务（7 子节）+ §5 IMP 表 2 行；iter_2.md Step 3-6 落地段 |
+
+**关键实现取舍记录**
+
+- Step 4 `_tool_add_to_srs`：quiz_question 路径反查 QuizStore 原 stem + correct_answer + explanation **冗余存** 到 SRS 卡的 front / back，落实 D8 决策（quiz_question 被 delete 后 SRS 卡仍独立可用）。explanation 非空时拼到 back 末尾作为"考点"补充。
+- Step 4 `add_to_srs` 防重复：调 `SRSStore.card_exists_for_source(source_type, source_ref)` 提前查 active+suspended（**不**算 archived，archived 视作"用户已显式弃用，允许再添"）；全部 question_id 都已存在时返回 `status="empty"` 而非 `"ok"`，避免 LLM 误判为成功。
+- Step 5 srs-review SKILL.md "一次只问一张卡"约束写得非常明确（含反模式段），确保 LLM 不会一次性把全部 due 卡 front+back 都展示出来（破坏复习语义）。
+- Step 6 CLI 故意不实现 `/srs review` 子命令 —— review 是高语义交互（一次一张卡 + 4 档评分 + 揭晓答案），更适合走对话路径让 LLM 编排，CLI 命令组只做"只读 + 删除"管理面板。
+
+#### Step 4 · UT 全套
+
+| 测试文件 | case 数 | 覆盖维度 |
+|---|---|---|
+| [`tests/test_srs_store.py`](../tests/test_srs_store.py) | 39 | CRUD（add / get / list / list_due / update_review_state）+ 入参校验 + 状态切换（suspend / resume / archive / delete）+ card_exists_for_source 跳 archived + stats 含 mature 卡 + 进程级单例 + context manager |
+| [`tests/test_srs_scheduler.py`](../tests/test_srs_scheduler.py) | 40 | parse_rating（4 档 + 大小写容忍 + 非法 raise）+ 4 档路径全覆盖（again 重置 / hard penalty 0.8 / good 主公式 / easy bonus 1.3）+ SM-2 阶段公式（reps=1→1d / reps=2→6d / reps≥3→prev×ease）+ 边界保护（ease ≥ 1.3 / interval ≥ 1）+ next_review_at ISO 格式 + Anki 序关系锁定（again < hard < good < easy）|
+| [`tests/test_srs_tools.py`](../tests/test_srs_tools.py) | 28 | JSON Schema 完整性（4 tool 名 / enum / required）+ add_to_srs（manual / quiz_question 批量 / 防重复 / 部分跳过）+ query_srs_due（摘要 / detail / empty / limit / 非法 limit）+ review_srs_card（4 档 + 非法 + 不存在 / suspended 拒）+ query_srs_stats（empty / 有卡）+ execute_tool 路由全覆盖 |
+| [`tests/test_cli_handlers_srs.py`](../tests/test_cli_handlers_srs.py) | 19 | `/srs` 无参 / list active|suspended / due 空与非空 / show 详情 / stats / del confirm yes|no / 非法 id / 未知子命令 |
+| 扩 [`tests/test_skill_loader.py`](../tests/test_skill_loader.py) | +2 | 仓库内置 4 个 skill 全 loaded（含 srs-review）+ srs-review body 含 4 个 SRS tool 名 |
+
+**实际数字**：净增 **126 个 UT case**（39 + 40 + 28 + 19 + 0 store 校验 + 仓库 skill +2，合并入 test_skill_loader）；全量回归 `pytest -q` = **824 passed / 3 skipped / 0 failed** in 63s（Phase 2.3 基线 698 → Phase 2.4 824，净增 126，0 业务退化）。
+
+#### Step 5 · 评估闭环
+
+| 评估器 | dataset | 阈值 | 实际通过率 |
+|---|---|---|---|
+| [`tools/agent_eval/srs/eval_srs.py`](../tools/agent_eval/srs/eval_srs.py) | 12 case（5 due + 3 add + 2 review + 2 negative）| 触发识别 ≥ 80% | **12/12 = 100%** |
+
+报告：[`tools/agent_eval/reports/srs-eval-20260529-140847.md`](../tools/agent_eval/reports/srs-eval-20260529-140847.md)
+
+**评估 case 对照 Step 0 验收**（强约束 — 不允许评估指标与验收脱钩）：
+
+| Step 0 验收 | 对应评估手段 | 落地证据 |
+|---|---|---|
+| ① SM-2 算法对齐 Anki 默认行为 | UT `test_srs_scheduler.py` 40 case 锁公式（含序关系 again<hard<good<easy）| 40/40 passed |
+| ② 核心场景：错题进队列 + due 列表 + review 更新 + 跨 session 持久化 | UT `test_srs_store.py` + `test_srs_tools.py` + evaluator add/review case | 67/67 passed + evaluator 5/5 |
+| ③ 触发识别率 ≥ 80%（LLM 在 due/add/review 三类指令下首轮调对 tool）| evaluator dataset 12 case | 12/12 = 100% |
+| ④ CLI `/srs` 命令组可视化 | UT `test_cli_handlers_srs.py` 19 case | 19/19 passed |
+| ⑤ 不污染 system prompt | 代码 review：`agent.py` 未新增 system block 注入逻辑；srs-review skill 走 catalog 渐进披露（与既有 skill 框架一致） | 手验 PASS |
+
+**为什么 SRS 评估只有单一指标（触发识别率）而非双阈值**（D6 决策落地）：SM-2 算法对齐由 UT 锁公式覆盖（40 case 含 Anki 序关系强约束），LLM 不参与算法计算（rating → tool 调用 → srs_scheduler 纯函数）；review path 评测无 LLM-judge 价值（公式确定性），所以 evaluator 只测一件事：LLM 看到用户请求后**第一轮是否调对 tool**。
+
+#### Step 6 · 文档同步
+
+`docs/design.md`：
+
+- 新增 §3.11 SRS 主动复习业务（7 子节，仿 §3.9 / §3.10 结构）：
+  - §3.11.1 数据模型（独立 srs.db / 单表 srs_cards / 冗余 front+back / 三态枚举 / 调度字段）
+  - §3.11.2 SM-2 算法核心（为什么 SM-2 而非 FSRS/Leitner + Anki 4 档 → SM-2 映射表 + 纯函数式实现位置）
+  - §3.11.3 四个业务 tool 协议（add_to_srs / query_srs_due / review_srs_card / query_srs_stats + 协议层关键设计）
+  - §3.11.4 端到端流程（mermaid 时序图 — 复习路径**不嵌套** plan-execute）
+  - §3.11.5 与测验业务的钩子（score < 0.6 错题阈值 + skill body 引导，不修改 grade_quiz 内部）
+  - §3.11.6 与其他模块关系（不注入 system block / skill 自动发现 / 复用 §3.10 question_id）
+  - §3.11.7 评估方法（5 行 UT + evaluator 矩阵）
+- §5 IMP 共享组件表加 `SRSStore`（依赖）+ `srs_scheduler`（Helper）2 行
+- §5 公共层 helpers `src/agent/core/` 文件树加 `srs_scheduler.py`
+- §5 依赖层路径列表加 `src/memory/quiz_store.py` + `src/memory/srs_store.py`
+- §5 `tools.py` 行加 Phase 2.4 SRS 业务 4 tool（含 cross-ref §3.11）
+
+`docs/iter_2_agent.md`：
+
+- §4.9.9 Step 3-6 落地段（即本节）
+- §4.13.1 Deferred Backlog #21-25（Chainlit SRS UI / FSRS 算法 / learning_task SRS 源 / SRS 导出 / LLM-judge for SRS review）已在 Step 2 期间登记
+- §4.13.2 Dropped Features #33（多用户 SRS / 多设备同步）已在 Step 2 期间登记
 
 
 ## 4.10. 配套 tools（tools/agent_eval）

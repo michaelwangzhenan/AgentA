@@ -1,0 +1,86 @@
+[
+  {
+    "id": "S01-due-today",
+    "category": "due",
+    "question": "今天有什么要复习的吗？",
+    "expected_first_tool": ["query_srs_due"],
+    "note": "最高频自然语言入口 — 用户主动来复习"
+  },
+  {
+    "id": "S02-due-srs",
+    "category": "due",
+    "question": "把 SRS 卡片背一下",
+    "expected_first_tool": ["query_srs_due"],
+    "note": "显式提 SRS 关键词"
+  },
+  {
+    "id": "S03-due-flashcard",
+    "category": "due",
+    "question": "给我出 due 的卡片我复习",
+    "expected_first_tool": ["query_srs_due"],
+    "note": "明确说 due"
+  },
+  {
+    "id": "S04-due-review-now",
+    "category": "due",
+    "question": "现在开始复习",
+    "expected_first_tool": ["query_srs_due"],
+    "note": "口语化但意图明确 — 应先拉 due 列表"
+  },
+  {
+    "id": "S05-due-flashcards-zh",
+    "category": "due",
+    "question": "今天的间隔重复卡有没有要回炉的",
+    "expected_first_tool": ["query_srs_due"],
+    "note": "学术用语『间隔重复』+『回炉』"
+  },
+  {
+    "id": "S06-add-quiz-mistakes",
+    "category": "add",
+    "question": "把刚才 quiz_set_id=3 的错题加入 SRS 复习队列。错题的 question_id 是 [11, 12, 15]。",
+    "expected_first_tool": ["add_to_srs"],
+    "note": "用户显式给出 question_ids → 应直接 add_to_srs(source_type=quiz_question)"
+  },
+  {
+    "id": "S07-add-manual",
+    "category": "add",
+    "question": "帮我加一张 SRS 卡：正面『Python GIL 是什么』背面『全局解释器锁，同一进程只允许一个线程执行字节码』",
+    "expected_first_tool": ["add_to_srs"],
+    "note": "manual 卡：用户给 front + back 明确入参"
+  },
+  {
+    "id": "S08-add-into-srs-batch",
+    "category": "add",
+    "question": "把错题 5、8、12 都加进 SRS 长期复习",
+    "expected_first_tool": ["add_to_srs"],
+    "note": "批量 question_ids；可能需要先 query_quiz_history 或直接 add_to_srs"
+  },
+  {
+    "id": "S09-review-good",
+    "category": "review",
+    "question": "card_id=7 这张我答对了，自评 good，记一下",
+    "expected_first_tool": ["review_srs_card"],
+    "note": "用户给出 card_id + rating 显式 → review_srs_card"
+  },
+  {
+    "id": "S10-review-again",
+    "category": "review",
+    "question": "card 12 我又忘了，again",
+    "expected_first_tool": ["review_srs_card"],
+    "note": "口语化 + rating again"
+  },
+  {
+    "id": "S11-negative-define-rag",
+    "category": "negative",
+    "question": "RAG 是什么意思？",
+    "expected_first_tool_not": ["add_to_srs", "query_srs_due", "review_srs_card", "query_srs_stats"],
+    "note": "定义查询 → 应 search_knowledge / web_search，不应触发 SRS"
+  },
+  {
+    "id": "S12-negative-study-plan",
+    "category": "negative",
+    "question": "我想 4 周准备 Python 面试，帮我做学习计划",
+    "expected_first_tool_not": ["add_to_srs", "query_srs_due", "review_srs_card", "query_srs_stats"],
+    "note": "学习计划需求 → 应 create_study_plan / make_plan，不应触发 SRS"
+  }
+]

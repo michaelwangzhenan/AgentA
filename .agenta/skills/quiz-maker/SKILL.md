@@ -84,9 +84,11 @@ make_plan(steps=[
 2. 解析用户自然语言回复，把"题号 → 答案串"映射到"question_id → 答案串"
 3. 调 `grade_quiz(quiz_set_id, user_answers={"<qid>": "<ans>", ...})`
 4. 工具返回总分 + 错题清单 → 把它转写成更友好的反馈给用户（不要照抄 tool 返回；加鼓励 / 重点提示）
+5. **错题进 SRS 钩子（Phase 2.4）**：批改完若有错题（每题 `score < 0.6`），在给用户的反馈末尾**主动建议**"把错题加入 SRS 复习队列长期巩固"。用户同意（或主动说"加 SRS / 复习这些 / 进队列"）→ 调 `add_to_srs(source_type="quiz_question", question_ids=[<错题 question_id 列表>])`。详细工作流详 srs-review skill；本 skill 只负责"引出建议 + 单次调用"，不要在此处展开 SRS 复习细节
 
 > 用户写的是**题号**（『1』），你要转成**question_id**（数据库主键）传给 tool。
 > 如果 question_id 不确定，先调 `query_quiz_history(quiz_set_id=X, detail=true)` 拿全部题目的 id。
+> **错题阈值**：`score < 0.6` 视为错题（grade_quiz 每题 0-1 分；阈值跟 srs-review skill 一致）。
 
 ## 查 quiz 历史 / 错题复盘的工作流
 
@@ -155,5 +157,6 @@ B. <…>
 
 下一步建议：
   - 错题集中在 <X 主题>，建议再看看 KB 里的 <相关章节>
+  - **要把错题加入 SRS 队列长期复习吗？** 输入「加 SRS / 复习这些」我帮你入队（按遗忘曲线提醒回炉）
   - 想重做 / 换主题 / 看错题详情都可以告诉我
 ```

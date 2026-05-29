@@ -31,6 +31,7 @@
 - **Plan-Execute 循环**：Agent 主动用 `make_plan` 把复杂任务拆成有序 step 再逐步执行，每步可调 tool 并 emit `plan_step_*` 事件；CLI 端 ☐/✓/✗/⏭ 实时勾选可见。
 - **学习计划长期跟踪**：跟 Agent 说"我想 8 周准备 ML 面试" → 自动拆阶段任务清单落库 SQLite，跨 session 可见 + LLM 自动注入 `<active_study_plan>` 到 system prompt；用 `/study` 命令列 / 切换 / 放弃多个 plan，task 进度更新走对话（"完成了第 3 题"）。
 - **Quiz 自检练习**：跟 Agent 说"考考我 RAG / 出 5 道 ML 题" → 用 `quiz-maker` skill 走 4 步嵌套（解析意图 / 查 KB / 60% MCQ + 40% 简答组题 / 落库），用户用一段自然语言批量作答 → MCQ 字符串比对 + 简答 LLM-judge 自动批改 + 反馈薄弱点；quiz 跨 session 留档复盘，可用 `/quiz` 命令查历史 / 看错题。
+- **SRS 主动复习**：用 SM-2 算法（Anki 1987 同款）按遗忘曲线调度卡片：测验错题一句"加 SRS"入队、用户也能手动加自定义卡（正面 + 背面）；之后说"今天复习" → Agent 用 `srs-review` skill 一张张带过 → 用户用 again / hard / good / easy 4 档自评 → 自动算下次回炉时间。卡片跨 session 持久化，可用 `/srs` 命令查队列 / 看统计。
 - **三套实现可选**：`PYTHON`（手写 ReAct，默认）/ `LANGCHAIN`（create_agent 驱动）/ `AUTOGPT`（Plan-Execute 双循环）。
 
 

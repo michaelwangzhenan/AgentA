@@ -15,4 +15,5 @@ Agent 公共层 helpers —— 三种 Agent 实现（Python / LangChain / AutoGP
 - thinking_policy.py      ThinkingPolicy     adaptive thinking budget 估算
 - citation_builder.py     CitationBuilder    RAG 引用展示编排（注册 / 提取 / 渲染 sources 块）
 - plan_manager.py         PlanState          Phase 2.1 Plan-Execute 状态封装 + reconstruct_from_messages
+- srs_scheduler.py        schedule_review    Phase 2.4 SM-2 调度公式 + Anki 4 档 mapping
 """

@@ -26,7 +26,7 @@ from src.agent.agent import ThinkingConfig, TokenUsage, SYSTEM_PROMPT
 from src.agent.tools import ToolResult
 from src.memory.chat_history import ChatHistoryStore
 
-# AutoGPT Agent 本期不验证（详见 iter_2.md §4.4.3），整文件默认 deselect
+# AutoGPT Agent 本期不验证（详见 iter_2_agent.md §4.4.3），整文件默认 deselect
 pytestmark = pytest.mark.autogpt
 
 

@@ -15,6 +15,7 @@ import src.config as config
 from src.memory.chat_history import ChatHistoryStore
 from src.memory.learning_plan_store import LearningPlanStore
 from src.memory.quiz_store import QuizStore
+from src.memory.srs_store import SRSStore
 from src.memory.user_memory import UserMemoryStore
 
 # 历史记录预览截断长度
@@ -382,7 +383,7 @@ def switch_session(
     """切换到指定 session 并恢复上下文。
 
     无参兜底 `/session` → list 已废弃；list 由 main.py 路由到独立的 `/sessions` 命令
-    （见 [iter_2.md §4.9.1](../../docs/iter_2.md#491-session-列表搜索恢复phase-11)），
+    （见 [iter_2_agent.md §4.9.1](../../docs/iter_2_agent.md#491-session-列表搜索恢复phase-11)），
     本函数保留对空 session_arg 的防御性返回 None，但不再回退到 list。
 
     Returns:
@@ -905,3 +906,200 @@ def handle_quiz(
 
         case _:
             out(_QUIZ_USAGE)
+
+
+# ── /srs 命令组（Phase 2.4 §4.9.9）─────────────────────────────────────────
+
+_SRS_USAGE = (
+    "⚠️  未知子命令。用法：\n"
+    "    /srs                              列出 active + suspended 卡片（默认 limit 20）\n"
+    "    /srs list [active|suspended]      按状态过滤\n"
+    "    /srs due                          列今天 due 的卡片（next_review_at <= now）\n"
+    "    /srs show <card_id>               查看单卡完整详情（front + back + SM-2 字段）\n"
+    "    /srs stats                        SRS 队列统计（总数 / due / 平均 ease / mature）\n"
+    "    /srs del <card_id>                删除指定卡（不可恢复；常规用 archive 软删）\n"
+)
+
+
+def _format_card_brief(card: dict[str, Any]) -> str:
+    """一行 SRS 卡摘要：id + 状态 + ease + interval + 来源 + 题干前 50 字。
+
+    MCQ 卡的 front 含 ABCD 多行选项 — 摘要只取第一行（题干）+ 截断，避免选项把
+    `/srs list` 表格撑成多行（详情看 `/srs show <id>`）。
+    """
+    cid = card["id"]
+    status = card["status"]
+    ef = card["ease_factor"]
+    iv = card["interval_days"]
+    reps = card["repetitions"]
+    first_line = (card["front"] or "").split("\n", 1)[0].strip()
+    front_short = first_line[:50] + ("…" if len(first_line) > 50 else "")
+    src = card["source_type"]
+    if src == "quiz_question" and card.get("source_ref"):
+        src_suffix = f"  ← quiz_q#{card['source_ref']}"
+    else:
+        src_suffix = "  ← manual"
+    return f"  [{cid:>3d}] [{status:<8}] ef={ef:.2f} iv={iv:>3}d reps={reps}  {front_short}{src_suffix}"
+
+
+def _print_card_list(
+    store: SRSStore,
+    status: str | None = None,
+    limit: int | None = None,
+    out: OutputFn = _stdout,
+) -> None:
+    """`/srs` / `/srs list [active|suspended]`：按状态过滤 + 创建时间倒序列卡片。"""
+    eff_limit = limit if isinstance(limit, int) and limit > 0 else config.SRS_DEFAULT_DUE_QUERY_LIMIT
+    cards = store.list_cards(status=status, limit=eff_limit)
+    if not cards:
+        filter_suffix = f"（状态={status}）" if status else ""
+        out(f"📭 暂无 SRS 卡片{filter_suffix}。可在对话中说\"把错题进 SRS / 帮我加一张卡\"等让 Agent 入队。\n")
+        return
+    title_suffix = f"（状态={status}）" if status else ""
+    out(f"\n📚 SRS 卡片列表{title_suffix}（共 {len(cards)} 张）：")
+    out(f"  {'ID':<6}  {'状态':<10}  {'ease':<7}  {'iv':<6}  {'reps':<6}  正面 + 来源")
+    out(f"  {'-'*4:<6}  {'-'*8:<10}  {'-'*5:<7}  {'-'*4:<6}  {'-'*4:<6}  {'-'*50}")
+    for c in cards:
+        out(_format_card_brief(c))
+    out("")
+
+
+def _print_due_list(store: SRSStore, out: OutputFn = _stdout) -> None:
+    """`/srs due`：列今天 due 的卡片（next_review_at <= now 且 status=active）。"""
+    cards = store.list_due()
+    if not cards:
+        out("🎉 当前没有 due 卡片。明天再来 / 或新建卡片进队列。\n")
+        return
+    out(f"\n📅 当前 due 卡片（{len(cards)} 张）：")
+    out(f"  {'ID':<6}  {'状态':<10}  {'ease':<7}  {'iv':<6}  {'reps':<6}  正面 + 来源")
+    out(f"  {'-'*4:<6}  {'-'*8:<10}  {'-'*5:<7}  {'-'*4:<6}  {'-'*4:<6}  {'-'*50}")
+    for c in cards:
+        out(_format_card_brief(c))
+    out("\n→ 在对话里说\"开始复习\"等让 Agent 带你一张张过；自评 again/hard/good/easy 4 档更新调度。\n")
+
+
+def _print_card_detail(card: dict[str, Any], out: OutputFn = _stdout) -> None:
+    """`/srs show <id>`：单卡完整详情。"""
+    src = card["source_type"]
+    src_suffix = f" ← quiz_question#{card['source_ref']}" if (src == "quiz_question" and card.get("source_ref")) else " ← manual"
+    out(f"\n📚 card_id={card['id']} [{card['status']}]{src_suffix}")
+    out(f"   ──── 正面 ────")
+    out(f"   {card['front']}")
+    out(f"   ──── 背面 ────")
+    out(f"   {card['back']}")
+    if card.get("note"):
+        out(f"   备注：{card['note']}")
+    out("")
+    out(f"   ease_factor:      {card['ease_factor']:.2f}")
+    out(f"   interval_days:    {card['interval_days']}")
+    out(f"   repetitions:      {card['repetitions']}")
+    out(f"   lapses:           {card['lapses']}")
+    out(f"   next_review_at:   {card['next_review_at']}")
+    out(f"   last_reviewed_at: {card['last_reviewed_at'] or '（未 review）'}")
+    out(f"   created_at:       {_format_relative_time(card['created_at'])}")
+    out("")
+
+
+def _print_srs_stats(store: SRSStore, out: OutputFn = _stdout) -> None:
+    """`/srs stats`：队列摘要统计。"""
+    stats = store.stats()
+    total = stats["total_active"] + stats["total_suspended"] + stats["total_archived"]
+    if total == 0:
+        out("📭 SRS 队列为空。\n")
+        return
+    out("\n📊 SRS 队列统计：")
+    out(f"   总 active:    {stats['total_active']:>4} 张")
+    out(f"   总 suspended: {stats['total_suspended']:>4} 张")
+    out(f"   总 archived:  {stats['total_archived']:>4} 张")
+    out(f"   当前 due:     {stats['due_count']:>4} 张")
+    out(f"   平均 ease:    {stats['avg_ease']:.2f}（标准 ~2.5；< 2.0 偏难，> 2.6 偏易）")
+    out(f"   mature 卡:    {stats['mature_count']:>4} 张（interval ≥ 21d）")
+    out("")
+
+
+def _parse_card_id(rest: str, out: OutputFn) -> int | None:
+    """从命令参数串解析正整数 card_id；失败时打印提示并返回 None。"""
+    if not rest:
+        out("⚠️  请提供 card_id。\n")
+        return None
+    try:
+        cid = int(rest.split()[0])
+    except ValueError:
+        out(f"❌ 无效 card_id：{rest!r}，应为整数。\n")
+        return None
+    if cid < 1:
+        out(f"❌ card_id 必须 ≥ 1，收到 {cid}。\n")
+        return None
+    return cid
+
+
+def handle_srs(
+    store: SRSStore,
+    cmd_parts: list[str],
+    out: OutputFn = _stdout,
+) -> None:
+    """
+    处理 /srs 子命令组（list / due / show / stats / del）。
+
+    Args:
+        store: SRSStore 实例（main.py 传入共享单例）。
+        cmd_parts: prompt_toolkit `input.split(maxsplit=1)` 的结果。
+    """
+    raw = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""
+    if not raw:
+        _print_card_list(store, out=out)
+        return
+
+    head, _, rest = raw.partition(" ")
+    sub_cmd = head.lower()
+    rest = rest.strip()
+
+    match sub_cmd:
+        case "list":
+            status_filter: str | None = None
+            if rest:
+                rest_lower = rest.lower()
+                if rest_lower in ("active", "suspended", "archived"):
+                    status_filter = rest_lower
+                else:
+                    out(f"⚠️  非法状态过滤：{rest!r}，应为 active / suspended / archived 之一。\n")
+                    return
+            _print_card_list(store, status=status_filter, out=out)
+
+        case "due":
+            _print_due_list(store, out=out)
+
+        case "show":
+            cid = _parse_card_id(rest, out)
+            if cid is None:
+                return
+            card = store.get_card(cid)
+            if card is None:
+                out(f"❌ card_id={cid} 不存在。\n")
+                return
+            _print_card_detail(card, out)
+
+        case "stats":
+            _print_srs_stats(store, out=out)
+
+        case "del":
+            cid = _parse_card_id(rest, out)
+            if cid is None:
+                return
+            card = store.get_card(cid)
+            if card is None:
+                out(f"❌ card_id={cid} 不存在。\n")
+                return
+            front_short = (card["front"] or "")[:40] + ("…" if len(card["front"]) > 40 else "")
+            confirm = input(
+                f"⚠️  即将删除 card_id={cid}：\"{front_short}\"（硬删不可恢复；推荐用 archive 软删），"
+                f"确认请输入 yes："
+            ).strip().lower()
+            if confirm == "yes":
+                store.delete_card(cid)
+                out(f"🗑️  card_id={cid} 已删除。\n")
+            else:
+                out("已取消。\n")
+
+        case _:
+            out(_SRS_USAGE)

@@ -8,7 +8,7 @@ Plan Recall + Structure 评估 (Phase 2.1)
 2. **Plan 结构质量**：positive 已通过的 case，进一步由 LLM-judge 对生成的 plan steps
    评 0-5 分（按粒度 / 顺序 / 覆盖度 / 业务对齐度）。
 
-对应 Step 0 验收（[iter_2.md §4.9.6](../../../docs/iter_2.md#496-agent-循环升级-phase-21)）：
+对应 Step 0 验收（[iter_2_agent.md §4.9.6](../../../docs/iter_2_agent.md#496-agent-循环升级-phase-21)）：
     ① 复杂任务可见 plan；
     ② 简单任务不被强行 plan；
     ③ 失败步可标记/跳过（本评估覆盖识别+结构，失败语义由 e2e UT 覆盖）。
@@ -180,7 +180,7 @@ def _llm_judge_plan_structure(
     调一次 LLM judge，返回 (score, reason)。失败时返回 (None, error_msg)。
 
     走 [`tools.agent_eval.judge.judge_with_llm`](../judge/llm_judge.py) 公共 helper，
-    与 Phase 2.2 学习计划质量 judge 共享同一抽象（[§4.9.7 D6 / D11](../../docs/iter_2.md#497-学习计划生成-phase-22)）。
+    与 Phase 2.2 学习计划质量 judge 共享同一抽象（[§4.9.7 D6 / D11](../../docs/iter_2_agent.md#497-学习计划生成-phase-22)）。
     """
     plan_block = "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(steps))
     res = judge_with_llm(

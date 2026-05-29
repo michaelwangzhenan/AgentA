@@ -404,15 +404,15 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 | **表达方式** | 优先 **Mermaid 图** 表达结构、流程；**表格** 表达字段 / 接口 / 决策；**不插代码块**（行内 ` `` ` 引用文件 / 类 / 函数 / 配置项除外）|
 | **内容深度** | 表达**设计思想 / 接口约定 / 取舍**；不列实现细节，例如不写具体 SQL DDL、初始化代码、迁移脚本、private 方法实现 |
 | **缩写** | 第一次出现给出全称或一句话解释，例 "RRF（Reciprocal Rank Fusion，倒数排名融合）"、"LLM（大语言模型）" |
-| **语言** | 精炼；不写讨论过程、设计推理、自评反思 — 这些归 `iter_2.md` |
-| **traceability** | 可链到 `iter_2.md §x.y.z` 让读者追溯实施过程，但本文件不重复实施细节 |
+| **语言** | 精炼；不写讨论过程、设计推理、自评反思 — 这些归 `iter_2_agent.md` |
+| **traceability** | 可链到 `iter_2_agent.md §x.y.z` 让读者追溯实施过程，但本文件不重复实施细节 |
 
 **反例（已发生过 → 不要再犯）**
 
 | 反例 | 修正 |
 |---|---|
 | "Phase 1.2 完成『触发优化 + 手动写入 + source 字段 + 评估方法』" | 删时效字眼；直接陈述当前能力 |
-| `> 不做向后兼容 schema 迁移：升级时手动删除 ./sqlite_db/user_memory.db 重建即可` | 这是运维/实施细节，不进设计文档；改归 `iter_2.md` 对应 Phase 的"显式不做"表 |
+| `> 不做向后兼容 schema 迁移：升级时手动删除 ./sqlite_db/user_memory.db 重建即可` | 这是运维/实施细节，不进设计文档；改归 `iter_2_agent.md` 对应 Phase 的"显式不做"表 |
 | `CREATE TABLE user_memories (id INTEGER PRIMARY KEY ...)` 代码块 | 用 Markdown 表格表达字段 / 类型 / 用途 |
 | "8 个中英 keyword：请记住 / remember / ..." | 列出关键词是实现细节；改"显式触发词命中即立即提取"即可 |
 
@@ -482,7 +482,7 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 
 **CLI 命令约定**
 
-按"单数=对一个对象 / 复数=对集合"原则拆分（[iter_2.md §4.9.1](iter_2.md#491-session-列表搜索恢复phase-11)）：
+按"单数=对一个对象 / 复数=对集合"原则拆分（[iter_2_agent.md §4.9.1](iter_2_agent.md#491-session-列表搜索恢复phase-11)）：
 
 | 命令 | 行为 |
 |---|---|
@@ -492,12 +492,12 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 | `/del-session <id>` | 删除指定 session（拒删当前活跃） |
 | `/clean-session` | 清空全部 session（需 yes 二次确认） |
 
-**演进点**：当前未做的 punt 列在 [iter_2.md §4.9.1 缺口表](iter_2.md#491-session-列表搜索恢复phase-11)，包括分页（>10K 时再做）、Session 命名/标签（[§5.1 企业内 Q&A](iter_2.md#51-企业内-qa) 之后）、project 列（[Phase 1.2 Memory 三层](iter_2.md#473-实施顺序) 做时 ALTER TABLE 加列）、Chainlit 端同步（[§4.2 WebUI](#42webui) 一并处理）。
+**演进点**：当前未做的 punt 列在 [iter_2_agent.md §4.9.1 缺口表](iter_2_agent.md#491-session-列表搜索恢复phase-11)，包括分页（>10K 时再做）、Session 命名/标签（[§5.1 企业内 Q&A](iter_2_agent.md#51-企业内-qa) 之后）、project 列（[Phase 1.2 Memory 三层](iter_2_agent.md#473-实施顺序) 做时 ALTER TABLE 加列）、Chainlit 端同步（[§4.2 WebUI](#42webui) 一并处理）。
 
 
 ## 3.4 Memory 管理
 
-跨 session 持久化用户偏好 / 背景 / 指令 / 任务 / 纠错，使 Agent 在新一次对话中仍"认得"用户。由两层组成：`MemoryManager`（注入与提取策略，详 [iter_2.md §4.5 Helper 抽象层](./iter_2.md#45-helper-抽象层)）+ `UserMemoryStore`（SQLite 持久化）。
+跨 session 持久化用户偏好 / 背景 / 指令 / 任务 / 纠错，使 Agent 在新一次对话中仍"认得"用户。由两层组成：`MemoryManager`（注入与提取策略，详 [iter_2_agent.md §4.5 Helper 抽象层](./iter_2_agent.md#45-helper-抽象层)）+ `UserMemoryStore`（SQLite 持久化）。
 
 ### 3.4.1 数据模型
 
@@ -570,7 +570,7 @@ flowchart LR
 
 | 维度 | 工具 | 判据 |
 |---|---|---|
-| 性能 | `tools/agent_eval/perf_eval.py --target memory` | 加载 / 渲染 / 写入各维度满足阈值（详 [iter_2.md §4.9.2](./iter_2.md#492-memory-管理-phase-12)） |
+| 性能 | `tools/agent_eval/perf_eval.py --target memory` | 加载 / 渲染 / 写入各维度满足阈值（详 [iter_2_agent.md §4.9.2](./iter_2_agent.md#492-memory-管理-phase-12)） |
 | 召回 | `tools/agent_eval/memory/recall_golden.py` | 通过率 ≥ 80% |
 
 
@@ -721,7 +721,7 @@ LLM "造引用"是已知风险（写 `[7]` 但实际只有 `[3]`，或编造不�
 
 ### 3.7.2 渐进披露（L1 + L2）
 
-`agentskills.io` 把 skill 信息分三层加载，本期实现 L1 + L2（L3 自动执行 scripts 留 [iter_2.md §4.13.1 #7 #8](iter_2.md#4131-deferred-backlog暂时不做)）：
+`agentskills.io` 把 skill 信息分三层加载，本期实现 L1 + L2（L3 自动执行 scripts 留 [iter_2_agent.md §4.13.1 #7 #8](iter_2_agent.md#4131-deferred-backlog暂时不做)）：
 
 | 层 | 内容 | 何时进 prompt | 目的 |
 |---|---|---|---|
@@ -1113,7 +1113,7 @@ sequenceDiagram
 | 题型字段 | `q_type` ENUM（`mcq_single` / `mcq_multi` / `short_answer`）+ `correct_answer` TEXT | 显式 type 字段比靠 correct_answer 串结构推断清晰；批改时直接按 type 分发到对应判分器 |
 | 题型比例 | 固定 60% MCQ + 40% short_answer（D13） | YAGNI；MVP 阶段固定比例 LLM 易稳定遵守；用户反馈不满意再做参数化 |
 | 状态枚举 | `created`（出完未批）/ `graded`（已批改）/ `archived`（用户归档） | 三态对应"出 → 批 → 留档"自然生命周期；与 [§3.9 D9](#39-学习计划业务) 思路对齐 |
-| 题库去重 | 不做（每次出题都新建一个 set） | 同主题多次出题正是练习场景的常态；硬去重反丢失"重复练习巩固"价值（详 [§4.13.2 #32](iter_2.md#4132-dropped永久不做)） |
+| 题库去重 | 不做（每次出题都新建一个 set） | 同主题多次出题正是练习场景的常态；硬去重反丢失"重复练习巩固"价值（详 [§4.13.2 #32](iter_2_agent.md#4132-dropped永久不做)） |
 
 **不变量**
 
@@ -1246,6 +1246,166 @@ sequenceDiagram
 | 跨 session 历史可查（验收 ③） | UT `tests/test_quiz_store.py::TestListQuizSets` + `test_quiz_tools.py::TestQueryQuizHistory` | 三路径全绿；按创建时间倒序 + plan_id 过滤 + limit 截断 |
 | 其他不变量 | UT `test_quiz_store.py` / `test_quiz_tools.py` / `test_cli_handlers_quiz.py` | 全绿；覆盖二表 schema 幂等 / 入参校验 / archived 状态拒改 / CLI confirm 流程 |
 
+## 3.11 SRS 主动复习业务
+
+让 Agent 帮用户**按遗忘曲线长期巩固已学知识**：用户做完测验有错题（或手动加一张卡）→ 进入跨 session 持久化的 SRS 队列 → 之后用户每次说"今天复习"就被引导回炉 due 卡 → 用户对每张卡用 4 档自评（again / hard / good / easy）→ 调度算法（SM-2，1987 Wozniak）动态调整该卡的 `ease_factor` / `interval_days` / `next_review_at`。范式对标 Anki 但落到 Agent 形态后产生独有约束：**入队走对话语义而非 GUI**（用户说"把错题加 SRS"而不是点按钮）、**复习过程被 Skill 编排成一问一答**（一次只问一张卡，保留"先想再揭晓"语义）、**LLM 不感知公式细节**（只调 tool 传 4 档 rating，公式由 `srs_scheduler` 纯函数兜底）。
+
+与 [§3.10 测验业务](#310-测验业务) 互补 —— 测验是"一次性自检"，SRS 是"长期回炉"：
+
+| 维度 | §3.10 测验 | §3.11 SRS |
+|---|---|---|
+| 用途 | 一次性自检掌握度 | 按遗忘曲线长期巩固已学卡片 |
+| 数据生命周期 | created → graded → archived，单套结束 | 卡入队即长期存活，按 SM-2 反复调度 |
+| 触发频次 | 用户主动出题 | 用户问"今天复习"即拉 due 卡 |
+| 状态主导 | quiz_set + question 二表 | srs_cards 单表 + active/suspended/archived 三态 |
+| 与 LLM 交互 | LLM 自己组题 + 自己批改 | LLM 不算分；只调 tool 传 rating，公式在 srs_scheduler |
+| LLM 可见性 | 不注入 system block（query_quiz_history 拉） | **同样**不注入 system block —— 短期 / on-demand 业务靠 skill + tool 描述触发 |
+
+### 3.11.1 数据模型
+
+数据载体的核心设计抉择：
+
+| 抉择 | 选择 | 理由 |
+|---|---|---|
+| 数据放哪 | 独立 SQLite 文件 `srs.db`，与 `quiz.db` / `learning.db` 同级 | SRS 队列跨 session 长期存活；独立文件便于单独 backup / 用户手动 inspect / 后续迁到 FSRS 算法只换 scheduler 不动 store |
+| 一张表 vs 多表 | 单表 `srs_cards` | 卡片是"含调度状态的小单位"，没有"题集 → 题"那种父子关系；一表足够 |
+| 数据来源 | `source_type` 枚举 + `source_ref` 软引用：`quiz_question`（测验错题）/ `manual`（用户手动加） | 当前只两种来源；learning_task 进 SRS punt（详 [§4.13.1 #23](iter_2_agent.md#4131-deferred-backlog暂时不做)）；软引用让 quiz_question 被 delete 后 SRS 卡仍独立可用 |
+| front / back 冗余存 | **冗余存** `front` + `back` 文本（不靠 source_ref 反查） | quiz_question archived / delete 后 SRS 卡仍要可复习；冗余 ~100 bytes/卡换数据独立性，值 |
+| 状态枚举 | `active`（在 due 队列）/ `suspended`（用户暂停不出现）/ `archived`（软删，list 默认不显示） | 与 §3.9 / §3.10 三态思路对齐；hard delete 走独立 CLI `del` 命令需要确认 |
+| 调度字段 | `ease_factor` REAL（默认 2.5 下限 1.3）/ `interval_days` INT（默认 0=新卡）/ `repetitions` INT（累计答对）/ `lapses` INT（累计 again）/ `next_review_at` ISO TEXT / `last_reviewed_at` ISO TEXT | SM-2 公式必需的全部状态；ISO 文本时间字段便于跨工具直接 inspect（不引入 epoch 比较代码） |
+
+**不变量**
+
+- `ease_factor` 写库前夹紧到 ≥ 1.3（SM-2 原版约定），无上限（用户连答 easy 自然上扬合理）
+- `interval_days` 写库前夹紧到 ≥ 1（不允许同日二次出现，避免短期记忆作弊）
+- `next_review_at` 初始化 = `created_at`（新卡立即 due，首次 review 后 SM-2 给真正 interval）
+- 唯一去重约束（防一张错题入两次）：`card_exists_for_source(quiz_question, ref)` 看 `status != archived` 是否已有；存在跳过
+- archived / suspended 卡拒绝 `update_review_state`（store 层兜底，scheduler 层不感知）
+
+### 3.11.2 SM-2 算法核心
+
+抉择：用 **SM-2**（1987 Wozniak）而非 FSRS / 简化 Leitner。
+
+**为什么不上 FSRS**：FSRS（2022, Anki 4 默认）需要 100+ 复习历史拟合用户记忆参数，MVP 阶段单人少量卡片完全发挥不出来；SM-2 公式简单（约 10 行）+ Anki 25 年用户数据验证有效，足够个人学习场景。FSRS 升级 punt（详 [§4.13.1 #22](iter_2_agent.md#4131-deferred-backlog暂时不做)）。
+
+**为什么不退到 Leitner**：Leitner 5 盒子 fixed interval 没有 ease_factor 自适应难度，相同题目不论用户答几次都按固定间隔出现 — 跟 SM-2 自适应间隔比明显落后。
+
+**Anki 4 档 → SM-2 映射**（用户自评 → 公式输入 quality score q）：
+
+| 用户自评 | 语义 | SM-2 q | ease 变化 | interval 变化 |
+|---|---|---|---|---|
+| `again` | 完全忘了 | 1 | -0.54（按 SM-2 原版公式 `0.1 - (5-q)(0.08 + (5-q)·0.02)`） | 重置：repetitions=0, interval=1, lapses+1 |
+| `hard` | 想起来但费劲 | 3 | -0.14 | interval × 0.8（hard penalty） |
+| `good` | 正常答对 | 4 | 0 不变 | 走 SM-2 主公式（reps=1→1d, reps=2→6d, reps≥3→prev × ease） |
+| `easy` | 太简单 | 5 | +0.10 | 主公式后 × 1.3（easy bonus） |
+
+算法实现位于 [`src/agent/core/srs_scheduler.py`](../src/agent/core/srs_scheduler.py)，**纯函数式**（输入 `CardState` + `Rating` → 输出 `ScheduleResult`，不感知 SQLite / UI），便于独立 UT 锁公式（`tests/test_srs_scheduler.py` 40 case 覆盖 4 档 × 多状态边界）。
+
+### 3.11.3 四个业务 tool 协议
+
+| tool | 必填参数 | 语义 | 返回内容 |
+|---|---|---|---|
+| `add_to_srs` | `source_type`（`quiz_question` / `manual`）+ `question_ids` 或 `front`+`back` | 卡入队（quiz 批量 / manual 单卡）；防重复 | "✓ 新增 N 张 / 跳过 M 张" + card_id 列表 |
+| `query_srs_due` | 全部可选（`limit` / `detail`） | 列 active 且 `next_review_at <= now` 的 due 卡 | 摘要列表 / detail=true 时含完整 front+back |
+| `review_srs_card` | `card_id` + `rating`（4 档之一）| 调 srs_scheduler 算出新状态 → 写库 | "✓ 新 ease=X / iv=Yd / next=Z" |
+| `query_srs_stats` | 无 | 队列摘要统计 | total_active / due_count / 平均 ease / mature(≥21d) 数 |
+
+**协议层关键设计**
+
+- `add_to_srs` **batch 入参**（`question_ids` 数组）—— 用户做完 quiz 通常 ≥ 3 题错，一次入队避免来回调用
+- `add_to_srs` source_type=`quiz_question` 时**反查 QuizStore 取 stem + correct_answer 冗余存** front/back —— 后续 quiz_question 被 delete 不影响 SRS 卡
+- `review_srs_card` rating **严格 4 档枚举**（不接受自由数值打分）—— LLM 在 prompt 里把用户的"又忘了"/"太简单"映射到固定 4 档，跟 srs-review skill 的 mapping 表一致
+- 四个 tool **常驻** `get_tools()` 返回列表 —— 用户在任何上下文都可能问"今天复习什么"，需 tool 立即可调
+- LLM **不直接传 ease/interval 数值**（防 LLM 改公式）—— 算法状态由 srs_scheduler 计算，LLM 只看到"新 interval = X 天后回炉"这种语义反馈
+
+### 3.11.4 端到端流程
+
+复习路径**没有 plan-execute 嵌套**（与测验 §3.10.3 区别）—— SRS review 是单 tool 多轮交互（用户读 → 评分 → tool 调度），非多源任务。
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant A as Agent
+    participant L as LLM
+    participant SK as srs-review skill
+    participant T as Tools
+    participant S as SRSStore
+    participant SCH as srs_scheduler
+
+    U->>A: "今天有什么要复习的？"
+    A->>L: chat(messages, tools)
+    L-->>A: load_skill(srs-review)
+    A->>SK: 加载 SKILL.md body
+    SK-->>A: skill 指引（"先调 query_srs_due detail=true"）
+
+    Note over A,L: 第 2 轮 — LLM 拉 due 列表
+    A->>L: chat(messages, tools)
+    L-->>A: query_srs_due(detail=true)
+    A->>T: execute_tool
+    T->>S: list_due()
+    S-->>T: [card 5, card 12, card 18]
+    T-->>A: due 列表（含 front+back）
+    A->>L: chat(...)
+    L-->>A: final_answer("📚 今天 3 张，第 1/3：<front>，想想答案后告诉我评分")
+    A-->>U: 单卡呈现 — 不揭晓答案
+
+    Note over U,A: 第 3 轮 — 用户回忆 + 评分
+    U->>A: "我想起来了，good"
+    A->>L: chat(messages, tools)
+    L-->>A: review_srs_card(card_id=5, rating="good")
+    A->>T: execute_tool
+    T->>S: get_card(5)
+    S-->>T: CardState(ef=2.5, iv=1, reps=0, lapses=0)
+    T->>SCH: schedule_review(state, "good")
+    SCH-->>T: ScheduleResult(ef=2.5, iv=1, reps=1, next=2026-01-02 ...)
+    T->>S: update_review_state(card_id=5, new_state)
+    S-->>T: ok
+    T-->>A: "✓ ef=2.50 iv=1d next=2026-01-02"
+    A->>L: chat(...)
+    L-->>A: final_answer("✓ 评分 good。答案：<back>。下次 1 天后。第 2/3：<下一张 front>")
+    A-->>U: 揭晓答案 + 进入下一张
+```
+
+**嵌套？不嵌套** —— srs-review skill body 明确指引："**一次只问一张卡，不要先调 make_plan**"。复习路径的简单性恰恰是用户体验的关键（用户进入复习心流，不要被嵌套规划打断）。
+
+### 3.11.5 与测验业务的钩子
+
+测验业务在批改完后**主动建议**用户把错题入 SRS（`quiz-maker` SKILL.md 批改工作流末尾段）：
+
+```
+得分：72/100，2 题错。
+下一步建议：
+  - 错题集中在 RAG 主题，建议再看看 KB 里的检索章节
+  - **要把错题加入 SRS 队列长期复习吗？** 输入「加 SRS」我帮你入队
+```
+
+判定阈值：`score < 0.6` 视为错题（与 `grade_quiz` 返回值单位一致；与 srs-review skill 描述对齐）。用户同意（"加 SRS / 复习这些"）→ LLM 调 `add_to_srs(source_type="quiz_question", question_ids=[...])`。
+
+这条钩子**不修改 `grade_quiz` tool 内部逻辑** —— `grade_quiz` 已返回错题清单含 `question_id`，足够 LLM 自主决策；钩子只是 prompt 层引导（skill body），不引入新代码路径。
+
+### 3.11.6 与其他模块关系
+
+| 模块 | 交互方式 |
+|---|---|
+| **[§3.5 Prompt 管理](#35-prompt-管理)** | **不**注入 system block —— SRS 不是常驻状态（与 §3.9 plan 不同），按需通过 skill body + tool 描述触发；详 D-θ 决策 |
+| **[§3.7 Agent Skills](#37-agent-skills)** | `srs-review` skill 是业务的事实入口 — skill body 编排 due 拉取 / 一卡一问 / 4 档评分 / 下一张推进的标准对白；同时 `quiz-maker` skill 在批改末尾**主动建议**入队 |
+| **[§3.8 Plan-Execute](#38-plan-execute)** | 复习路径**不嵌套** plan-execute（区别于 §3.9.3 / §3.10.3）—— SRS 是单 tool 多轮交互，不是多源任务 |
+| **[§3.10 测验业务](#310-测验业务)** | 错题进 SRS 是核心场景：grade_quiz 返回的 question_id 列表喂给 `add_to_srs(source_type="quiz_question")` |
+| **[§3.4 Memory](#34-memory-管理)** | 互不感知 —— UserMemory 存稳定偏好，SRS 存动态调度的卡片状态 |
+| **CLI [§4.1](#41cli)** | `/srs` 命令组只读 + delete：`list [active\|suspended]` / `due` / `show <id>` / `stats` / `del <id>`；review 走对话路径不走 CLI（强制用户用自然语言 + LLM 编排） |
+
+### 3.11.7 评估方法
+
+| 维度 | 工具 | 判据 |
+|---|---|---|
+| 触发识别（验收 ③） | `tools/agent_eval/srs/eval_srs.py`（dataset 12 case：5 due + 3 add + 2 review + 2 negative） | 通过率 ≥ 80% —— due / add / review 必触发对应 tool；negative 不得触发 SRS 四 tool |
+| SM-2 算法对齐（验收 ①） | UT `tests/test_srs_scheduler.py`（40 case，覆盖 4 档 × 多状态边界 + Anki 序关系锁定）| `again < hard < good < easy` 在 interval 与 ease 维度严格成立；ease ≥ 1.3 / interval ≥ 1 边界保护；SM-2 q score 公式精确匹配 |
+| 数据持久化（验收 ②④） | UT `tests/test_srs_store.py`（39 case） | CRUD / 状态切换 / list_due 过滤 / stats 聚合 / 进程级单例 / context manager 全绿 |
+| 四 tool 协议（验收 ①②） | UT `tests/test_srs_tools.py`（28 case） | JSON Schema / 入参校验 / quiz_question 防重复 / manual 单卡 / 4 档 mapping / execute_tool 路由 全绿 |
+| CLI 可视化（验收 ④） | UT `tests/test_cli_handlers_srs.py`（19 case） | `/srs list / due / show / stats / del` 各路径 + 状态过滤 + confirm 流程 |
+| 测验 → SRS 钩子（验收 ②） | UT `tests/test_skill_loader.py::TestRealAgentaSkills::test_srs_review_skill_metadata` + 手验 quiz-maker SKILL.md 含建议段 | srs-review skill 自动发现 / 4 个 tool 名都在 body 中提及；quiz-maker 批改建议段含 "加 SRS" 字样 |
+
 
 # 4.表现层
 
@@ -1313,18 +1473,20 @@ flowchart TB
 
 | 共享组件 | 类型 | 职责 | Python | LangChain | AutoGPT |
 |---|---|---|---|---|---|
-| `tools.py`（工具实现） | 依赖 | 业务 tool（`search_knowledge` / `web_search` / `fetch_url` / `load_skill`）+ plan-execute 三 tool（`make_plan` / `update_step` / `abort_plan`，详 [§3.8](#38-plan-execute)）+ 学习计划业务三 tool（`create_study_plan` / `update_study_progress` / `query_study_status`，详 [§3.9](#39-学习计划业务)）+ 测验业务三 tool（`create_quiz` / `grade_quiz` / `query_quiz_history`，详 [§3.10](#310-测验业务)）JSON Schema 定义与 `execute_tool` 路由 | ✓ | ✓（StructuredTool 包装） | ✓ |
+| `tools.py`（工具实现） | 依赖 | 业务 tool（`search_knowledge` / `web_search` / `fetch_url` / `load_skill`）+ plan-execute 三 tool（`make_plan` / `update_step` / `abort_plan`，详 [§3.8](#38-plan-execute)）+ 学习计划业务三 tool（`create_study_plan` / `update_study_progress` / `query_study_status`，详 [§3.9](#39-学习计划业务)）+ 测验业务三 tool（`create_quiz` / `grade_quiz` / `query_quiz_history`，详 [§3.10](#310-测验业务)）+ SRS 业务四 tool（`add_to_srs` / `query_srs_due` / `review_srs_card` / `query_srs_stats`，详 [§3.11](#311-srs-主动复习业务)）JSON Schema 定义与 `execute_tool` 路由 | ✓ | ✓（StructuredTool 包装） | ✓ |
 | `LLMProvider` | 依赖 | 多 provider chat + Extended Thinking + 流式 token 抽象 | ✓ | △（可选，framework 自带） | ✓ |
 | `ChatHistoryStore` | 依赖 | session 内消息持久化与按 N 条加载（CRUD） | ✓ | ✓（adapter） | ✓ |
 | `UserMemoryStore` | 依赖 | 跨 session 用户偏好 / 背景持久化（CRUD） | ✓ | ✓ | ✓ |
 | `LearningPlanStore` | 依赖 | 跨 session 学习计划与任务持久化（CRUD + active 互斥，详 [§3.9](#39-学习计划业务)） | ✓ | ✓ | ✓ |
 | `QuizStore` | 依赖 | 跨 session 测验与题目持久化（CRUD + 三态生命周期 + 软引用 learning_plan，详 [§3.10](#310-测验业务)） | ✓ | ✓ | ✓ |
+| `SRSStore` | 依赖 | 跨 session SRS 卡片持久化（CRUD + 三态 + SM-2 调度字段，详 [§3.11.1](#3111-数据模型)） | ✓ | ✓ | ✓ |
 | `EventBus` | Helper | 统一流式事件分发（thinking / token / tool / plan / final） | ✓ | ✓ | ✓ |
 | `ToolCallEngine` | Helper | 工具调用编排：执行 + 结果格式化 + 引导提示注入 + 写历史 + plan tool 调用后叠加发 `plan_*` 事件 | ✓ | ✓ | ✓ |
 | `HistoryManager` | Helper | 历史按轮截断 + skill_pair 完整性保护 + system 拼接 | ✓ | ✓ | △（用 summary 替代） |
 | `MemoryManager` | Helper | UserMemory 触发判定 + 提取 + 注入 system_prompt | ✓ | ✓ | ✓ |
 | `ThinkingPolicy` | Helper | adaptive thinking budget 估算（LOW / MED / HIGH 三档） | ✓ | ✓ | △（子任务不启用） |
 | `plan_manager` | Helper | `PlanStep` / `PlanState` dataclass + `reconstruct_from_messages()`；plan 状态从 messages 历史 reconstruct（详 [§3.8.1](#381-数据载体与-reconstruct)） | ✓ | ✓ | ✓ |
+| `srs_scheduler` | Helper | SM-2 公式纯函数（4 档 → ease/interval/repetitions/lapses 调度计算，详 [§3.11.2](#3112-sm-2-算法核心)） | ✓ | ✓ | ✓ |
 
 > **类型说明**
 > - **依赖**：底层能力，不感知 Agent loop 语义（turn / skill_pair / thinking budget），可独立测试与替换实现（如 SQLite → Postgres）。命名约定：数据存储用 `*Store` 后缀。
@@ -1343,10 +1505,11 @@ src/agent/core/
 ├── tool_call_engine.py       # ToolCallEngine（含 TOOL_EMPTY_HINT 常量）
 ├── thinking_policy.py        # ThinkingPolicy + ThinkingConfig 数据类
 ├── citation_builder.py       # CitationBuilder（详 §3.6）
-└── plan_manager.py           # PlanState / PlanStep + reconstruct_from_messages（详 §3.8）
+├── plan_manager.py           # PlanState / PlanStep + reconstruct_from_messages（详 §3.8）
+└── srs_scheduler.py          # SM-2 公式纯函数 + Rating / CardState / ScheduleResult（详 §3.11.2）
 ```
 
-依赖层（`src/memory/chat_history.py` 的 `ChatHistoryStore` / `src/memory/user_memory.py` 的 `UserMemoryStore` / `src/memory/learning_plan_store.py` 的 `LearningPlanStore` / `src/llm/provider.py`）位置不动，被 helper 调用。
+依赖层（`src/memory/chat_history.py` 的 `ChatHistoryStore` / `src/memory/user_memory.py` 的 `UserMemoryStore` / `src/memory/learning_plan_store.py` 的 `LearningPlanStore` / `src/memory/quiz_store.py` 的 `QuizStore` / `src/memory/srs_store.py` 的 `SRSStore` / `src/llm/provider.py`）位置不动，被 helper 调用。
 
 **实现进度**
 

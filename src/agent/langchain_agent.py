@@ -140,7 +140,7 @@ class LangChainAgent:
         """
         设置统一事件回调（覆盖语义）：传 None 清空所有事件订阅。
 
-        本实现当前只在 run() 发出 `final_answer` 与 `error`（D3=A，详见 iter_2.md §4.5.4）；
+        本实现当前只在 run() 发出 `final_answer` 与 `error`（D3=A，详见 iter_2_agent.md §4.5.4）；
         其它事件类型订阅注册后不会立即收到数据。如需 thinking / token 流式，
         后续可接入 LangChain 的 `BaseCallbackHandler` 体系。
         """

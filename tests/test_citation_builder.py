@@ -328,10 +328,10 @@ class TestEndToEnd:
             _make_hit("src/rag/retriever.py", heading="Hybrid 检索 / _rrf_fuse"),
             _make_hit("src/rag/retriever.py", heading="Hybrid 检索 / _rrf_fuse"),
             _make_hit("docs/design.md", heading="2.1.5 Retrieve+Rerank", page_no=7),
-            _make_hit("docs/iter_2.md", heading="4.5"),
+            _make_hit("docs/iter_2_agent.md", heading="4.5"),
             _make_hit("README.md"),
         ])
-        # 现在分配了 4 个编号：[1] retriever.py, [2] design.md, [3] iter_2.md, [4] README.md
+        # 现在分配了 4 个编号：[1] retriever.py, [2] design.md, [3] iter_2_agent.md, [4] README.md
 
         # 第二次 tool_call：再补 2 条；其中 design.md §2.1.5 复用 [2]
         builder.register([

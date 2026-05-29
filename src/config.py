@@ -97,7 +97,7 @@ PROVIDER_CONFIGS: dict[str, ProviderConfig] = {
     "qwen": ProviderConfig(
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         api_key=os.getenv("QWEN_API_KEY", ""),
-        model="qwen3-max-2026-01-23",
+        model="qwen3-max",
         extra_body={"enable_thinking": False},
     ),
     "minimax": ProviderConfig(
@@ -328,6 +328,16 @@ QUIZ_DB_PATH: str = os.getenv("QUIZ_DB_PATH", "./sqlite_db/quiz.db")
 QUIZ_DEFAULT_NUM_QUESTIONS: int = int(os.getenv("QUIZ_DEFAULT_NUM_QUESTIONS", "10"))
 # /quiz list / query_quiz_history 默认返回条数上限
 QUIZ_HISTORY_LIST_LIMIT: int = int(os.getenv("QUIZ_HISTORY_LIST_LIMIT", "20"))
+
+# ── SRS 主动复习（Phase 2.4）配置 ────────────────────────────────────────────
+# SRS SQLite 路径（独立文件，单表 srs_cards）
+SRS_DB_PATH: str = os.getenv("SRS_DB_PATH", "./sqlite_db/srs.db")
+# /srs due / query_srs_due 默认返回条数上限
+SRS_DEFAULT_DUE_QUERY_LIMIT: int = int(os.getenv("SRS_DEFAULT_DUE_QUERY_LIMIT", "20"))
+# SM-2 算法：repetitions=1 时的 interval（首次复习答对的下次回炉天数）
+SRS_FIRST_INTERVAL_DAYS: int = int(os.getenv("SRS_FIRST_INTERVAL_DAYS", "1"))
+# SM-2 算法：repetitions=2 时的 interval（第二次复习答对的下次回炉天数）
+SRS_SECOND_INTERVAL_DAYS: int = int(os.getenv("SRS_SECOND_INTERVAL_DAYS", "6"))
 # 用户输入短于此字符数不触发自动提取（显式触发不受此限；设为 0 禁用）
 USER_MEMORY_EXTRACT_MIN_INPUT_LEN: int = int(os.getenv("USER_MEMORY_EXTRACT_MIN_INPUT_LEN", "20"))
 

@@ -225,6 +225,10 @@ def main() -> None:
                 from src.memory.quiz_store import get_shared_store as _get_quiz_store
                 handlers.handle_quiz(_get_quiz_store(), cmd_parts)
                 continue
+            case "/srs":
+                from src.memory.srs_store import get_shared_store as _get_srs_store
+                handlers.handle_srs(_get_srs_store(), cmd_parts)
+                continue
         
         # ── 用户显式 Skill 激活 ──────────────────────────────────────────────
         if cmd_name in skill_cmds:

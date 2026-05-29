@@ -42,6 +42,12 @@ HELP_TEXT = """
   /quiz list [plan <pid>]    同上 / 过滤某 plan 的 quiz
   /quiz show <quiz_set_id>   查看单个 quiz 详情（含题目 + 批改细节）
   /quiz del <quiz_set_id>    删除指定 quiz（不可恢复）
+  /srs                       列出 active + suspended SRS 卡片（默认 limit 20）
+  /srs list [active|suspended]  按状态过滤
+  /srs due                   列今天 due 的卡片（next_review_at <= now）
+  /srs show <card_id>        查看单卡完整详情（front + back + SM-2 字段）
+  /srs stats                 SRS 队列统计（总数 / due / 平均 ease / mature）
+  /srs del <card_id>         删除指定卡（不可恢复；推荐 archive 软删）
   /quit                      退出程序
   /exit                      退出程序（同 /quit）
 

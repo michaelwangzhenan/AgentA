@@ -203,7 +203,7 @@ async def _stream_agent_reply(state: AppState, user_input: str) -> tuple[str, cl
     thinking_queue: asyncio.Queue[str | None] = asyncio.Queue()
     token_queue: asyncio.Queue[str | None] = asyncio.Queue()
     # Phase 2.1: plan 事件桥接到 Chainlit 主消息流（plan_created/plan_step_end）；
-    # plan_step_start 仅用于 GUI step UI 高亮，本期不渲染（[iter_2.md §4.13.1 #11](../docs/iter_2.md#4131-deferred-backlog)）。
+    # plan_step_start 仅用于 GUI step UI 高亮，本期不渲染（[iter_2_agent.md §4.13.1 #11](../docs/iter_2_agent.md#4131-deferred-backlog)）。
     plan_queue: asyncio.Queue[tuple[str, dict] | None] = asyncio.Queue()
 
     def thinking_callback(chunk: str) -> None:

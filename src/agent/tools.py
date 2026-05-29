@@ -87,6 +87,7 @@ def get_tools(skill_bodies: dict[str, str] | None = None) -> list[dict[str, Any]
       - Phase 2.1 plan-execute 3 tool（make_plan / update_step / abort_plan）
       - Phase 2.2 学习计划业务 3 tool（create_study_plan / update_study_progress / query_study_status）
       - Phase 2.3 Quiz 业务 3 tool（create_quiz / grade_quiz / query_quiz_history）
+      - Phase 2.4 SRS 业务 4 tool（add_to_srs / query_srs_due / review_srs_card / query_srs_stats）
     若传入 skill_bodies，再追加 load_skill 工具定义（name 字段限定为已有名称枚举）。
     """
     tools = (
@@ -94,6 +95,7 @@ def get_tools(skill_bodies: dict[str, str] | None = None) -> list[dict[str, Any]
         + list(_PLAN_TOOLS)
         + list(_STUDY_PLAN_TOOLS)
         + list(_QUIZ_TOOLS)
+        + list(_SRS_TOOLS)
     )
     if skill_bodies:
         tools.append(_build_load_skill_def(list(skill_bodies.keys())))
@@ -1583,6 +1585,481 @@ def _tool_query_quiz_history(
     return ToolResult(status="ok", content="\n".join(lines))
 
 
+# ── Phase 2.4 — SRS 主动复习业务 tool 定义 ──────────────────────────────────
+# 与 _QUIZ_TOOLS（周期性自检练习，一次性出题 + 批改）相对：本组 tool 操作的是
+# **跨 session 持久化的 SRS 队列**，按 SM-2 算法按"下次该复习的时刻"调度卡片，
+# 用户用 again / hard / good / easy 4 档自评后自动更新调度状态。
+# 详 docs/iter_2_agent.md §4.9.9 / docs/design.md §3.11 SRS 业务。
+
+_SRS_TOOLS: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "add_to_srs",
+            "description": (
+                "把卡片加入 SRS 复习队列（跨 session 持久化）。两种 source_type："
+                "① `quiz_question` — 通常用于把 grade_quiz 后的错题进 SRS（传 question_ids 数组批量）；"
+                "② `manual` — 用户手动加自定义卡（传 front 题面 + back 答案）。"
+                "新卡 next_review_at 初始化为 now（立即 due，用户首次 review 后 SM-2 给出真正 interval）。"
+                "已存在 active/suspended 卡片不重复添加。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source_type": {
+                        "type": "string",
+                        "enum": ["quiz_question", "manual"],
+                        "description": "卡片来源：quiz_question 用 question_ids 批量；manual 用 front+back 单卡。",
+                    },
+                    "question_ids": {
+                        "type": "array",
+                        "description": (
+                            "source_type=quiz_question 时必填：question_id 整数数组。"
+                            "通常从 grade_quiz 返回的错题清单 / query_quiz_history(detail=true) 拿到。"
+                        ),
+                        "items": {"type": "integer", "minimum": 1},
+                    },
+                    "front": {
+                        "type": "string",
+                        "description": "source_type=manual 时必填：卡片正面（题面 / 提示）。",
+                    },
+                    "back": {
+                        "type": "string",
+                        "description": "source_type=manual 时必填：卡片背面（答案 / 解释）。",
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "可选自由备注（≤ 200 字）；如『错题复盘』『面试重点』等标签。",
+                    },
+                },
+                "required": ["source_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_srs_due",
+            "description": (
+                "查询当前 due（next_review_at <= now 且 status=active）的卡片。"
+                "适用：用户问『今天有什么要复习 / 给我出 due 的卡片 / 把 SRS 卡片背一下』。"
+                "默认 detail=false 返回摘要列表（id + 题面前 40 字 + 当前 interval + ease）；"
+                "detail=true 返回完整 front + back（用户开始 review 时取此）。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "返回 due 卡最多条数；默认 20。",
+                        "minimum": 1,
+                    },
+                    "detail": {
+                        "type": "boolean",
+                        "description": "true 返回完整 front+back；false 仅摘要。默认 false 节省 context。",
+                        "default": False,
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "review_srs_card",
+            "description": (
+                "用户对一张 due 卡片完成回忆 + 4 档自评后调用，更新该卡的 SM-2 调度状态："
+                "ease_factor / interval_days / repetitions / lapses / next_review_at。"
+                "rating 四档语义：`again` = 完全忘了（重置）/ `hard` = 想起来但费劲（间隔略缩）/ "
+                "`good` = 正常答对（走 SM-2 主公式）/ `easy` = 太简单（间隔加成）。"
+                "返回新 interval + next_review_at 给用户反馈。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "card_id": {
+                        "type": "integer",
+                        "description": "要 review 的卡片 id（从 query_srs_due 返回）。",
+                        "minimum": 1,
+                    },
+                    "rating": {
+                        "type": "string",
+                        "enum": ["again", "hard", "good", "easy"],
+                        "description": "用户 4 档自评（D4 Anki 风格）。",
+                    },
+                },
+                "required": ["card_id", "rating"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_srs_stats",
+            "description": (
+                "返回 SRS 队列摘要统计：总 active 卡 / suspended / archived 数 / 当前 due 数 / "
+                "平均 ease / mature 卡（interval ≥ 21 天）数。适用："
+                "用户问『我的 SRS 队列有多少卡 / 我对哪类题最弱 / 已经背熟多少』。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+]
+
+
+# ── Phase 2.4 — SRS 业务 tool 实现 ──────────────────────────────────────────
+
+
+def _get_srs_store() -> Any:
+    """延迟 import，返回 srs_store 模块级共享 store。"""
+    from src.memory.srs_store import get_shared_store
+    return get_shared_store()
+
+
+# MCQ 题型在 quiz_questions 表里的 q_type 值
+_QUIZ_MCQ_TYPES: tuple[str, ...] = ("mcq_single", "mcq_multi")
+
+
+def _build_card_text_from_question(
+    *,
+    q_type: str,
+    stem: str,
+    options_raw: str,
+    correct_answer: str,
+    explanation: str,
+) -> tuple[str, str]:
+    """
+    把 quiz_questions 行转成 SRS 卡的 (front, back)。
+
+    MCQ 题型：
+        - front：`[题型标签] 题干\n\nA. <option0>\nB. <option1>\n...`
+        - back：`<correct letters> — <对应选项文本>\n\n考点：<explanation>`
+        （多选时选项文本用 ` / ` 分隔；标答字母解析失败则只给字母）
+    简答题型：
+        - front：`[简答] 题干`
+        - back：`<correct_answer>\n\n考点：<explanation>`
+
+    options_raw 解析失败（JSON 损坏）时降级：MCQ 也走"简答"格式，避免卡 add 失败。
+    """
+    stem = (stem or "").strip()
+    correct = (correct_answer or "").strip()
+    expl = (explanation or "").strip()
+
+    options: list[str] = []
+    if q_type in _QUIZ_MCQ_TYPES and options_raw:
+        try:
+            parsed = json.loads(options_raw)
+            if isinstance(parsed, list):
+                options = [str(o).strip() for o in parsed if str(o).strip()]
+        except (json.JSONDecodeError, TypeError):
+            options = []
+
+    if q_type in _QUIZ_MCQ_TYPES and options:
+        type_tag = "单选" if q_type == "mcq_single" else "多选"
+        # front：题干 + 编号选项（A. xx / B. yy ...）
+        option_lines = [
+            f"{chr(ord('A') + i)}. {opt}" for i, opt in enumerate(options)
+        ]
+        front = f"[{type_tag}] {stem}\n\n" + "\n".join(option_lines)
+
+        # back：把标答字母（"C" / "AC"）翻成对应选项文本，方便用户复习时核对
+        letter_to_text: dict[str, str] = {
+            chr(ord("A") + i): opt for i, opt in enumerate(options)
+        }
+        letters = [c for c in correct.upper() if "A" <= c <= "Z"]
+        mapped = [letter_to_text[c] for c in letters if c in letter_to_text]
+        if mapped:
+            back_head = f"{''.join(letters)} — {' / '.join(mapped)}"
+        else:
+            # 标答字母对不上选项（数据脏 / 简答题误填字母）→ 只给原始 correct
+            back_head = correct
+        back = back_head + (f"\n\n考点：{expl}" if expl else "")
+        return front, back
+
+    # short_answer 或 MCQ options 缺失降级 → 题干 + 标答 + 考点
+    front = (f"[简答] {stem}" if q_type == "short_answer" else stem) if stem else ""
+    back = correct + (f"\n\n考点：{expl}" if expl else "")
+    return front, back
+
+
+def _render_card_brief(card: dict[str, Any]) -> str:
+    """单卡摘要一行：id + 状态 + ease + interval + 题干前 50 字（不带多行选项）。
+
+    MCQ 卡的 front 含 ABCD 多行选项 — 摘要只取第一行避免污染 LLM context；
+    用户开始复习时 LLM 会用 detail=true 拿完整 front+back。
+    """
+    cid = card["id"]
+    status = card["status"]
+    ef = card["ease_factor"]
+    iv = card["interval_days"]
+    reps = card["repetitions"]
+    first_line = (card["front"] or "").split("\n", 1)[0].strip()
+    front_short = first_line[:50] + ("…" if len(first_line) > 50 else "")
+    src = card["source_type"]
+    src_suffix = (
+        f"（quiz_q#{card['source_ref']}）" if src == "quiz_question" and card["source_ref"] else "（manual）"
+    )
+    return (
+        f"  [{cid:>3d}] [{status:<8}] ef={ef:.2f} iv={iv}d reps={reps}  "
+        f"{front_short}{src_suffix}"
+    )
+
+
+def _render_card_detail(card: dict[str, Any]) -> str:
+    """单卡完整呈现：front + back + 全部调度字段。"""
+    lines = [
+        f"## 卡片 #{card['id']}（{card['source_type']}，{card['status']}）",
+        f"**正面**：{card['front']}",
+        f"**背面**：{card['back']}",
+    ]
+    if card.get("note"):
+        lines.append(f"**备注**：{card['note']}")
+    lines += [
+        "",
+        f"- ease_factor: {card['ease_factor']:.2f}",
+        f"- interval_days: {card['interval_days']}",
+        f"- repetitions: {card['repetitions']}",
+        f"- lapses: {card['lapses']}",
+        f"- next_review_at: {card['next_review_at']}",
+        f"- last_reviewed_at: {card['last_reviewed_at'] or '（未 review）'}",
+        f"- created_at: {card['created_at']}",
+    ]
+    return "\n".join(lines)
+
+
+def _tool_add_to_srs(
+    source_type: Any,
+    question_ids: Any = None,
+    front: Any = None,
+    back: Any = None,
+    note: Any = None,
+) -> ToolResult:
+    """新增 SRS 卡：quiz_question 批量 / manual 单卡两条路径。"""
+    if not isinstance(source_type, str) or source_type not in ("quiz_question", "manual"):
+        return ToolResult(
+            status="error",
+            content=f"add_to_srs(source_type) 必须是 'quiz_question' 或 'manual'，收到：{source_type!r}",
+        )
+    note_str = str(note or "")[:200] if note is not None else ""
+    store = _get_srs_store()
+
+    if source_type == "manual":
+        if not isinstance(front, str) or not front.strip():
+            return ToolResult(status="error", content="add_to_srs(manual) 必须传非空 front（卡片正面）。")
+        if not isinstance(back, str) or not back.strip():
+            return ToolResult(status="error", content="add_to_srs(manual) 必须传非空 back（卡片背面）。")
+        try:
+            card_id = store.add_card(
+                source_type="manual",
+                front=front.strip(),
+                back=back.strip(),
+                source_ref=None,
+                note=note_str,
+            )
+        except Exception as e:
+            return ToolResult(status="error", content=f"add_to_srs 落库失败 — {e}")
+        return ToolResult(
+            status="ok",
+            content=(
+                f"✓ 已新建 manual 卡：card_id={card_id}\n"
+                f"  正面：{front.strip()[:60]}\n"
+                f"  立即 due — 用户可用 query_srs_due 查到这张卡开始复习。"
+            ),
+        )
+
+    # source_type == "quiz_question" 批量路径（D14）
+    if not isinstance(question_ids, list) or not question_ids:
+        return ToolResult(
+            status="error",
+            content="add_to_srs(source_type=quiz_question) 必须传非空 question_ids 整数数组。",
+        )
+
+    # 从 QuizStore 拿题面 + 标答作为冗余存储（D8）
+    try:
+        from src.memory.quiz_store import get_shared_store as _qz_store
+        quiz_store = _qz_store()
+    except Exception as e:
+        return ToolResult(status="error", content=f"读取 QuizStore 失败 — {e}")
+
+    added: list[int] = []
+    skipped: list[tuple[int, str]] = []
+    for qid in question_ids:
+        if not isinstance(qid, int) or qid < 1:
+            skipped.append((qid if isinstance(qid, int) else -1, f"非法 question_id {qid!r}"))
+            continue
+        # 防重复：已存在 active / suspended 卡（archived 不算）→ 跳过
+        existing = store.card_exists_for_source("quiz_question", qid)
+        if existing is not None:
+            skipped.append((qid, f"已有 card_id={existing}，跳过"))
+            continue
+        # 反查题面 / 题型 / 选项 / 标答 / 考点 —— MCQ 必须把选项也带进 front，
+        # 标答字母也要映射到选项文本，否则用户复习时只看到题干 + 孤零零的"C"无法判正确
+        question_row = quiz_store._conn.execute(  # noqa: SLF001 — 内部 join 查询
+            "SELECT q_type, stem, options, correct_answer, explanation "
+            "FROM quiz_questions WHERE id = ?",
+            (qid,),
+        ).fetchone()
+        if question_row is None:
+            skipped.append((qid, "question_id 不存在于 quiz_questions"))
+            continue
+        q_type = str(question_row["q_type"] or "").strip()
+        stem = str(question_row["stem"] or "").strip()
+        correct = str(question_row["correct_answer"] or "").strip()
+        expl = str(question_row["explanation"] or "").strip()
+        front_text, back_text = _build_card_text_from_question(
+            q_type=q_type,
+            stem=stem,
+            options_raw=str(question_row["options"] or ""),
+            correct_answer=correct,
+            explanation=expl,
+        )
+        if not front_text or not back_text:
+            skipped.append((qid, "题面 / 标答为空，跳过"))
+            continue
+        try:
+            card_id = store.add_card(
+                source_type="quiz_question",
+                front=front_text,
+                back=back_text,
+                source_ref=qid,
+                note=note_str,
+            )
+            added.append(card_id)
+        except Exception as e:  # noqa: BLE001
+            skipped.append((qid, f"落库失败 — {e}"))
+
+    lines = [f"✓ add_to_srs 完成：新增 {len(added)} 张卡，跳过 {len(skipped)} 张。"]
+    if added:
+        lines.append(f"  新增 card_id: {added}")
+    for qid, reason in skipped:
+        lines.append(f"  跳过 question_id={qid}：{reason}")
+    if not added and skipped:
+        # 全部跳过 → 视作 empty 而非 ok（避免 LLM 误以为全成功）
+        return ToolResult(status="empty", content="\n".join(lines))
+    return ToolResult(status="ok", content="\n".join(lines))
+
+
+def _tool_query_srs_due(
+    limit: Any = None,
+    detail: Any = False,
+) -> ToolResult:
+    """列当前 due 卡片（active 且 next_review_at <= now）。"""
+    eff_limit: int | None = None
+    if limit is not None:
+        if not isinstance(limit, int) or limit < 1:
+            return ToolResult(status="error", content=f"query_srs_due(limit) 必须是 ≥1 整数，收到：{limit!r}")
+        eff_limit = limit
+    store = _get_srs_store()
+    cards = store.list_due(limit=eff_limit)
+    if not cards:
+        return ToolResult(
+            status="empty",
+            content=(
+                "🎉 当前没有 due 卡片需要复习。可让用户新建 quiz 后把错题进 SRS / 手动加 manual 卡。"
+            ),
+        )
+    lines = [f"# 当前 due 卡片（{len(cards)} 张）"]
+    if detail:
+        # 完整详情模式：每张卡渲染 front + back + 调度字段
+        for c in cards:
+            lines.append("")
+            lines.append(_render_card_detail(c))
+            lines.append("")
+            lines.append("→ 用户回忆后，调 review_srs_card(card_id, rating='again'/'hard'/'good'/'easy')")
+    else:
+        lines.append(f"  {'ID':<6}  {'状态':<10}  {'ease':<6}  {'iv':<5}  {'reps':<5}  正面（前 40 字）")
+        lines.append(f"  {'-'*4:<6}  {'-'*8:<10}  {'-'*4:<6}  {'-'*3:<5}  {'-'*3:<5}  {'-'*40}")
+        for c in cards:
+            lines.append(_render_card_brief(c))
+        lines.append("")
+        lines.append("→ 用户开始复习时，先调 query_srs_due(detail=true) 拿完整正面 / 背面；")
+        lines.append("  用户回忆后用 review_srs_card(card_id, rating) 更新调度。")
+    return ToolResult(status="ok", content="\n".join(lines))
+
+
+def _tool_review_srs_card(
+    card_id: Any,
+    rating: Any,
+) -> ToolResult:
+    """用户对一张卡完成回忆 + 4 档自评 → SM-2 公式更新调度状态。"""
+    if not isinstance(card_id, int) or card_id < 1:
+        return ToolResult(status="error", content=f"review_srs_card(card_id) 必须是 ≥1 整数，收到：{card_id!r}")
+    if not isinstance(rating, str):
+        return ToolResult(status="error", content=f"review_srs_card(rating) 必须是字符串，收到：{type(rating).__name__}")
+
+    from src.agent.core.srs_scheduler import (
+        card_state_from_dict,
+        parse_rating,
+        schedule_review,
+    )
+
+    try:
+        rating_enum = parse_rating(rating)
+    except ValueError as e:
+        return ToolResult(status="error", content=str(e))
+
+    store = _get_srs_store()
+    card = store.get_card(card_id)
+    if card is None:
+        return ToolResult(status="error", content=f"card_id={card_id} 不存在")
+    if card["status"] != "active":
+        return ToolResult(
+            status="error",
+            content=f"card_id={card_id} 状态 {card['status']}，禁止 review（请先 resume / unarchive）",
+        )
+
+    state = card_state_from_dict(card)
+    result = schedule_review(state, rating_enum)
+
+    ok = store.update_review_state(
+        card_id,
+        ease_factor=result.ease_factor,
+        interval_days=result.interval_days,
+        repetitions=result.repetitions,
+        lapses=result.lapses,
+        next_review_at=result.next_review_at,
+    )
+    if not ok:
+        return ToolResult(status="error", content=f"持久化 review 结果失败（card_id={card_id}）")
+
+    return ToolResult(
+        status="ok",
+        content=(
+            f"✓ card_id={card_id} 已完成 review（rating={rating_enum.value}）：\n"
+            f"  新 ease={result.ease_factor:.2f}, interval={result.interval_days}d, "
+            f"reps={result.repetitions}, lapses={result.lapses}\n"
+            f"  下次复习：{result.next_review_at}\n"
+            "→ 给用户简短反馈：本次评分 + 下次几天后回来。"
+        ),
+    )
+
+
+def _tool_query_srs_stats() -> ToolResult:
+    """返回 SRS 队列摘要统计（D15）。"""
+    store = _get_srs_store()
+    stats = store.stats()
+    if stats["total_active"] == 0 and stats["total_suspended"] == 0 and stats["total_archived"] == 0:
+        return ToolResult(
+            status="empty",
+            content="📭 SRS 队列为空。可让用户做完 quiz 后把错题进 SRS / 手动加 manual 卡。",
+        )
+    lines = [
+        "# SRS 队列统计",
+        f"- 总 active：{stats['total_active']} 张",
+        f"- 总 suspended：{stats['total_suspended']} 张",
+        f"- 总 archived：{stats['total_archived']} 张",
+        f"- 当前 due：{stats['due_count']} 张",
+        f"- 平均 ease：{stats['avg_ease']:.2f}（≥ 2.5 偏简单 / < 2.0 偏难）",
+        f"- mature 卡（interval ≥ 21d）：{stats['mature_count']} 张",
+    ]
+    return ToolResult(status="ok", content="\n".join(lines))
+
+
 def _tool_load_skill(name: str, skill_bodies: dict[str, str]) -> ToolResult:
     """
     加载 Skill 的完整指令正文，返回 <skill_content> 包裹的内容。
@@ -1710,6 +2187,26 @@ def execute_tool(
                     limit=args.get("limit"),
                     detail=args.get("detail", False),
                 )
+            case "add_to_srs":
+                return _tool_add_to_srs(
+                    source_type=args.get("source_type"),
+                    question_ids=args.get("question_ids"),
+                    front=args.get("front"),
+                    back=args.get("back"),
+                    note=args.get("note"),
+                )
+            case "query_srs_due":
+                return _tool_query_srs_due(
+                    limit=args.get("limit"),
+                    detail=args.get("detail", False),
+                )
+            case "review_srs_card":
+                return _tool_review_srs_card(
+                    card_id=args.get("card_id"),
+                    rating=args.get("rating"),
+                )
+            case "query_srs_stats":
+                return _tool_query_srs_stats()
             case _:
                 return ToolResult(
                     status="error",

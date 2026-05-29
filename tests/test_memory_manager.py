@@ -177,7 +177,7 @@ class TestTryExtract:
     def test_auto_extract_passes_empty_context(self) -> None:
         """AUTO_EXTRACT 路径：context_history 必须为 ""（用严格 prompt）。
 
-        Phase 1.2 节流（iter_2.md §4.9.2）：every_n=1 + min_len=0 等价于旧的"每轮触发"行为。
+        Phase 1.2 节流（iter_2_agent.md §4.9.2）：every_n=1 + min_len=0 等价于旧的"每轮触发"行为。
         """
         um = MagicMock()
         recent = [
@@ -223,7 +223,7 @@ class TestTryExtract:
         um.upsert.assert_any_call("background", "b", "2", source="explicit")
 
 
-# ── Phase 1.2 触发节流策略（iter_2.md §4.9.2） ───────────────────────────
+# ── Phase 1.2 触发节流策略（iter_2_agent.md §4.9.2） ───────────────────────────
 
 class TestExtractTriggerPolicy:
     """auto 模式下的"每 N 轮 + min_len"节流，显式触发必须不受影响。"""

@@ -231,14 +231,27 @@ class TestRealAgentaSkills:
         if not repo_skills.is_dir():
             pytest.skip(".agenta/skills 目录不存在，跳过")
         result = scan_skills(repo_skills)
-        # 至少三个：example-skill / study-planner / quiz-maker
+        # 至少四个：example-skill / study-planner / quiz-maker / srs-review
         assert "example-skill" in result.loaded
         assert "study-planner" in result.loaded
         assert "quiz-maker" in result.loaded
+        assert "srs-review" in result.loaded  # Phase 2.4
         # 仓库内置 skill 必须 0 失败，否则 main.py 启动就会刷红
         assert result.failed == [], (
             f"仓库内置 skill 解析失败：{[(str(f.path), f.reason) for f in result.failed]}"
         )
+
+    def test_srs_review_skill_metadata(self) -> None:
+        """Phase 2.4 srs-review skill 的 frontmatter 完整可解析（含 description 含 4 个 tool 名）。"""
+        repo_skills = Path(__file__).resolve().parents[1] / ".agenta" / "skills"
+        if not repo_skills.is_dir():
+            pytest.skip(".agenta/skills 目录不存在，跳过")
+        result = scan_skills(repo_skills)
+        srs = result.loaded["srs-review"]
+        assert "复习" in srs.description or "SRS" in srs.description
+        # body 应引出 4 个 SRS tool 名
+        for tool_name in ("add_to_srs", "query_srs_due", "review_srs_card", "query_srs_stats"):
+            assert tool_name in srs.body, f"srs-review SKILL.md 应提及 {tool_name}"
 
 
 # ── TestBuildSkillCatalog ─────────────────────────────────────────────────────

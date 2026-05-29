@@ -22,7 +22,7 @@
         UNIQUE(category, key)           -- 同类同 key 自动覆盖旧值
     )
 
-source 字段来源（C 混合范式，详 iter_2.md §4.9.2）：
+source 字段来源（C 混合范式，详 iter_2_agent.md §4.9.2）：
     - auto      MemoryManager.try_extract 在自动模式下提取（USER_MEMORY_AUTO_EXTRACT）
     - explicit  用户敲"请记住"/"remember" 等触发词后由 LLM 提取
     - manual    用户用 /memory add / /memory edit 显式写入
@@ -72,7 +72,7 @@ CATEGORY_LABELS: dict[str, str] = {
     "correction":  "纠错",
 }
 
-# 写入来源（详 iter_2.md §4.9.2 C 混合范式）
+# 写入来源（详 iter_2_agent.md §4.9.2 C 混合范式）
 MEMORY_SOURCES: frozenset[str] = frozenset({"auto", "explicit", "manual"})
 SOURCE_LABELS: dict[str, str] = {
     "auto":     "自动",

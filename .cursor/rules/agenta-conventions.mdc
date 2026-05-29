@@ -11,7 +11,7 @@ alwaysApply: true
 
 - 代码规范以本文件为准
 - **设计文档**（`docs/design.md`）风格详 [§3.0](../../docs/design.md#30-设计文档风格)
-- **实现文档**（`docs/iter_2.md`）风格详 [§4.9.0](../../docs/iter_2.md#490-实现文档风格)
+- **实现文档**（`docs/iter_2_agent.md`）风格详 [§4.9.0](../../docs/iter_2_agent.md#490-实现文档风格)
 
 冲突时以这两份为准；本文件是"操作指引"，docs 是"风格约定"。
 
@@ -34,13 +34,13 @@ USER_RULES_FILE: str = os.getenv("USER_RULES_FILE", ".agenta/rules.md")
 
 ```python
 # ❌ 差：解释设计思想 / Phase / 跟其他模块的关系
-# 项目级用户偏好（详 iter_2.md §4.9.3）：在项目根放 .agenta/rules.md，启动时一次性
+# 项目级用户偏好（详 iter_2_agent.md §4.9.3）：在项目根放 .agenta/rules.md，启动时一次性
 # 加载并注入到 system prompt 的 <project_rules> 块。与 user_memory（动态学到的偏好）
 # 形成两层：rules 是稳定基础设定，memory 在其之后注入做临时覆写。
 USER_RULES_ENABLED: bool = ...
 ```
 
-设计思想放在 `docs/design.md` 的对应章节，Phase 来源放在 `docs/iter_2.md` 的 §4.9.x；config.py 里只写"这个开关是干什么的"。
+设计思想放在 `docs/design.md` 的对应章节，Phase 来源放在 `docs/iter_2_agent.md` 的 §4.9.x；config.py 里只写"这个开关是干什么的"。
 
 ### 1.2 函数 / 类 docstring
 
@@ -103,13 +103,13 @@ USER_RULES_ENABLED: bool = ...
 
 | 词 | 严格含义 | 在文档里出现的位置 |
 |---|---|---|
-| **评估** | `tools/rag_eval/` / `tools/agent_eval/` 下脚本，跑真实 LLM / 数据集，报告存储 `tools/*_eval/reports/<feature>-*.md` | iter_2.md Step 5；design.md "评估方法" 表 |
-| **UT** | `tests/test_*.py`，编码顺带的强制流程，**与"评估"完全分开**，不出现在"评估"语境 | iter_2.md Step 4；design.md 子节脚注 |
+| **评估** | `tools/rag_eval/` / `tools/agent_eval/` 下脚本，跑真实 LLM / 数据集，报告存储 `tools/*_eval/reports/<feature>-*.md` | iter_2_agent.md Step 5；design.md "评估方法" 表 |
+| **UT** | `tests/test_*.py`，编码顺带的强制流程，**与"评估"完全分开**，不出现在"评估"语境 | iter_2_agent.md Step 4；design.md 子节脚注 |
 
 约束：
 
 - **UT 不算评估**：design.md §3.x "评估方法" 表**只列 tools/* 行**；UT 文件名以子节首一行说明带过即可（如 "正确性单测见 `tests/test_xxx.py`，编码顺带跑，不在本节评估范围"）
-- **iter_2.md Step 4 / Step 5 严格分开**：Step 4 只写 UT 数字；Step 5 只写评估命令 + 通过率
+- **iter_2_agent.md Step 4 / Step 5 严格分开**：Step 4 只写 UT 数字；Step 5 只写评估命令 + 通过率
 - "评估"作为日常中文动词（"评估必要性" / "缺口评估"）跟本规则无关，自由用
 
 ### 1.7 写文档不要想当然（让读者读懂）
@@ -142,7 +142,7 @@ USER_RULES_ENABLED: bool = ...
 | CLI 命令处理 | `src/cli/handlers.py` | `handle_<command>` 函数 |
 | LLM 调用入口 | `src/llm/provider.py` | 一个 `chat(...)` 函数为主出口 |
 | 评估脚本 | `tools/agent_eval/<feature>/` | `<task>.py`（如 `recall_golden.py` / `perf_eval.py`） |
-| 评估报告 | `tools/agent_eval/reports/` | `<feature>-<target>-<YYYYMMDD-HHMMSS>.md`（**强制 Markdown，禁 JSON**，详 iter_2.md §4.10） |
+| 评估报告 | `tools/agent_eval/reports/` | `<feature>-<target>-<YYYYMMDD-HHMMSS>.md`（**强制 Markdown，禁 JSON**，详 iter_2_agent.md §4.10） |
 | 单元测试 | `tests/test_<module>.py` | Test 类名 `Test<Behavior>`，方法 `test_<scenario>` |
 
 不允许引入新的 helper / store / manager 类型时再开新文件；先尝试在已有文件添加。
@@ -174,8 +174,8 @@ USER_RULES_ENABLED: bool = ...
 |---|---|
 | 新 config 项 | `src/config.py` **+ `.env.example` + `.env`（三处必须同步，缺一不可）**；详 §5.1 |
 | 新 CLI 命令 | `src/cli/ui.py` help + `src/cli/tab_complete.py` + `docs/design.md` 对应小节 CLI 表 |
-| 新 feature | `docs/iter_2.md §4.9.x` 按 §4.9.0 风格 + `docs/design.md` 按 §3.0 风格 + `README.md §1.2 Agent` 一句话 bullet |
-| 评估工具 | `tools/agent_eval/reports/` 落 Markdown 报告（**禁 JSON**，详 iter_2.md §4.10）；entry point 必须 `load_dotenv(override=True)` |
+| 新 feature | `docs/iter_2_agent.md §4.9.x` 按 §4.9.0 风格 + `docs/design.md` 按 §3.0 风格 + `README.md §1.2 Agent` 一句话 bullet |
+| 评估工具 | `tools/agent_eval/reports/` 落 Markdown 报告（**禁 JSON**，详 iter_2_agent.md §4.10）；entry point 必须 `load_dotenv(override=True)` |
 
 ### 5.1 新 config 项三处同步（强制）
 
@@ -203,16 +203,16 @@ USER_RULES_ENABLED: bool = ...
 
 **反例 ❌**：处理废弃 `advanced/prompts/` 时遇到 `chat_history.sessions.prompt_name` schema 字段，**默认选了**"保留 schema + dead code 维持向后兼容"路径，没问用户；用户实际偏好"删 DB 重建 + 全清"，导致返工。
 
-**正例 ✅**：[§4.9.3 Step 7](../../docs/iter_2.md#493-prompt-管理-phase-13) 处理 `advanced/prompts/` 和 `advanced/skills/` 时，先用 AskQuestion 让用户在 "废弃 / 搬迁 / 保留" 3 选项里拍板，再动手。
+**正例 ✅**：[§4.9.3 Step 7](../../docs/iter_2_agent.md#493-prompt-管理-phase-13) 处理 `advanced/prompts/` 和 `advanced/skills/` 时，先用 AskQuestion 让用户在 "废弃 / 搬迁 / 保留" 3 选项里拍板，再动手。
 
 ---
 
-## 7. AI ↔ 用户交互节奏（叠加在 `iter_2.md §4.9` Step 1-6 之上）
+## 7. AI ↔ 用户交互节奏（叠加在 `iter_2_agent.md §4.9` Step 1-6 之上）
 
 **分层约定 —— 不重复定义**：
 
-- **实现流程"做什么"** → 权威在 [`iter_2.md §4.9`](../../docs/iter_2.md#49-开始实现) 开头列的 **Step 1-6**（Review / Plan / Code / Test / Eval / Doc），本文件**不重定义**
-- **文档表达风格** → 权威在 [`iter_2.md §4.9.0`](../../docs/iter_2.md#490-实现文档风格)，本文件不重定义
+- **实现流程"做什么"** → 权威在 [`iter_2_agent.md §4.9`](../../docs/iter_2_agent.md#49-开始实现) 开头列的 **Step 1-6**（Review / Plan / Code / Test / Eval / Doc），本文件**不重定义**
+- **文档表达风格** → 权威在 [`iter_2_agent.md §4.9.0`](../../docs/iter_2_agent.md#490-实现文档风格)，本文件不重定义
 - **AI 跟用户怎么配合做** → 本节，**只在 Step 边界叠加交互约束**（何时问 / 何时等 / 何时动手 / 何时验收）
 
 ### 7.1 按 Step 时间线的 AI 交互约束
@@ -220,7 +220,7 @@ USER_RULES_ENABLED: bool = ...
 | 时间点 | AI 必须 | 失败模式 |
 |---|---|---|
 | **Step 0 之前**（预备，可选） | 若 feature 涉及用户未表现熟悉度的外部框架 / 协议 / 算法（如 MCP / LangGraph / agentskills.io），先 `AskQuestion`「先讲原理 / 先扫现状 / 直接开始？」 | 默认替用户决定跳过 → 用户后面被概念劝退 |
-| **Step 0 期间**（Requirements） | 按 [§4.9.0 Step 0 结构](../../docs/iter_2.md#490-实现文档风格) 4 行表（用户故事 / 验收标准 / Scope / 依赖）起草**用户视角**需求规格；先列 `iter_2.md §4.7.3` / `§4.7.2` 早期想法作"历史参照"，再独立起草现在的规格；用 `AskQuestion` 让用户审 / 改约定；**Scope 中"暂时不做" / "显式不做"项一律同步登记到 [§4.13.1](../../docs/iter_2.md#4131-deferred-backlog暂时不做) / [§4.13.2](../../docs/iter_2.md#4132-dropped永久不做)**，feature 章节正文只 cross-ref 编号、不复述详情 | 直接照抄 `§4.7.3` 出口判据当需求（已过时） / 写成实现视角"本 feature 实现 X 功能" / 验收标准写成"API 调用成功"（实现视角不可观察） / 把"暂时不做"误归"显式不做"或反之 / 在 §4.9.x 章节正文里单列"显式不做"表复述 punt 详情（应统一进 §4.13）|
+| **Step 0 期间**（Requirements） | 按 [§4.9.0 Step 0 结构](../../docs/iter_2_agent.md#490-实现文档风格) 4 行表（用户故事 / 验收标准 / Scope / 依赖）起草**用户视角**需求规格；先列 `iter_2_agent.md §4.7.3` / `§4.7.2` 早期想法作"历史参照"，再独立起草现在的规格；用 `AskQuestion` 让用户审 / 改约定；**Scope 中"暂时不做" / "显式不做"项一律同步登记到 [§4.13.1](../../docs/iter_2_agent.md#4131-deferred-backlog暂时不做) / [§4.13.2](../../docs/iter_2_agent.md#4132-dropped永久不做)**，feature 章节正文只 cross-ref 编号、不复述详情 | 直接照抄 `§4.7.3` 出口判据当需求（已过时） / 写成实现视角"本 feature 实现 X 功能" / 验收标准写成"API 调用成功"（实现视角不可观察） / 把"暂时不做"误归"显式不做"或反之 / 在 §4.9.x 章节正文里单列"显式不做"表复述 punt 详情（应统一进 §4.13）|
 | **Step 1 期间**（Review） | 自行扫码摸底，产出**现状表 + gap 列表**；**不直接给方案**；摸底要对照 Step 0 验收标准 | 边摸底边给方案 → 剥夺用户判断空间 |
 | **Step 2 期间**（Plan） | 摆**决策矩阵**（锁定 / 待定 / 显式不做 三列雏形），用 `AskQuestion` 让用户**对每个决策点拍板**；AI 不预设答案、不默认选保守路径 | 默认选"看起来更兼容"的路径 → 违反本文件 §6 |
 | **Step 2 → Step 3 切换**（关键卡口） | **等用户显式 OK 才进 Step 3 动代码**（沉默 ≠ 同意） | 看到沉默就开写 → 文档反推代码 / 用户失去 review 机会 |
@@ -239,26 +239,26 @@ AI 不确定 feature 是否触发预备步时，**默认问，不默认跳**。�
 
 ### 7.3 典范流程
 
-[§4.9.4 引用展示 (phase 1.4)](../../docs/iter_2.md#494-引用展示-phase-14) 是首个完整走完 Step 0-6 的范例（含回填的 Step 0 需求规格 4 行表），后续 phase 照此复用。
+[§4.9.4 引用展示 (phase 1.4)](../../docs/iter_2_agent.md#494-引用展示-phase-14) 是首个完整走完 Step 0-6 的范例（含回填的 Step 0 需求规格 4 行表），后续 phase 照此复用。
 
 ---
 
 ## 8. 红线（违反 = 必须修正）
 
-- ❌ 评估报告落 JSON / CSV / TSV（详 iter_2.md §4.10 "评估报告输出约定"）
-- ❌ `tools/agent_eval/reports/` 下批量删除文件（详 iter_2.md §4.10 "Agent 禁止主动清理 reports/"）
+- ❌ 评估报告落 JSON / CSV / TSV（详 iter_2_agent.md §4.10 "评估报告输出约定"）
+- ❌ `tools/agent_eval/reports/` 下批量删除文件（详 iter_2_agent.md §4.10 "Agent 禁止主动清理 reports/"）
 - ❌ `tools/agent_eval/**` entry point 不调 `load_dotenv()`（会导致 LLM 调用 401）
 - ❌ 新增 `os.getenv(...)` 只改 `src/config.py`，不同步 `.env.example` 和 `.env`（违反本文件 §5.1）
 - ❌ 不问用户就默认选向后兼容路径 / 默认执行破坏性操作 / 默认 scope 蔓延（违反本文件 §6）
-- ❌ 在 `iter_2.md §4.9.x` Step 0+1+2 文档落地（Requirements + Review + Plan）前直接动代码；或 Step 2 → Step 3 切换时没等用户显式 OK 就开写（违反本文件 §7）
-- ❌ Step 0 需求规格直接照抄 `iter_2.md §4.7.3` 出口判据当需求（已过时早期想法，仅作历史参照）；或 Step 0 写成实现视角而非用户视角（违反本文件 §7.1 Step 0 期间约束）
-- ❌ Step 0 Scope 把"暂时不做（→ §4.13.1）"误归到"显式不做（→ §4.13.2）"或反之；或写了 punt 项但**忘记同步登记**到 `iter_2.md §4.13`（违反本文件 §7.1 Step 0 期间约束 + iter_2.md §4.9.0 Step 0 结构）
-- ❌ 在 `iter_2.md §4.9.x` 章节正文里单列"显式不做"表 / "实现层显式不做"段、复述 punt 项详情（违反 iter_2.md §4.9.0 "Punt 项归集"强约束 — 所有 punt 项一律进 §4.13 唯一登记）
+- ❌ 在 `iter_2_agent.md §4.9.x` Step 0+1+2 文档落地（Requirements + Review + Plan）前直接动代码；或 Step 2 → Step 3 切换时没等用户显式 OK 就开写（违反本文件 §7）
+- ❌ Step 0 需求规格直接照抄 `iter_2_agent.md §4.7.3` 出口判据当需求（已过时早期想法，仅作历史参照）；或 Step 0 写成实现视角而非用户视角（违反本文件 §7.1 Step 0 期间约束）
+- ❌ Step 0 Scope 把"暂时不做（→ §4.13.1）"误归到"显式不做（→ §4.13.2）"或反之；或写了 punt 项但**忘记同步登记**到 `iter_2_agent.md §4.13`（违反本文件 §7.1 Step 0 期间约束 + iter_2_agent.md §4.9.0 Step 0 结构）
+- ❌ 在 `iter_2_agent.md §4.9.x` 章节正文里单列"显式不做"表 / "实现层显式不做"段、复述 punt 项详情（违反 iter_2_agent.md §4.9.0 "Punt 项归集"强约束 — 所有 punt 项一律进 §4.13 唯一登记）
 - ❌ Step 5 评估 case 跟 Step 0 验收标准脱钩自由发挥（违反本文件 §7.1 Step 5 期间约束）
 - ❌ config 注释解释设计思想 / Phase 来源（违反本文件 §1.1）
 - ❌ `docs/design.md` 出现 "Phase X 完成 Y" / "本期实现" 等时效字眼（违反 design.md §3.0）
 - ❌ `docs/design.md` 插代码块（违反 design.md §3.0，行内 ` `` ` 引用文件 / 类除外）
-- ❌ `docs/iter_2.md §4.9.x` 写业界对比 / 方案选型推理这种过程描述（违反 iter_2.md §4.9.0）
+- ❌ `docs/iter_2_agent.md §4.9.x` 写业界对比 / 方案选型推理这种过程描述（违反 iter_2_agent.md §4.9.0）
 
 ---
 
