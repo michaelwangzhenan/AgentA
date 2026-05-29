@@ -382,3 +382,7 @@ AUTOGPT_MAX_TASK_TOOL_ROUNDS: int = int(os.getenv('AUTOGPT_MAX_TASK_TOOL_ROUNDS'
 # ── 网络搜索配置 ──────────────────────────────────────────────────────────────
 # Serper.dev API Key（用于 web_search 工具；在 .env 中配置 SERPAPI_API_KEY）
 SERPAPI_API_KEY: str = os.getenv('SERPAPI_API_KEY', '')
+
+# 是否把 CLI 终端的所有输出同步写到日志文件（可选值：true / false）
+# 开启后每次启动新建 ./logs/agenta-YYYYMMDD-HHMMSS.log，关闭时完全无副作用
+CLI_LOG_TO_FILE: bool = os.getenv("CLI_LOG_TO_FILE", "false").lower() == "true"

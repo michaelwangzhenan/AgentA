@@ -7,7 +7,11 @@ CLI 入口 —— 私有知识库 Agent 对话界面
 """
 
 import logging
+import os
+import sys
 import warnings
+from datetime import datetime
+from pathlib import Path
 from dotenv import load_dotenv
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import InMemoryHistory
@@ -16,7 +20,54 @@ from prompt_toolkit.history import InMemoryHistory
 warnings.filterwarnings("ignore", category=FutureWarning, module="transformers")
 
 # override=True 确保 .env 覆盖系统环境变量
-load_dotenv(override=True) 
+load_dotenv(override=True)
+
+
+class _Tee:
+    """把写入同时转发给原 stream 和日志文件；其余属性（isatty/fileno/encoding 等）透传给原 stream，避免破坏 prompt_toolkit 的 TTY 检测。"""
+
+    def __init__(self, original, file):
+        self._original = original
+        self._file = file
+
+    def write(self, s):
+        n = self._original.write(s)
+        try:
+            self._file.write(s)
+            self._file.flush()
+        except Exception:
+            # 文件突发不可写（磁盘满 / 句柄关闭）不影响终端输出
+            pass
+        return n
+
+    def flush(self):
+        self._original.flush()
+        try:
+            self._file.flush()
+        except Exception:
+            pass
+
+    def __getattr__(self, name):
+        return getattr(self._original, name)
+
+
+# CLI 终端输出落盘开关 —— 必须在 logging.basicConfig 之前完成 stream 包装，
+# 否则 StreamHandler 在构造时已绑定到未包装的 sys.stderr，logger 输出进不了文件。
+_CLI_LOG_FILE = None
+_CLI_LOG_PATH: Path | None = None
+if os.getenv("CLI_LOG_TO_FILE", "false").lower() == "true":
+    try:
+        _log_dir = Path("./logs")
+        _log_dir.mkdir(parents=True, exist_ok=True)
+        _CLI_LOG_PATH = _log_dir / f"agenta-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
+        # buffering=1 → 行缓冲，每条 \n 立即刷盘，进程异常退出也不丢日志
+        _CLI_LOG_FILE = open(_CLI_LOG_PATH, "w", encoding="utf-8", buffering=1)
+        sys.stdout = _Tee(sys.stdout, _CLI_LOG_FILE)
+        sys.stderr = _Tee(sys.stderr, _CLI_LOG_FILE)
+    except OSError as e:
+        print(f"⚠️  无法打开 CLI 日志文件：{e}，本次运行不写文件")
+        _CLI_LOG_FILE = None
+        _CLI_LOG_PATH = None
 
 # 设置日志：INFO 级别，显示文件名、行号和时间
 logging.basicConfig(
@@ -61,6 +112,9 @@ def _warm_up_rag_models() -> None:
 def main() -> None:
     """CLI 主循环。"""
     print(BANNER)
+
+    if _CLI_LOG_PATH:
+        print(f"📝 终端输出同步写入：{_CLI_LOG_PATH}\n")
 
     # _warm_up_rag_models()
 
@@ -116,6 +170,15 @@ def main() -> None:
             
         if not user_input:
             continue
+
+        # 用户输入只走 TTY 回显，不经 Python stdout —— 若开了文件日志需手动补写一笔，
+        # 文件里才能完整还原"我问了啥 → Agent 答了啥"
+        if _CLI_LOG_FILE is not None:
+            try:
+                _CLI_LOG_FILE.write(f"你: {user_input}\n")
+                _CLI_LOG_FILE.flush()
+            except Exception:
+                pass
 
         # ── 内置命令处理 ──────────────────────────────────────────────────────
         cmd_parts = user_input.split(maxsplit=1) # input 分割为命 令名和参数

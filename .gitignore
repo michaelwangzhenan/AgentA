@@ -27,6 +27,9 @@ tools/agent_eval/reports/*
 sqlite_db/
 history/
 
+# 日志文件目录
+logs/
+
 # ── Python 运行时 ──────────────────────────────────────────────
 __pycache__/
 # .pyc / .pyo / .pyd
