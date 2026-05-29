@@ -412,8 +412,12 @@ _STUDY_PLAN_TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "query_study_status",
             "description": (
-                "查询学习计划进度。"
-                "适用：用户问 \"我学到哪了 / 下一步该干啥 / 我有哪些学习计划\"。"
+                "查询本系统内通过 create_study_plan 创建的**结构化学习计划进度状态**"
+                "（plan 元信息 / task 完成状态 / 下一步建议）。"
+                "适用：用户问 \"我学到哪了 / 下一步该干啥 / 我有哪些计划\"。"
+                "**反例（不要选本工具，请用 search_knowledge）**："
+                "用户问学习计划的**具体内容**（如 \"AI Agent 第三天讲什么 / xx 计划里建议怎么学 / 这个计划的步骤是什么\"）"
+                "—— 这类问题答案在用户上传的知识库文档里，本工具只返回 task 标题不返回内容。"
                 "**不传 plan_id 默认查当前 active plan**；想看任一 plan 全貌传 plan_id；"
                 "想看全部 plan 列表传 list_all=true。"
             ),
@@ -558,6 +562,15 @@ def _tool_search_knowledge(
         )
 
     hits = search(query, top_k=top_k, where=where, queries=expanded_queries)
+
+    # —— Phase 2.5 R1：critic 相关性过滤（D6 — 过滤 not_relevant，0 条返 empty 不重召回） ——
+    if hits and _cfg.HARNESS_RAG_ENABLED:
+        try:
+            from src.agent.core.harness_manager import get_harness_manager
+            hits = get_harness_manager().filter_chunks(query=query, hits=hits)
+        except Exception as e:  # noqa: BLE001 — critic 异常一律软放行原始 hits
+            logger.warning("[tool] search_knowledge: harness 过滤失败，保留原始 hits：%s", e)
+
     if hits:
         # Phase 1.4：若上层传入 CitationBuilder，把 hits 注册进去拿到全局
         # 编号，让 LLM 看到的 [n] 与最终 sources 块的 [n] 对齐
@@ -1459,6 +1472,11 @@ def _tool_grade_quiz(
     if not ok:
         return ToolResult(status="error", content=f"持久化批改结果失败（quiz_set_id={quiz_set_id}）")
 
+    # —— Phase 2.5 Q1：critic 自检（仅 short_answer，MCQ 字符串比对是确定性的，跳过省 token） ——
+    harness_block = ""
+    if _cfg.HARNESS_QUIZ_ENABLED:
+        harness_block = _run_quiz_critic(quiz_set_id, questions, gradings, store)
+
     head = (
         f"📝 已批改 quiz_set_id={quiz_set_id}『{quiz['topic']}』：\n"
         f"  总分 {total_score:.1f}/100（{int(round(total_raw))}/{len(questions)} 题完全正确）"
@@ -1471,7 +1489,68 @@ def _tool_grade_quiz(
         "\n\n→ 可向用户展示总分 + 错题点评（含标答 + 简短考点），"
         "再问是否要『再考一次 / 换主题 / 看错题详情』。"
     )
-    return ToolResult(status="ok", content=head + body + tail)
+    return ToolResult(status="ok", content=head + body + harness_block + tail)
+
+
+def _run_quiz_critic(
+    quiz_set_id: int,
+    questions: list[dict[str, Any]],
+    gradings: list[dict[str, Any]],
+    store: Any,
+) -> str:
+    """Phase 2.5 Q1：对简答题批改结果做 critic 自检；不达标的题落库 mark + 拼成 warning 块。
+
+    返回值：插入 grade_quiz 输出 head + body 后、tail 前的 harness_warning 段（含前导 `\\n\\n`）；
+    无 flagged 题 / 全部 critic 失败 → 返回空串（不在输出里制造噪音）。
+    Critic 自身异常一律软返回，不影响主输出。
+    """
+    try:
+        from src.agent.core.harness_manager import get_harness_manager
+        manager = get_harness_manager()
+    except Exception as e:  # noqa: BLE001 — manager 初始化失败不阻塞 grade_quiz
+        logger.warning("[tool] grade_quiz: HarnessManager 加载失败，跳过自检：%s", e)
+        return ""
+
+    qmap = {q["id"]: q for q in questions}
+    flagged_lines: list[str] = []
+    reviewed = 0
+    for g in gradings:
+        qid = g["question_id"]
+        q = qmap.get(qid)
+        if q is None or q["q_type"] in _MCQ_TYPES:
+            continue
+        reviewed += 1
+        verdict = manager.review_grading(
+            stem=q["stem"],
+            user_answer=g["user_answer"],
+            correct_answer=q["correct_answer"],
+            agent_score=float(g["score"]),
+            agent_feedback=g["feedback"],
+        )
+        if verdict.failure or verdict.passed:
+            continue
+        store.mark_question_harness_flagged(qid)
+        score_str = f"{verdict.score:.1f}" if verdict.score is not None else "—"
+        flagged_lines.append(
+            f"  第 {q['order_idx']} 题 — critic {score_str}/5：{verdict.reason}"
+        )
+
+    if reviewed == 0 or not flagged_lines:
+        if reviewed:
+            logger.info(
+                "[tool] grade_quiz: critic 复审 %d 题，全部通过（quiz_set_id=%d）",
+                reviewed, quiz_set_id,
+            )
+        return ""
+
+    logger.info(
+        "[tool] grade_quiz: critic 复审 %d 题，flagged %d 题（quiz_set_id=%d）",
+        reviewed, len(flagged_lines), quiz_set_id,
+    )
+    return (
+        f"\n\n⚠️ Agent 自检（Phase 2.5）：以下 {len(flagged_lines)} 题批改可能有偏，"
+        f"建议人工复核：\n" + "\n".join(flagged_lines)
+    )
 
 
 def _render_quiz_brief(quiz_set: dict[str, Any]) -> str:

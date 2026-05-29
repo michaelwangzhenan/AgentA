@@ -49,6 +49,44 @@ def _seed_quizzes(store: QuizStore) -> tuple[int, int]:
     return q1, q2
 
 
+# ── Phase 2.5 Harness：⚠️ 渲染 ──────────────────────────────────────────────
+
+class TestHarnessFlagRender:
+
+    def test_unflagged_quiz_no_warning(self, store: QuizStore) -> None:
+        q1, _ = _seed_quizzes(store)
+        lines, out = _make_collector()
+        handle_quiz(store, ["/quiz", f"show {q1}"], out=out)
+        joined = "\n".join(lines)
+        assert "⚠️" not in joined
+        assert "自检" not in joined
+
+    def test_flagged_question_renders_warning(self, store: QuizStore) -> None:
+        q1, _ = _seed_quizzes(store)
+        # 拉第 3 题（short_answer）的 question_id 后 mark
+        q_id = store.get_quiz_with_questions(q1)["questions"][2]["id"]
+        store.mark_question_harness_flagged(q_id)
+        lines, out = _make_collector()
+        handle_quiz(store, ["/quiz", f"show {q1}"], out=out)
+        joined = "\n".join(lines)
+        assert "⚠️" in joined
+        assert "复核" in joined
+
+    def test_flagged_only_target_question(self, store: QuizStore) -> None:
+        """3 题中只 mark 第 3 题 → 输出只在第 3 题位置出现 ⚠️。"""
+        q1, _ = _seed_quizzes(store)
+        q_id = store.get_quiz_with_questions(q1)["questions"][2]["id"]
+        store.mark_question_harness_flagged(q_id)
+        lines, out = _make_collector()
+        handle_quiz(store, ["/quiz", f"show {q1}"], out=out)
+        # 整体只有 1 个 ⚠️
+        warning_count = sum(1 for ln in lines if "⚠️" in ln)
+        assert warning_count == 1
+        # ⚠️ 出现在标题行（含"第 3 题"）
+        warn_lines = [ln for ln in lines if "⚠️" in ln]
+        assert "第 3 题" in warn_lines[0]
+
+
 # ── /quiz / /quiz list ──────────────────────────────────────────────────────
 
 class TestQuizList:

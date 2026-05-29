@@ -288,82 +288,82 @@ SRS（Spaced Repetition System，间隔重复系统）是 1970s 起源的记忆�
 
 ### 术语先澄清（避免后面混淆）
 
-业界 "harness" 有两种用法，必须分清：
+业界 "harness" 一词有两种用法，必须分清：
 
 | 用法 | 含义 | 谁这么叫 |
 |---|---|---|
-| **广义 agent harness** | 包住 LLM 的整套**运行时脚手架**：tool-call loop / 解析器 / 上下文拼装 / 错误处理 —— 即 "把一个生 LLM 包成 agent 的那层胶水" | METR / Devin / SWE-bench 论文圈 |
+| **广义 agent harness** | 包住 LLM 的整套**运行时脚手架**：工具调用循环 / 解析器 / 上下文拼装 / 错误处理 —— 即"把一个生 LLM 包成 agent 的那层胶水" | METR / Devin / SWE-bench 论文圈 |
 | **狭义自检 harness**（**本项目用法**） | LLM 跑出一个产出后，agent **自己评一下产出好不好、要不要再来一轮** —— 即"反馈回路" | iter_3.md §3 #10 / iter_2_agent.md §4.6.2 G1 |
 
-本项目（Phase 2.5）讨论的是**狭义**：广义那层在 Phase 2.1 plan-execute / 现有 ReAct loop 已经构成。下面"harness" 一词如无说明都指狭义。
+本项目（Phase 2.5）讨论的是**狭义**：广义那层在 Phase 2.1 plan-execute / 现有 ReAct 主循环里已经构成。下面 "harness" 一词如无说明都指狭义。
 
 ### 解决什么问题
 
-LLM 一次性输出未必准（hallucination / 漏覆盖 / 误用 tool / 答非所问）。传统做法是**让用户自己发现 + 重新提问**，但：
+LLM 一次性输出未必准（幻觉 / 漏覆盖 / 误用工具 / 答非所问）。传统做法是**让用户自己发现 + 重新提问**，但：
 
 - 用户察觉成本高（要懂这个领域才能判错）
-- 一些"对错有客观依据"的场景（quiz 答对答错 / plan 步骤是否覆盖目标 / RAG 召回是否相关）其实**LLM 自己就能判**，没必要让用户当裁判
-- 有些错误（plan 漏关键步骤 / RAG 召回到无关 chunk）**当时不发现，后面整条链路都是错的**，事后修代价大
+- 一些"对错有客观依据"的场景（测验答对答错 / plan 步骤是否覆盖目标 / RAG 召回是否相关）其实 **LLM 自己就能判**，没必要让用户当裁判
+- 有些错误（plan 漏关键步骤 / RAG 召回到无关片段）**当时不发现，后面整条链路都是错的**，事后修代价大
 
 所以加一道"agent 自己批自己"的回路：**产出 → 自评 → （不达标则）重做 / 修正 / 终止**。
 
-直白一句：**Harness 是给 LLM 的产出加一道 review，决定要不要再来一遍。**
+直白一句：**Harness 是给 LLM 的产出加一道复核，决定要不要再来一遍。**
 
 ### 经典灵感来源
 
-Reflexion（Shinn et al., NeurIPS 2023）—— "verbal reinforcement learning"：agent 失败后用自然语言写一段反思，下一轮把反思塞回 prompt，相当于**用语言版的奖励信号迭代**。本项目的 harness 思路跟 Reflexion 一脉相承（iter_2_agent.md §4.7.2 #3 备注："Reflexion 风格"）。
+Reflexion（Shinn et al., NeurIPS 2023）—— "verbal reinforcement learning"（语言化强化学习）：agent 失败后用自然语言写一段反思，下一轮把反思塞回 prompt，相当于**用语言版的奖励信号迭代**。本项目的 harness 思路跟 Reflexion 一脉相承（iter_2_agent.md §4.7.2 #3 备注："Reflexion 风格"）。
 
 ---
 
-## 二、典型 pattern 对比
+## 二、典型模式对比
 
-各路 self-check / self-refine 工作可以按"评什么 / 谁来评 / 评几轮"3 个轴归类。
+各路自检 / 自我修正工作可以按"评什么 / 谁来评 / 评几轮"3 个轴归类。
 
-| pattern | 论文 / 出处 | 评什么 | 谁来评 | 迭代次数 | 关键特征 |
+| 模式 | 论文 / 出处 | 评什么 | 谁来评 | 迭代次数 | 关键特征 |
 |---|---|---|---|---|---|
-| **Self-Refine** | Madaan et al., NeurIPS 2023 | 单次输出 | 同一个 LLM | 多轮（直到满意 / 上限） | 单模型自洽 feedback → refine → repeat |
-| **Reflexion** | Shinn et al., NeurIPS 2023 | 整条 trajectory（含失败信号） | 同一个 LLM 写反思 | 跨 episode（每次失败积累） | 反思以**语言形式**累积进 long-term memory |
-| **Chain-of-Verification (CoVe)** | Dhuliawala et al., 2023 | 单次输出 | 同模型，但**先列验证问题**再答 | 1-2 轮 | 把"自评"分解成"列出可验证的子事实问题" |
-| **CRITIC** | Gou et al., ICLR 2024 | 单次输出 | 同模型 + **外部工具核验**（搜索 / 计算 / 代码执行） | 多轮 | 自评不空想，调工具拿 ground truth |
-| **Self-Consistency** | Wang et al., ICLR 2023 | 多次采样 | 不评，**投票** | N 次并行采样 | 没有显式 critic，靠"多数收敛"近似正确 |
-| **Constitutional AI / Self-Critique** | Bai et al., Anthropic 2022 | 单次输出 | 同模型 + 一组**原则（constitution）** | 1 轮（critique → revise） | 用书面原则约束 critic 视角，避免漫无目的 |
-| **Process Reward Model (PRM)** | Lightman et al., 2023 | 推理过程**每一步** | **独立训练的小模型** | 离线训练 + 在线打分 | 每步打分而非只评最终答案；需要标注数据训练 |
-| **LLM-as-a-Judge** | Zheng et al., NeurIPS 2023 | 任意输出 | 一个**更强的** LLM（GPT-4 等） | 1 轮 | 评估场景为主（非生产 critic）；**本项目 [`tools/agent_eval/judge/`](../tools/agent_eval/judge/__init__.py) 已采用**|
+| **Self-Refine** | Madaan et al., NeurIPS 2023 | 单次输出 | 同一个 LLM | 多轮（直到满意 / 上限） | 单模型自洽：反馈 → 修正 → 再来一轮 |
+| **Reflexion** | Shinn et al., NeurIPS 2023 | 整条执行轨迹（含失败信号） | 同一个 LLM 写反思 | 跨次（每次失败积累） | 反思以**语言形式**累积进长期记忆 |
+| **Chain-of-Verification（CoVe）** | Dhuliawala et al., 2023 | 单次输出 | 同模型，但**先列验证问题**再答 | 1-2 轮 | 把"自评"分解成"列出可验证的子事实问题" |
+| **CRITIC** | Gou et al., ICLR 2024 | 单次输出 | 同模型 + **外部工具核验**（搜索 / 计算 / 代码执行） | 多轮 | 自评不空想，调工具拿事实依据（ground truth） |
+| **Self-Consistency** | Wang et al., ICLR 2023 | 多次采样 | 不评，**投票** | N 次并行采样 | 没有显式评审，靠"多数收敛"近似正确 |
+| **Constitutional AI / Self-Critique** | Bai et al., Anthropic 2022 | 单次输出 | 同模型 + 一组**原则（constitution）** | 1 轮（批评 → 重写） | 用书面原则约束评审视角，避免漫无目的 |
+| **Process Reward Model（PRM）** | Lightman et al., 2023 | 推理过程**每一步** | **独立训练的小模型** | 离线训练 + 在线打分 | 每步打分而非只评最终答案；需要标注数据训练 |
+| **LLM-as-a-Judge** | Zheng et al., NeurIPS 2023 | 任意输出 | 一个**更强的** LLM（GPT-4 等） | 1 轮 | 评估场景为主（非生产路径评审）；**本项目 [`tools/agent_eval/judge/`](../tools/agent_eval/judge/__init__.py) 已采用** |
 | **Verifier Agent / Critic 子代理** | Devin / Marco DeepResearch / 多 agent 论文 | 子任务输出 / 最终答案 | **独立 agent 角色**（不同 prompt / 不同模型） | 1+ 轮 | 角色分离，"出题人 ≠ 阅卷人" |
 
 ### 关键对比维度提炼
 
 | 维度 | 选项 | 影响 |
 |---|---|---|
-| **评什么** | 最终输出 / 中间步骤 / 整条 trajectory | 评的颗粒度 → 反馈信号密度（PRM 最密，Self-Refine 最疏） |
+| **评什么** | 最终输出 / 中间步骤 / 整条执行轨迹 | 评的颗粒度 → 反馈信号密度（PRM 最密，Self-Refine 最疏） |
 | **谁来评** | 同一 LLM / 同模型不同 prompt / 独立 LLM / 独立小模型 / 工具核验 | 客观性 vs 成本（独立 LLM 最准但贵；同模型最省但有"自我欣赏"偏差） |
-| **评几轮** | 1 轮（出 → 评 → 终止） / N 轮（迭代 refine） / 跨 episode（Reflexion 风格） | 质量 vs 成本（迭代越多越好越贵，且可能不收敛） |
+| **评几轮** | 1 轮（出 → 评 → 终止） / N 轮（迭代修正） / 跨次（Reflexion 风格） | 质量 vs 成本（迭代越多越好越贵，且可能不收敛） |
 | **依据什么** | 自由打分 / 原则清单 / 验证子问题 / 工具事实核验 | 信号客观性递增；项目复用工具核验时跟现有 RAG / web_search 同构 |
-| **生产路径还是评估路径** | 生产 = 每次 user query 都跑 / 评估 = CI / phase 出口跑 | 生产 critic 必须低延迟（≤ +1 LLM call）；评估 judge 不在乎延迟，可上更强模型 |
+| **生产路径还是评估路径** | 生产 = 每次用户提问都跑 / 评估 = CI / phase 出口跑 | 生产路径评审必须低延迟（最多多打 1 次 LLM 调用）；评估路径不在乎延迟，可上更强模型 |
 
 ---
 
-## 三、关键 trade-off
+## 三、关键取舍
 
-### 1. Self-critique 偏差（最致命的坑）
+### 1. 自评偏差（最致命的坑）
 
 同一个 LLM **既是出题人又是阅卷人**时，存在文献反复实证的两类偏差：
 
-- **Self-preference bias**：模型倾向于给自己的输出打高分（Zheng et al. 2023 LLM-as-Judge 的核心警告之一）
+- **自我偏好偏差（self-preference bias）**：模型倾向于给自己的输出打高分（Zheng et al. 2023 LLM-as-Judge 的核心警告之一）
 - **盲点同源**：模型在第一轮想不到的角度，第二轮自评也想不到 —— "你不知道自己不知道"
 
 **缓解办法**（按成本递增）：
 
 | 办法 | 成本 | 效果 |
 |---|---|---|
-| **换 prompt persona**（"扮演严苛挑刺的 reviewer"） | 0 | 弱缓解，仍易陷入自我欣赏 |
-| **给明确评分标准（rubric）** | 写一份 prompt | 中（约束打分维度，减少漫无目的） |
-| **CoVe 风格分解**（先列验证问题，再答） | +1 LLM call | 中（强迫触发盲点） |
-| **CRITIC 风格工具核验** | +1 工具 call（grep / search / 计算） | 强（事实有 ground truth） |
-| **换更强模型当 judge** | +API 费 | 强（GPT-4 评 GPT-3.5 比同级互评稳） |
-| **独立 critic agent** | +整条 prompt + 上下文 | 最强（角色 + 模型双隔离） |
+| **换 prompt 人设**（"扮演严苛挑刺的审查者"） | 0 | 弱缓解，仍易陷入自我欣赏 |
+| **给明确评分细则（rubric）** | 写一份 prompt | 中（约束打分维度，减少漫无目的） |
+| **CoVe 风格分解**（先列验证问题，再答） | +1 次 LLM 调用 | 中（强迫触发盲点） |
+| **CRITIC 风格工具核验** | +1 次工具调用（grep / search / 计算） | 强（事实有依据可对） |
+| **换更强模型当评审** | +API 费 | 强（GPT-4 评 GPT-3.5 比同级互评稳） |
+| **独立评审 agent** | +整条 prompt + 上下文 | 最强（角色 + 模型双隔离） |
 
-### 2. 单轮 vs 迭代 refine 的收敛性
+### 2. 单轮 vs 迭代修正的收敛性
 
 Self-Refine 论文展示"迭代越多越好"，但 Madaan 自己也承认：
 
@@ -373,56 +373,56 @@ Self-Refine 论文展示"迭代越多越好"，但 Madaan 自己也承认：
 
 | 任务类型 | 推荐迭代次数 | 备注 |
 |---|---|---|
-| 客观可验证（quiz 对错 / 代码执行 / 数学计算） | 1-3 轮，**直到通过 / 触顶** | 适合有明确 pass condition |
+| 客观可验证（测验对错 / 代码执行 / 数学计算） | 1-3 轮，**直到通过 / 触顶** | 适合有明确通过条件 |
 | 半客观（plan 步骤合理性 / RAG 召回相关性） | **1 轮即停** | 第 2 轮往往只是换个说法没本质改进 |
 | 主观（写作 / 风格） | **0 轮（不上 harness）** | 振荡 + 退化风险大于收益 |
 
 ### 3. 生产路径 vs 评估路径（最容易混淆）
 
-业界 "self-critique" / "judge" 既出现在**生产**也出现在**评估**，机制相同但**目标和约束完全不同**：
+业界"自评 / 评判"既出现在**生产**也出现在**评估**，机制相同但**目标和约束完全不同**：
 
-| 维度 | 生产路径 critic | 评估路径 judge |
+| 维度 | 生产路径评审 | 评估路径评审 |
 |---|---|---|
-| 触发频率 | **每次 user query** | CI / phase 出口 / dataset 跑批 |
-| 谁触发 | LLM 自主 / agent 框架硬编码 | 工程师手动 / pipeline |
-| 延迟约束 | **强**（用户在等） → 最多 +1 call | **无**（离线跑） |
-| 模型选择 | 用主对话同款（省钱省延迟） | 可上**更强**模型当 judge |
+| 触发频率 | **每次用户提问** | CI / phase 出口 / 数据集跑批 |
+| 谁触发 | LLM 自主 / agent 框架硬编码 | 工程师手动 / 流水线 |
+| 延迟约束 | **强**（用户在等）→ 最多多打 1 次调用 | **无**（离线跑） |
+| 模型选择 | 用主对话同款（省钱省延迟） | 可上**更强**模型当评审 |
 | 用途 | 修自己产出 → 给用户更好答案 | 给"答案好坏"打分数 → 回归 / 选模型 / 调 prompt |
-| 失败兜底 | critic 自己挂掉**不能阻塞**主流程 | critic 挂掉直接报告该 case fail |
+| 失败兜底 | 评审自己挂掉**不能阻塞**主流程 | 评审挂掉直接报告该用例 fail |
 
-**本项目现状**：[`tools/agent_eval/judge/llm_judge.py`](../tools/agent_eval/judge/__init__.py) 是**评估路径** judge（已用于 Phase 2.1 plan / Phase 2.2 学习计划 eval）；Phase 2.5 要做的是**生产路径** critic（首次引入）。两者 prompt 思路相通但接入点完全不同 —— 生产路径要嵌进 `Agent.run()` 主 loop / tool 调用通道，评估路径只在脚本里跑。
+**本项目现状**：[`tools/agent_eval/judge/llm_judge.py`](../tools/agent_eval/judge/__init__.py) 是**评估路径**评审（已用于 Phase 2.1 plan / Phase 2.2 学习计划 eval）；Phase 2.5 要做的是**生产路径**评审（首次引入）。两者 prompt 思路相通但接入点完全不同 —— 生产路径要嵌进 `Agent.run()` 主循环 / 工具调用通道，评估路径只在脚本里跑。
 
-### 4. Trajectory 级 vs 输出级评估
+### 4. 执行轨迹级 vs 输出级评估
 
 | 评估颗粒度 | 看什么 | 适用场景 | 难点 |
 |---|---|---|---|
-| **输出级（output-only）** | 最终答案 | quiz 答案对不对 / 文章好不好 | 看不到"过程哪一步出错"，只能整体推翻 |
-| **Trajectory 级** | 完整事件流（每次 LLM 调用 / tool call / 中间结论） | plan-execute 哪步走偏 / RAG 召回哪条不相关 | 上下文长，judge prompt 要 careful；需要"录制"基础设施 |
-| **步骤级（step-level / PRM）** | 每一步打分 | 数学推理 / 代码生成 | 需要标注训练 reward model，工程量大 |
+| **输出级**（output-only） | 最终答案 | 测验答案对不对 / 文章好不好 | 看不到"过程哪一步出错"，只能整体推翻 |
+| **执行轨迹级** | 完整事件流（每次 LLM 调用 / 工具调用 / 中间结论） | plan-execute 哪步走偏 / RAG 召回哪条不相关 | 上下文长，评审 prompt 要写得严谨；需要"录制"基础设施 |
+| **步骤级**（step-level / PRM） | 每一步打分 | 数学推理 / 代码生成 | 需要标注训练奖励模型，工程量大 |
 
-本项目 iter_2_agent.md §4.8.2 已规划 `trajectory` framework 给 plan-execute / harness 共享 —— Phase 2.5 大概率会用 trajectory 级评估"plan 执行回顾"这个场景。
+本项目 iter_2_agent.md §4.8.2 已规划 `trajectory` 框架（执行轨迹录制 / 离线回放）给 plan-execute / harness 共享 —— Phase 2.5 大概率会用执行轨迹级评估"plan 执行回顾"这个场景。
 
 ---
 
 ## 四、典型应用场景的颗粒度选择
 
-把 §三 的 trade-off 套到几个常见落地场景，看哪种 pattern 适配（**纯原理对照，不掺项目实现细节**）：
+把 §三 的取舍套到几个常见落地场景，看哪种模式适配（**纯原理对照，不掺项目实现细节**）：
 
-| 场景 | 评什么 | 推荐 pattern | 为什么 |
+| 场景 | 评什么 | 推荐模式 | 为什么 |
 |---|---|---|---|
-| **客观对错型**（quiz 简答题用户答案是否正确） | 输出级 | **LLM-as-Judge + rubric**（同模型即可，主对话延迟可接受） | 有 ground truth（标准答案）做锚，自我欣赏偏差小 |
-| **plan / 多步任务质量** | trajectory 级（含 plan 文本 + 每步执行结果） | **Reflexion 风格**：跑完后写反思总结 → 下次同类任务时塞进 prompt | 只看最终答案丢失"哪步走偏"信号；trajectory 才能定位 |
-| **RAG 召回质量** | 输出级（召回的 chunks vs 用户 query） | **CoVe / 验证子问题** 或 **轻量 LLM-as-Judge** | "这条 chunk 跟 query 相关吗" 是封闭判断，1 轮就够 |
-| **agent 答案 hallucination 检测** | 输出级 + 工具核验 | **CRITIC 风格** 调 RAG / web_search 验证关键事实 | 自己跟自己核对没用，必须接 ground truth 工具 |
+| **客观对错型**（测验简答题用户答案是否正确） | 输出级 | **LLM-as-Judge + 评分细则**（同模型即可，主对话延迟可接受） | 有事实依据（标准答案）做锚，自我欣赏偏差小 |
+| **plan / 多步任务质量** | 执行轨迹级（含 plan 文本 + 每步执行结果） | **Reflexion 风格**：跑完后写反思总结 → 下次同类任务时塞进 prompt | 只看最终答案丢失"哪步走偏"信号；执行轨迹才能定位 |
+| **RAG 召回质量** | 输出级（召回的片段 vs 用户提问） | **CoVe / 验证子问题** 或 **轻量 LLM-as-Judge** | "这条片段跟提问相关吗"是封闭判断，1 轮就够 |
+| **agent 答案幻觉检测** | 输出级 + 工具核验 | **CRITIC 风格** 调 RAG / web_search 验证关键事实 | 自己跟自己核对没用，必须接事实依据工具 |
 | **创意 / 写作类** | — | **不上 harness** | 主观任务迭代易退化，留给用户判断 |
 
 ### 失败模式 / 风险清单（落地前必看）
 
-1. **Cost 翻倍**：每次 user query 多打 1 次 LLM = token / 延迟 / API 费 ×2 起步；迭代 N 轮 ×N
-2. **Loop 不收敛 / 振荡**：refine 后 critic 评分反而下降 → 需要"评分降了就回退到上一版"的兜底
-3. **Critic 比 actor 还差**：同模型自评时弱模型给弱判断 → 噪声 > 信号；需要 calibration（用 golden set 验证 critic 准确率）
-4. **过度自信**：critic 总打高分，永远不触发 refine → 需要刻意写 prompt 鼓励挑刺，或用阈值（"评分 ≥ 4 才放行"而非"评分非 5 就重做"）
-5. **Critic 挂掉阻塞主流程**：必须 graceful fallback —— critic 调用失败时直接放过原始输出，**绝不让 review 路径成为单点故障**
+1. **成本翻倍**：每次用户提问多打 1 次 LLM 调用 = token / 延迟 / API 费 ×2 起步；迭代 N 轮 ×N
+2. **循环不收敛 / 振荡**：修正后评审打分反而下降 → 需要"打分降了就回退到上一版"的兜底
+3. **评审比执行者还差**：同模型自评时弱模型给弱判断 → 噪声 > 信号；需要校准（用 golden set 验证评审准确率）
+4. **过度自信**：评审总打高分，永远不触发修正 → 需要刻意写 prompt 鼓励挑刺，或用阈值（"评分 ≥ 4 才放行"而非"评分非 5 就重做"）
+5. **评审挂掉阻塞主流程**：必须优雅降级（graceful fallback）—— 评审调用失败时直接放过原始输出，**绝不让评审路径成为单点故障**
 
 ---
 

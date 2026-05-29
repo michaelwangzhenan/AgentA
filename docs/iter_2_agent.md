@@ -2109,7 +2109,7 @@ UT 锁公式：对照 Anki 默认调度行为表 ≥ 20 case（初次 / 第二�
 
 **Punt 项**（同步登记入 §4.13）：本 step 无新增 punt 项；既有 [§4.13.1 #21-#25](#4131-deferred-backlog暂时不做) + [§4.13.2 #29 #33](#4132-dropped永久不做) 已覆盖。
 
-#### Step 3 · 编码落地
+**Step 3 · 编码落地**
 
 按 Step 2 的 9 实施步骤顺序完成，全程 `TodoWrite` 跟踪、每改完一个模块跑相关 UT + `ReadLints` 0 错。落地路径与最终行数（与 Step 2 估算对比）：
 
@@ -2132,7 +2132,7 @@ UT 锁公式：对照 Anki 默认调度行为表 ≥ 20 case（初次 / 第二�
 - Step 5 srs-review SKILL.md "一次只问一张卡"约束写得非常明确（含反模式段），确保 LLM 不会一次性把全部 due 卡 front+back 都展示出来（破坏复习语义）。
 - Step 6 CLI 故意不实现 `/srs review` 子命令 —— review 是高语义交互（一次一张卡 + 4 档评分 + 揭晓答案），更适合走对话路径让 LLM 编排，CLI 命令组只做"只读 + 删除"管理面板。
 
-#### Step 4 · UT 全套
+**Step 4 · UT 全套**
 
 | 测试文件 | case 数 | 覆盖维度 |
 |---|---|---|
@@ -2144,7 +2144,7 @@ UT 锁公式：对照 Anki 默认调度行为表 ≥ 20 case（初次 / 第二�
 
 **实际数字**：净增 **126 个 UT case**（39 + 40 + 28 + 19 + 0 store 校验 + 仓库 skill +2，合并入 test_skill_loader）；全量回归 `pytest -q` = **824 passed / 3 skipped / 0 failed** in 63s（Phase 2.3 基线 698 → Phase 2.4 824，净增 126，0 业务退化）。
 
-#### Step 5 · 评估闭环
+**Step 5 · 评估闭环**
 
 | 评估器 | dataset | 阈值 | 实际通过率 |
 |---|---|---|---|
@@ -2164,7 +2164,7 @@ UT 锁公式：对照 Anki 默认调度行为表 ≥ 20 case（初次 / 第二�
 
 **为什么 SRS 评估只有单一指标（触发识别率）而非双阈值**（D6 决策落地）：SM-2 算法对齐由 UT 锁公式覆盖（40 case 含 Anki 序关系强约束），LLM 不参与算法计算（rating → tool 调用 → srs_scheduler 纯函数）；review path 评测无 LLM-judge 价值（公式确定性），所以 evaluator 只测一件事：LLM 看到用户请求后**第一轮是否调对 tool**。
 
-#### Step 6 · 文档同步
+**Step 6 · 文档同步**
 
 `docs/design.md`：
 
@@ -2186,6 +2186,156 @@ UT 锁公式：对照 Anki 默认调度行为表 ≥ 20 case（初次 / 第二�
 - §4.9.9 Step 3-6 落地段（即本节）
 - §4.13.1 Deferred Backlog #21-25（Chainlit SRS UI / FSRS 算法 / learning_task SRS 源 / SRS 导出 / LLM-judge for SRS review）已在 Step 2 期间登记
 - §4.13.2 Dropped Features #33（多用户 SRS / 多设备同步）已在 Step 2 期间登记
+
+
+### 4.9.10 Harness 自检 (phase 2.5)
+
+**功能描述**：在两条最常走的产出路径上各加一道 AI 自检关 —— 测验批改完后追加一次 LLM 复核（避免简答题主观打分误判），RAG 召回后追加一次 LLM 相关性筛查（过滤掉跟提问无关的片段）。两条路径各自最多多打 1 次 LLM 调用、不达标静默降级返原始结果，不让自检本身成为单点故障。
+
+> Phase 2 学习/研究助理（[§4.7.1 项目定位](#471-项目定位)）的最后一个 feature，性质上是"通用能力"而非业务 feature 。区别于 [§4.7.3 Phase 2.5](#473-实施顺序) 早期判据"测验答案自评 + Plan 执行后回顾 + RAG 召回判定"三个场景全做，本期 carve out 为 **Q1（测验自评）+ R1（RAG 召回自判）** 两个 narrow 场景，不引入 trajectory 录制框架；P1（Plan 执行后 retrospective）/ Q2（SRS review LLM 反馈）/ A1（通用答案 hallucination 检测）punt 入 [§4.13.1 #26](#4131-deferred-backlog暂时不做) / [§4.13.1 #25](#4131-deferred-backlog暂时不做) / [§4.13.2 #34](#4132-dropped永久不做)。区别于 [§4.6.2 G3 Reflexion 论文风格](#462-合并后的所有可能-feature-列表)（"失败积累进长期记忆 + 跨次复用"），本期是 **single-shot 输出级生产路径 critic**（1 轮即停 + 不写长期记忆），跟 Reflexion 思想一脉相承但 scope 收窄。
+
+**Step 0 · 需求规格**
+
+| 字段 | 内容 |
+|---|---|
+| **用户故事** | 我做完一组测验，希望 agent 在把批改结果给我前**自查一遍批改是否合理**（特别是简答题这种主观打分），减少"明明答对了被判错"或"评分理由站不住脚"的体验；我用 agent 查知识库时，希望召回的资料能**先过滤掉无关片段**再喂给后续推理，减少"答非所问"或"引用了无关来源"。两条路径都不应该明显加大延迟（每次最多多 1 次 LLM 调用），且自检本身挂掉时不能阻塞主流程，要悄悄降级用原始结果。 |
+| **验收标准** | ① **Q1 测验自评跑通**：grade_quiz 后默认追加 1 次 LLM 自检，对每道简答 / 多选题打"批改合理性"分（4 维度 rubric：答案匹配度 / 评分理由合理性 / 部分给分公平性 / 反馈措辞）→ 平均分 < 阈值（默认 3.5/5）时在 quiz_questions 元数据 mark `harness_flagged=true` + grade_quiz 返回追加 `harness_warning` 字段；CLI `/quiz show <id>` 看到该题前出现 ⚠️ 标记<br>② **R1 RAG 召回自判跑通**：rag_search 召回 top-K 片段后默认追加 1 次 LLM 自检，对每条片段二分类（relevant / not_relevant）→ 过滤 not_relevant 后剩余片段喂给后续推理；过滤后剩 0 条时正常返 0 条（不重新召回，由后续 LLM 自然回答"未找到相关资料"）<br>③ **独立开关可观察**：`HARNESS_QUIZ_ENABLED=false` 时 grade_quiz 链路零额外 LLM 调用、无 `harness_*` 字段；`HARNESS_RAG_ENABLED=false` 时 rag_search 返回原始召回 K 条；profiler 验证开关效果<br>④ **失败兜底**：critic 调用失败（API 异常 / JSON 解析失败 / 超时 `HARNESS_LLM_TIMEOUT_SEC` 默认 15s）→ **静默降级**返原始结果 + log warning（不抛异常 / 不重试 / 不阻塞主流程 / 用户感知不到自检挂了）<br>⑤ **critic 评估指标过线**：`tools/agent_eval/harness/` golden 集（Q1 + R1 各 5-8 case，含正负样本）跑批，critic 自身判定准确率 ≥ 80%（人工标注 ground truth 对照）— 评的是 critic 本身好不好，不是主路径产出好不好 |
+| **Scope** | **本期做**：<br>① 新建 `src/agent/core/harness_gate.py`：基于 [`judge_with_llm`](../tools/agent_eval/judge/llm_judge.py) 包一层生产路径 wrapper（`HarnessGate` 类或 `gate_with_llm` 函数式 helper）—— 加超时控制 + graceful fallback + source 字段日志<br>② 改 [`tools.py:_tool_grade_quiz`](../src/agent/tools.py)：批改完后调 `harness_gate.review_grading(quiz_set_id)` → 不达标时设 `quiz_questions.harness_flagged=true` + 返回追加 `harness_warning` 字段<br>③ 改 RAG 召回链路（`src/rag/retriever.py` 或 `tools.py:_tool_rag_search`，待 Step 1 review 确认位置）：召回完后调 `harness_gate.filter_chunks(query, chunks)` → 过滤 not_relevant 片段<br>④ 4 个 config 三段同步：`HARNESS_QUIZ_ENABLED`（默认 true）/ `HARNESS_RAG_ENABLED`（默认 true）/ `HARNESS_LLM_TIMEOUT_SEC`（默认 15）/ `HARNESS_GRADING_THRESHOLD`（默认 3.5）<br>⑤ `quiz_questions` 表 ALTER TABLE 加 `harness_flagged INTEGER DEFAULT 0`（schema auto-migrate 模式，沿用 [`UserMemoryStore`](../src/memory/user_memory.py) 套路）<br>⑥ CLI `/quiz show <id>` 渲染对 `harness_flagged` 题加 ⚠️ 标记<br>⑦ critic prompt 走文件：[`tools/agent_eval/harness/quiz_critic.txt`](../tools/agent_eval/harness/quiz_critic.txt) + [`rag_critic.txt`](../tools/agent_eval/harness/rag_critic.txt)（[§4.8.2 硬约束 3](#482-评估工具列表)）<br>⑧ Phase 2.5 评估器：[`tools/agent_eval/harness/eval_harness.py`](../tools/agent_eval/harness/eval_harness.py) + `dataset.json` 10-16 case，复用 `judge_with_llm` 评 critic 本身准确率（**第 5 次复用**，巩固 [§4.9.6 D4 / §4.9.7 D6](#496-agent-循环升级-phase-21) "第 2 次复用时上 framework"）<br>**暂时不做**：详 [§4.13.1 #25 #26 #27 #28](#4131-deferred-backlog暂时不做)<br>**显式不做**：详 [§4.13.2 #34 #35](#4132-dropped永久不做) |
+| **依赖** | [`judge_with_llm`](../tools/agent_eval/judge/llm_judge.py) helper（评估路径已用 4 次，本期生产路径 wrapper 是第 5 次复用 — 两路径共享 prompt 模板 + JSON 解析逻辑，加 timeout/fallback 解耦延迟）/ [§4.9.8 Phase 2.3](#498-quiz-出题-phase-23) `_tool_grade_quiz` + `QuizStore`（Q1 改 grade_quiz 末尾追加自检；ALTER TABLE 加 `harness_flagged`）/ 现有 RAG 链路 [`src/rag/retriever.py`](../src/rag/retriever.py) 或 [`tools.py:_tool_rag_search`](../src/agent/tools.py)（R1 改召回末尾追加过滤；具体位置待 Step 1 确认）/ Phase 2.4 SRS **不依赖**（Q2 carve out）/ [§4.9.5 skill 框架](#495-skills-框架强化-phase-15) **不依赖**（D7 决策：critic 是底层质量门，硬编码进生产路径，不走 skill 自决） |
+
+**关键决策摘要**（D1-D8，完整推导留 [Step 2](#step-2--实施计划-5)）：
+
+| # | 决策点 | 选用 | 一句话理由 |
+|---|---|---|---|
+| **D1** | scope 范围 | **Q1 测验自评 + R1 RAG 召回自判**两个 P0；P1（Plan retrospective）/ Q2（SRS LLM 反馈）/ A1（通用 hallucination）全 punt | MVP narrow + 不引入 trajectory 录制框架；P1 留 Reflexion 长期记忆任务一并做（[§4.13.1 #26](#4131-deferred-backlog暂时不做)） |
+| **D2** | 触发模式 | **Q1 / R1 各自默认开**，用户可在 .env 独立关闭某路径调试 | RAG 召回判定 cost 低收益高；测验主观打分必判；用户调试时能各自 carve out |
+| **D3** | critic 实现路径 | **复用 `judge_with_llm` + 加生产路径 wrapper** `HarnessGate` | 第 5 次复用，巩固 [§4.9.7 D6](#497-学习计划生成-phase-22) 抽象；wrapper 加 timeout + fallback 解耦评估路径 / 生产路径的延迟约束差异 |
+| **D4** | 迭代轮数 | **1 轮即停**，不达标静默降级返原始结果 | [`docs/knowlege.md §6 §三第 2 项`](knowlege.md) "半客观任务 1 轮即停"约定；多轮 refine 振荡风险大于收益；保 cost ×2 上限 |
+| **D5** | Q1 自评不达标的输出影响 | **元数据 mark `harness_flagged` + 返回追加 `harness_warning` 字段**；CLI `/quiz show` 加 ⚠️；不修改原批改结果 / 不让 LLM 重判 | 跟 D4 "1 轮即停"一致；让用户在看到批改时知道"agent 不太确定"，但不替用户做二次决定（保持用户主权） |
+| **D6** | R1 召回自判的输出影响 | **过滤 not_relevant 给后续，过滤后 0 条 → 正常返 0 条**（不重新召回） | 重召回 = 多 1+ 次工具调用，cost 翻倍且可能再召不到；返 0 条让后续 LLM 说"未找到相关资料"是更诚实的 UX |
+| **D7** | critic 是否走 skill 承载 | **不走 skill**，硬编码进 grade_quiz / rag_search 主流程 wrapper | critic 是底层"质量门"不是用户感知业务（区别于 quiz / SRS / 学习计划这些走 skill 的业务）；硬编码确保触发率 100% 不被 LLM 自决干扰 |
+| **D8** | critic prompt 形态 | **走文件**：[`tools/agent_eval/harness/quiz_critic.txt`](../tools/agent_eval/harness/quiz_critic.txt) + [`rag_critic.txt`](../tools/agent_eval/harness/rag_critic.txt) | [§4.8.2 硬约束 3](#482-评估工具列表) "Judge prompt 走文件不硬编码 Python"；评估 / 生产共享同一份 prompt 文件 |
+
+**Punt 项**（同步登记入 §4.13）：[§4.13.1 #25](#4131-deferred-backlog暂时不做) 已有（SRS review 接 LLM-judge — 当时推迟原因维持，本期 Q2 评估为继续 punt）；[§4.13.1 #26 #27 #28](#4131-deferred-backlog暂时不做)（P1 Plan retrospective / Q1 多轮 refine / critic 评分历史持久化）+ [§4.13.2 #34 #35](#4132-dropped永久不做)（A1 通用 hallucination 检测 / 独立 critic agent 多模型流水线）本期新登记。[§4.13.1 #10](#4131-deferred-backlog暂时不做) plan 执行前用户审批 + [§4.13.1 #15](#4131-deferred-backlog暂时不做) CLI `/quiz` 交互答题模式：原标"Phase 2.5 Harness 或..."，本期判定不属于 harness scope（前者是 permission mode、后者是 CLI UX），更新计划阶段去掉 Phase 2.5 引用。[§4.13.1 #17](#4131-deferred-backlog暂时不做) 测验 Harness 自检：本期 Q1 落地，**Step 3-6 实施完后从 §4.13.1 删除**（[§4.13](#413-backlog集中-punt-入口) 强制要求 3）。
+
+**Step 1 · Review 现状**
+
+> Gap 编号 `P25-G*` 是 Phase 2.5 局部命名，避免跟 [§4.6.2 G1-G9](#462-合并后的所有可能-feature-列表) / 各 phase 的 P21-G* / P22-G* / P23-G* / P24-G* 重名。
+
+| # | Gap | 现状 | 影响（对应 Step 0 验收 / Scope） |
+|---|---|---|---|
+| **P25-G1** | `judge_with_llm` 仅用于评估路径，无生产路径 wrapper | [`tools/agent_eval/judge/llm_judge.py`](../tools/agent_eval/judge/__init__.py) 已稳定（80 行 + `JudgeResult(score, reason, raw)` + 容错解析剥 markdown / 校验 score 区间 / 任何失败 score=None 不抛异常），评估路径已用 **4 次**（plan / plan_business / quiz / srs 中前 3 个；srs evaluator 按 D6 不调 judge）；**无 timeout 控制**（`chat()` 默认无超时 — 生产路径风险）；**无生产路径 wrapper** | D3 验收 ④ ⑤；Scope ① 全部待新建 |
+| **P25-G2** | `src/agent/core/harness_gate.py` 不存在 | [`src/agent/core/`](../src/agent/core/) 已有 `plan_manager.py` / `tool_call_engine.py` / `event_bus.py` / `srs_scheduler.py` / `memory_manager.py` 等；目录后缀约定 `*_manager.py` / `*_engine.py` / `*_policy.py`（[agenta-conventions §2](../.cursor/rules/agenta-conventions.mdc)）— 命名 `harness_gate.py` 偏离主流后缀，Step 2 待复核（候选 `harness_policy.py` / `harness_manager.py`）| Scope ① 命名待 Step 2 拍板 |
+| **P25-G3** | `_tool_grade_quiz` 末尾无 critic 钩子 | [`tools.py:1390-1474`](../src/agent/tools.py) `_tool_grade_quiz` 现流程：入参校验 → 拉 quiz + questions → 逐题 `_grade_one_mcq` 或 `_grade_one_short_answer` → `store.update_grading(quiz_set_id, gradings, total_score)` → 拼 head + body + tail 返回；`store.update_grading` 之后 / return 之前是 Q1 critic 自然接入点 | Scope ② 验收 ① |
+| **P25-G4** | RAG 召回链路无 critic 过滤 | [`_tool_search_knowledge`](../src/agent/tools.py)（tools.py:504-571）现流程：`expand_queries(query)` → `search(query, top_k, where, queries=expanded)`（→ `src/rag/retriever.py:search()` 多 collection dense+BM25+RRF+rerank+dedupe）→ `format_search_results(hits, citation_nums)` 返回字符串；R1 接入点是 **`format_search_results` 之前**（拿到 `hits: list[Hit]` 的位置）— 不是 `retriever.search()` 内部（避免影响 `tools/rag_eval/` 等其它调用路径） | Scope ③ 验收 ② — 接入点已确认 |
+| **P25-G5** | `quiz_questions` 表无 `harness_flagged` 列 | [`quiz_store.py:106-118`](../src/memory/quiz_store.py) schema 现 11 列：`id / quiz_set_id / order_idx / q_type / stem / options / correct_answer / explanation / user_answer / score / feedback`；`store.update_grading` 写入 `user_answer / score / feedback` 三列；新加 `harness_flagged` 需要 1 列 + UPDATE 语句扩列 | Scope ⑤ 验收 ① |
+| **P25-G6** | quiz_store 无 schema 迁移机制（与 [`UserMemoryStore`](../src/memory/user_memory.py) 套路不一致）| [`quiz_store.py:86-122`](../src/memory/quiz_store.py) `_create_tables` 仅 `CREATE TABLE IF NOT EXISTS`，**无 PRAGMA 自检 / 无 ALTER TABLE / 无 fail-fast**；[`user_memory.py:263-292`](../src/memory/user_memory.py) `UserMemoryStore` 用 **fail-fast 模式**（PRAGMA 自检缺列 → raise RuntimeError 提示用户删库重建，**不是 auto-migrate**）—— Step 0 Scope ⑤ 写的"沿用 `UserMemoryStore` 套路"是 ALTER TABLE auto-migrate，与 user_memory 实际 fail-fast 不一致；Step 2 须拍板用 fail-fast（删 quiz.db 重建）还是 ALTER TABLE auto-migrate | **D10 浮现**：Step 2 决策点 |
+| **P25-G7** | CLI `/quiz show` 渲染无 `harness_flagged` ⚠️ 标记 | [`handlers.py:_print_quiz_detail`](../src/cli/handlers.py)（793-828）按 `q_type / stem / options / 标答 / user_answer / score+feedback / explanation` 顺序渲染；question dict 来自 `_row_to_question`（[`quiz_store.py:147-166`](../src/memory/quiz_store.py)）— 加 ⚠️ 标记需 `_row_to_question` + `_print_quiz_detail` 各加 1 个字段 | Scope ⑥ 验收 ① |
+| **P25-G8** | `tools/agent_eval/harness/` 不存在（dataset / evaluator / critic prompt 文件全无）| [`tools/agent_eval/srs/`](../tools/agent_eval/srs/) 是模板（`__init__.py` + `dataset.json` 12 case + `eval_srs.py` ~317 行 — `_EVAL_SYSTEM_PROMPT` + `_RECALL_PASS_RATE` + `_extract_first_tool_call` + `_render_markdown`）；`judge_with_llm` 评估场景已用 4 次，第 5 次（生产路径 wrapper 抽出）会让评估器内部也复用同一 wrapper（共享 prompt 模板文件） | Scope ⑦ ⑧ 验收 ⑤ |
+| **P25-G9** | config 三段同步缺 4 项 `HARNESS_*` | [`src/config.py:332-340`](../src/config.py) 既有 `SRS_*` 4 项模板；[`.env.example:271-280`](../.env.example) 同步；[`agenta-conventions §5.1`](../.cursor/rules/agenta-conventions.mdc) 强约束三段必须同步缺一不可 | 验收 ③ 配置层 |
+| **P25-G10** | `_grade_one_short_answer` 自实现 inline LLM-judge，未走 `judge_with_llm` helper | [`tools.py:1244-1283`](../src/agent/tools.py) 简答批改是**自实现的 LLM-judge**：`_SHORT_ANSWER_JUDGE_SYS` 30 行 system prompt + `chat()` + 容错 JSON 解析 + 软返回 — 结构与 `judge_with_llm` 几乎重复但参数 schema 不同（0-1 分 + feedback vs 0-5 分 + reason）；意味着 Q1 自检对简答题路径是"**LLM-judge 复审 LLM-judge**"（二阶嵌套）| **D9 浮现**：Step 2 决策点 — 是否顺手把 `_grade_one_short_answer` 也迁到 `judge_with_llm` 消重复？ |
+
+**复用资源**（不动）：
+
+- [`judge_with_llm`](../tools/agent_eval/judge/llm_judge.py) 80 行函数式 helper —— 生产路径 wrapper 直接 `from tools.agent_eval.judge import judge_with_llm` import 复用；prompt 模板 / JSON 解析 / score 区间校验 / 软返回逻辑全部沿用
+- [`UserMemoryStore`](../src/memory/user_memory.py) PRAGMA 自检 + fail-fast 模式（如 D10 选 fail-fast 路径，则全量套用）
+- [`SRSStore`](../src/memory/srs_store.py) `_create_tables` + 进程级单例 / `with self._conn:` 事务（如 D10 选 ALTER TABLE 路径，作为参考）
+- [`tools/agent_eval/srs/`](../tools/agent_eval/srs/) evaluator 套路（dataset.json + `_EVAL_SYSTEM_PROMPT` + `_extract_first_tool_call` + Markdown 报告）→ `eval_harness.py` 仿写
+- [`_tool_search_knowledge`](../src/agent/tools.py) 504-571 主流程不动，只在末尾 `format_search_results` 之前插入 `harness_gate.filter_chunks(query, hits)`
+- [`_tool_grade_quiz`](../src/agent/tools.py) 1390-1474 主流程不动，只在 `update_grading` 之后 / return 之前插入 `harness_gate.review_grading(quiz_set_id)`
+
+**Step 1 浮现的设计调整**（在 [Step 2](#step-2--实施计划-6) 已拍板的局部决策）：
+
+| # | 浮现点 | 选用 | 一句话理由 |
+|---|---|---|---|
+| **D9** | `_grade_one_short_answer` 是否顺手迁到 `judge_with_llm` helper（[P25-G10](#4910-harness-自检-phase-25)） | **B 不动** | 最小变更避免 scope 蔓延；critic 复审 LLM-judge 二阶嵌套本期不阻塞，留独立 refactor task |
+| **D10** | `quiz_questions` 加 `harness_flagged` 列的迁移路径（[P25-G6](#4910-harness-自检-phase-25)） | **B fail-fast** | PRAGMA 自检缺列 → `raise RuntimeError("schema 已过期，请删 sqlite_db/quiz.db 后重启")`；跟 [`UserMemoryStore`](../src/memory/user_memory.py) 套路对齐；MVP 单用户场景丢库重建可接受，[工程公约 §6](../.cursor/rules/agenta-conventions.mdc) 简洁 > 兼容 |
+| **D11** | harness manager 文件命名（[P25-G2](#4910-harness-自检-phase-25)） | **`harness_manager.py`** | 跟 [`memory_manager.py`](../src/agent/core/memory_manager.py) / [`plan_manager.py`](../src/agent/core/plan_manager.py) 同后缀，最贴 [agenta-conventions §2](../.cursor/rules/agenta-conventions.mdc) `*_manager.py` 主流约定；类名 `HarnessManager` |
+
+其它路径清晰，无结构性阻碍 — 全部 gap 都是"加字段 / 加文件 / 加 wrapper"性质，不需要重构既有模块。
+
+**Step 2 · 实施计划**
+
+最终决策表（D1-D11，含 [Step 0](#step-0--需求规格-1) 的 D1-D8 + [Step 1](#step-1--review-现状-1) 浮现的 D9-D11；用户已 batch 拍板）：
+
+| # | 决策 | 选用 | 一句话理由 |
+|---|---|---|---|
+| **D1** | scope 范围 | Q1 + R1 两个 P0；P1 / Q2 / A1 全 punt | MVP narrow + 不引入 trajectory 录制框架 |
+| **D2** | 触发模式 | Q1 / R1 各自默认开，`HARNESS_QUIZ_ENABLED` / `HARNESS_RAG_ENABLED` 独立开关 | RAG 召回判定 cost 低收益高；测验主观打分必判 |
+| **D3** | critic 实现路径 | 复用 `judge_with_llm` + 加生产路径 wrapper（`HarnessManager`） | 第 5 次复用，巩固 [§4.9.7 D6](#497-学习计划生成-phase-22) 抽象 |
+| **D4** | 迭代轮数 | 1 轮即停，不达标静默降级 | [`docs/knowlege.md §6 §三第 2 项`](knowlege.md) 半客观任务约定 |
+| **D5** | Q1 自评不达标的输出影响 | 元数据 mark `harness_flagged` + grade_quiz 返回 `harness_warning` 字段；CLI `/quiz show` 加 ⚠️ | 保持用户主权：让用户知道但不替用户做二次决定 |
+| **D6** | R1 召回自判输出影响 | 过滤 not_relevant 给后续，过滤后 0 条 → 返 0 条不重召回 | 重召回 cost 翻倍且可能再召不到；返 0 条让 LLM 说"未找到相关资料"是更诚实的 UX |
+| **D7** | critic 是否走 skill 承载 | 不走 skill，硬编码进 grade_quiz / search_knowledge 主流程 | critic 是底层质量门，硬编码确保触发率 100% |
+| **D8** | critic prompt 形态 | 走文件 [`tools/agent_eval/harness/quiz_critic.txt`](../tools/agent_eval/harness/quiz_critic.txt) + [`rag_critic.txt`](../tools/agent_eval/harness/rag_critic.txt) | [§4.8.2 硬约束 3](#482-评估工具列表)；评估 / 生产共享同一份 prompt 文件 |
+| **D9** | `_grade_one_short_answer` 迁 helper | 不迁，最小变更 | scope 蔓延风险；二阶嵌套本期不阻塞 |
+| **D10** | `quiz_questions` schema 迁移 | fail-fast：PRAGMA 自检缺列 raise RuntimeError 提示删库 | 跟 [`UserMemoryStore`](../src/memory/user_memory.py) 套路对齐；简洁 > 兼容 |
+| **D11** | harness manager 命名 | `src/agent/core/harness_manager.py` + 类名 `HarnessManager` | 贴 [`*_manager.py`](../.cursor/rules/agenta-conventions.mdc) 主流后缀 |
+
+实施步骤（按依赖排序，**严格分 10 step**，每 step 出口判据明确）：
+
+| 序 | 实施内容 | 关联 Gap / D | 文件 | 估算行数 |
+|---|---|---|---|---|
+| 1 | config + `.env.example` + `.env` 三段同步：`HARNESS_QUIZ_ENABLED`（默认 true）/ `HARNESS_RAG_ENABLED`（默认 true）/ `HARNESS_LLM_TIMEOUT_SEC`（默认 15）/ `HARNESS_GRADING_THRESHOLD`（默认 3.5）| G9 + [§5.1 三段同步](../.cursor/rules/agenta-conventions.mdc) | [`src/config.py`](../src/config.py) + [`.env.example`](../.env.example) + `.env` | + ~15 行 |
+| 2 | `HarnessManager` 核心：基于 `judge_with_llm` 包生产路径 wrapper（`__init__(threshold, timeout)` + `review_grading(quiz_set_id, questions, gradings) -> dict[qid, HarnessVerdict]` + `filter_chunks(query, hits) -> list[Hit]`）；timeout 用 `concurrent.futures.ThreadPoolExecutor` 包 `judge_with_llm`；所有异常软返回 + log warning；`HarnessVerdict(passed, score, reason, raw)` frozen dataclass；critic prompt 文件加载（`_load_prompt(path)` 进程级缓存 + 文件不存在 fail-fast） | G1 + G2 + D3 + D4 + D11 | 新建 [`src/agent/core/harness_manager.py`](../src/agent/core/harness_manager.py) | + ~220 行 |
+| 3 | critic prompt 文件：`quiz_critic.txt`（4 维度 rubric：答案匹配度 / 评分理由合理性 / 部分给分公平性 / 反馈措辞，0-5 分）+ `rag_critic.txt`（二分类 relevant / not_relevant + 简短理由）| G8 + D8 | 新建 [`tools/agent_eval/harness/quiz_critic.txt`](../tools/agent_eval/harness/quiz_critic.txt) + [`tools/agent_eval/harness/rag_critic.txt`](../tools/agent_eval/harness/rag_critic.txt) | + ~80 行 |
+| 4 | `QuizStore` schema 升级：`_create_tables` 末尾加 PRAGMA 自检缺 `harness_flagged` 列 → fail-fast；`_row_to_question` 加 `harness_flagged` 字段；`update_grading` SQL 不动（先批改、后 mark）；新增 `mark_question_harness_flagged(qid: int)` 方法 | G5 + G6 + D10 | [`src/memory/quiz_store.py`](../src/memory/quiz_store.py) | + ~40 行 |
+| 5 | 改 `_tool_grade_quiz`：`store.update_grading` 之后 / return 之前调 `harness_manager.review_grading(quiz_set_id, questions, gradings)`；不达标时 `store.mark_question_harness_flagged(qid)` + 在返回 content 前追加 `harness_warning` 块（含被 flag 的题号 + critic 评分 + reason）；`HARNESS_QUIZ_ENABLED=false` 时跳过整段 | G3 + D2 + D5 | [`src/agent/tools.py`](../src/agent/tools.py) `_tool_grade_quiz` 末尾 | + ~50 行 |
+| 6 | 改 `_tool_search_knowledge`：`search()` 拿到 `hits` 之后 / `format_search_results()` 之前调 `harness_manager.filter_chunks(query, hits)` 过滤；过滤后 0 条 → 返 `ToolResult(status="empty", content="知识库中未找到与提问相关的资料。")`；`HARNESS_RAG_ENABLED=false` 时跳过整段；`citation_builder.register` 用过滤后 hits | G4 + D2 + D6 | [`src/agent/tools.py`](../src/agent/tools.py) `_tool_search_knowledge:560` | + ~25 行 |
+| 7 | CLI `/quiz show <id>` 渲染加 ⚠️：`_print_quiz_detail` 在第 N 题渲染前判 `q.get("harness_flagged")` → 输出 `⚠️ Agent 自检指出该题批改可能有偏差` 提示行 | G7 | [`src/cli/handlers.py`](../src/cli/handlers.py) `_print_quiz_detail` | + ~5 行 |
+| 8 | Phase 2.5 evaluator + golden set：仿 [`eval_srs.py`](../tools/agent_eval/srs/eval_srs.py) 套路 — `_EVAL_SYSTEM_PROMPT` 不需要（critic 直接评，不模拟 agent 决策）；`dataset.json` 10-16 case（quiz_critic 5-8 case：含正负样本如"批改正确" / "批改误判答错答对" / "评分理由不合理"等 + rag_critic 5-8 case：含"召回相关 chunk" / "召回明显无关 chunk" / "召回部分相关"）；`eval_harness.py`：load critic prompt 文件 → 喂 `judge_with_llm` → 跟 dataset `expected` 字段比对算准确率（**第 5 次复用**）+ Markdown 报告 + 阈值退出码（≥ 80%） | G8 + D8 + 验收 ⑤ | 新建 [`tools/agent_eval/harness/__init__.py`](../tools/agent_eval/harness/__init__.py) + [`tools/agent_eval/harness/dataset.json`](../tools/agent_eval/harness/dataset.json) + [`tools/agent_eval/harness/eval_harness.py`](../tools/agent_eval/harness/eval_harness.py) | + ~350 行 |
+| 9 | UT 全套：`HarnessManager`（review_grading / filter_chunks / timeout / graceful fallback / config 开关）+ `QuizStore` schema 升级（fail-fast / mark_question_harness_flagged）+ `_tool_grade_quiz` Q1 集成测 + `_tool_search_knowledge` R1 集成测（含开关关闭 + 过滤 0 条路径）+ CLI `/quiz show` ⚠️ 渲染 | 所有 G | 新建 [`tests/test_harness_manager.py`](../tests/test_harness_manager.py) ~25 case + 扩 [`tests/test_quiz_store.py`](../tests/test_quiz_store.py) +5 case + 扩 [`tests/test_quiz_tools.py`](../tests/test_quiz_tools.py) +6 case + 扩 [`tests/test_cli_handlers_quiz.py`](../tests/test_cli_handlers_quiz.py) +3 case | + ~500 行 |
+| 10 | 全量回归 + smoke 跑 evaluator（`--no-judge` smoke + `--case <id>`）+ ReadLints；design.md 同步：新增 §3.12 Harness 自检（5-6 子节，仿 §3.10 / §3.11 结构）+ §5 IMP 表加 `HarnessManager` 依赖行 + `tools.py` 行加 Phase 2.5 备注；iter_2.md Step 3-6 落地 | 所有 G | `pytest -q --ignore=...` 净增 ~40 case；[`docs/design.md`](design.md) + [`docs/iter_2_agent.md`](iter_2_agent.md) | + ~250 行 |
+
+**关键实现取舍**（Step 3 落地时再细化，本节只锁主路径）：
+
+- **timeout 实现**：用 `concurrent.futures.ThreadPoolExecutor(max_workers=1).submit(judge_with_llm, ...).result(timeout=HARNESS_LLM_TIMEOUT_SEC)`；超时抛 `TimeoutError` → catch 后软返回原始结果（呼应 D4）。**不**用 `signal.alarm`（Windows 不支持 + 只能主线程使）
+- **critic prompt 文件加载**：`HarnessManager.__init__` 时 `_load_prompt()` 一次性读两个 .txt 进进程缓存；文件不存在 → `raise RuntimeError("critic prompt 文件缺失：<path>")`（fail-fast，跟 D10 同思路）
+- **dataset.json case schema**：参考 [`tools/agent_eval/srs/dataset.json`](../tools/agent_eval/srs/dataset.json) 风格，但字段不同：`{id, category: "quiz_critic"|"rag_critic", input: {stem|query, ...}, expected: {min_score|relevant|not_relevant}, note}`；**评估的是 critic 本身判断准不准**，不是主路径产出好不好（呼应验收 ⑤）
+- **R1 过滤逻辑**：每个 hit 单独调 1 次 `judge_with_llm`（K 条召回 = K 次 LLM 调用）—— 这违反 D4 "每次 +1 LLM 调用"严约束。**Step 3 决策点**：是否改成"一次 LLM 调用评 K 条"（拼 K 条 hits 进 prompt，让 LLM 输出 K 个二分类）— **D12 留 Step 3 拍**
+
+**Punt 项**（同步登记入 §4.13）：本 step 无新增 punt 项；既有 [§4.13.1 #25-#28](#4131-deferred-backlog暂时不做) + [§4.13.2 #34 #35](#4132-dropped永久不做) 已覆盖。
+
+**Step 3 · Code 落地**
+
+10 步实施清单全部完成，每步代码改动见 [§3.12](design.md#312-harness-自检)。Step 3 期间拍板的浮现决策：
+
+| # | 浮现点 | 选用 | 影响 |
+|---|---|---|---|
+| **D12** | R1 K 条 chunks 怎么调 critic | **B 一次拼 K 条评 K 个二分类**（1 次 LLM 调用，自管 batch prompt） | `HarnessManager.filter_chunks` 不复用 `judge_with_llm`，改自管 `_RAG_BATCH_*_TEMPLATE` + `chat()` + `_parse_rag_verdicts`；K=8 时 cost 降到 1/8 |
+| **D13** | Q1 critic 复审粒度 | **仅 short_answer**；MCQ 跳过 | `_run_quiz_critic` 内 `if q["q_type"] in _MCQ_TYPES: continue`；MCQ 字符串归一化是确定性的，复审无可议；典型 60% MCQ + 40% 简答比例下省 ~2/3 critic 调用量 |
+
+**Step 4 · Test 落地**
+
+- UT 净增 49 case：`tests/test_harness_manager.py` 31 + `tests/test_harness_integration.py` 10 + `tests/test_quiz_store.py::TestHarnessSchema` 5 + `tests/test_cli_handlers_quiz.py::TestHarnessFlagRender` 3
+- `tests/test_quiz_tools.py` 加 module-scope autouse fixture `_disable_harness_quiz_critic` 防止现有 Phase 2.3 UT 真发 critic LLM 调用
+- 全量 fast 集：**882 passed, 110 deselected, 3 warnings in 54.81s** —— 0 failed
+- ReadLints：全部受影响文件 0 错
+
+**Step 5 · Eval 落地**
+
+- 评估器 [`tools/agent_eval/harness/eval_harness.py`](../tools/agent_eval/harness/eval_harness.py) 仿 [`eval_srs.py`](../tools/agent_eval/srs/eval_srs.py) 套路；entry point 调 `load_dotenv(override=True)` + `sys.stdout.reconfigure(encoding="utf-8")` 防 Windows GBK emoji 报错
+- Golden dataset [`tools/agent_eval/harness/dataset.json`](../tools/agent_eval/harness/dataset.json) 12 case：6 quiz_critic（含正负样本：批改正确 / 答错给满分误判 / 答对给 0 分误判 / 部分对合理给分 / 反馈与事实矛盾 / 未作答给 0）+ 6 rag_critic（全相关 / 全不相关 / 混合 / 关键词陷阱 / 边缘相关宁松 / 形似词陷阱）
+- 评估全跑：**12/12 (100%)** —— 远超 80% 验收阈值；报告 `tools/agent_eval/reports/harness-eval-20260529-163844.md`
+
+**Step 6 · Doc 落地**
+
+- [`docs/design.md`](design.md) 新增 [§3.12 Harness 自检](design.md#312-harness-自检)（6 子节：定位 / 数据载体 / 实现路径 / API 协议 / 端到端流程 mermaid / 评估方法）
+- [`docs/design.md`](design.md) [§5 IMP](design.md#5imp) 公共层表加 `HarnessManager` 行；代码组织段加 `harness_manager.py`
+- [`docs/iter_2_agent.md §4.9.10`](#4910-harness-自检-phase-25)（本节）Step 3-6 落地段（含 D12 / D13 浮现决策）
+
+**最终决策表（D1-D13）**：D1 / D2 / D3 / D4 / D5 / D6 / D7 / D8（[Step 0](#step-0--需求规格-1)）、D9 / D10 / D11（[Step 1](#step-1--review-现状-1) 浮现）、D12（Step 3 浮现 R1 batch）、D13（Step 3 浮现 MCQ 跳过 critic）。
+
+**端到端入口验证**：
+
+| 入口 | 命令 | 验收对应 |
+|---|---|---|
+| `main.py` 对话 | 跑 quiz → grade → CLI `/quiz show <id>` 看 ⚠️；问知识库无关问题观察 RAG 过滤 | 验收 ① ② |
+| Phase 2.5 评估器 | `python -m tools.agent_eval.harness.eval_harness` | 验收 ⑤ |
+| 配置三段同步 | `grep HARNESS_ src/config.py .env.example .env` 各 4 项一致 | 验收 ③ |
+| timeout / 异常 fallback | UT `test_harness_manager.py` `test_timeout_returns_failure_true_passed_true` / `test_chat_exception_returns_failure_true` 等 case 锁定 | 验收 ④ |
+
+**升级风险提醒**（D10 fail-fast 后果）：升级到 Phase 2.5 后首次跑 `main.py`，若本地 `sqlite_db/quiz.db` 已存在且无 `harness_flagged` 列 → `RuntimeError("quiz.db schema 已过期...")`；按错误提示 `Remove-Item sqlite_db/quiz.db` 重建即可。
 
 
 ## 4.10. 配套 tools（tools/agent_eval）
@@ -2283,12 +2433,12 @@ import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
 | 7 | Skills L3 — `scripts/` 自动执行（agent 主动跑 skill 里的 Python） | Phase 1.5 | Phase 2.x （sandbox / 权限机制设计完成后） | L3 涉及 code execution，需要 sandbox 设计 + 信任模型；本期资源不够 |
 | 8 | Skills L3 — `references/` 按需加载 | Phase 1.5 | Phase 2.x （与 #7 同阶段） | L3 渐进披露的副入口；本期 L1 + L2 已足够覆盖 study-planner / quiz_maker 等典型 skill 场景 |
 | 9 | Skill 激活后 catalog 同步移除该 skill 的 description 块（H1） | Phase 1.5 | 实测有 LLM 因为重复信息走偏 / context 紧张时再修 | 已激活的 skill body 已注入 system_prompt，catalog 里的 description 块成了重复信息；当前 LLM 实测未受影响 — 过度设计（MVP 阶段不必要） |
-| 10 | Plan 执行前用户审批 / 编辑（plan 出来后用户 yes / edit / no 三选一再执行，Cursor Plan Mode / CC plan permission mode 风格） | Phase 2.1 | Phase 2.5 Harness 或 Phase 3.3 防 prompt injection 时一起做 | 跟反思 / 安全 mode 强相关，单独做没收益；MVP 单用户场景每步审批反降 UX |
+| 10 | Plan 执行前用户审批 / 编辑（plan 出来后用户 yes / edit / no 三选一再执行，Cursor Plan Mode / CC plan permission mode 风格） | Phase 2.1 | Phase 3.3 防 prompt injection 时一起做 | 跟安全 mode 强相关，单独做没收益；MVP 单用户场景每步审批反降 UX；[§4.9.10 Step 0](#4910-harness-自检-phase-25) carve out — 这是 permission mode 不是 harness 反思机制 |
 | 11 | Chainlit plan step UI 渲染（plan 步骤 / 进度可视化到 Chainlit 端） | Phase 2.1 | 后续 WebUI 优化任务（与 #2 / #5 / #6 同任务，[design.md §4.2 WebUI](design.md#42webui)） | Phase 2.1 验收按 CLI 端 plan 可见即可；Chainlit 端 step UI 跟其他 WebUI 优化项统一在 WebUI 优化任务做（同 #2 / #5 / #6 逻辑） |
 | 12 | Chainlit 学习计划进度可视化（plan / task 进度推 Chainlit 端） | Phase 2.2 | 后续 WebUI 优化任务（同 #2 / #5 / #6 / #11 一并做） | Phase 2.2 验收按 CLI 端 `/study show` 文本可见即可；统一在 WebUI 优化任务做 |
 | 13 | 学习计划 export（导出为 Markdown / Anki 卡片 / Notion DB） | Phase 2.2 | 用户实际需求触发后做 | MVP 阶段 CLI 端 `/study show` 文本输出已足够；export 涉及目标格式适配 + 真用户痛点验证 |
 | 14 | `learning_tasks` 预留 SRS 字段（`srs_next_review` / `srs_ease` / `srs_interval`） | Phase 2.2 | Phase 2.4 SRS 启动时 ALTER TABLE 加 | [§4.9.7 D7](#497-plan学习计划生成-phase-22) 决策：YAGNI；Phase 2.4 不一定还用同一表（Anki SRS card 与 task 不是 1:1），ALTER TABLE 在 SQLite 廉价 |
-| 15 | CLI `/quiz` 交互答题模式（逐题问答 input() 循环） | Phase 2.3 | Phase 2.5 Harness 或单独 CLI UX 优化任务 | [§4.9.8 D2](#498-quiz-出题-phase-23) 决策：本期走"两阶段对话"（agent 出题 → 用户作答 → agent 批改）已满足验收 ⑤；交互模式需新建 quiz_loop.py + 与 agent 主 loop 解耦，复杂度高，等 Harness 自检场景一起做 |
+| 15 | CLI `/quiz` 交互答题模式（逐题问答 input() 循环） | Phase 2.3 | 单独 CLI UX 优化任务 | [§4.9.8 D2](#498-quiz-出题-phase-23) 决策：本期走"两阶段对话"（agent 出题 → 用户作答 → agent 批改）已满足验收 ⑤；交互模式需新建 quiz_loop.py + 与 agent 主 loop 解耦，复杂度高；[§4.9.10 Step 0](#4910-harness-自检-phase-25) carve out — 这是 CLI UX 不是 harness 反思 |
 | 16 | `quiz_questions` 预留 SRS 字段（`next_review_at` / `ease_factor` / `interval_days`） | Phase 2.3 | Phase 2.4 SRS 启动时 ALTER TABLE 加 | [§4.9.8 D7](#498-quiz-出题-phase-23) 决策：YAGNI，跟 §4.13.1 #14 同思路；Phase 2.4 不一定按 quiz_questions 建模 SRS card，ALTER TABLE 在 SQLite 廉价 |
 | 17 | 测验 Harness 自检（agent 对自己出题质量 / 批改判定的反思） | Phase 2.3 | Phase 2.5 Harness | [§4.9.8 Step 0](#498-quiz-出题-phase-23) 验收"结合 Harness 自评"明示 Harness 是 Phase 2.5；本期只做基础自动批改 |
 | 18 | 测验结果 export（导出为 Markdown / Anki 卡 / Notion） | Phase 2.3 | 用户实际需求触发后做（同 §4.13.1 #13 思路） | MVP 阶段 CLI `/quiz show <id>` 文本输出已足够；export 涉及目标格式适配 + 真用户痛点验证 |
@@ -2298,7 +2448,10 @@ import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
 | 22 | SRS 算法升级（SM-2 → FSRS / Half-life regression / NN-based） | Phase 2.4 | 待用户 review 量 > 1000 张 / 实测 SM-2 精度明显不足 | [§4.9.9 D1](#499-srs-主动复习调度-phase-24) 决策：MVP 体量下 SM-2 精度足够；FSRS 17 参数调参成本高且需训练数据；review 量未上来不冒进 |
 | 23 | learning_task 进 SRS 队列（task 作为 source_type） | Phase 2.4 | 视用户实际需求触发后做 | [§4.9.9 D5](#499-srs-主动复习调度-phase-24) 决策：task 是"做"不是"记住"，语义勉强；先观察用户是否真有该诉求 |
 | 24 | SRS 卡片 export（导出为 Anki .apkg / Notion DB / Markdown） | Phase 2.4 | 用户实际需求触发后做（同 #13 #18 思路）| MVP 阶段 CLI `/srs list` 文本输出已足够；export 涉及目标格式适配 + 真用户痛点验证 |
-| 25 | SRS review 路径接入 `judge_with_llm`（用户作答简答卡时 LLM 给反馈） | Phase 2.4 | Phase 2.5 Harness 自检场景 | [§4.9.9 D6](#499-srs-主动复习调度-phase-24) 决策：SRS 是"回忆+自评"不是"考核+评分"；review 路径强行接 LLM-judge 会模糊 mental model；留 Phase 2.5 一并做 |
+| 25 | SRS review 路径接入 `judge_with_llm`（用户作答简答卡时 LLM 给反馈） | Phase 2.4 | 用户实际表达需要时再做 | [§4.9.9 D6](#499-srs-主动复习调度-phase-24) 决策：SRS 是"回忆+自评"不是"考核+评分"；review 路径强行接 LLM-judge 会模糊 mental model；[§4.9.10 D1](#4910-harness-自检-phase-25) 本期评估继续 punt（同样心智冲突），等用户真表达"想要简答卡 LLM 反馈"再做 |
+| 26 | Harness P1 — Plan 执行后 retrospective（Reflexion 风格：plan-execute 跑完写反思塞回 long-term memory，下次同类任务作为 hint 注入 prompt） | Phase 2.5 | Reflexion 长期记忆任务 / `trajectory` 录制框架抽出后 | [§4.9.10 D1](#4910-harness-自检-phase-25) 决策：要做 [§4.8.2 trajectory 框架](#482-评估工具列表)（已规划但未抽）+ memory 持久化 + retrospect prompt + 跨次注入逻辑，单 phase 范围爆炸；本期 Q1+R1 是 single-shot 输出级，P1 是 trajectory 级 + 跨次累积，性质上是另一个 phase 量级的任务 |
+| 27 | Harness Q1 多轮 refine（critic 不达标时让 LLM 重批改一次，N≤3 上限） | Phase 2.5 | Q1 首期 1 轮即停跑稳后视精度需求决定 | [§4.9.10 D4](#4910-harness-自检-phase-25) 决策：[`docs/knowlege.md §6 §三第 2 项`](knowlege.md) "半客观任务 1 轮即停"约定；多轮 refine 在主观评分场景容易振荡 + cost 翻倍；先看 1 轮即停是否够用 |
+| 28 | Harness critic verdict 历史持久化（每次 critic 评分落库，给后续看准确率趋势 / 调阈值） | Phase 2.5 | 用户需要看 critic 准确率趋势时再做 | [§4.9.10 D5](#4910-harness-自检-phase-25) 决策：MVP 阶段 log warning + Step 5 evaluator dataset 评估 critic 准确率已足够；持久化涉及新表 + UI 展示，YAGNI |
 
 ---
 
@@ -2341,6 +2494,8 @@ import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
 | 31 | 测验难度自适应（按用户历史正确率动态调难度） | Phase 2.3 | 需长期数据积累 + 复杂调度策略，超 MVP scope；让用户在 `create_quiz` 时显式说"出难一点 / 简单点"即可 |
 | 32 | 测验题目去重（同主题多次出题不重复 / 跨 quiz_set 去重） | Phase 2.3 | 实现复杂度高（需语义相似度判定 + 历史扫描），MVP 阶段用户能容忍偶尔重复；真实使用时让 LLM 在 prompt 里看到最近题目即可缓解 |
 | 33 | 多用户 SRS 队列共享 / 排行榜 / 多设备 SRS 同步（cloud sync） | Phase 2.4 | 本项目永久单用户场景定位（类比 §4.13.2 #1 #28 #30）；多设备同步涉及 cloud sync infra（冲突解决 / 增量同步 / 时区处理），超 AgentA scope |
+| 34 | Harness A1 — 通用答案 hallucination 检测（agent 任意 LLM 答案后追加自检，跨所有路径） | Phase 2.5 | scope 失控；本质是 Q1 / R1 / P1 的超集；不知道在哪个路径触发、哪个产出该评、阈值统一 vs 分场景，决策点过多；[§4.9.10 D1](#4910-harness-自检-phase-25) 决策：先把 Q1 + R1 narrow 跑稳，再判要不要泛化（大概率永远不需要 — 用户痛点不在通用 hallucination） |
+| 35 | Harness 独立 critic agent / 多模型 critic 流水线（不同模型当 critic，独立 prompt + 上下文） | Phase 2.5 | [§4.9.10 D3](#4910-harness-自检-phase-25) 决策：复用 `judge_with_llm` + 生产路径 wrapper 已足够；独立 critic agent 涉及多模型 cost 暴涨 + 调试复杂度（类比 §4.13.2 #25 多 agent 分工 同思路）；个人助手单用户场景动机不成立 |
 
 
 # 5. Future

@@ -812,7 +812,8 @@ def _print_quiz_detail(quiz: dict[str, Any], out: OutputFn = _stdout) -> None:
         return
     out("")
     for q in questions:
-        out(f"   ── 第 {q['order_idx']} 题（{q['q_type']}）──")
+        flag = " ⚠️ 自检：批改可能有偏，建议复核" if q.get("harness_flagged") else ""
+        out(f"   ── 第 {q['order_idx']} 题（{q['q_type']}）──{flag}")
         out(f"   {q['stem']}")
         if q["q_type"] in ("mcq_single", "mcq_multi") and q.get("options"):
             for i, opt in enumerate(q["options"]):

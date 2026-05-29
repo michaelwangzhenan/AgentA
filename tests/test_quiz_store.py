@@ -307,6 +307,81 @@ class TestListQuizSets:
         assert len(store.list_quiz_sets(limit=3)) == 3
 
 
+# ── Phase 2.5 Harness：harness_flagged 列 + mark + fail-fast ─────────────────
+
+class TestHarnessSchema:
+
+    def test_new_question_default_harness_flagged_false(
+        self, store: QuizStore,
+    ) -> None:
+        qid = store.create_quiz_set(topic="x", num_questions=1)
+        store.add_questions(qid, [_sample_questions()[3]])
+        q = store.get_quiz_with_questions(qid)["questions"][0]
+        assert q["harness_flagged"] is False
+
+    def test_mark_question_harness_flagged(self, store: QuizStore) -> None:
+        qid = store.create_quiz_set(topic="x", num_questions=1)
+        store.add_questions(qid, [_sample_questions()[3]])
+        q_id = store.get_quiz_with_questions(qid)["questions"][0]["id"]
+        assert store.mark_question_harness_flagged(q_id) is True
+        q = store.get_quiz_with_questions(qid)["questions"][0]
+        assert q["harness_flagged"] is True
+
+    def test_mark_unknown_question_returns_false(self, store: QuizStore) -> None:
+        assert store.mark_question_harness_flagged(99999) is False
+
+    def test_mark_idempotent(self, store: QuizStore) -> None:
+        """重复 mark 同题多次都返 True 且字段保持 1。"""
+        qid = store.create_quiz_set(topic="x", num_questions=1)
+        store.add_questions(qid, [_sample_questions()[3]])
+        q_id = store.get_quiz_with_questions(qid)["questions"][0]["id"]
+        assert store.mark_question_harness_flagged(q_id) is True
+        assert store.mark_question_harness_flagged(q_id) is True
+        q = store.get_quiz_with_questions(qid)["questions"][0]
+        assert q["harness_flagged"] is True
+
+    def test_fail_fast_when_old_schema_missing_column(self, tmp_path: Path) -> None:
+        """模拟旧 quiz.db（quiz_questions 缺 harness_flagged 列）→ QuizStore 初始化 raise。
+
+        建表 schema 必须跟 Phase 2.3 现状一致（quiz_sets 完整 + quiz_questions 缺 harness_flagged）
+        否则 CREATE TABLE IF NOT EXISTS 会跳过建表、然后业务 SQL 撞别的列错。
+        """
+        import sqlite3
+        old_db = tmp_path / "old.db"
+        conn = sqlite3.connect(str(old_db))
+        conn.executescript("""
+            CREATE TABLE quiz_sets (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                topic           TEXT    NOT NULL,
+                plan_id         INTEGER,
+                stage_idx       INTEGER,
+                num_questions   INTEGER NOT NULL,
+                status          TEXT    NOT NULL DEFAULT 'created',
+                total_score     REAL,
+                created_at      TEXT    NOT NULL,
+                graded_at       TEXT    NOT NULL DEFAULT '',
+                updated_at      TEXT    NOT NULL
+            );
+            CREATE TABLE quiz_questions (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                quiz_set_id     INTEGER NOT NULL REFERENCES quiz_sets(id) ON DELETE CASCADE,
+                order_idx       INTEGER NOT NULL,
+                q_type          TEXT    NOT NULL,
+                stem            TEXT    NOT NULL,
+                options         TEXT    NOT NULL DEFAULT '',
+                correct_answer  TEXT    NOT NULL,
+                explanation     TEXT    NOT NULL DEFAULT '',
+                user_answer     TEXT    NOT NULL DEFAULT '',
+                score           REAL    NOT NULL DEFAULT 0.0,
+                feedback        TEXT    NOT NULL DEFAULT ''
+            );
+        """)
+        conn.commit()
+        conn.close()
+        with pytest.raises(RuntimeError, match="schema 已过期"):
+            QuizStore(str(old_db))
+
+
 # ── 资源管理 ──────────────────────────────────────────────────────────────────
 
 def test_context_manager(tmp_path: Path) -> None:

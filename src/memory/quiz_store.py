@@ -30,7 +30,8 @@ Quiz 出题持久化模块 —— SQLite 存储层（Phase 2.3 §4.9.8 D1 / D9 /
         explanation     TEXT    NOT NULL DEFAULT '',       -- 简短考点说明
         user_answer     TEXT    NOT NULL DEFAULT '',       -- 用户作答（批改时填）
         score           REAL    NOT NULL DEFAULT 0.0,      -- 单题得分 0.0-1.0（MCQ 整对 1.0 / 否则 0；简答按 LLM-judge）
-        feedback        TEXT    NOT NULL DEFAULT ''        -- 批改反馈（string-match 简评 / LLM 反馈）
+        feedback        TEXT    NOT NULL DEFAULT '',       -- 批改反馈（string-match 简评 / LLM 反馈）
+        harness_flagged INTEGER NOT NULL DEFAULT 0         -- Phase 2.5：critic 自检判定本题批改可能有偏（0/1）
     )
 
 跨 session 复盘场景：用户重启 agent → 新 session 问"上次 quiz 哪些错了 / 列出我做过的 quiz"
@@ -84,7 +85,12 @@ class QuizStore:
     # ── 表结构初始化 ──────────────────────────────────────────────────────────
 
     def _create_tables(self) -> None:
-        """创建 quiz_sets / quiz_questions 表（幂等）。"""
+        """创建 quiz_sets / quiz_questions 表（幂等）+ fail-fast 检测旧 schema。
+
+        Phase 2.5 起 quiz_questions 加 `harness_flagged` 列。沿用 [`UserMemoryStore`](user_memory.py)
+        的 fail-fast 模式：旧 quiz.db 升级时不做 ALTER TABLE auto-migrate，PRAGMA 自检
+        缺列直接抛 RuntimeError 提示删库重建（单用户 MVP 场景损失可接受，避免引入迁移代码）。
+        """
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS quiz_sets (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,12 +120,22 @@ class QuizStore:
                 explanation     TEXT    NOT NULL DEFAULT '',
                 user_answer     TEXT    NOT NULL DEFAULT '',
                 score           REAL    NOT NULL DEFAULT 0.0,
-                feedback        TEXT    NOT NULL DEFAULT ''
+                feedback        TEXT    NOT NULL DEFAULT '',
+                harness_flagged INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_quiz_questions_set
                 ON quiz_questions(quiz_set_id, order_idx);
         """)
         self._conn.commit()
+
+        # fail-fast：旧 quiz.db 升级到 Phase 2.5 时，PRAGMA 自检缺 harness_flagged 列
+        # 直接抛 RuntimeError 让用户删库重建（不走 ALTER TABLE auto-migrate）
+        cols = {row[1] for row in self._conn.execute("PRAGMA table_info(quiz_questions)")}
+        if "harness_flagged" not in cols:
+            raise RuntimeError(
+                f"quiz.db schema 已过期（缺 harness_flagged 列，Phase 2.5 引入）。\n"
+                f"请删除 {self._db_path} 后重启（单用户 MVP 不做向后兼容迁移）。"
+            )
 
     # ── 内部 helper ───────────────────────────────────────────────────────────
 
@@ -163,6 +179,7 @@ class QuizStore:
             "user_answer": row["user_answer"],
             "score": float(row["score"] or 0.0),
             "feedback": row["feedback"],
+            "harness_flagged": bool(row["harness_flagged"]),
         }
 
     # ── quiz_set CRUD ────────────────────────────────────────────────────────
@@ -379,6 +396,24 @@ class QuizStore:
             quiz_set_id, ts, len(gradings),
         )
         return True
+
+    # ── 归档 / 删除 ──────────────────────────────────────────────────────────
+
+    def mark_question_harness_flagged(self, question_id: int) -> bool:
+        """Phase 2.5：把指定题号的 `harness_flagged` 置 1（critic 自检判定批改可能有偏）。
+
+        Returns:
+            True 该题存在且更新成功；False 题不存在。
+        """
+        with self._conn:
+            cursor = self._conn.execute(
+                "UPDATE quiz_questions SET harness_flagged = 1 WHERE id = ?",
+                (question_id,),
+            )
+        flagged = cursor.rowcount > 0
+        if flagged:
+            logger.info("mark_question_harness_flagged: question_id=%d", question_id)
+        return flagged
 
     # ── 归档 / 删除 ──────────────────────────────────────────────────────────
 

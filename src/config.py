@@ -97,7 +97,7 @@ PROVIDER_CONFIGS: dict[str, ProviderConfig] = {
     "qwen": ProviderConfig(
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         api_key=os.getenv("QWEN_API_KEY", ""),
-        model="qwen3-max",
+        model="qwen3-max-2025-09-23",
         extra_body={"enable_thinking": False},
     ),
     "minimax": ProviderConfig(
@@ -338,6 +338,16 @@ SRS_DEFAULT_DUE_QUERY_LIMIT: int = int(os.getenv("SRS_DEFAULT_DUE_QUERY_LIMIT", 
 SRS_FIRST_INTERVAL_DAYS: int = int(os.getenv("SRS_FIRST_INTERVAL_DAYS", "1"))
 # SM-2 算法：repetitions=2 时的 interval（第二次复习答对的下次回炉天数）
 SRS_SECOND_INTERVAL_DAYS: int = int(os.getenv("SRS_SECOND_INTERVAL_DAYS", "6"))
+
+# ── Harness 自检（Phase 2.5）配置 ────────────────────────────────────────────
+# 是否对 grade_quiz 批改结果做自检（可选值：true / false）
+HARNESS_QUIZ_ENABLED: bool = os.getenv("HARNESS_QUIZ_ENABLED", "true").lower() == "true"
+# 是否对 search_knowledge 召回片段做相关性自检（可选值：true / false）
+HARNESS_RAG_ENABLED: bool = os.getenv("HARNESS_RAG_ENABLED", "true").lower() == "true"
+# critic 单次 LLM 调用超时（秒），超时静默降级
+HARNESS_LLM_TIMEOUT_SEC: float = float(os.getenv("HARNESS_LLM_TIMEOUT_SEC", "15"))
+# Q1 quiz 批改自检阈值（critic 总分 < 该值标 harness_flagged，0-5 分）
+HARNESS_GRADING_THRESHOLD: float = float(os.getenv("HARNESS_GRADING_THRESHOLD", "3.5"))
 # 用户输入短于此字符数不触发自动提取（显式触发不受此限；设为 0 禁用）
 USER_MEMORY_EXTRACT_MIN_INPUT_LEN: int = int(os.getenv("USER_MEMORY_EXTRACT_MIN_INPUT_LEN", "20"))
 

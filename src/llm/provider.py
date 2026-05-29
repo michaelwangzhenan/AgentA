@@ -92,6 +92,25 @@ def chat(
     need_proxy = config.ACTIVE_PROVIDER in config.PROXIED_PROVIDERS and bool(config.LLM_PROXY)
 
     if on_token_chunk is not None:
+        # 工作绕道：qwen 在 streaming 模式下，当 LLM 同时输出 content + tool_call 时，
+        # 所有 tool_call delta 的 function.name 字段一律为 None（args 拼接正常），导致
+        # ToolCallEngine 报"未知工具：''"循环失败。非流式模式则返回完整 name。
+        # 因此：传 tools 时禁用 streaming，一次性拿完整 message；之后把 content 通过
+        # on_token_chunk 一次性回灌，保持 CLI / Chainlit 渲染入口一致。
+        if tools:
+            response = _openai_call(
+                provider_config,
+                need_proxy,
+                lambda client: client.chat.completions.create(**kwargs),
+            )
+            try:
+                msg_content = response.choices[0].message.content or ""
+                if msg_content:
+                    on_token_chunk(msg_content)
+            except Exception:
+                pass
+            return response
+
         kwargs["stream"] = True
         # 流式响应里把 usage 放到最后一个 chunk，否则 prompt_tokens / completion_tokens
         # 都拿不到（kimi / qwen 等 OpenAI 兼容 provider 默认不推 usage）

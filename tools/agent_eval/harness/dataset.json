@@ -1,0 +1,157 @@
+[
+  {
+    "id": "Q01-correct-grading-passes",
+    "category": "quiz_critic",
+    "input": {
+      "stem": "什么是 RAG？",
+      "user_answer": "Retrieval-Augmented Generation，先检索相关文档再让 LLM 生成回答。",
+      "correct_answer": "Retrieval-Augmented Generation，结合外部知识检索增强 LLM 生成。",
+      "agent_score": 1.0,
+      "agent_feedback": "完全正确，覆盖关键点。"
+    },
+    "expected": "pass",
+    "note": "答案正确 + 给满分 + 反馈合理 → critic 应判通过"
+  },
+  {
+    "id": "Q02-wrong-answer-given-full-mark-must-flag",
+    "category": "quiz_critic",
+    "input": {
+      "stem": "Python 中 list 和 tuple 的主要区别？",
+      "user_answer": "都是有序集合，没什么区别。",
+      "correct_answer": "list 可变（mutable），tuple 不可变（immutable）；性能上 tuple 略快。",
+      "agent_score": 1.0,
+      "agent_feedback": "完全正确。"
+    },
+    "expected": "flag",
+    "note": "用户明显答错却给满分 → critic 应判 flag（误判核心场景）"
+  },
+  {
+    "id": "Q03-correct-answer-given-zero-must-flag",
+    "category": "quiz_critic",
+    "input": {
+      "stem": "解释 BM25 算法的核心思想。",
+      "user_answer": "基于词频 + 文档频率的稀疏检索打分；考虑词频饱和与文档长度归一化。",
+      "correct_answer": "传统稀疏检索算法，基于 TF-IDF 思路 + 文档长度归一化 + 词频饱和（saturation）。",
+      "agent_score": 0.0,
+      "agent_feedback": "完全错误。"
+    },
+    "expected": "flag",
+    "note": "用户答案与标答语义高度一致却给 0 分 → critic 应判 flag"
+  },
+  {
+    "id": "Q04-partial-answer-fair-half-mark-passes",
+    "category": "quiz_critic",
+    "input": {
+      "stem": "解释 RRF（Reciprocal Rank Fusion）的工作原理。",
+      "user_answer": "把多个排序结果融合，取倒数排名相加。",
+      "correct_answer": "Reciprocal Rank Fusion：score(d) = Σ 1/(k+rank_i(d))，对多路检索结果按 rank 倒数加权融合，rank-based 不依赖原始分数尺度。",
+      "agent_score": 0.5,
+      "agent_feedback": "思路对但漏了 k 平滑项 + 没解释为何用 rank 而非分数。"
+    },
+    "expected": "pass",
+    "note": "部分对给一半分 + 反馈精准指出漏点 → critic 应判通过"
+  },
+  {
+    "id": "Q05-feedback-claims-missing-actually-present-must-flag",
+    "category": "quiz_critic",
+    "input": {
+      "stem": "Cosine similarity 衡量什么？",
+      "user_answer": "向量之间的夹角余弦值，反映方向相似度，范围 [-1, 1]，越大越相似。",
+      "correct_answer": "向量夹角余弦，方向相似度度量，[-1, 1] 范围。",
+      "agent_score": 0.5,
+      "agent_feedback": "漏了取值范围。"
+    },
+    "expected": "flag",
+    "note": "用户答案明确写了 [-1, 1] 范围但反馈说『漏了范围』→ 反馈与事实矛盾，critic 应判 flag"
+  },
+  {
+    "id": "Q06-empty-answer-given-zero-passes",
+    "category": "quiz_critic",
+    "input": {
+      "stem": "什么是 SM-2 算法？",
+      "user_answer": "",
+      "correct_answer": "SuperMemo 2，间隔重复（spaced repetition）调度算法，根据用户回忆质量动态调整下次复习间隔。",
+      "agent_score": 0.0,
+      "agent_feedback": "未作答。"
+    },
+    "expected": "pass",
+    "note": "未作答给 0 分 + 反馈准确 → critic 应判通过"
+  },
+  {
+    "id": "R01-relevant-chunk-only-all-keep",
+    "category": "rag_critic",
+    "input": {
+      "query": "如何在 Python 中使用 asyncio 实现并发 I/O？",
+      "chunks": [
+        "asyncio 是 Python 标准库，提供 async/await 语法用于编写单线程并发代码。常见用法：用 asyncio.run() 启动事件循环，await 异步函数（coroutine），用 asyncio.gather() 并发跑多个任务。",
+        "Python 中 async def 定义协程，await 等待 awaitable 对象。事件循环通过 asyncio.get_event_loop() 获取，loop.run_until_complete() 跑到完成。"
+      ]
+    },
+    "expected": [5, 5],
+    "note": "全部直接相关 → 应全保留"
+  },
+  {
+    "id": "R02-irrelevant-chunks-all-drop",
+    "category": "rag_critic",
+    "input": {
+      "query": "如何在 Python 中使用 asyncio 实现并发 I/O？",
+      "chunks": [
+        "JavaScript 的 async/await 语法用于处理 Promise，事件循环由浏览器或 Node.js 提供。",
+        "Java NIO 提供非阻塞 I/O 支持，通过 Selector + Channel 模型实现单线程多路复用。"
+      ]
+    },
+    "expected": [0, 0],
+    "note": "都讲并发 I/O 但语境跑偏（JS/Java 不是 Python asyncio）→ 应全过滤"
+  },
+  {
+    "id": "R03-mixed-relevance-partial-keep",
+    "category": "rag_critic",
+    "input": {
+      "query": "什么是间隔重复学习（spaced repetition）？",
+      "chunks": [
+        "间隔重复（spaced repetition）是一种学习方法，通过逐渐拉长复习时间间隔来强化长期记忆，常见算法有 SM-2、FSRS。",
+        "金融市场的『重复交易』指投资者在短时间内多次买卖同一标的，与税务规则相关。",
+        "Anki 是基于间隔重复的开源 flashcard 软件，使用 SM-2 算法调度卡片复习。"
+      ]
+    },
+    "expected": [5, 0, 5],
+    "note": "1 条相关 + 1 条关键词重叠但语境跑偏（金融 vs 学习）+ 1 条相关 → 应过滤中间这条"
+  },
+  {
+    "id": "R04-keyword-overlap-but-different-domain-drop",
+    "category": "rag_critic",
+    "input": {
+      "query": "Cross-Encoder 在重排序（reranker）中的作用？",
+      "chunks": [
+        "化学中的交叉偶联反应（cross-coupling）通过过渡金属催化连接两个分子片段，常见于药物合成。"
+      ]
+    },
+    "expected": [0],
+    "note": "『cross』关键词重叠但语境完全不同（化学 vs NLP）→ 应过滤"
+  },
+  {
+    "id": "R05-edge-relevant-tend-to-keep",
+    "category": "rag_critic",
+    "input": {
+      "query": "什么是 LLM？",
+      "chunks": [
+        "Large Language Model（大语言模型）是一类基于 Transformer 架构的深度学习模型，参数量通常达到数十亿到数千亿，具备文本生成、问答、推理等能力。",
+        "Transformer 架构由 Vaswani 等人 2017 年在 Attention is All You Need 中提出，使用 self-attention 替代 RNN，是 LLM 的基础。"
+      ]
+    },
+    "expected": [5, 5],
+    "note": "1 条直接定义 + 1 条边缘相关（讲 Transformer 是 LLM 基础）→ 边缘宁松勿严，全保留"
+  },
+  {
+    "id": "R06-totally-off-topic-keyword-drop",
+    "category": "rag_critic",
+    "input": {
+      "query": "Chroma 向量数据库的相似度查询语法？",
+      "chunks": [
+        "Chrome 浏览器的开发者工具支持网络面板、Performance 性能分析、Coverage 代码覆盖率检测。"
+      ]
+    },
+    "expected": [0],
+    "note": "『Chroma』vs『Chrome』关键词形似但语境完全不同 → 应过滤"
+  }
+]
