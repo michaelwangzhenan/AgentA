@@ -320,6 +320,14 @@ USER_MEMORY_EXTRACT_EVERY_N: int = int(os.getenv("USER_MEMORY_EXTRACT_EVERY_N", 
 LEARNING_PLAN_DB_PATH: str = os.getenv("LEARNING_PLAN_DB_PATH", "./sqlite_db/learning.db")
 # 注入 system prompt 的 active 学习计划文本最大字符数（超出截断）
 LEARNING_PLAN_MAX_INJECT_CHARS: int = int(os.getenv("LEARNING_PLAN_MAX_INJECT_CHARS", "1500"))
+
+# ── Quiz 出题（Phase 2.3）配置 ───────────────────────────────────────────────
+# Quiz SQLite 路径（独立文件，便于单独 backup / migration）
+QUIZ_DB_PATH: str = os.getenv("QUIZ_DB_PATH", "./sqlite_db/quiz.db")
+# create_quiz 默认题数（未传 num_questions 时使用；可选值 5-15）
+QUIZ_DEFAULT_NUM_QUESTIONS: int = int(os.getenv("QUIZ_DEFAULT_NUM_QUESTIONS", "10"))
+# /quiz list / query_quiz_history 默认返回条数上限
+QUIZ_HISTORY_LIST_LIMIT: int = int(os.getenv("QUIZ_HISTORY_LIST_LIMIT", "20"))
 # 用户输入短于此字符数不触发自动提取（显式触发不受此限；设为 0 禁用）
 USER_MEMORY_EXTRACT_MIN_INPUT_LEN: int = int(os.getenv("USER_MEMORY_EXTRACT_MIN_INPUT_LEN", "20"))
 

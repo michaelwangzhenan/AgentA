@@ -224,16 +224,17 @@ class TestFormatScanBanner:
 # ── TestRealAgentaSkills ──────────────────────────────────────────────────────
 
 class TestRealAgentaSkills:
-    """对仓库 .agenta/skills/ 真实目录的烟雾测试（防止 example-skill / study-planner 退化）"""
+    """对仓库 .agenta/skills/ 真实目录的烟雾测试（防止 example-skill / study-planner / quiz-maker 退化）"""
 
     def test_repo_skills_loadable(self) -> None:
         repo_skills = Path(__file__).resolve().parents[1] / ".agenta" / "skills"
         if not repo_skills.is_dir():
             pytest.skip(".agenta/skills 目录不存在，跳过")
         result = scan_skills(repo_skills)
-        # 至少两个：example-skill 和 study-planner（Step 0 验收 ②/④ 的载体）
+        # 至少三个：example-skill / study-planner / quiz-maker
         assert "example-skill" in result.loaded
         assert "study-planner" in result.loaded
+        assert "quiz-maker" in result.loaded
         # 仓库内置 skill 必须 0 失败，否则 main.py 启动就会刷红
         assert result.failed == [], (
             f"仓库内置 skill 解析失败：{[(str(f.path), f.reason) for f in result.failed]}"

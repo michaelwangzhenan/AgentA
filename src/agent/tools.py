@@ -11,6 +11,7 @@
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -85,9 +86,15 @@ def get_tools(skill_bodies: dict[str, str] | None = None) -> list[dict[str, Any]
       - 基础 3 tool（search_knowledge / web_search / fetch_url）
       - Phase 2.1 plan-execute 3 tool（make_plan / update_step / abort_plan）
       - Phase 2.2 学习计划业务 3 tool（create_study_plan / update_study_progress / query_study_status）
+      - Phase 2.3 Quiz 业务 3 tool（create_quiz / grade_quiz / query_quiz_history）
     若传入 skill_bodies，再追加 load_skill 工具定义（name 字段限定为已有名称枚举）。
     """
-    tools = list(TOOLS) + list(_PLAN_TOOLS) + list(_STUDY_PLAN_TOOLS)
+    tools = (
+        list(TOOLS)
+        + list(_PLAN_TOOLS)
+        + list(_STUDY_PLAN_TOOLS)
+        + list(_QUIZ_TOOLS)
+    )
     if skill_bodies:
         tools.append(_build_load_skill_def(list(skill_bodies.keys())))
     return tools
@@ -1041,6 +1048,541 @@ def _tool_query_study_status(
     return ToolResult(status="ok", content=_render_plan_summary(plan, include_tasks=detail))
 
 
+# ── Phase 2.3 — Quiz 业务三 tool JSON Schema ─────────────────────────────────
+# 与 _STUDY_PLAN_TOOLS（学习计划长期跟踪）相对：本组 tool 操作的是**周期性
+# 自检练习 + 跨 session 复盘**（quiz_sets / quiz_questions 二表）。
+# 触发主路径见 [quiz-maker skill](../../.agenta/skills/quiz-maker/SKILL.md)。
+
+_QUIZ_TOOLS: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "create_quiz",
+            "description": (
+                "新建一个**跨 session 持久化的 quiz**，把题目清单一次性落库。"
+                "适用：用户表达明确出题需求（如『考考我 RAG』/『给我出 5 道 ML 题』/"
+                "『把 active 学习计划 stage 2 出成题』）。"
+                "**不要**直接用本 tool —— 应先按 quiz-maker skill 引导用 make_plan 拆解"
+                "（解析意图 → 查 KB → 出题 → 落库），落库即调本 tool。"
+                "题型按固定 60% MCQ + 40% 简答比例混合（D13）；总题数由 questions 列表长度决定，"
+                "用户未指定时建议 10 道。"
+                "至少传 topic 或 plan_id 之一；返回新 quiz_set_id 与题数。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": (
+                            "出题主题一句话描述，如『RAG 检索基础』/『Python 列表与字典』。"
+                            "传 plan_id+stage_idx 时可省，工具会用 plan goal + stage 自动填。"
+                        ),
+                    },
+                    "plan_id": {
+                        "type": "integer",
+                        "description": "可选关联 learning_plan id（绑定到学习计划，便于跨 session 按 plan 查 quiz 历史）。",
+                        "minimum": 1,
+                    },
+                    "stage_idx": {
+                        "type": "integer",
+                        "description": "可选关联 plan stage（需同时传 plan_id；标明本 quiz 针对哪个学习阶段）。",
+                        "minimum": 1,
+                    },
+                    "questions": {
+                        "type": "array",
+                        "description": (
+                            "题目清单（5-15 道；按题号顺序）；每项 "
+                            "{order_idx, q_type, stem, options?, correct_answer, explanation?}。"
+                            "order_idx：题号从 1 起；"
+                            "q_type：mcq_single / mcq_multi / short_answer 三选一；"
+                            "stem：题干文本；"
+                            "options：MCQ 选项列表（如 ['北京', '上海', '广州', '深圳']，简答留空 / 省略）；"
+                            "correct_answer：MCQ 填字母串（单选 『B』 / 多选 『AC』）；简答填标准答案文本；"
+                            "explanation：可选简短考点说明（≤ 80 字）。"
+                        ),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "order_idx": {"type": "integer", "minimum": 1},
+                                "q_type": {
+                                    "type": "string",
+                                    "enum": ["mcq_single", "mcq_multi", "short_answer"],
+                                },
+                                "stem": {"type": "string"},
+                                "options": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "correct_answer": {"type": "string"},
+                                "explanation": {"type": "string"},
+                            },
+                            "required": ["order_idx", "q_type", "stem", "correct_answer"],
+                        },
+                        "minItems": 1,
+                    },
+                },
+                "required": ["questions"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "grade_quiz",
+            "description": (
+                "批改一个已生成的 quiz：用户在上一轮自然语言作答（如『1.B 2.AC 3. xxx』）→ "
+                "你（LLM）根据上下文把答案拼成 {question_id: answer} dict 传给本 tool。"
+                "工具按 q_type 分派批改：MCQ 走字符串归一化比对；简答走内置 LLM-judge 给 0-1 分 + 短反馈。"
+                "返回总分 + 错题清单。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "quiz_set_id": {
+                        "type": "integer",
+                        "description": "要批改的 quiz_set_id（从 create_quiz 返回 / query_quiz_history 取得）。",
+                        "minimum": 1,
+                    },
+                    "user_answers": {
+                        "type": "object",
+                        "description": (
+                            "{question_id: 用户答案串} 映射。"
+                            "MCQ 答案写字母（单选 『B』 / 多选 『AC』，不区分大小写）；简答写一句话或几句话。"
+                            "key 是 question_id 整数字符串（如 『12』 / 『13』）；缺漏的题视为未作答记 0 分。"
+                        ),
+                        "additionalProperties": {"type": "string"},
+                    },
+                },
+                "required": ["quiz_set_id", "user_answers"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_quiz_history",
+            "description": (
+                "查 quiz 历史 / 单个 quiz 详情。"
+                "适用：用户问『我做过哪些 quiz / 上次 quiz 哪些错了 / 看下 quiz 5』。"
+                "**三种查询方式互斥（按优先级取一种）**：① 传 quiz_set_id → 返该 quiz 题目清单"
+                "（detail=True 时含 user_answer/correct_answer/反馈，用于复盘错题）；"
+                "② 传 plan_id → 列该 plan 关联的全部 quiz 摘要；"
+                "③ 都不传 → 列最近若干条 quiz 摘要（不含具体题目）。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "quiz_set_id": {
+                        "type": "integer",
+                        "description": "可选；查单个 quiz 的题目清单。",
+                        "minimum": 1,
+                    },
+                    "plan_id": {
+                        "type": "integer",
+                        "description": "可选；过滤某 learning_plan 关联的全部 quiz。",
+                        "minimum": 1,
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "列表模式下返回的最多条数（默认 20）。",
+                        "minimum": 1,
+                    },
+                    "detail": {
+                        "type": "boolean",
+                        "description": (
+                            "仅 quiz_set_id 模式下生效：true 返回每题完整批改细节"
+                            "（user_answer / correct_answer / score / feedback）；false 仅返回题干 + 题型。"
+                            "默认 false 以节省 context。"
+                        ),
+                        "default": False,
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+]
+
+
+# ── Phase 2.3 — Quiz 业务 tool 实现 ──────────────────────────────────────────
+# 实现采用"按需 import + 复用共享 store"模式，与 §4.9.7 Phase 2.2 对齐。
+
+
+def _get_quiz_store() -> Any:
+    """延迟 import，返回 quiz_store 模块级共享 store。"""
+    from src.memory.quiz_store import get_shared_store
+    return get_shared_store()
+
+
+_QUIZ_LETTER_SET: frozenset[str] = frozenset("ABCDEFGH")
+_MCQ_TYPES: tuple[str, ...] = ("mcq_single", "mcq_multi")
+_ALL_Q_TYPES: tuple[str, ...] = ("mcq_single", "mcq_multi", "short_answer")
+
+
+def _normalize_mcq_answer(s: str) -> str:
+    """归一化 MCQ 答案串：『a,c』/『 AC 』/『abc』→ 『AC』（去重 + 升序 + 大写 A-H）。"""
+    if not isinstance(s, str):
+        return ""
+    letters = sorted({c.upper() for c in s if c.upper() in _QUIZ_LETTER_SET})
+    return "".join(letters)
+
+
+def _grade_one_mcq(user_ans: str, correct: str) -> tuple[float, str]:
+    """MCQ 字符串比对：归一化后完全相等 → 1.0；未作答 / 不等 → 0.0。"""
+    u = _normalize_mcq_answer(user_ans)
+    c = _normalize_mcq_answer(correct)
+    if not u:
+        return 0.0, "未作答"
+    if u == c:
+        return 1.0, "正确"
+    return 0.0, f"错（你答 {u}，正确 {c}）"
+
+
+# 简答 LLM-judge system prompt：让 LLM 给 0-1 浮点分 + ≤ 60 字反馈
+_SHORT_ANSWER_JUDGE_SYS = """你是一个简答题评卷员。给定题目、标准答案、用户答案，按语义贴合度评分（0.0-1.0）：
+- 1.0：完全正确，关键要点全覆盖
+- 0.6-0.9：部分对（漏点 / 边角错 / 表述欠准）
+- 0.1-0.5：思路对但关键点错 / 缺失多
+- 0.0：完全错误或离题
+
+只输出严格 JSON，格式：{"score": <0-1 浮点>, "feedback": "<≤ 60 字简评>"}。不要 markdown / 前后说明。"""
+
+
+def _grade_one_short_answer(stem: str, user_ans: str, correct: str) -> tuple[float, str]:
+    """简答 LLM-judge：内置 chat 调用；任何失败软返回 (0.0, 错误说明)。"""
+    if not user_ans.strip():
+        return 0.0, "未作答"
+    user_msg = (
+        f"## 题目\n{stem}\n\n"
+        f"## 标准答案\n{correct}\n\n"
+        f"## 用户答案\n{user_ans}"
+    )
+    try:
+        from src.llm.provider import chat as _chat
+        resp = _chat(
+            [{"role": "system", "content": _SHORT_ANSWER_JUDGE_SYS},
+             {"role": "user", "content": user_msg}],
+            temperature=0.0,
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+    except Exception as e:
+        logger.warning("[tool] short_answer judge LLM 失败: %s", e)
+        return 0.0, f"批改异常：{e}"
+
+    m = re.search(r"\{.*?\}", raw.replace("\n", " "), re.DOTALL)
+    if not m:
+        return 0.0, "judge 返回非 JSON"
+    try:
+        data = json.loads(m.group(0))
+        score = max(0.0, min(1.0, float(data.get("score", 0))))
+        fb = str(data.get("feedback", "")).strip()[:120] or "（无反馈）"
+        return score, fb
+    except (json.JSONDecodeError, ValueError, TypeError) as e:
+        return 0.0, f"judge JSON 解析失败：{e}"
+
+
+def _tool_create_quiz(
+    questions: Any,
+    topic: Any = None,
+    plan_id: Any = None,
+    stage_idx: Any = None,
+) -> ToolResult:
+    """新建跨 session 持久化 quiz + 全量 questions 一次性落库。"""
+    # —— 入参校验 ——
+    if topic is not None and not isinstance(topic, str):
+        return ToolResult(status="error", content=f"create_quiz(topic) 必须是字符串，收到：{topic!r}")
+    if plan_id is not None and (not isinstance(plan_id, int) or plan_id < 1):
+        return ToolResult(status="error", content=f"create_quiz(plan_id) 必须是 ≥1 整数，收到：{plan_id!r}")
+    if stage_idx is not None and (not isinstance(stage_idx, int) or stage_idx < 1):
+        return ToolResult(status="error", content=f"create_quiz(stage_idx) 必须是 ≥1 整数，收到：{stage_idx!r}")
+    if stage_idx is not None and plan_id is None:
+        return ToolResult(status="error", content="create_quiz(stage_idx) 必须同时传 plan_id。")
+
+    topic_clean = (topic or "").strip() if isinstance(topic, str) else ""
+    if not topic_clean and plan_id is None:
+        return ToolResult(
+            status="error",
+            content="create_quiz 至少要传 topic 或 plan_id 之一（说明这次 quiz 是什么主题 / 关联哪个学习计划）。",
+        )
+
+    if not isinstance(questions, list) or not questions:
+        return ToolResult(
+            status="error",
+            content="create_quiz(questions) 必须是非空列表，每项 {order_idx, q_type, stem, options?, correct_answer, explanation?}。",
+        )
+
+    cleaned: list[dict[str, Any]] = []
+    for i, q in enumerate(questions):
+        if not isinstance(q, dict):
+            return ToolResult(status="error", content=f"questions[{i}] 不是 dict，收到 {type(q).__name__}")
+        order_idx = q.get("order_idx")
+        q_type = q.get("q_type")
+        stem = q.get("stem")
+        correct_answer = q.get("correct_answer")
+        if not isinstance(order_idx, int) or order_idx < 1:
+            return ToolResult(status="error", content=f"questions[{i}].order_idx 必须 ≥1 整数：{order_idx!r}")
+        if q_type not in _ALL_Q_TYPES:
+            return ToolResult(
+                status="error",
+                content=f"questions[{i}].q_type 必须是 mcq_single / mcq_multi / short_answer：{q_type!r}",
+            )
+        if not isinstance(stem, str) or not stem.strip():
+            return ToolResult(status="error", content=f"questions[{i}].stem 必须是非空字符串")
+        if not isinstance(correct_answer, str) or not correct_answer.strip():
+            return ToolResult(status="error", content=f"questions[{i}].correct_answer 必须是非空字符串")
+        # MCQ 必须有 options
+        options = q.get("options") or []
+        if q_type in _MCQ_TYPES:
+            if not isinstance(options, list) or len(options) < 2:
+                return ToolResult(
+                    status="error",
+                    content=f"questions[{i}] MCQ 必须有 options 列表（≥ 2 项），收到 {options!r}",
+                )
+        cleaned.append({
+            "order_idx": order_idx,
+            "q_type": q_type,
+            "stem": stem.strip(),
+            "options": options if q_type in _MCQ_TYPES else [],
+            "correct_answer": correct_answer.strip(),
+            "explanation": (q.get("explanation") or "").strip(),
+        })
+
+    # plan_id + stage_idx 时若 topic 缺，从 LearningPlanStore 拉 goal 作 topic
+    if not topic_clean and plan_id is not None:
+        try:
+            from src.memory.learning_plan_store import get_shared_store as _lp_store
+            plan = _lp_store().get_plan(plan_id)
+            if plan is None:
+                return ToolResult(status="error", content=f"plan_id={plan_id} 不存在，无法派生 topic；请显式传 topic。")
+            topic_clean = plan["goal"]
+            if stage_idx is not None:
+                topic_clean = f"{topic_clean} - Stage {stage_idx}"
+        except Exception as e:
+            return ToolResult(status="error", content=f"读取关联学习计划失败：{e}")
+
+    # —— 落库 ——
+    store = _get_quiz_store()
+    try:
+        quiz_set_id = store.create_quiz_set(
+            topic=topic_clean,
+            num_questions=len(cleaned),
+            plan_id=plan_id,
+            stage_idx=stage_idx,
+        )
+        added = store.add_questions(quiz_set_id, cleaned)
+    except Exception as e:
+        return ToolResult(status="error", content=f"持久化 quiz 失败 — {e}")
+
+    plan_suffix = f"，关联 plan_id={plan_id}" + (f"/Stage {stage_idx}" if stage_idx else "") if plan_id else ""
+    return ToolResult(
+        status="ok",
+        content=(
+            f"✓ 已创建 quiz_set_id={quiz_set_id}：\"{topic_clean}\"{plan_suffix}，"
+            f"含 {added} 道题。\n"
+            "→ 可向用户依次呈现题目（含 ABCD 选项 / 简答提示），并提示：作答时按 "
+            "『1.B 2.AC 3. <文字>』格式回复；你之后会用 grade_quiz 自动批改。"
+        ),
+    )
+
+
+def _tool_grade_quiz(
+    quiz_set_id: Any,
+    user_answers: Any,
+) -> ToolResult:
+    """批改指定 quiz：MCQ 字符串比对 + 简答 LLM-judge；落库并返回总分 + 错题清单。"""
+    if not isinstance(quiz_set_id, int) or quiz_set_id < 1:
+        return ToolResult(
+            status="error",
+            content=f"grade_quiz(quiz_set_id) 必须是 ≥1 整数，收到：{quiz_set_id!r}",
+        )
+    if not isinstance(user_answers, dict):
+        return ToolResult(
+            status="error",
+            content=(
+                "grade_quiz(user_answers) 必须是 dict {question_id: 答案串}；"
+                f"收到 {type(user_answers).__name__}"
+            ),
+        )
+
+    store = _get_quiz_store()
+    quiz = store.get_quiz_with_questions(quiz_set_id)
+    if quiz is None:
+        return ToolResult(status="error", content=f"quiz_set_id={quiz_set_id} 不存在")
+    if quiz["status"] == "archived":
+        return ToolResult(status="error", content=f"quiz_set_id={quiz_set_id} 已 archived，无法批改")
+
+    questions: list[dict[str, Any]] = quiz["questions"]
+    if not questions:
+        return ToolResult(status="error", content=f"quiz_set_id={quiz_set_id} 没有题目，无法批改")
+
+    # —— 归一化 user_answers key：支持 int / str ——
+    normalized: dict[int, str] = {}
+    for k, v in user_answers.items():
+        try:
+            qid = int(k)
+        except (ValueError, TypeError):
+            continue
+        normalized[qid] = str(v or "")
+
+    # —— 逐题批改 ——
+    gradings: list[dict[str, Any]] = []
+    total_raw = 0.0
+    wrong_lines: list[str] = []
+    for q in questions:
+        qid = q["id"]
+        user_ans = normalized.get(qid, "")
+        q_type = q["q_type"]
+        if q_type in _MCQ_TYPES:
+            score, fb = _grade_one_mcq(user_ans, q["correct_answer"])
+        else:
+            score, fb = _grade_one_short_answer(q["stem"], user_ans, q["correct_answer"])
+        gradings.append({
+            "question_id": qid,
+            "user_answer": user_ans,
+            "score": score,
+            "feedback": fb,
+        })
+        total_raw += score
+        if score < 1.0:
+            order = q["order_idx"]
+            stem_short = q["stem"][:40] + ("…" if len(q["stem"]) > 40 else "")
+            wrong_lines.append(
+                f"  第 {order} 题 [{q_type}] {score:.1f}/1.0 — {fb}\n"
+                f"    题干：{stem_short}\n"
+                f"    标答：{q['correct_answer']}"
+            )
+
+    total_score = round(total_raw * 100.0 / len(questions), 1)
+    ok = store.update_grading(quiz_set_id, gradings, total_score)
+    if not ok:
+        return ToolResult(status="error", content=f"持久化批改结果失败（quiz_set_id={quiz_set_id}）")
+
+    head = (
+        f"📝 已批改 quiz_set_id={quiz_set_id}『{quiz['topic']}』：\n"
+        f"  总分 {total_score:.1f}/100（{int(round(total_raw))}/{len(questions)} 题完全正确）"
+    )
+    if wrong_lines:
+        body = "\n\n薄弱点 / 错题（{n} 道）：\n{lines}".format(n=len(wrong_lines), lines="\n".join(wrong_lines))
+    else:
+        body = "\n\n🎉 全部正确！"
+    tail = (
+        "\n\n→ 可向用户展示总分 + 错题点评（含标答 + 简短考点），"
+        "再问是否要『再考一次 / 换主题 / 看错题详情』。"
+    )
+    return ToolResult(status="ok", content=head + body + tail)
+
+
+def _render_quiz_brief(quiz_set: dict[str, Any]) -> str:
+    """单 quiz_set 摘要（query_quiz_history 列表模式 + CLI list 共用）。"""
+    qid = quiz_set["id"]
+    status = quiz_set["status"]
+    n = quiz_set["num_questions"]
+    topic = (quiz_set["topic"] or "")[:40]
+    score = quiz_set.get("total_score")
+    score_part = f"{score:.1f}/100" if isinstance(score, (int, float)) else "—"
+    plan_suffix = ""
+    if quiz_set.get("plan_id"):
+        plan_suffix = f"，plan {quiz_set['plan_id']}"
+        if quiz_set.get("stage_idx"):
+            plan_suffix += f".S{quiz_set['stage_idx']}"
+    return (
+        f"- quiz_set_id={qid} [{status}] 「{topic}」 {n}题 / 总分 {score_part}{plan_suffix}"
+    )
+
+
+def _render_quiz_detail(quiz: dict[str, Any], include_grading: bool) -> str:
+    """单 quiz 详情：题目清单（detail=True 时含批改细节）。"""
+    head_lines = [
+        f"## quiz_set_id={quiz['id']}「{quiz['topic']}」 [{quiz['status']}]",
+        f"- 题数：{quiz['num_questions']}",
+    ]
+    if quiz.get("plan_id"):
+        head_lines.append(
+            f"- 关联：plan_id={quiz['plan_id']}"
+            + (f" Stage {quiz['stage_idx']}" if quiz.get("stage_idx") else "")
+        )
+    if quiz.get("total_score") is not None:
+        head_lines.append(f"- 总分：{quiz['total_score']:.1f}/100")
+    head_lines.append("")
+
+    body: list[str] = []
+    for q in quiz.get("questions", []):
+        body.append(f"**第 {q['order_idx']} 题** [{q['q_type']}]")
+        body.append(q["stem"])
+        if q["q_type"] in _MCQ_TYPES and q["options"]:
+            for i, opt in enumerate(q["options"]):
+                letter = chr(ord("A") + i)
+                body.append(f"  {letter}. {opt}")
+        if include_grading:
+            body.append(f"  标答：{q['correct_answer']}")
+            if q.get("user_answer"):
+                body.append(f"  你的答案：{q['user_answer']}")
+            if q.get("score") is not None:
+                body.append(f"  得分：{q['score']:.1f}/1.0  反馈：{q.get('feedback', '')}")
+            if q.get("explanation"):
+                body.append(f"  考点：{q['explanation']}")
+        body.append("")
+    return "\n".join(head_lines + body).rstrip()
+
+
+def _tool_query_quiz_history(
+    quiz_set_id: Any = None,
+    plan_id: Any = None,
+    limit: Any = None,
+    detail: bool = False,
+) -> ToolResult:
+    """三路径：单 quiz 详情 / plan 关联 quiz 列表 / 全局 quiz 列表。"""
+    store = _get_quiz_store()
+
+    # —— 路径 1：quiz_set_id 单查 ——
+    if quiz_set_id is not None:
+        if not isinstance(quiz_set_id, int) or quiz_set_id < 1:
+            return ToolResult(
+                status="error",
+                content=f"query_quiz_history(quiz_set_id) 必须是 ≥1 整数，收到：{quiz_set_id!r}",
+            )
+        quiz = store.get_quiz_with_questions(quiz_set_id)
+        if quiz is None:
+            return ToolResult(status="error", content=f"quiz_set_id={quiz_set_id} 不存在")
+        return ToolResult(
+            status="ok",
+            content=_render_quiz_detail(quiz, include_grading=bool(detail)),
+        )
+
+    # —— limit 归一化（plan_id / 全局都用） ——
+    if limit is None:
+        eff_limit = _cfg.QUIZ_HISTORY_LIST_LIMIT
+    elif isinstance(limit, int) and limit > 0:
+        eff_limit = limit
+    else:
+        return ToolResult(
+            status="error",
+            content=f"query_quiz_history(limit) 必须是 ≥1 整数，收到：{limit!r}",
+        )
+
+    # —— 路径 2：plan_id 过滤 ——
+    if plan_id is not None:
+        if not isinstance(plan_id, int) or plan_id < 1:
+            return ToolResult(
+                status="error",
+                content=f"query_quiz_history(plan_id) 必须是 ≥1 整数，收到：{plan_id!r}",
+            )
+        quizzes = store.list_quiz_sets(plan_id=plan_id, limit=eff_limit)
+        if not quizzes:
+            return ToolResult(status="empty", content=f"plan_id={plan_id} 无关联 quiz。")
+        lines = [f"# plan_id={plan_id} 关联 quiz（共 {len(quizzes)} 个）"]
+        lines += [_render_quiz_brief(q) for q in quizzes]
+        return ToolResult(status="ok", content="\n".join(lines))
+
+    # —— 路径 3：全局列表 ——
+    quizzes = store.list_quiz_sets(limit=eff_limit)
+    if not quizzes:
+        return ToolResult(status="empty", content="暂无 quiz 历史。可让用户说『考考我 X』新建一个。")
+    lines = [f"# 最近 quiz 历史（共 {len(quizzes)} 个）"]
+    lines += [_render_quiz_brief(q) for q in quizzes]
+    return ToolResult(status="ok", content="\n".join(lines))
+
+
 def _tool_load_skill(name: str, skill_bodies: dict[str, str]) -> ToolResult:
     """
     加载 Skill 的完整指令正文，返回 <skill_content> 包裹的内容。
@@ -1147,6 +1689,25 @@ def execute_tool(
                 return _tool_query_study_status(
                     plan_id=args.get("plan_id"),
                     list_all=args.get("list_all", False),
+                    detail=args.get("detail", False),
+                )
+            case "create_quiz":
+                return _tool_create_quiz(
+                    questions=args.get("questions"),
+                    topic=args.get("topic"),
+                    plan_id=args.get("plan_id"),
+                    stage_idx=args.get("stage_idx"),
+                )
+            case "grade_quiz":
+                return _tool_grade_quiz(
+                    quiz_set_id=args.get("quiz_set_id"),
+                    user_answers=args.get("user_answers"),
+                )
+            case "query_quiz_history":
+                return _tool_query_quiz_history(
+                    quiz_set_id=args.get("quiz_set_id"),
+                    plan_id=args.get("plan_id"),
+                    limit=args.get("limit"),
                     detail=args.get("detail", False),
                 )
             case _:

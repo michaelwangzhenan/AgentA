@@ -77,6 +77,10 @@ class LearningPlanStore:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON;")
         self._create_tables()
+        # session 级"加载到 prompt"映射（in-memory，不落 DB）：
+        # 对标 Agent Skills 的 load_skill 生命周期 —— 必须由用户/CLI 显式
+        # `/study load [id]` 才注入；切 session 自动清空。详 design.md §3.9.4。
+        self._loaded_by_session: dict[str, int] = {}
         logger.info("LearningPlanStore 初始化完成: %s", db_path)
 
     # ── 表结构初始化 ──────────────────────────────────────────────────────────
@@ -412,25 +416,78 @@ class LearningPlanStore:
             )
         return True
 
+    # ── session 级 loaded plan 映射（手动 /study load）─────────────────────
+    # 对标 Agent Skills 的 load_skill 生命周期：默认不注入，用户用 `/study load [id]`
+    # 手动激活；切 session 自然清空（因 session_id 变了 dict 里查不到）。
+    # 不提供"卸载"命令 —— 新建 session 即天然清空。详 design.md §3.9.4。
+
+    def mark_loaded(self, session_id: str, plan_id: int) -> bool:
+        """
+        将指定 plan 标记为当前 session 已"加载"到 prompt 注入。
+
+        Args:
+            session_id: 当前会话 id。
+            plan_id: 要加载的 plan id；必须存在且非 abandoned。
+
+        Returns:
+            True 标记成功；False plan 不存在 / 已 abandoned（不写映射）。
+        """
+        plan = self.get_plan(plan_id)
+        if plan is None:
+            logger.warning("mark_loaded: plan_id=%d 不存在", plan_id)
+            return False
+        if plan["status"] == "abandoned":
+            logger.warning("mark_loaded: plan_id=%d 已 abandoned，拒绝 load", plan_id)
+            return False
+        self._loaded_by_session[session_id] = plan_id
+        logger.info("mark_loaded: session=%s, plan_id=%d", session_id, plan_id)
+        return True
+
+    def get_loaded(self, session_id: str) -> int | None:
+        """
+        读当前 session 已加载的 plan_id；含 stale 自动清理（plan 已被 abandon /
+        delete 时返回 None 并从映射中 evict，避免后续误注入失效内容）。
+        """
+        pid = self._loaded_by_session.get(session_id)
+        if pid is None:
+            return None
+        plan = self.get_plan(pid)
+        if plan is None or plan["status"] == "abandoned":
+            # stale：上次 load 后 plan 被 abandon / delete，自动 evict
+            self._loaded_by_session.pop(session_id, None)
+            logger.info("get_loaded: session=%s 的 plan_id=%d 已失效，自动清除", session_id, pid)
+            return None
+        return pid
+
+    def clear_loaded(self, session_id: str | None = None) -> None:
+        """
+        清除 loaded 映射。
+        session_id 给定 → 清单个；None → 清全部（主要给 UT / 进程级 reset）。
+        """
+        if session_id is None:
+            self._loaded_by_session.clear()
+        else:
+            self._loaded_by_session.pop(session_id, None)
+
     # ── 摘要 / 上下文注入 helper ─────────────────────────────────────────────
 
-    def render_active_for_prompt(self, max_chars: int = 1500) -> str:
+    def render_plan_for_prompt(self, plan_id: int, max_chars: int = 1500) -> str:
         """
-        把 active plan 渲染成可注入 system prompt 的 markdown 块；
-        无 active plan 返回空字符串。
+        把指定 plan 渲染成可注入 system prompt 的 markdown 块；
+        plan 不存在 / 已 abandoned 时返回空字符串（caller 凭此跳过注入）。
         超出 max_chars 自动截断（保留前部 + 末尾标注 "...截断..."）。
         """
-        active = self.get_active()
-        if not active:
+        plan = self.get_plan_with_tasks(plan_id)
+        if plan is None or plan["status"] == "abandoned":
             return ""
 
         lines = [
-            f"## 当前学习计划（plan_id={active['id']}）",
-            f"**目标**：{active['goal']}",
+            f"## 当前学习计划（plan_id={plan['id']}）",
+            f"**目标**：{plan['goal']}",
         ]
-        if active["weeks"]:
-            lines.append(f"**周期**：{active['weeks']} 周")
-        tasks = active.get("tasks", [])
+        if plan["weeks"]:
+            lines.append(f"**周期**：{plan['weeks']} 周")
+        tasks = plan.get("tasks", [])
         done = sum(1 for t in tasks if t["status"] == "success")
         total = len(tasks)
         lines.append(f"**进度**：{done}/{total} 完成")

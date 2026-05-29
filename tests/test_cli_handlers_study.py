@@ -5,6 +5,7 @@
     - 无参 / `list` 子命令：空 / 多 plan / active 标记
     - `show`：无 active / active / 指定 plan_id / 不存在
     - `switch`：成功 / 不存在 / 已 abandoned
+    - `load`：无参（取 active）/ 指定 id / 无 active / 不存在 / 已 abandoned / session 隔离
     - `abandon`：confirm 流程（yes / no）
     - 错误处理：非整数 plan_id / 负数 / 空参
 """
@@ -145,6 +146,69 @@ class TestStudySwitch:
         lines, out = _make_collector()
         handle_study(store, ["/study", "switch"], out=out)
         assert any("请提供 plan_id" in ln for ln in lines)
+
+
+# ── /study load ─────────────────────────────────────────────────────────────
+
+class TestStudyLoad:
+    """`/study load [plan_id]`：手动激活 plan 注入到当前 session prompt（路线 C）。"""
+
+    def test_load_without_id_uses_active(self, store: LearningPlanStore) -> None:
+        _, p2 = _seed_plans(store)
+        lines, out = _make_collector()
+        handle_study(store, ["/study", "load"], session_id="sess-A", out=out)
+        joined = "\n".join(lines)
+        assert "已加载" in joined and f"plan_id={p2}" in joined
+        assert store.get_loaded("sess-A") == p2
+
+    def test_load_without_id_no_active_prints_hint(self, store: LearningPlanStore) -> None:
+        lines, out = _make_collector()
+        handle_study(store, ["/study", "load"], session_id="sess-A", out=out)
+        assert any("没有 active" in ln for ln in lines)
+        assert store.get_loaded("sess-A") is None
+
+    def test_load_with_id_succeeds(self, store: LearningPlanStore) -> None:
+        p1, _ = _seed_plans(store)
+        lines, out = _make_collector()
+        handle_study(store, ["/study", f"load {p1}"], session_id="sess-A", out=out)
+        joined = "\n".join(lines)
+        assert "已加载" in joined and f"plan_id={p1}" in joined
+        assert store.get_loaded("sess-A") == p1
+
+    def test_load_unknown_returns_error(self, store: LearningPlanStore) -> None:
+        lines, out = _make_collector()
+        handle_study(store, ["/study", "load 999"], session_id="sess-A", out=out)
+        assert any("加载失败" in ln for ln in lines)
+        assert store.get_loaded("sess-A") is None
+
+    def test_load_abandoned_returns_error(self, store: LearningPlanStore) -> None:
+        p1, _ = _seed_plans(store)
+        store.abandon_plan(p1)
+        lines, out = _make_collector()
+        handle_study(store, ["/study", f"load {p1}"], session_id="sess-A", out=out)
+        assert any("加载失败" in ln for ln in lines)
+        assert store.get_loaded("sess-A") is None
+
+    def test_load_invalid_id_prints_hint(self, store: LearningPlanStore) -> None:
+        lines, out = _make_collector()
+        handle_study(store, ["/study", "load abc"], session_id="sess-A", out=out)
+        assert any("无效 plan_id" in ln for ln in lines)
+
+    def test_load_sessions_isolated(self, store: LearningPlanStore) -> None:
+        """A session load → B session 仍未 load。"""
+        p1, _ = _seed_plans(store)
+        lines, out = _make_collector()
+        handle_study(store, ["/study", f"load {p1}"], session_id="sess-A", out=out)
+        assert store.get_loaded("sess-A") == p1
+        assert store.get_loaded("sess-B") is None
+
+    def test_load_replaces_previous(self, store: LearningPlanStore) -> None:
+        """同 session 多次 load 替换上次的目标 plan。"""
+        p1, p2 = _seed_plans(store)
+        _, out = _make_collector()
+        handle_study(store, ["/study", f"load {p1}"], session_id="sess-A", out=out)
+        handle_study(store, ["/study", f"load {p2}"], session_id="sess-A", out=out)
+        assert store.get_loaded("sess-A") == p2
 
 
 # ── /study abandon ──────────────────────────────────────────────────────────

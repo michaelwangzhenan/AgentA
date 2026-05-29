@@ -2,7 +2,7 @@
 
 通过搭建AgentA 来：
 - 实践 Vibe coding ：从零开始，在自己不是什么都了解的情形下，完成一个完整项目
-- 学习 RAG ： 通过实现真实的 RAG，来逐步了解其原理和本质
+- 学习 RAG (Retrieval-Augmented Generation，检索增强生成) ： 通过实现真实的 RAG，来逐步了解其原理和本质
 - 学习 Agent ：通过实现一个Agent，来深入理解Agent的原理，以便更好的使用 AI
 - 项目展示 ：把本项目包装为一个实战项目，用于找工作/面试
 
@@ -37,7 +37,7 @@
 5. Prompt ： 理解 system/user/assistant prompt，实现类似 GHC/cursor 在 .github/.cursor 目录下的 prompt 文件，或自定义agent
 6. Tools ：Agent 代码自实现的 tool(RAG,web search, etc) + 类似 GHC 把插件当作工具
 7. Skills ：支持标准 Skills 注入（https://agentskills.io/home），实现参考 GHC 
-8. MCP ： 支持标准MCP(https://modelcontextprotocol.io/docs/getting-started/intro) ，实现参考 GHC/Cursor
+8. MCP (Model Context Protocol，模型上下文协议) ： 支持标准 MCP (https://modelcontextprotocol.io/docs/getting-started/intro)，实现参考 GHC/Cursor
 9. Thinking模式：增加更多模型支持，流式输出优化，可折叠等
 10. Harness ： LLM 直接返回文本 → 输出最终回答，评价回答，决定是否继续提问 => 建立反馈机制，让 AI 能自我检查和修正。
 11. 防止 prompt injection
@@ -90,7 +90,7 @@ Review 完整实现 @AgentA 目录
 
 **第一档：直接清理（明确冗余，行为零变化）**
 
-1. **CLI `/ingest` 命令全链路移除** —— 已被 `tools/rag_cli.py ingest` 完全覆盖且更强（叠加了 status / clear / 孤儿 segment 清理 / sidecar 历史），表现层不应再承担 RAG 运维。涉及：
+1. **CLI `/ingest` 命令全链路移除** —— 已被 `tools/rag_cli.py ingest` 完全覆盖且更强（叠加了 status / clear / 孤儿 segment 清理 / 伴生文件历史），表现层不应再承担 RAG 运维。涉及：
    - `main.py:140-161`：`/ingest` 分支 + 手写参数解析
    - `chainlit_app.py:317-324`：`/ingest` 分支
    - `chainlit_app.py:167-181`：`_parse_ingest_args`
@@ -337,7 +337,7 @@ Part B 落地总览：
 
 - **`src/agent/agent_api.py`** 新建：`AgentAPI(Protocol, runtime_checkable)` 含 `session_id / last_usage / thinking_cfg / events` 4 属性 + `run / activate_skill / set_event_callback` 3 方法 —— 即 [design.md §3.1](design.md#31-agentapi) 的 Python 实现
 - **`src/agent/core/event_bus.py`** 升级：新增 `AgentEvent` dataclass；`publish` 单参签名（无 shim）；新增 `ALL_EVENT_TYPES` 元组便于遍历
-- **`src/agent/agent.py`** 改造：删 `set_thinking_callback / set_token_callback`，新增 `set_event_callback`；`run` 内补 `info / final_answer / error` 发射；空内容 / 超轮次 fallback 路径也发出 `error + final_answer`
+- **`src/agent/agent.py`** 改造：删 `set_thinking_callback / set_token_callback`，新增 `set_event_callback`；`run` 内补 `info / final_answer / error` 发射；空内容 / 超轮次兜底路径也发出 `error + final_answer`
 - **`src/agent/core/tool_call_engine.py`** 新增 `events` 构造参数；`process` 内每次 execute_tool 前后发出 `tool_call_start / tool_call_end`
 - **`src/agent/autogpt_agent.py`** 同上：删旧双方法、加 `set_event_callback`、`run` 入口发 `info`、退出前发 `final_answer`、`activate_skill` 发 `info`；`_execute_task` 工具调用处发 `tool_call_start / tool_call_end`
 - **`src/agent/langchain_agent.py`** 删旧双方法、加 `set_event_callback`；`run` 发 `final_answer + error`（D3=A 路线）
@@ -567,12 +567,12 @@ Part B 落地总览：
 | Phase | 场景 | 增量 |
 |---|---|---|
 | Phase 1 | 个人知识助手 | RAG 能力 + 基础 Agent loop + Memory + 引用展示 |
-| Phase 2 | + 学习/研究助理 | 在个人知识助手上叠加：**Plan**（学习计划）/ **SRS**（Spaced Repetition 主动复习）/ **Quiz**（出题） |
+| Phase 2 | + 学习/研究助理 | 在个人知识助手上叠加：**Plan**（学习计划）/ **SRS**（Spaced Repetition System，间隔重复练习系统）/ **测验**（出题） |
 
-**两个场景共享 ~80%+ 代码**：RAG / Agent loop / EventBus / UI / Memory / Skill / MCP 全部共用；增量只在"学习闭环"业务逻辑（plan / SRS 调度 / quiz）。
+**两个场景共享 ~80%+ 代码**：RAG / Agent loop / EventBus / UI / Memory / Skill / MCP 全部共用；增量只在"学习全流程"业务逻辑（plan / SRS 调度 / 测验）。
 
 
-- 个人知识助手是私有版 NotebookLM，叠加**主动学习/研究助理（Plan + SRS + Quiz）**
+- 个人知识助手是私有版 NotebookLM，叠加**主动学习/研究助理（Plan + SRS + 测验）**
 - 场景差异化：NotebookLM 只是被动 Q&A，本项目加入"主动陪你学"的循环，且全本地、隐私可控
 
 
@@ -587,7 +587,7 @@ Part B 落地总览：
 | 4 | Memory | [§3 #4] | [Phase 1.2](#473-实施顺序) | 单层 → user / project / local 三层（参考 Claude Code）；从被动 extract 升级为主动 consolidation |
 | 5 | Prompt | [§3 #5] | [Phase 1.3](#473-实施顺序) | 用户偏好文件 `.agenta/rules.md`（参考 Cursor Rules / Copilot Custom Instructions） |
 | 6 | Tools | [§3 #6] | 新增 tool 在 [Phase 2.2/2.3/2.4](#473-实施顺序) | 现有 RAG / web_search 保留；为 Phase 2 新增 plan_tracker / quiz_grader / srs_scheduler |
-| 7 | Skills | [§3 #7] | [Phase 1.5](#473-实施顺序) | 框架强化（Skill 清单 / 自动加载 / Skill registry），承载 Phase 2 学习/研究助理（Plan / SRS / Quiz）的 quiz_maker / review_card / study_planner 等 |
+| 7 | Skills | [§3 #7] | [Phase 1.5](#473-实施顺序) | 框架强化（Skill 清单 / 自动加载 / Skill registry），承载 Phase 2 学习/研究助理（Plan / SRS / 测验）的 quiz_maker / review_card / study_planner 等 |
 | 8 | Thinking 模式 | [§3 #9] | [Phase 3.1](#473-实施顺序) | **本期仅做 CLI 渲染优化**（thinking 段分隔标记、流式分块输出）；WebUI 端的可折叠/展开等渲染留待 [design.md §4.2 WebUI](design.md#42webui) 单独优化任务 |
 
 **新增 feature**
@@ -596,11 +596,11 @@ Part B 落地总览：
 |---|---|---|---|---|---|
 | 1 | MCP | 基础设施 | [§3 #8] | [Phase 3.2](#473-实施顺序) | 至少接 1-2 个标杆 server（fetch / filesystem / 第三方知识源） |
 | 2 | 防 prompt injection | 安全 | [§3 #11] | [Phase 3.3](#473-实施顺序) | RAG 召回内容过滤 + 命令白名单 |
-| 3 | Harness（自检 / 反思） | 通用能力 | [§3 #10] + [§4.6.2 G1/G3] | [Phase 2.5](#473-实施顺序) | Reflexion 风格：Quiz 答案自评、Plan 执行回顾、RAG 召回判定 |
+| 3 | Harness（自检 / 反思） | 通用能力 | [§3 #10] + [§4.6.2 G1/G3] | [Phase 2.5](#473-实施顺序) | Reflexion 风格：测验答案自评、Plan 执行回顾、RAG 召回判定 |
 | 4 | 引用展示（jump to source） | RAG 体验增强 | [§4.6.2 衍生] | [Phase 1.4](#473-实施顺序) | 输出格式约定：每条回答含 `[source: file#section]`，UI 可点击跳转原文 |
 | 5 | **Plan**：学习计划生成 | 学习/研究助理（Phase 2 业务） | [新] + [§4.6.2 A2] | [Phase 2.2](#473-实施顺序) | 用户给出目标（如"准备 ML 面试"）→ Agent 生成阶段性计划 + 进度跟踪 |
 | 6 | **SRS**：Spaced Repetition 主动复习调度 | 学习/研究助理（Phase 2 业务） | [新] + [§4.6.2 C8 风格] | [Phase 2.4](#473-实施顺序) | 后台 scheduler 按遗忘曲线主动触发复习；与被动 Q&A 拉开根本差距 |
-| 7 | **Quiz**：出题 | 学习/研究助理（Phase 2 业务） | [新] + [§4.6.2 F1/F3] | [Phase 2.3](#473-实施顺序) | 基于知识库内容自动出题（多选/简答），结合 Harness 自评 |
+| 7 | **测验**：出题 | 学习/研究助理（Phase 2 业务） | [新] + [§4.6.2 F1/F3] | [Phase 2.3](#473-实施顺序) | 基于知识库内容自动出题（多选/简答），结合 Harness 自评 |
 
 
 ### 4.7.3. 实施顺序
@@ -616,7 +616,7 @@ Part B 落地总览：
 | 1.2 | Memory 触发优化 + 手动写入 + 评估 | 已有强化 | P0 | 跨次对话能记住"用户喜欢中文回答""偏好引用论文页码"；自动提取按 N 轮/min_len 触发；用户可 `/memory add` / `/memory edit`；golden 召回 ≥ 80%（详 [§4.9.2](#492-memory-触发优化--手动写入--评估-phase-12)） |
 | 1.3 | Prompt 用户偏好（`.agenta/rules.md`）| 已有强化 | P1 | 项目根放 rules.md 自动注入 |
 | 1.4 | 引用展示（jump to source）| 新 | P0 | 每条回答末尾列 `[source: file#section]`，Chainlit 可点击(本次任务不实现) |
-| 1.5 | Skills 框架强化（registry / 自动加载）| 已有强化 | P0 | 为 Phase 2 的 Quiz/Plan Skill 铺路 |
+| 1.5 | Skills 框架强化（registry / 自动加载）| 已有强化 | P0 | 为 Phase 2 的 测验/Plan Skill 铺路 |
 
 **Phase 1 目标**：能塞个人文档 → 自然语言查 → 跨 session 记得偏好 → 答案带可跳转引用。
 
@@ -627,9 +627,9 @@ Part B 落地总览：
 |---|---|---|---|---|
 | 2.1 | Agent 循环升级（Plan-Execute） | 已有强化 | P0 | 2.2 前置依赖；Agent 能执行多步骤计划 |
 | 2.2 | **Plan**：学习计划生成 | 新 P0 业务 | P0 | 用户给目标（"准备 ML 面试"）→ Agent 输出阶段计划 + 跟踪进度 |
-| 2.3 | **Quiz**：出题（Skill + tool） | 新 P0 业务 | P0 | 基于 KB 内容自动出 5~10 题（多选/简答），用户答完给反馈 |
+| 2.3 | **测验**：出题（Skill + tool） | 新 P0 业务 | P0 | 基于 KB 内容自动出 5~10 题（多选/简答），用户答完给反馈 |
 | 2.4 | **SRS**：主动复习调度 | 新 P0 业务 | P0 | 后台 scheduler 按遗忘曲线提醒复习；可对接通知（邮件 / 系统 toast） |
-| 2.5 | **Harness**：自检 / 反思 | 新 | P1 | Quiz 答案自评、Plan 执行后回顾、RAG 召回相关性自判 |
+| 2.5 | **Harness**：自检 / 反思 | 新 | P1 | 测验答案自评、Plan 执行后回顾、RAG 召回相关性自判 |
 
 **Phase 2 目标**：用户给学习目标 → 生成计划 → 出题 → 复习 → 自检循环，全程 Agent 主动驱动。
 
@@ -658,7 +658,7 @@ Part B 落地总览：
 |---|---|---|
 | 功能正确性 | 所有 | 输入→输出基础正确性 |
 | 记忆/检索准确性 | Memory / SRS / 引用展示 / RAG | 召回是否准、引用是否对得上原文 |
-| 推理质量 | Plan / Quiz / Harness / Agent 循环 | LLM 输出"好坏"（超出"对错"的主观判定） |
+| 推理质量 | Plan / 测验 / Harness / Agent 循环 | LLM 输出"好坏"（超出"对错"的主观判定） |
 | 安全性 | 防 prompt injection | 攻击样本是否被识别拦截 |
 | UX 流畅度 | Thinking CLI / Session / Skills | 主观体验 |
 | 性能 / 成本 | 所有 | 延迟、token、API 费用 |
@@ -697,7 +697,7 @@ Part B 落地总览：
 | 1.5 Skills | ✅ | | | | | ○ | |
 | 2.1 Plan-Execute | ✅ | ✅ | | | ✅ | | |
 | 2.2 Plan | ✅ | | | ✅ | ○ | | |
-| 2.3 Quiz | ✅ | | ✅ | ✅ | | | |
+| 2.3 测验 | ✅ | | ✅ | ✅ | | | |
 | 2.4 SRS | ✅ | | ✅ | | | | |
 | 2.5 Harness | ✅ | | | ✅ | ✅ | | |
 | 3.1 Thinking CLI | ✅ | | | | | ✅ | |
@@ -710,7 +710,7 @@ Part B 落地总览：
 | Phase | 出口判据 |
 |---|---|
 | Phase 1: 个人知识助手 | 跑 20 个真实个人知识查询场景：引用准确率 ≥ 90% / Memory 跨 session 召回 ≥ 80% / UX 自评 ≥ 4(满分5) |
-| Phase 2: 学习/研究助理 | 跑 1 个完整学习目标闭环（如"准备 ML 面试"）：Plan 生成 → 3 轮 Quiz → SRS 调度 → 进度可视化全程无中断；Plan / Quiz judge 评分 ≥ 4 |
+| Phase 2: 学习/研究助理 | 跑通 1 个完整学习目标（如"准备 ML 面试"）：Plan 生成 → 3 轮测验 → SRS 调度 → 进度可视化全程无中断；Plan / 测验 judge 评分 ≥ 4 |
 | Phase 3: 工具和安全补强 | feature × eval 矩阵全跑通；性能/成本数据齐全；adversarial test 100 样本拦截率 ≥ 95% |
 
 
@@ -724,7 +724,7 @@ Part B 落地总览：
 |---|---|---|
 | `runner` | 统一 eval 入口（按 feature / phase / full 选择） | 所有 eval |
 | `report` | 渲染 Markdown 报告（含元信息头 / 核心指标表 / 诊断小节） | 所有 eval |
-| `judge` | LLM-as-Judge 通用模块（judge prompt + 待评内容 → 分数 + 理由） | Plan / Quiz / Harness |
+| `judge` | LLM-as-Judge 通用模块（judge prompt + 待评内容 → 分数 + 理由） | Plan / 测验 / Harness |
 | `trajectory` | 录制 agent run 完整事件流 / 离线回放 / diff | Plan-Execute / Harness / 任何多轮 feature |
 | `profiler` | 延迟、token、cost 自动采集 | 所有 |
 | `golden_loader` | golden set 加载 / 版本管理 | Memory / 引用展示 / SRS |
@@ -740,7 +740,7 @@ Part B 落地总览：
 
 | 复用关系 | 共享对象 |
 |---|---|
-| Plan / Quiz / Harness | 共享 `judge` framework，各自 judge prompt 不同 |
+| Plan / 测验 / Harness | 共享 `judge` framework，各自 judge prompt 不同 |
 | Memory / 引用展示 / SRS | 共享 `golden_loader`，各自 dataset schema 略不同 |
 | Plan-Execute / Harness | 共享 `trajectory` 录制回放 |
 | 全部 feature | 共享 `runner` / `report` / `profiler` |
@@ -757,7 +757,7 @@ Part B 落地总览：
 ## 4.9. 开始实现
 按[4.7.3](#473-实施顺序)的实施顺序，逐功能实现。每个 feature 走完 **Step 0 → Step 6** 才算关 phase：
 
-0. **需求规格 (Requirements)** — 用 4 行表锁定**用户视角的约定**：用户故事 / 验收标准 / Scope（**本期做** + 暂时不做 / 显式不做 cross-ref §4.13）/ 依赖。详细写法详 [§4.9.0 实现文档风格](#490-实现文档风格)。⚠️ 三点强约束：(a) `§4.7.3` 的"出口判据"是早期粗粒度规划，**不能直接当需求**，必须基于当前项目状态独立起草；(b) Scope 中的"**暂时不做** / **显式不做**"项必须**同步登记到 [§4.13 Backlog](#413-backlog集中-punt-入口)** 对应子节（§4.13.1 / §4.13.2），作为所有 punt 项的唯一入口，章节正文不复述详情；(c) 正确区分"**暂时不做**（计划分阶段做 → §4.13.1）"与"**显式不做**（永久 punt → §4.13.2）"，错分会导致 backlog 漏项或永久不做项被重复讨论。
+0. **需求规格 (Requirements)** — 用 4 行表锁定**用户视角的约定**：用户故事 / 验收标准 / Scope（**本期做** + 暂时不做 / 显式不做 cross-ref §4.13）/ 依赖。详细写法详 [§4.9.0 实现文档风格](#490-实现文档风格)。⚠️ 三点必须遵守的规则：(a) `§4.7.3` 的"出口判据"是早期粗粒度规划，**不能直接当需求**，必须基于当前项目状态独立起草；(b) Scope 中的"**暂时不做** / **显式不做**"项必须**同步登记到 [§4.13 Backlog](#413-backlog集中-punt-入口)** 对应子节（§4.13.1 / §4.13.2），作为所有 punt 项的唯一入口，章节正文不复述详情；(c) 正确区分"**暂时不做**（计划分阶段做 → §4.13.1）"与"**显式不做**（永久 punt → §4.13.2）"，错分会导致 backlog 漏项或永久不做项被重复讨论。
 1. Review 当前代码，如已有初步实现，给出优化建议，写到对应子章节，如 [4.9.1 Session 列表/搜索/恢复(phase 1.1)](#491-session-列表搜索恢复phase-11)
 2. 如是新需求，给出实施计划，写到对应子章节，如 [4.9.1 Session 列表/搜索/恢复(phase 1.1)](#491-session-列表搜索恢复phase-11)
 3. 按计划实现代码
@@ -779,7 +779,7 @@ Part B 落地总览：
 | **Step 0 结构** | 用 4 行表锁定需求约定：① **用户故事**（who / what / why，"作为…用户，我希望…，这样我能…"）② **验收标准**（用户视角可观察的条件，Step 5 评估时直接对照）③ **Scope**（2 段：**本期做** + **暂时不做 / 显式不做 cross-ref [§4.13](#413-backlog集中-punt-入口)**，都是用户视角）④ **依赖**（前置 feature / 已有 API / 第三方库）。**来源采用混合策略**：AI 先列 [§4.7.3](#473-实施顺序) / [§4.7.2](#472-选定-feature-列表) / [§4.6.2](#462-候选-feature) 早期想法作"历史参照"，再独立起草现在的规格，用户在新规格基础上修正 |
 | **Scope 字段写法** | **本期做**：列具体内容（catalog discovery / L1 注入 / ...）<br>**暂时不做 / 显式不做**：**只 cross-ref [§4.13.1](#4131-deferred-backlog暂时不做) / [§4.13.2](#4132-dropped永久不做)** 对应编号（如"详 §4.13.1 #7 #8 / §4.13.2 #21-#24"），**不复述项详情**。详情统一在 §4.13 唯一登记 |
 | **表达方式** | 优先**表格**；流程/层次关系用 Mermaid；行内 code 引用文件 / API / config 名用反引号 |
-| **Punt 项归集（强约束）** | §4.9.x 各章节**不允许**单列"显式不做"表或"实现层显式不做"段；所有暂时 / 永久不做项**一律**进 [§4.13](#413-backlog集中-punt-入口) 统一登记，feature 章节正文只 cross-ref 编号 |
+| **Punt 项归集（强制）** | §4.9.x 各章节**不允许**单列"显式不做"表或"实现层显式不做"段；所有暂时 / 永久不做项**一律**进 [§4.13](#413-backlog集中-punt-入口) 统一登记，feature 章节正文只 cross-ref 编号 |
 | **写作时机** | Step 0+1+2 在动手前写完（让用户审约定 + 计划）；Step 3-6 在实施后回填 |
 
 **反例（已发生过 → 不要再犯）**
@@ -955,8 +955,8 @@ Memory 实际现状已经覆盖大部分  混合范式（用户记忆自动提�
 | 写入范式 | 混合 | 跟 ChatGPT / Cursor Memories 一致，对学习场景最契合 |
 | 分层 | **不分层**（单一全局池）| 单用户几十条规模 context 装得下，按主题切是负担 |
 | 触发频率 | 每 N 轮 + min_len（默认 N=5, min_len=20，可配置）| 短问题不浪费 LLM 调用 |
-| 编辑形态 | 纯 CLI（`add` / `edit` / `del`）| MD sidecar 加 ~200 行 sync 代码 over-engineering |
-| 评估方式 | 5-8 个 golden case + keyword/regex check | LLM-judge 留 Phase 2 Plan/Quiz 时再上 framework |
+| 编辑形态 | 纯 CLI（`add` / `edit` / `del`）| MD 伴生文件加 ~200 行 sync 代码属于过度设计 |
+| 评估方式 | 5-8 个 golden case + keyword/regex check | LLM-judge 留 Phase 2 Plan/测验 时再上 framework |
 
 11 项改动，分 7 块：
 
@@ -1336,8 +1336,8 @@ C0x 人工跑实测（Provider: qwen）：
 | **依赖** | `.agenta/skills/` 目录已归位（[§4.9.3 Step 7](#493-prompt-管理-phase-13)）；`src/cli/skill_loader.py` 已有基础加载逻辑；`Agent.activate_skill(name)` API 已实现手动激活；`SYSTEM_PROMPT` 三层注入机制（base / `<project_rules>` / `<user_context>`）；phase 1.4 `CitationBuilder` 已部署在 tool 层（自动生效） |
 
 > _历史参照_：
-> [§4.7.2 #7](#472-选定-feature-列表) "框架强化（Skill 清单 / 自动加载 / Skill registry），承载 Phase 2 学习/研究助理（Plan / SRS / Quiz）的 quiz_maker / review_card / study_planner 等"；
-> [§4.7.3 Phase 1.5](#473-实施顺序) 出口判据 "为 Phase 2 的 Quiz/Plan Skill 铺路"；
+> [§4.7.2 #7](#472-选定-feature-列表) "框架强化（Skill 清单 / 自动加载 / Skill registry），承载 Phase 2 学习/研究助理（Plan / SRS / 测验）的 quiz_maker / review_card / study_planner 等"；
+> [§4.7.3 Phase 1.5](#473-实施顺序) 出口判据 "为 Phase 2 的 测验/Plan Skill 铺路"；
 > [§3 #7](#3-当前-agenta-的-agent-部分) "支持标准 Skills 注入 (https://agentskills.io/home)"。早期措辞含糊或过程性，本节（[§4.9.5](#495-skills-框架强化-phase-15)）Step 0 独立起草用户视角约定。
 
 **Step 1 · Review 现状**
@@ -1443,12 +1443,12 @@ sequenceDiagram
 | CLI 启动 + /reload-skills | `main.py`：启动段把 banner 显式 print；`/reload-skills` 复用同一函数 |
 | Chainlit 启动 + /reload-skills | `chainlit_app.py:on_chat_start()` 同步打印 banner 到欢迎消息；`/reload-skills` 命令同步走 |
 | 真实业务 skill | `.agenta/skills/study-planner/SKILL.md`（新）：name + 触发关键词丰富的 description；body 含 when_to_use / 输出原则 / 短/长两套模板 / 流程约束 / 反模式，引用规则参照 phase 1.4 默认机制 |
-| 加载器 UT 扩展 | `tests/test_skill_loader.py`：新增 3 个测试类共 8 case — `TestScanResultFailures`（4 case：yaml 错 / frontmatter 不闭合 / name fallback / 多失败按顺序）+ `TestFormatScanBanner`（3 case：empty / loaded only / 含 failed 块）+ `TestRealAgentaSkills`（1 case：仓库内置 example-skill / study-planner 0 失败） |
-| 评估脚本 | `tools/agent_eval/skills/recall_skill.py`（新）：扫真实 skills → 拼 base + catalog system_prompt → 单步 `chat()` with `tools=get_tools(skill_bodies)` → 解析 `tool_calls` 抽 `load_skill(name=…)` 列表 → positive 判命中 / negative 判未触发；落盘 markdown 报告（核心指标 / 分组指标 / 全 case 总览 / Fail 详情，复用 `recall_golden.py` 风格） |
+| 加载器 UT 扩展 | `tests/test_skill_loader.py`：新增 3 个测试类共 8 case — `TestScanResultFailures`（4 case：yaml 错 / frontmatter 不闭合 / name 兜底 / 多失败按顺序）+ `TestFormatScanBanner`（3 case：empty / loaded only / 含 failed 块）+ `TestRealAgentaSkills`（1 case：仓库内置 example-skill / study-planner 0 失败） |
+| 评估脚本 | `tools/agent_eval/skills/recall_skill.py`（新）：扫真实 skills → 拼 base + catalog system_prompt → 单步 `chat()` with `tools=get_tools(skill_bodies)` → 解析 `tool_calls` 抽 `load_skill(name=…)` 列表 → positive 判命中 / negative 判未触发；存储 markdown 报告（核心指标 / 分组指标 / 全 case 总览 / Fail 详情，复用 `recall_golden.py` 风格） |
 | Golden dataset | `tools/agent_eval/skills/dataset.json`（新）：8 case，4 positive（study-planner ×3 中/速成/英文 + example-skill 规范问 ×1）+ 4 negative（greet / 纯事实 RAG / 相邻主题书单 / trivia） |
 | design.md / README | `docs/design.md` 新增 §3.7 Skills 框架（5 子节：数据来源 / 渐进披露 L1+L2 / 失败可见性 / 与 Rules+引用关系 / 评估方法 + Mermaid sequenceDiagram）；`README.md §1.2 Agent` 把"Skills 加载"bullet 改写为"Skills 框架"，覆盖启动回显 / 主动认出 / 引用复用三点新增能力 |
 
-> _Step 2 计划微调_：原计划 5.1 "main.py 启动打印 capsys UT" 取消 — 启动 banner 的核心字符串逻辑已由 `TestFormatScanBanner`（3 case）100% 覆盖；`main.py` 那段只是 3 行 trivial `print(success_line); if failure_block: print(failure_block); print()`，再单独造 main() stub 测它的边际价值低于 over-test 成本。
+> _Step 2 计划微调_：原计划 5.1 "main.py 启动打印 capsys UT" 取消 — 启动 banner 的核心字符串逻辑已由 `TestFormatScanBanner`（3 case）100% 覆盖；`main.py` 那段只是 3 行简单的 `print(success_line); if failure_block: print(failure_block); print()`，再单独造 main() 桩测它的边际价值低于过度测试成本。
 
 **Step 4 · UT 结果**
 
@@ -1544,7 +1544,7 @@ AI 跑过的单 case 烟雾（验证脚本不崩）：
 | **P21-G3** | `EventBus` 7 类事件无 `plan_created` / `plan_step_start` / `plan_step_end` | [`event_bus.py:27-43`](../src/agent/core/event_bus.py) 常量 + `ALL_EVENT_TYPES` 元组 | 小（追加 3 常量 + 元组成员） |
 | **P21-G4** | CLI / Chainlit 端均无 plan 事件订阅与渲染；CLI 当前连 `tool_call_*` 事件都没接（靠 `verbose` log） | `main.py`（订阅链路缺失）+ [`chainlit_app.py:241-248`](../chainlit_app.py) `_event_router` 分流表 | 中（CLI 0 → 有；Chainlit router 加 case） |
 | **P21-G5** | `tools/agent_eval/plan/` 目录、`dataset.json` golden（plan / non-plan 各 5-8 case）、`recall_plan.py` 评估脚本均不存在 | `tools/agent_eval/` 下新增子目录 | 中（仿 `skills/recall_skill.py` 套路） |
-| **P21-G6** | LLM-judge framework（[§4.8.2 评估工具列表](#482-评估工具列表) 的 `judge`）未抽出；呼应 [§4.13.1 #4](#4131-deferred-backlog暂时不做) "第 2 次复用时上 framework" — Phase 2.1 plan judge 是触发条件之一 | `tools/agent_eval/` 下新建 `judge.py`（或仿 [§4.10](#410-配套-toolstoolsagent_eval) 决策位置） | 中（"是否本期抽 framework vs 仅 ad-hoc"是 Step 2 决策） |
+| **P21-G6** | LLM-judge framework（[§4.8.2 评估工具列表](#482-评估工具列表) 的 `judge`）未抽出；呼应 [§4.13.1 #4](#4131-deferred-backlog暂时不做) "第 2 次复用时上 framework" — Phase 2.1 plan judge 是触发条件之一 | `tools/agent_eval/` 下新建 `judge.py`（或仿 [§4.10](#410-配套-toolstoolsagent_eval) 决策位置） | 中（"是否本期抽 framework vs 仅在脚本里内联一份"是 Step 2 决策） |
 | **P21-G7** | `ToolCallEngine.process()` 单步失败只往 messages 注入 hint 让 LLM 自然恢复 — 无 plan 维度的"step status=failed → LLM 看到失败信号 + 三选一控制权"语义 | 语义层在 `Agent.run()` plan-aware 分支管控；工具层（[`tool_call_engine.py:73-139`](../src/agent/core/tool_call_engine.py)）可不动 | 中 |
 | **P21-G8** | `MAX_TOOL_ROUNDS=8` / `MAX_TOTAL_ROUNDS=12` 硬编码，plan N=3-5 步任务易撞顶 | [`agent.py:179-181`](../src/agent/agent.py) 模块常量 | 小（改 plan-aware 自适应） |
 | **P21-G9** | `ChatHistoryStore.messages` schema 无结构化 payload 列；plan + step status 持久化 3 候选（content 写 markdown / 借位 tool_calls JSON / 加新列 `payload`）需 Step 2 拍板 | [`chat_history.py:70-90`](../src/memory/chat_history.py) `_create_tables` + `append/_row_to_message` | 中-大（取决于方案：A 0 schema 改动；B 加列 + migration；C 借位 0 改动但语义脏） |
@@ -1573,8 +1573,8 @@ AI 跑过的单 case 烟雾（验证脚本不崩）：
 | **D1** | plan 持久化 schema（[G9](#step-1--review-现状)） | plan 走标准 OpenAI Function Calling 通道：`user → assistant(tool_calls=[make_plan(arguments={steps:[...]})]) → tool(ack 文本)` 三条 message 自然落库；`update_step` 同套路。重建时读 `assistant.tool_calls[*].function.arguments` JSON 字符串解出 steps，不依赖 tool message 的 ack 文本 | OpenAI Function Calling 协议契合；**0 schema 改动**（兼容现 `chat_history.messages`）；reconstruct 遍历 `assistant.tool_calls` 即得 |
 | **D2** | plan-aware 控制流（[G2 + G10](#step-1--review-现状)） | 嵌入式 plan state：现 `Agent.run()` loop 加 `active_plan` 变量，每轮 LLM 调用前若 active 则注入"当前 step / plan 状态"提示，LLM 通过 `update_step` tool 自驱状态前进 | single loop + tool-driven state 是行业标准（OpenAI Runs / LangGraph）；跟现 ReAct 同形（"看 messages → LLM 决定 → tool 执行"）；现 loop 加 ~50 行即可 |
 | **D3** | 步级失败处理（[G7](#step-1--review-现状)） | 100% LLM 自决：失败信号注入 messages（沿用 `ToolCallEngine` 现有 hint 机制），LLM 自决重试 / `update_step(status=failed)` 跳过 / `abort_plan` 中止 | 跟 [`tool_call_engine.py:131-136`](../src/agent/core/tool_call_engine.py) 现有 hint 注入套路一致；符合 [Step 0 验收 ⑤](#496-agent-循环升级-phase-21) "LLM 自主决定三选一"路线；程序 0 干预 |
-| **D4** | LLM-judge framework 抽象时机（[G5 + G6](#step-1--review-现状)） | 本期仅 ad-hoc `tools/agent_eval/plan/recall_plan.py` 内联 judge（仿 `recall_skill` 套路）；framework 抽象留 Phase 2.2 Plan 业务时一并上 | 严守 [§4.8.2 评估工具列表](#482-评估工具列表) "**第 2 次复用时**上 framework" 硬约束；Phase 2.1 plan judge 是 LLM-judge **第 1 次**用（`recall_golden`/`recall_skill` 是关键词 check 不算）；Phase 2.2 Plan 业务正是第 2 次（兑现 [§4.13.1 #4](#4131-deferred-backlog暂时不做)） |
-| **D5** | `make_plan` 是否同轮执行第 1 步（G10 衍生） | **分轮执行**（two-stage）：`make_plan` tool response 仅返回 ack 文本（含步骤清单 + "下一步：第 1 步 — ..." 指引），LLM **下一轮**才执行 step 1 | LangGraph PlanAndExecute / OpenAI Assistant 标准两阶段；UX 自然（用户先看 plan 再看执行，匹配 [Step 0 用户故事](#496-agent-循环升级-phase-21) "先把要做的步骤列给我看，再分步执行"）；验收 ① "动手前先输出 plan" 自动满足；为未来 [§4.13.1 #10](#4131-deferred-backlog暂时不做) 用户审批预留 turn 分隔通道 |
+| **D4** | LLM-judge framework 抽象时机（[G5 + G6](#step-1--review-现状)） | 本期仅在 `tools/agent_eval/plan/recall_plan.py` 内联一份 judge（仿 `recall_skill` 套路）；framework 抽象留 Phase 2.2 Plan 业务时一并上 | 严守 [§4.8.2 评估工具列表](#482-评估工具列表) "**第 2 次复用时**上 framework" 硬约束；Phase 2.1 plan judge 是 LLM-judge **第 1 次**用（`recall_golden`/`recall_skill` 是关键词 check 不算）；Phase 2.2 Plan 业务正是第 2 次（兑现 [§4.13.1 #4](#4131-deferred-backlog暂时不做)） |
+| **D5** | `make_plan` 是否同轮执行第 1 步（G10 衍生） | **分轮执行**（即两阶段）：`make_plan` tool response 仅返回 ack 文本（含步骤清单 + "下一步：第 1 步 — ..." 指引），LLM **下一轮**才执行 step 1 | LangGraph PlanAndExecute / OpenAI Assistant 标准两阶段；UX 自然（用户先看 plan 再看执行，匹配 [Step 0 用户故事](#496-agent-循环升级-phase-21) "先把要做的步骤列给我看，再分步执行"）；验收 ① "动手前先输出 plan" 自动满足；为未来 [§4.13.1 #10](#4131-deferred-backlog暂时不做) 用户审批预留 turn 分隔通道 |
 
 **端到端流程**
 
@@ -1596,7 +1596,7 @@ sequenceDiagram
     A->>E: publish plan_created
     E->>C: 渲染 📋 Plan checkbox
 
-    Note over A,L: 下一轮（D5 = 分轮执行 / two-stage）
+    Note over A,L: 下一轮（D5 = 分轮执行 / 两阶段）
 
     loop 每个 step
         A->>L: chat(messages + plan 提示 + tools)
@@ -1627,7 +1627,7 @@ sequenceDiagram
 | 6 | CLI plan 渲染：订阅 plan_* 事件 → 输出 📋 / ☐ / ✓ / ✗ | G4 | [`main.py`](../main.py)（新增订阅 + 渲染函数） | + ~40 行 |
 | 7 | Chainlit plan 文本渲染：`_event_router` 增 plan_* case → `cl.Message` 推送 plan 文本（Chainlit step UI 留 [§4.13.1 #11](#4131-deferred-backlog暂时不做)） | G4 | [`chainlit_app.py:241-248`](../chainlit_app.py) | + ~30 行 |
 | 8 | UT：plan tool 行为 / loop plan-aware 分支 / EventBus 新事件 / reconstruct 正确性 | Step 4 配套 | `tests/test_plan_tools.py`（新）+ 扩 `tests/test_agent.py` / `test_event_bus.py` | + ~250 行 |
-| 9 | `tools/agent_eval/plan/recall_plan.py` + `dataset.json`：plan / non-plan 各 5-8 case + ad-hoc LLM-judge（仿 `recall_skill` 套路） | G5 / G6 / D4 | 新建 `tools/agent_eval/plan/` | + ~300 行 |
+| 9 | `tools/agent_eval/plan/recall_plan.py` + `dataset.json`：plan / non-plan 各 5-8 case + 内联 LLM-judge（仿 `recall_skill` 套路） | G5 / G6 / D4 | 新建 `tools/agent_eval/plan/` | + ~300 行 |
 | 10 | `design.md §3.x Agent 循环` 同步：新增"Plan-Execute 叠加层"小节（数据流 / 持久化 schema / 评估方法） | Step 6 | [`docs/design.md`](design.md) | + ~80 行 |
 
 **Step 3 · 代码实现**
@@ -1638,7 +1638,7 @@ sequenceDiagram
 | `core/__init__.py` 模块清单 | 追加 `plan_manager.py` 一行 |
 | Plan 三 tool 定义 + 执行（Scope ① + D3） | [`src/agent/tools.py`](../src/agent/tools.py)：新增 `_PLAN_TOOLS` 三 JSON Schema（`make_plan` / `update_step` / `abort_plan`，含 enum 锁定 status 字段、numeric 校验 step_id、description 写明"何时该用 / 何时不该用"）+ `_tool_make_plan` / `_tool_update_step` / `_tool_abort_plan` 三函数（含 step_id 越界 / 非 int / status 非枚举 / 无 active plan 等 5 类入参校验 → `ToolResult(status="error")`；`update_step` 内部调 `reconstruct_from_messages` 给 LLM 返回进度 + 下一步指引；plan 完成态自动提示 "可总结"）；`execute_tool` 新增 `messages` kwarg + 三 case 路由；`get_tools()` 把 `_PLAN_TOOLS` 永远塞进返回列表 |
 | ToolCallEngine plan 事件叠加 + messages 透传 | [`src/agent/core/tool_call_engine.py`](../src/agent/core/tool_call_engine.py)：`process()` 调 `execute_tool` 时新增 `messages=messages` kwarg（给 plan tool reconstruct 用）；新增 `_maybe_publish_plan_events(tool_name, tool_args, messages)` 私有方法，仅当 `result.status == "ok"` 时按 tool name 分发：`make_plan` → 发 `plan_created` + `plan_step_start(1)`；`update_step` → 发 `plan_step_end` + 若仍有 pending 步发下一 `plan_step_start`；`abort_plan` 不发 plan 事件（终止信号由 final_answer 文案承载） |
-| Agent.run() plan-aware loop（G2 / G8 / G10） | [`src/agent/agent.py`](../src/agent/agent.py)：新增模块常量 `MAX_HARD_CAP_ROUNDS=50` / `_PLAN_ROUNDS_PER_STEP=4` / `_PLAN_TOTAL_HEADROOM=4`；新增 `_compute_effective_caps(messages) -> (tool_cap, total_cap)` 方法（无 plan / 已完成 / aborted → baseline；active plan N 步 → `max(8, N×4+2)` & 总上限 +4 余量，硬上限 50 兜底）；主 loop `for iteration in range(1, self.max_iterations+1)` 改为 `range(1, MAX_HARD_CAP_ROUNDS+1)` + 循环内每轮 `_compute_effective_caps()` 重算 + `if iteration > eff_total_max: break` 提前退；`active_tools` 判断改用 `eff_tool_max`；fallback 文案改 "达到自适应总轮次上限" |
+| Agent.run() plan-aware loop（G2 / G8 / G10） | [`src/agent/agent.py`](../src/agent/agent.py)：新增模块常量 `MAX_HARD_CAP_ROUNDS=50` / `_PLAN_ROUNDS_PER_STEP=4` / `_PLAN_TOTAL_HEADROOM=4`；新增 `_compute_effective_caps(messages) -> (tool_cap, total_cap)` 方法（无 plan / 已完成 / 已中止 → 基线上限；active plan N 步 → `max(8, N×4+2)` & 总上限 +4 余量，硬上限 50 兜底）；主 loop `for iteration in range(1, self.max_iterations+1)` 改为 `range(1, MAX_HARD_CAP_ROUNDS+1)` + 循环内每轮 `_compute_effective_caps()` 重算 + `if iteration > eff_total_max: break` 提前退；`active_tools` 判断改用 `eff_tool_max`；兜底文案改 "达到自适应总轮次上限" |
 | SYSTEM_PROMPT make_plan 指导段（G1） | `src/agent/agent.py:SYSTEM_PROMPT`：在 `## 引用规范` 前插入 `## 何时使用 make_plan（Plan-Execute）` 段（约 30 行）：4 类复杂任务必触发 + 4 类简单任务禁用 + plan 执行规范（步数 / status 三选一 / 完成后总结 / 不要同轮 plan + 业务 tool 混发）|
 | EventBus 三类 plan 事件 | [`src/agent/core/event_bus.py`](../src/agent/core/event_bus.py)：追加 `EVENT_PLAN_CREATED` / `EVENT_PLAN_STEP_START` / `EVENT_PLAN_STEP_END` 三常量 + 写入 `ALL_EVENT_TYPES` 元组 |
 | CLI plan 渲染（G4） | [`src/cli/handlers.py`](../src/cli/handlers.py)：新增 `_PLAN_STATUS_ICONS = {"success": "✓", "failed": "✗", "skipped": "⏭"}` 字典 + `_render_plan_created(payload)` 打印 📋 + 所有 ☐ checkbox + `_render_plan_step_end(payload)` 打印 ✓/✗/⏭ + 可选 note；`run_query._event_router` 增 `plan_created` / `plan_step_end` 两 case（`plan_step_start` CLI 静默，留给 GUI 高亮用） |
@@ -1646,15 +1646,15 @@ sequenceDiagram
 | 加载器 UT（plan_manager） | [`tests/test_plan_manager.py`](../tests/test_plan_manager.py)（新）：22 case 分 4 组 — `TestPlanStateBasics`（6 case：from_step_texts / 空 plan / next_pending / progress / 完成态 / aborted 含 pending）+ `TestPlanStateUpdate`（5 case：success+note / failed+note / unknown step_id / 非法 status / 禁止反向标 pending）+ `TestReconstructFromMessages`（9 case：空 / 无 make_plan / 全 pending / 含 update / 累积更新 / abort / 多 plan 取最新 / SDK 对象形态 / 非法 args 容错）+ `TestEdgeCases`（2 case：非 str step / 缺 steps arg） |
 | Plan tools UT | [`tests/test_tools.py`](../tests/test_tools.py)：扩 19 case — `TestPlanToolsSchema`（4 case：get_tools 含三 tool / steps 必填 / status enum 锁定 / abort 无必填）+ `TestMakePlanExecute`（5 case：valid + 第一步指引 / 空 steps / 非 list / 非 str 元素 / 空白元素）+ `TestUpdateStepExecute`（8 case：success 返回下一步 / 完成 plan / failed+note / skipped / 无 active plan / 越界 step_id / 非法 status / 非 int step_id）+ `TestAbortPlanExecute`（2 case：含 reason / 无 reason） |
 | EventBus plan 事件 UT | [`tests/test_event_bus.py`](../tests/test_event_bus.py)：扩 3 case — `TestPlanEventTypes`（in ALL_EVENT_TYPES / publish-subscribe 往返 / 异常隔离） |
-| Agent events plan UT | [`tests/test_agent_events.py`](../tests/test_agent_events.py)：扩 8 case — `TestPlanEventFlow`（4 case：make_plan 触发 plan_created + plan_step_start / update_step 触发 plan_step_end + 下一 plan_step_start / 完成 plan 只发 plan_step_end / abort 不发 plan 事件）+ `TestPlanAwareCaps`（4 case：无 plan baseline / active plan N=5 扩到 22 / 已完成回退 / aborted 回退） |
+| Agent events plan UT | [`tests/test_agent_events.py`](../tests/test_agent_events.py)：扩 8 case — `TestPlanEventFlow`（4 case：make_plan 触发 plan_created + plan_step_start / update_step 触发 plan_step_end + 下一 plan_step_start / 完成 plan 只发 plan_step_end / abort 不发 plan 事件）+ `TestPlanAwareCaps`（4 case：无 plan 基线 / active plan N=5 扩到 22 / 已完成回退 / 已中止回退） |
 | CLI 渲染器 UT | [`tests/test_cli_handlers.py`](../tests/test_cli_handlers.py)：扩 6 case — `TestPlanRenderers`（plan_created checkbox 块 / 空 steps noop / step_end success+note / failed without note / skipped 图标 / 未知 status 兜底 •） |
 | e2e UT：plan SQLite roundtrip | [`tests/test_memory.py`](../tests/test_memory.py)：扩 4 case — `TestPlanRoundtripFromSqlite`（make_plan-only reload / 完整生命周期 status+note 保留 / abort 持久化 / 多 plan 取最新）；锁住 D1 决策（plan 完全依赖 messages 历史 + 0 schema 改动）不退化 |
 | e2e UT：Agent 多轮 plan | [`tests/test_agent.py`](../tests/test_agent.py)：扩 3 case — `TestAgentPlanExecuteE2E`（two_step_plan_full_lifecycle 6 轮全跑 + 完整事件序列；plan_with_failed_step_then_recovers — LLM 看 failed 后自决 skipped；plan_aborted_mid_way_returns_final_text — abort 后正常出最终答）；mock execute_tool 按 tool name 分流（search_knowledge 假 hit + plan tools 走真实实现），保证 reconstruct 跨真 SQLite + 真 plan 逻辑 |
-| Plan eval runner | [`tools/agent_eval/plan/eval_plan.py`](../tools/agent_eval/plan/eval_plan.py)（新）：仿 `recall_skill.py` 套路 — 独立 `_BASE_PROMPT`（内嵌完整 make_plan 教学段，跟 SYSTEM_PROMPT 解耦避免漂移）+ `_extract_make_plan_args` / `_extract_other_tool_names` 解析 tool_calls + `_judge_recall` 按 category 判 positive/negative（含 min_steps / max_steps 范围校验）+ `_llm_judge_plan_structure`（LLM-judge 4 维度：粒度 / 顺序 / 覆盖度 / 业务对齐，0-5 分；容错剥离 markdown 代码块再 JSON 解析）+ Markdown 报告（核心指标 + positive/negative 分组 + 全 case 总览 + positive 通过 case 的 plan 详情 spot-check + Fail 详情）+ 双阈值退出码（识别率 ≥ 80% AND 结构均分 ≥ 3.5/5） |
+| Plan eval runner | [`tools/agent_eval/plan/eval_plan.py`](../tools/agent_eval/plan/eval_plan.py)（新）：仿 `recall_skill.py` 套路 — 独立 `_BASE_PROMPT`（内嵌完整 make_plan 教学段，跟 SYSTEM_PROMPT 解耦避免漂移）+ `_extract_make_plan_args` / `_extract_other_tool_names` 解析 tool_calls + `_judge_recall` 按 category 判 positive/negative（含 min_steps / max_steps 范围校验）+ `_llm_judge_plan_structure`（LLM-judge 4 维度：粒度 / 顺序 / 覆盖度 / 业务对齐，0-5 分；容错剥离 markdown 代码块再 JSON 解析）+ Markdown 报告（核心指标 + positive/negative 分组 + 全 case 总览 + positive 通过 case 的 plan 详情抽检 + Fail 详情）+ 双阈值退出码（识别率 ≥ 80% AND 结构均分 ≥ 3.5/5） |
 | Plan golden dataset | [`tools/agent_eval/plan/dataset.json`](../tools/agent_eval/plan/dataset.json)（新）：10 case，5 positive（多文档对比 / 学习计划 / 目标+建议 / 多源调研 / 多文档汇总，各含 `min_steps` / `max_steps` 范围）+ 5 negative（单实体 / 单事实 / 闲聊 / 追问 / 礼貌结束） |
 | design.md 同步 | [`docs/design.md`](design.md)：§3.1 AgentEvent 表加 plan_* 三行；**新增 §3.8 Plan-Execute** 完整章节（7 子节：3.8.1 数据载体与 reconstruct + PlanStep/PlanState 数据模型 / 3.8.2 三 tool 协议表 / 3.8.3 端到端 Mermaid sequenceDiagram（含 D5 分轮执行标注）/ 3.8.4 上限自适应表 / 3.8.5 失败恢复表 / 3.8.6 与其它模块关系表 / 3.8.7 评估方法）；§5 IMP 公共层表加 `plan_manager` 行 + `tools.py` / `EventBus` / `ToolCallEngine` 行加 plan 备注；§5 代码组织树加 `citation_builder.py` + `plan_manager.py` 两行；顺手修 `[§4.5 ToolCallEngine]` dead link |
 
-> _Step 2 计划微调_：① 新建文件名 `plan_state.py` → `plan_manager.py`（对齐 [agenta-conventions.mdc §2 公共层后缀](../.cursor/rules/agenta-conventions.mdc) 的 `*_manager.py` 标准，含数据 dataclass + reconstruct 函数语义偏 manager）。② 多写一个 `abort_plan` tool（Step 2 计划只列 `make_plan` + `update_step` 两 tool；Scope ① 写"两个 tool" — 实施时按 D3 "100% LLM 自决"语义补 `abort_plan` 让"中止整个 plan"成显式 tool 而非"反复 failed + 自然走 fallback"，跟 LLM 心智更对齐，UT/eval 同步覆盖）。③ Chainlit / chainlit_app.py 不写专门 UT — 跟现状一致（整个 chainlit_app.py 无 UT 覆盖），plan 事件桥接逻辑契约已由 `test_agent_events.py::TestPlanEventFlow` + `test_cli_handlers.py::TestPlanRenderers` 覆盖；省一份框架级 UT 维护成本。
+> _Step 2 计划微调_：① 新建文件名 `plan_state.py` → `plan_manager.py`（对齐 [agenta-conventions.mdc §2 公共层后缀](../.cursor/rules/agenta-conventions.mdc) 的 `*_manager.py` 标准，含数据 dataclass + reconstruct 函数语义偏 manager）。② 多写一个 `abort_plan` tool（Step 2 计划只列 `make_plan` + `update_step` 两 tool；Scope ① 写"两个 tool" — 实施时按 D3 "100% LLM 自决"语义补 `abort_plan` 让"中止整个 plan"成显式 tool 而非"反复 failed + 自然走兜底"，跟 LLM 心智更对齐，UT/eval 同步覆盖）。③ Chainlit / chainlit_app.py 不写专门 UT — 跟现状一致（整个 chainlit_app.py 无 UT 覆盖），plan 事件桥接逻辑约定已由 `test_agent_events.py::TestPlanEventFlow` + `test_cli_handlers.py::TestPlanRenderers` 覆盖；省一份框架级 UT 维护成本。
 
 **Step 4 · UT 结果**
 
@@ -1685,7 +1685,7 @@ sequenceDiagram
 .venv\Scripts\python -m tools.agent_eval.plan.eval_plan --no-report                  # 不存储报告
 ```
 
-报告存储 `tools/agent_eval/reports/plan-eval-<ts>.md`，含核心指标（识别通过率 + plan 结构均分）/ positive vs negative 分组 / 全 case 总览（含 make_plan 步数 + 结构分）/ positive 通过 case 的 plan 详情 spot-check / Fail 用例详情。**双阈值判据**：识别通过率 ≥ 80%（10 case 需 ≥ 8 通过）AND positive 通过 case 的 plan 结构均分 ≥ 3.5/5，二者都达标才 exit 0。
+报告存储 `tools/agent_eval/reports/plan-eval-<ts>.md`，含核心指标（识别通过率 + plan 结构均分）/ positive vs negative 分组 / 全 case 总览（含 make_plan 步数 + 结构分）/ positive 通过 case 的 plan 详情抽检 / Fail 用例详情。**双阈值判据**：识别通过率 ≥ 80%（10 case 需 ≥ 8 通过）AND positive 通过 case 的 plan 结构均分 ≥ 3.5/5，二者都达标才 exit 0。
 
 AI 跑过的 smoke 验证（`--help` 入口 + 模块 import + dataset JSON 解析）通过；完整 10 case 跑 + LLM-judge 评分待用户在配 API key 环境跑一遍，结果回填本表。
 
@@ -1718,7 +1718,7 @@ AI 跑过的 smoke 验证（`--help` 入口 + 模块 import + dataset JSON 解�
 | **D3** | Plan 创建路径 | `study-planner` skill 内显式调 `create_study_plan` tool | Phase 1.5 已验证 prompt 指引能让 LLM 正确调 plan tool |
 | **D4** | 进度更新粒度 | 任务级 | 行业标准（Anki / Todoist / Notion 一致）；阶段级太粗用户无成就感 |
 | **D5** | Plan 生成是否嵌套 Phase 2.1 plan-execute | 嵌套 | 学习计划生成本身就是复杂多源任务（查 KB / web / 整合），嵌套自然复用 Phase 2.1 |
-| **D6** | LLM-judge framework 抽象时机 | 本期抽 `tools/agent_eval/judge/` helper + Phase 2.1 ad-hoc 改造接入 | 兑现 [§4.13.1 #4](#4131-deferred-backlog暂时不做) "第 2 次复用时上 framework"；helper 30-50 行函数级别，不是 framework 重投入 |
+| **D6** | LLM-judge framework 抽象时机 | 本期抽 `tools/agent_eval/judge/` helper + Phase 2.1 内联实现改造接入 | 兑现 [§4.13.1 #4](#4131-deferred-backlog暂时不做) "第 2 次复用时上 framework"；helper 30-50 行函数级别，不是 framework 重投入 |
 | **D7** | SRS（Phase 2.4）字段预留 | 不预留 | YAGNI；Phase 2.4 不一定还用同一表（Anki SRS card 与 task 不是 1:1），ALTER TABLE 在 SQLite 廉价；详 [§4.13.1 #14](#4131-deferred-backlog暂时不做) |
 
 **Step 1 · Review 现状**
@@ -1732,7 +1732,7 @@ AI 跑过的 smoke 验证（`--help` 入口 + 模块 import + dataset JSON 解�
 | **P22-G3** | `study-planner` skill 是**纯 prompt**（74 行，无 tool 调用约定） | [`.agenta/skills/study-planner/SKILL.md`](../.agenta/skills/study-planner/SKILL.md) 全部是输出模板（"按周/天/Day 分"），LLM 看完直接输出 markdown，**不落 DB** | D3 skill 必须强化为 tool-aware，影响验收 ①② |
 | **P22-G4** | Agent 启动**不注入 active learning_plan** | [`agent.py`](../src/agent/agent.py) system_content 拼接路径只有 rules.md + UserMemory，无 learning_plan 通道 | 验收 ② "跨 session 恢复"无入口 |
 | **P22-G5** | CLI `/study` 命令组不存在 | [`handlers.py`](../src/cli/handlers.py) 有 `/memory` / `/session` / `/sessions` 等组，仿照即可（无结构性阻碍） | 验收 ④ 多 plan 切换无入口 |
-| **P22-G6** | LLM-judge 散在 `eval_plan.py` 一份 ad-hoc | [`eval_plan.py`](../tools/agent_eval/plan/eval_plan.py) `_JUDGE_PROMPT` (L89) + `_llm_judge_plan_structure()` (L187) 写在 plan eval 内部；`tools/agent_eval/` 无 `judge/` 目录 | D6 helper 待抽 + Phase 2.1 ad-hoc 改造接入 |
+| **P22-G6** | LLM-judge 内联在 `eval_plan.py` 一份 | [`eval_plan.py`](../tools/agent_eval/plan/eval_plan.py) `_JUDGE_PROMPT` (L89) + `_llm_judge_plan_structure()` (L187) 写在 plan eval 内部；`tools/agent_eval/` 无 `judge/` 目录 | D6 helper 待抽 + Phase 2.1 内联实现改造接入 |
 | **P22-G7** | Phase 2.2 golden set 不存在 | 现有 dataset 只有 plan-execute ([Phase 2.1](#496-agent-循环升级-phase-21)) / skill recall ([Phase 1.5](#495-skills-框架强化-phase-15)) | Step 5 评估无数据 |
 | **P22-G8** | D5"嵌套 Phase 2.1 plan-execute"在 skill 端无指引 | 现 SKILL.md 未提 `make_plan`；新版需让 LLM 在 `create_study_plan` 内自己走 `make_plan` 拆 4 步（查领域 → 列阶段 → 列任务 → 落库） | D5 不指引则 LLM 可能直接出 JSON 不嵌套，违反"agent-y"承诺 |
 
@@ -1753,10 +1753,10 @@ AI 跑过的 smoke 验证（`--help` 入口 + 模块 import + dataset JSON 解�
 
 | # | 决策 | 选用 | 一句话理由 |
 |---|---|---|---|
-| **D8** | plan/task 状态变化是否发 EventBus 新事件（`study_plan_created` / `study_task_completed`） | 不发 | Phase 2.2 是 user-triggered（用户主动报告进度），不像 Phase 2.1 LLM 推进需实时推送；CLI 直接调 store 刷新即可，避免事件膨胀 |
+| **D8** | plan/task 状态变化是否发 EventBus 新事件（`study_plan_created` / `study_task_completed`） | 不发 | Phase 2.2 由**用户主动触发**（用户主动报告进度），不像 Phase 2.1 LLM 推进需实时推送；CLI 直接调 store 刷新即可，避免事件膨胀 |
 | **D9** | active plan 标记位置（multi-plan 场景） | `learning_plans` 表加 `is_active` BOOL 字段 | 单表自包含；`WHERE is_active=1 LIMIT 1` 即可；新建 `user_state` 表过度设计 |
 | **D10** | `LearningPlanStore` SQLite 路径 | 独立 `sqlite_db/learning.db` | 沿用项目现行模式（`chat_history.db` / `user_memory.db` 都是独立文件），便于单独 backup / migration |
-| **D11** | LLM-judge helper 接口形态 | 函数式 `judge_with_llm(prompt, output, criteria) -> {score, reason}`（30-50 行） | 满足 [D6 承诺](#step-0--需求规格按-490-step-0-结构-4-行表)"function-level helper 不是 framework"；类 / 装饰器都是 over-engineering |
+| **D11** | LLM-judge helper 接口形态 | 函数式 `judge_with_llm(prompt, output, criteria) -> {score, reason}`（30-50 行） | 满足 [D6 承诺](#step-0--需求规格按-490-step-0-结构-4-行表)"函数级 helper 不是 framework"；类 / 装饰器都是过度设计 |
 | **D12** | `query_study_status` 默认返回粒度 | 参数控制：默认摘要，`detail=True` 返全量 | LLM 上下文有限，默认给摘要节省 token；用户问"show full"时再返全量 |
 
 实施步骤（按依赖排序，**严格分 9 step**，每 step 出口判据明确）：
@@ -1768,7 +1768,7 @@ AI 跑过的 smoke 验证（`--help` 入口 + 模块 import + dataset JSON 解�
 | 3 | `study-planner` skill 重写：加 tool 调用约定（何时调 3 tool）+ D5 嵌套指引（在 `create_study_plan` 内走 `make_plan` 4 步：查领域 → 列阶段 → 列任务 → 落库）+ `update_study_progress` 触发条件 + 多 plan 提示 | G3 + G8 + D3 + D5 | [`.agenta/skills/study-planner/SKILL.md`](../.agenta/skills/study-planner/SKILL.md) 改写 | 74 → ~120 行 |
 | 4 | Agent 启动注入 `<active_study_plan>` system block：`LearningPlanStore.get_active()` → 拼成 markdown 块塞 system_content | G4 | [`src/agent/agent.py`](../src/agent/agent.py) system_content 拼接路径 | + ~30 行 |
 | 5 | CLI `/study` 命令组：`list` / `show [plan_id]` / `switch <plan_id>` / `abandon <plan_id>` + `_STUDY_USAGE` 帮助 + main.py 路由 + tab 补全 | G5 + D2 | [`src/cli/handlers.py`](../src/cli/handlers.py) + [`main.py`](../main.py) + [`src/cli/tab_complete.py`](../src/cli/tab_complete.py) | + ~150 行 |
-| 6 | LLM-judge helper 抽出 + Phase 2.1 ad-hoc 改造接入 | G6 + D6 + D11 | 新建 [`tools/agent_eval/judge/__init__.py`](../tools/agent_eval/judge/__init__.py)（`judge_with_llm()` 函数 30-50 行）；改 [`tools/agent_eval/plan/eval_plan.py`](../tools/agent_eval/plan/eval_plan.py) 删 `_JUDGE_PROMPT` + `_llm_judge_plan_structure`，改调新 helper | +~50 / -~60 +~20 行 |
+| 6 | LLM-judge helper 抽出 + Phase 2.1 内联实现改造接入 | G6 + D6 + D11 | 新建 [`tools/agent_eval/judge/__init__.py`](../tools/agent_eval/judge/__init__.py)（`judge_with_llm()` 函数 30-50 行）；改 [`tools/agent_eval/plan/eval_plan.py`](../tools/agent_eval/plan/eval_plan.py) 删 `_JUDGE_PROMPT` + `_llm_judge_plan_structure`，改调新 helper | +~50 / -~60 +~20 行 |
 | 7 | Phase 2.2 golden set + evaluator + Markdown 报告 | G7 | 新建 `tools/agent_eval/plan_business/dataset.json`（计划生成 5-8 case + 进度更新 5-8 case）+ `eval_plan_business.py`（仿 [`eval_plan.py`](../tools/agent_eval/plan/eval_plan.py) 套路 + 接入新 judge helper） | + ~400 行 |
 | 8 | UT 全套：`LearningPlanStore` CRUD / 业务 tool 三函数 / CLI `/study` 命令 / Agent 注入 / 跨 session 恢复 e2e | 所有 G | 新建 `tests/test_learning_plan_store.py`；扩 [`tests/test_tools.py`](../tests/test_tools.py) / [`tests/test_cli_handlers.py`](../tests/test_cli_handlers.py) / [`tests/test_agent.py`](../tests/test_agent.py) | + ~600 行 |
 | 9 | design.md 同步 + iter_2.md Step 3-6 落地 | 所有 G | 新增 [`docs/design.md`](design.md) §3.9 学习计划 + §5 IMP / 代码组织树同步；[`docs/iter_2.md`](iter_2.md) §4.9.7 Step 3-6 | + ~300 行 |
@@ -1783,12 +1783,12 @@ AI 跑过的 smoke 验证（`--help` 入口 + 模块 import + dataset JSON 解�
 | config 配置 | [`src/config.py`](../src/config.py) 新增 `LEARNING_PLAN_DB_PATH`（默认 `./sqlite_db/learning.db`）+ `LEARNING_PLAN_MAX_INJECT_CHARS`（默认 1500） |
 | 三业务 tool（G2 + D3 + D4 + D12） | [`src/agent/tools.py`](../src/agent/tools.py)：新增 `_STUDY_PLAN_TOOLS` 三 JSON Schema（`create_study_plan(goal, weeks?, tasks)` 含全嵌套 task object schema / `update_study_progress(plan_id, task_id, status, note?)` 锁 status enum / `query_study_status(plan_id?, list_all?, detail?)` 三互斥参数）+ `_tool_create_study_plan` / `_tool_update_study_progress` / `_tool_query_study_status` 三实现函数（含 ≥ 10 类入参校验 → `ToolResult(status="error")`；`update_study_progress` 全部 success 自动 `complete_plan`；`query_study_status` 默认 active + summary 模式节 context）+ `_render_plan_summary` 内部 helper（list_all / show 两路径共用）+ `_get_study_plan_store()` 延迟 import 复用 `learning_plan_store.get_shared_store()` 单例；`execute_tool` 加三 case 路由；`get_tools()` 永远塞入。**Step 2 微调**：description 字符串内嵌的 `"..."` 在 ASCII 引号下会破坏 Python 字符串字面量边界 → 改用中文书名号 `『...』` 包裹示例 |
 | `study-planner` skill 重写（G3 + G8 + D5） | [`.agenta/skills/study-planner/SKILL.md`](../.agenta/skills/study-planner/SKILL.md) 74 → 100 行：新增"核心交互模型"表（5 类意图 × tool 映射）+ "新建计划的工作流"（D5 嵌套约定：`make_plan(steps=[查领域/列阶段/列任务/落库])` → 各步对应 tool）+ "进度更新"流程 + "跨 session 恢复"流程 + 反模式清单（D5 必走嵌套 / title 不带 `[n]` 修饰 / 一次性落库不分多次 / 多 plan 切换交给 CLI）+ "用户呈现层模板"（落库后展示给用户的 markdown，**不是** tool 入参）；description 字段同步含 3 新 tool 名 + D5 嵌套关键字 |
-| Agent 启动注入 `<active_study_plan>` system block（G4） | [`src/agent/agent.py`](../src/agent/agent.py)：新增模块级 `build_active_study_plan_block(max_chars?)` 函数（懒加载 store → `render_active_for_prompt` → 包装 `<active_study_plan>` 标签 + 防注入提示；store 异常 try/except 软返回空串）；`run()` 中 `system_content = memory_mgr.build_system_prompt(base_with_rules)` 后追加 `+ build_active_study_plan_block()`；导入 `get_shared_store as _get_shared_learning_plan_store`。注入顺序变为 `base → <project_rules> → <user_context> → <active_study_plan>`（最末贴近 user 消息） |
-| CLI `/study` 命令组（G5 + D2） | [`src/cli/handlers.py`](../src/cli/handlers.py)：新增 `_STUDY_USAGE` 帮助文本 + `_format_plan_brief` / `_print_plan_list` / `_print_plan_detail` / `_parse_plan_id` 四 helper + `handle_study(store, cmd_parts)` 主函数（match `list` / `show` / `switch` / `abandon` 四子命令；`abandon` 走 `input("yes")` 二次确认）；[`main.py`](../main.py) 加 `case "/study"` 路由复用 `get_shared_store()` 单例；[`src/cli/tab_complete.py`](../src/cli/tab_complete.py) 加 5 个 `/study*` 补全项；[`src/cli/ui.py`](../src/cli/ui.py) `HELP_TEXT` 加 4 行 study 命令说明 |
-| LLM-judge helper 抽出 + Phase 2.1 改造（G6 + D6 + D11） | 新建 [`tools/agent_eval/judge/__init__.py`](../tools/agent_eval/judge/__init__.py) 公开 `judge_with_llm` + `JudgeResult`；[`tools/agent_eval/judge/llm_judge.py`](../tools/agent_eval/judge/llm_judge.py)：`judge_with_llm(*, prompt, output, criteria, role_intro, score_min, score_max, temperature)` 函数式 helper（80 行含 docstring；模板填 system + user msg → 调 `chat()` → 正则提 `{...}` JSON → 校验 score 区间）+ `JudgeResult(score, reason, raw)` frozen dataclass + `.ok` 便捷属性；改造 [`tools/agent_eval/plan/eval_plan.py`](../tools/agent_eval/plan/eval_plan.py)：删 `_JUDGE_PROMPT` 全 prompt 模板 + 旧 inline `_llm_judge_plan_structure` 实现（~35 行）、删未用 `import re`，仅保留 `_JUDGE_CRITERIA` 评分维度文本，`_llm_judge_plan_structure` 改成 3 行调 `judge_with_llm` 包装 |
+| Agent 启动注入 `<active_study_plan>` system block（G4） | [`src/agent/agent.py`](../src/agent/agent.py)：新增模块级 `build_active_study_plan_block(session_id, max_chars?)` 函数（懒加载 store → `get_loaded(session_id)` 取本 session 已 load 的 plan_id → `render_plan_for_prompt` → 包装 `<active_study_plan>` 标签 + 防注入提示；store 异常 try/except 软返回空串）；`run()` 中 `system_content = memory_mgr.build_system_prompt(base_with_rules)` 后追加 `+ build_active_study_plan_block(self.session_id)`；导入 `get_shared_store as _get_shared_learning_plan_store`。注入顺序变为 `base → <project_rules> → <user_context> → <active_study_plan>`（最末贴近 user 消息）。**注意**：默认**不注入**（路线 C，详 [Step 7 注入路线变更](#step-7--注入路线变更路线-a--c)）；必须用户 CLI `/study load [id]` 显式激活才入 prompt |
+| CLI `/study` 命令组（G5 + D2） | [`src/cli/handlers.py`](../src/cli/handlers.py)：新增 `_STUDY_USAGE` 帮助文本 + `_format_plan_brief` / `_print_plan_list` / `_print_plan_detail` / `_parse_plan_id` 四 helper + `handle_study(store, cmd_parts, session_id?)` 主函数（match `list` / `show` / `switch` / `load` / `abandon` 五子命令；`load` 走 session 级 in-memory 映射；`abandon` 走 `input("yes")` 二次确认）；[`main.py`](../main.py) 加 `case "/study"` 路由复用 `get_shared_store()` 单例 + 传 `session_id=agent.session_id`；[`src/cli/tab_complete.py`](../src/cli/tab_complete.py) 加 6 个 `/study*` 补全项；[`src/cli/ui.py`](../src/cli/ui.py) `HELP_TEXT` 加 5 行 study 命令说明 |
+| LLM-judge helper 抽出 + Phase 2.1 改造（G6 + D6 + D11） | 新建 [`tools/agent_eval/judge/__init__.py`](../tools/agent_eval/judge/__init__.py) 公开 `judge_with_llm` + `JudgeResult`；[`tools/agent_eval/judge/llm_judge.py`](../tools/agent_eval/judge/llm_judge.py)：`judge_with_llm(*, prompt, output, criteria, role_intro, score_min, score_max, temperature)` 函数式 helper（80 行含 docstring；模板填 system + user msg → 调 `chat()` → 正则提 `{...}` JSON → 校验 score 区间）+ `JudgeResult(score, reason, raw)` frozen dataclass + `.ok` 便捷属性；改造 [`tools/agent_eval/plan/eval_plan.py`](../tools/agent_eval/plan/eval_plan.py)：删 `_JUDGE_PROMPT` 全 prompt 模板 + 旧内联的 `_llm_judge_plan_structure` 实现（~35 行）、删未用 `import re`，仅保留 `_JUDGE_CRITERIA` 评分维度文本，`_llm_judge_plan_structure` 改成 3 行调 `judge_with_llm` 包装 |
 | Phase 2.2 评估器（G7） | 新建 [`tools/agent_eval/plan_business/dataset.json`](../tools/agent_eval/plan_business/dataset.json) 8 case（5 create：ML 面试 8w / RAG 工程 / Python 4w / 5G NR / PMP 2 月 + 3 negative：邮箱 / RAG 定义 / 闲聊）；[`tools/agent_eval/plan_business/eval_learning_plan.py`](../tools/agent_eval/plan_business/eval_learning_plan.py) 416 行：仿 `eval_plan.py` 套路 — `_EVAL_SYSTEM_PROMPT`（独立教学段含 D5 嵌套约定，跟生产 SYSTEM_PROMPT 解耦避免漂移）+ `_PLAN_QUALITY_CRITERIA`（4 维：完整性 / 顺序 / 可执行性 / 时间分配）+ `_extract_first_tool_call` + `_judge_recall`（create vs negative 双路径）+ `_judge_plan_quality` 调新 `judge_with_llm` helper + Markdown 报告生成（核心指标 + 分组 + 全 case 总览 + create 通过 case plan 详情 + Fail 详情）+ 双阈值退出码（识别率 ≥ 80% AND plan 质量均分 ≥ 4.0/5） |
-| UT 全套（覆盖所有 G） | 新建 5 个测试文件 — [`tests/test_learning_plan_store.py`](../tests/test_learning_plan_store.py) 34 case（基本 CRUD / is_active 互斥 / update_task_status 6 种错误 / abandon-complete-delete 生命周期 / list_plans 排序 / render_active_for_prompt 5 场景 / 上下文管理器）+ [`tests/test_study_plan_tools.py`](../tests/test_study_plan_tools.py) 27 case（schema 完整性 / create 7 case 含入参校验 / update 7 case 含 cross-plan + 自动 complete / query 7 case 含 list_all + detail + missing id / 路由 1）+ [`tests/test_cli_handlers_study.py`](../tests/test_cli_handlers_study.py) 17 case（list 3 / show 5 / switch 4 / abandon 4 + confirm mock / unknown 1）+ [`tests/test_llm_judge_helper.py`](../tests/test_llm_judge_helper.py) 14 case（入参校验 3 / 解析正常 5 含 markdown 代码块 + 前后文 + 自定义 score 区间 / 容错 4 / JudgeResult 2）+ [`tests/test_agent_active_plan_injection.py`](../tests/test_agent_active_plan_injection.py) 6 case（空 / 含 active / max_chars / store 异常 / config 默认 / 跨 session 重开 store） |
-| design.md 同步 | [`docs/design.md`](design.md)：**新增 §3.9 学习计划业务**完整章节（7 子节：3.9.1 数据载体 + 二表 schema / 3.9.2 三业务 tool 协议表 / 3.9.3 端到端 Mermaid sequenceDiagram（D5 嵌套 4 步标注）/ 3.9.4 跨 session 恢复 / 3.9.5 多 plan 切换 + CLI 命令表 / 3.9.6 与其他模块关系 / 3.9.7 评估方法）+ **§3.10 LLM-judge framework**（接口签名 + D6/D11 设计要点 + 当前调用方表）；[§3.5.2 三层注入顺序](design.md#352-三层注入顺序) 三层 → 四层（加 `<active_study_plan>` 行 + 更新 mermaid + 顺序约束）；[§3.8.7](design.md#387-评估方法) judge 走通用 helper；[§5 IMP 表](design.md#5imp) 加 `LearningPlanStore` 依赖行 + `tools.py` 行加 Phase 2.2 三 tool 备注；依赖层枚举段加 `learning_plan_store.py` |
+| UT 全套（覆盖所有 G） | 新建 5 个测试文件 — [`tests/test_learning_plan_store.py`](../tests/test_learning_plan_store.py) **44 case**（基本 CRUD / is_active 互斥 / update_task_status 6 种错误 / abandon-complete-delete 生命周期 / list_plans 排序 / render_plan_for_prompt 6 场景 + **session 级 loaded 映射 10 case：默认无 load / mark+get / 非法 plan / abandoned 拒绝 / 替换 / 多 session 隔离 / 自动 evict abandoned / 自动 evict deleted / clear 单 session / clear 全部** / 上下文管理器）+ [`tests/test_study_plan_tools.py`](../tests/test_study_plan_tools.py) 27 case（schema 完整性 / create 7 case 含入参校验 / update 7 case 含 cross-plan + 自动 complete / query 7 case 含 list_all + detail + missing id / 路由 1）+ [`tests/test_cli_handlers_study.py`](../tests/test_cli_handlers_study.py) **25 case**（list 3 / show 5 / switch 4 / **load 8（无参/有参/无 active/不存在/abandoned/无效 id/session 隔离/替换）** / abandon 4 + confirm mock / unknown 1）+ [`tests/test_llm_judge_helper.py`](../tests/test_llm_judge_helper.py) 14 case（入参校验 3 / 解析正常 5 含 markdown 代码块 + 前后文 + 自定义 score 区间 / 容错 4 / JudgeResult 2）+ [`tests/test_agent_active_plan_injection.py`](../tests/test_agent_active_plan_injection.py) **8 case**（**默认未 load 返空 / mark_loaded 后返 tagged 块 / session 隔离 / loaded plan 被 abandon 自动 evict** / max_chars / store 异常 / config 默认 / 跨 session 重开 store 需重新 load） |
+| design.md 同步 | [`docs/design.md`](design.md)：**新增 §3.9 学习计划业务**完整章节（7 子节：3.9.1 数据载体 + 二表 schema / 3.9.2 三业务 tool 协议表 / 3.9.3 端到端 Mermaid sequenceDiagram（D5 嵌套 4 步标注）/ 3.9.4 跨 session 恢复 / 3.9.5 多 plan 切换 + CLI 命令表 / 3.9.6 与其他模块关系 / 3.9.7 评估方法）+ 抽出 LLM-judge 公共 helper（`tools/agent_eval/judge/llm_judge.py`，兑现 D6 / D11 抽象 —— Phase 2.1 内联在 `eval_plan.py` 里的 judge 第 2 次复用时升级为函数式 helper；当时另在 design.md 立 §3.10 LLM-judge framework 单独成节，**后期已删除**，知识保留在代码 docstring + 调用方 eval 脚本里）；[§3.5.2 三层注入顺序](design.md#352-三层注入顺序) 三层 → 四层（加 `<active_study_plan>` 行 + 更新 mermaid + 顺序约束）；[§3.8.7](design.md#387-评估方法) judge 走通用 helper；[§5 IMP 表](design.md#5imp) 加 `LearningPlanStore` 依赖行 + `tools.py` 行加 Phase 2.2 三 tool 备注；依赖层枚举段加 `learning_plan_store.py` |
 
 **Step 4 · UT 结果**
 
@@ -1826,9 +1826,208 @@ AI 跑过的 smoke 验证（dataset JSON 解析 + evaluator import + `--help` �
 
 **Step 6 · design.md 同步**
 
-新增 [`design.md §3.9 学习计划业务`](design.md#39-学习计划业务) 完整 7 子节（数据载体二表 schema / 三业务 tool 协议表 / 端到端 mermaid D5 嵌套 / 跨 session 恢复 / 多 plan + CLI 命令表 / 与其他模块关系 / 评估方法 UT 路径列举 + 双阈值判据）+ [`§3.10 LLM-judge framework`](design.md#310-llm-judge-framework)（接口签名 + 设计要点 + 当前调用方表，兑现 D6 抽象）；[`§3.5.2`](design.md#352-三层注入顺序) 三层注入升级四层（加 `<active_study_plan>` 行 + 更新 mermaid 图 + 顺序约束说明）；[`§5 IMP 表`](design.md#5imp) 加 `LearningPlanStore` 依赖行 + `tools.py` 行更新含 Phase 2.2 三 tool 备注 + 依赖层枚举加 `learning_plan_store.py`。
+新增 [`design.md §3.9 学习计划业务`](design.md#39-学习计划业务) 完整 7 子节（数据载体二表 schema / 三业务 tool 协议表 / 端到端 mermaid D5 嵌套 / 跨 session 恢复 / 多 plan + CLI 命令表 / 与其他模块关系 / 评估方法 UT 路径列举 + 双阈值判据）+ 抽出 LLM-judge 公共 helper `tools/agent_eval/judge/llm_judge.py`（接口 + 设计要点写在代码 docstring，兑现 D6 抽象；当时另在 design.md 立 §3.10 LLM-judge framework 单独成节记录核心抉择，**后期已删除整合**）；[`§3.5.2`](design.md#352-三层注入顺序) 三层注入升级四层（加 `<active_study_plan>` 行 + 更新 mermaid 图 + 顺序约束说明）；[`§5 IMP 表`](design.md#5imp) 加 `LearningPlanStore` 依赖行 + `tools.py` 行更新含 Phase 2.2 三 tool 备注 + 依赖层枚举加 `learning_plan_store.py`。
 
 **Punt 项**：[§4.13.1 #12 #13 #14](#4131-deferred-backlog暂时不做)（Chainlit 学习计划进度可视化 / 学习计划 markdown export / SRS 字段预留）按本期 Scope 缓 — 14 SRS 是 Anki 行为；现 schema 不预留字段（D7 决策：先做最小可用）。[§4.13.2 #27 #28 #29](#4132-dropped永久不做)（自动学习时长追踪 / 多用户学习计划 / 自动调度提醒）永久 punt。Phase 2.1 → 2.2 桥（验收 ② 跨 session 恢复 100% 准确）由 [`tests/test_agent_active_plan_injection.py::TestCrossSessionRecovery`](../tests/test_agent_active_plan_injection.py) 双重保障：store 重开能复读 + 渲染稳定。
+
+**Step 7 · 注入路线变更（路线 A → C）**
+
+Phase 2.2 初版按"路线 A：自动注入 active plan"实现 —— 只要 DB 里有 `is_active=1` 的 plan，任何 session、任何对话主题、任何重启场景，`<active_study_plan>` 块都常驻 system_prompt（占 500-1500 tokens）。本变更切换为**路线 C：手动 `/study load` 激活**，与 Agent Skills 的 `load_skill` 心智完全对齐。
+
+| 维度 | 路线 A（初版） | 路线 C（最终） |
+|---|---|---|
+| 默认状态 | DB 有 active 即注入 | 默认**不注入** |
+| 激活方式 | 程序自动（无用户交互） | 用户用 CLI `/study load [plan_id]` 显式激活 |
+| 作用域 | 全局（所有 session） | session 级（in-memory `dict[session_id, plan_id]`） |
+| 切 session 后 | 仍注入 | 自动失效，需重新 load |
+| 选择理由 | "零延迟答 + 不会失忆" | 用户对 context tokens 有完全控制权 + 与 skill 体系一致 + friction 可接受 |
+
+**变更动机**：用户反馈日常 90% 对话与学习无关时，1500 tokens 常驻 system_prompt 的污染感强；自动注入违反"用户付费的 tokens 应只用在用户当前关心的事上"原则。路线 A 的"零延迟"价值，在用户实际使用模式下（"打开 Agent 想聊学习 → 自然会先 `/study load`"）并不显著。
+
+**实施改动**
+
+| 改动 | 实现位置 |
+|---|---|
+| `LearningPlanStore` 新增 session 级映射 API | [`src/memory/learning_plan_store.py`](../src/memory/learning_plan_store.py)：新增 `_loaded_by_session: dict[str, int]` 实例字段 + `mark_loaded(session_id, plan_id)` / `get_loaded(session_id)`（含 stale 自动 evict：plan 被 abandon/delete 时返 None + 清映射）/ `clear_loaded(session_id?)`；`render_active_for_prompt(max_chars)` 重构为参数化 `render_plan_for_prompt(plan_id, max_chars)`（plan 不存在 / abandoned 返空串） |
+| `Agent.run()` 注入路径改 | [`src/agent/agent.py`](../src/agent/agent.py)：`build_active_study_plan_block(session_id, max_chars?)` 签名加 `session_id`；内部从 `get_active()` 改成 `get_loaded(session_id) → render_plan_for_prompt(plan_id)`；提示文本从"当前 active 学习计划"改为"当前会话已加载的学习计划（由用户用 CLI `/study load` 显式激活）" |
+| CLI `/study load` 子命令 | [`src/cli/handlers.py`](../src/cli/handlers.py)：`handle_study(...)` 加 `session_id` 参数 + 新增 `load` case（不带 id 取 active；带 id 校验存在 + 非 abandoned 后调 `mark_loaded`）；`_STUDY_USAGE` 加 `/study load` 说明行；[`main.py`](../main.py) 调用传 `session_id=agent.session_id`；[`src/cli/tab_complete.py`](../src/cli/tab_complete.py) + [`src/cli/ui.py`](../src/cli/ui.py) HELP_TEXT 加 `/study load` |
+| UT 翻转 + 增量 | [`tests/test_learning_plan_store.py`](../tests/test_learning_plan_store.py) 加 `TestLoadedSession` 10 case + `TestRenderActiveForPrompt` 改名 `TestRenderPlanForPrompt` 加 2 case（不存在 / abandoned）；[`tests/test_agent_active_plan_injection.py`](../tests/test_agent_active_plan_injection.py) 全文重写 8 case（默认行为反转 + load 集成 + session 隔离 + 跨 session 重开必须重新 load）；[`tests/test_cli_handlers_study.py`](../tests/test_cli_handlers_study.py) 加 `TestStudyLoad` 8 case |
+| design.md 同步 | [`§3.9.4`](design.md#394-跨-session-状态可见性) 三路线（A 自动 / B 自查 / C 手动）对比 + "为什么选 C" 取舍表 + 激活语义说明；[`§3.9.5`](design.md#395-治理谁触发什么操作) 命令组加 `/study load` 行 + 新增 "`switch` vs `load` 差异" 表 + "故意不提供 `/study unload`" 解释；[`§3.9.6`](design.md#396-与其他模块关系) 与 §3.7 Skills 关系强调 `load_skill` 心智同构；[`§3.5.2`](design.md#352-三层注入顺序) 第 4 层描述加"仅当本 session 已 `/study load` 时注入"+ mermaid 注解；[`§3.9.7`](design.md#397-评估方法) 跨 session 恢复判据改成"plan 数据持久 + 新 session 需重新 load 是约定不是 bug" |
+
+**顺带修复**：[§4.13.1 #20](#4131-deferred-backlog暂时不做) `TestCustomSystemPrompt` fixture 隔离 bug 自然消失 —— 路线 C 默认不注入，测试 session 没 `mark_loaded` 时 `build_active_study_plan_block` 返空，不污染 system_prompt。已实测 2/2 case 通过。
+
+**UT 全绿**：119 case（44 store + 27 tools + 25 cli + 14 judge + 8 inject + 1 ctx mgr）通过；0 regression。
+
+
+### 4.9.8 测验出题 (phase 2.3)
+
+**功能描述**：用户给学习主题或绑 active 学习计划 stage → agent 用 `quiz-maker` skill 从知识库检索内容自动出 5-10 道题（混合单选 / 多选 / 简答），用户用一段自然语言批量作答 → agent 自动批改（MCQ (Multiple Choice Question，单选 / 多选合称) 字符串比对 + 简答 LLM-judge）给逐题反馈 + 总分 + 薄弱点；测验结果落库跨 session 可查复盘。
+
+> Phase 2 学习/研究助理（[§4.7.1 项目定位](#471-项目定位)）的第 2 个业务 feature。与 [§4.9.7 Phase 2.2](#497-学习计划生成-phase-22) 学习计划长期跟踪互补 — Phase 2.3 是**周期性自检练习**（测验短时落库 / 可重复出题）。
+
+**Step 0 · 需求规格**
+
+| 字段 | 内容 |
+|---|---|
+| **用户故事** | 我说"考考我 RAG 检索 / 出 5 道 ML 面试题 / 把 active 学习计划 stage 2 出成题" → agent 用 `quiz-maker` skill **从 KB 检索相关内容 → 出 5-10 道题（混合 单选 / 多选 / 简答），每题带正确答案 + 简短考点说明 + 落库**；下一轮我**用一段自然语言写答案**（如『1.B 2.AC 3. xxx』）→ agent **自动批改**：MCQ 比对答案、简答用 LLM-judge 判分，给我**逐题反馈 + 总分 + 薄弱点**；跨 session 后我能问"上次测验我哪些错了 / 列出我做过的测验" agent 能查得到 |
+| **验收标准** | ① **出题质量**：给主题 / plan stage → 出 5-10 题（题数稳定 / 题型按用户偏好混合 / 题目从 `search_knowledge` 命中内容产出而非凭空编），LLM-judge 评分（相关性 / 难度合理 / 答案可推导 / 覆盖度）≥ 4/5<br>② **批改正确性**：MCQ 比对 100% 准；简答 LLM-judge 给分 + 短反馈，召回准确率 ≥ 80%（golden 集）<br>③ **跨 session 可查**：上轮测验跨 session 可问"列出我做过的测验 / 上次哪些错了"，召回准确率 100%<br>④ **多源触发**：① 用户给 topic → 出题；② 用户绑定 active 学习计划 → 自动从 active plan 当前 stage 的任务标题做检索 query；③ 用户给具体 `plan_id` + `stage_idx` → 精准对该 stage 出题<br>⑤ **生成 / 批改解耦**：两阶段对话 — 第 1 轮 `create_quiz` 生成题目 + 落库；第 2 轮 `grade_quiz` 批改 + 反馈，CLI 不进测验模式（详 §4.13.1 #15）<br>⑥ **skill 路径**：`.agenta/skills/quiz-maker/SKILL.md` 走 catalog 自动发现 + L1 注入 + L2 LLM 主动 `load_skill`（与 study-planner 平级） |
+| **Scope** | **本期做**：<br>① 新建 `quiz_sets` + `quiz_questions` 二表 + `QuizStore` 数据层（D1）<br>② 3 个 tool：`create_quiz(topic?, plan_id?, stage_idx?, num_questions?)` / `grade_quiz(quiz_set_id, user_answers)` / `query_quiz_history(plan_id?, limit?, detail?)`（D3 + D4 + D5；题型按 60% MCQ + 40% short_answer 固定比例混合 → D13）<br>③ 新建 `.agenta/skills/quiz-maker/SKILL.md`（D5 嵌套：`make_plan` 拆 4 步 — 解析意图 / 查 KB / 出题 / 落库）（D7）<br>④ CLI `/quiz` 命令组：`list` / `show <id>` / `del <id>`（只读 + 管理，不做交互答题）（D2）<br>⑤ Phase 2.3 golden set：`tools/agent_eval/quiz/`（出题 / 批改各 5-8 case），复用 §4.9.7 抽出的 `judge_with_llm` helper（兑现第 3 次复用，巩固 D6 抽象）<br>**暂时不做**：详 [§4.13.1 #15 #16 #17 #18 #19](#4131-deferred-backlog暂时不做)<br>**显式不做**：详 [§4.13.2 #30 #31 #32](#4132-dropped永久不做) |
+| **依赖** | [§4.9.6 Phase 2.1](#496-agent-循环升级-phase-21) plan-execute loop（D7 嵌套复用 `make_plan` / `update_step`）/ [§4.9.5 Phase 1.5](#495-skills-框架强化-phase-15) skill 框架（catalog 自动发现 + load_skill）/ [§4.9.7 Phase 2.2](#497-学习计划生成-phase-22) `LearningPlanStore`（D4 绑 plan_id / stage_idx）+ `judge_with_llm` helper（D6 第 3 次复用）/ [§4.9.4 Phase 1.4](#494-引用展示-phase-14) `CitationBuilder`（出题内 KB 引用）/ `ChatHistoryStore` SQLite 模板复用底层 |
+
+**关键决策摘要**（D1-D7，完整推导留 [Step 2](#step-2--实施计划-3)）：
+
+| # | 决策点 | 选用 | 一句话理由 |
+|---|---|---|---|
+| **D1** | 数据模型 | 落库 — `quiz_sets` + `quiz_questions` 二表 | 跨 session 复盘场景（验收 ③）/ 为 Phase 2.4 SRS 喂错题铺路；与 Phase 2.2 二表模式对齐 |
+| **D2** | CLI 交互形态 | 两阶段对话（agent 出题 → 用户作答 → agent 批改），CLI 只做只读 `list / show / del` | 不引入测验模式 loop（input() 循环 + agent loop 解耦复杂度高）；先 A 后 B → 详 §4.13.1 #15 |
+| **D3** | 题型 | MCQ（单选 / 多选）+ 简答 | 按 [§4.7.3 Phase 2.3](#473-实施顺序) 字面；判断题相对 MCQ 价值低 |
+| **D4** | 出题源 / 触发方式 | 三入口：topic / plan_id / `plan_id + stage_idx` | 覆盖独立练习 + 学习计划复习两大场景；plan stage 入口直接用 stage 任务标题做 KB query |
+| **D5** | 批改策略 | MCQ string-match + 简答 LLM-judge | MCQ 精确比对 0 误差；简答天然需要主观评分；批改时只调一次 LLM 节 token |
+| **D6** | LLM-judge framework 复用 | 直接复用 §4.9.7 抽出的 `judge_with_llm` helper（第 3 次复用） | 巩固 D6 抽象合理性；新建 plan-quality / answer-quality 两个 criteria 即可 |
+| **D7** | SRS 字段预留 | 不预留 | YAGNI，跟 [§4.9.7 D7](#497-学习计划生成-phase-22) 一致；Phase 2.4 ALTER TABLE 廉价；详 §4.13.1 #16 |
+
+**Step 1 · Review 现状**
+
+> Gap 编号 `P23-G*` 是 Phase 2.3 局部命名，避免跟 [§4.6.2 G1-G9](#462-合并后的所有可能-feature-列表) / [§4.9.6 P21-G*](#496-agent-循环升级-phase-21) / [§4.9.7 P22-G*](#497-学习计划生成-phase-22) 重名。
+
+| # | Gap | 现状 | 影响（对应 Step 0 验收） |
+|---|---|---|---|
+| **P23-G1** | `QuizStore` + 二表 schema 不存在 | [`src/memory/learning_plan_store.py`](../src/memory/learning_plan_store.py) 提供完整模板（`_create_tables` 幂等 / `_now()` 时间戳 / `with self._conn:` 事务 / `_row_to_*` 转换 / `get_shared_store` 进程级单例 + `reset_shared_store_for_testing` 测试隔离）；可直接照搬 | D1 全部待新建，影响验收 ①②③④（落库 + 跨 session 查 + plan 绑定）|
+| **P23-G2** | 测验业务三 tool（`create_quiz` / `grade_quiz` / `query_quiz_history`）不存在 | [`src/agent/tools.py:_STUDY_PLAN_TOOLS`](../src/agent/tools.py) 是完美 reference（JSON Schema 嵌套 object 写法 / 入参 ≥ 10 类校验 / `_get_study_plan_store()` 延迟 import 复用 store 单例 / `execute_tool` match 路由 / `get_tools()` 永远塞入三 tool）；`_PLAN_TOOLS`（plan-execute）也可参考 | D3 + D4 + D5 全部待新建，影响验收 ①②③④⑤（出题 + 批改 + 跨 session 查 + 多源触发 + 解耦）|
+| **P23-G3** | `.agenta/skills/quiz-maker/SKILL.md` 不存在 | [`.agenta/skills/study-planner/SKILL.md`](../.agenta/skills/study-planner/SKILL.md) 提供 D5 嵌套模板 + 反模式清单 + 用户呈现层模板；scan_skills 自动发现，无代码改动 | D7 + 验收 ⑥（skill 自动激活路径）影响 ①②（出题流程指引）|
+| **P23-G4** | `grade_quiz` 内简答评分接入 `judge_with_llm` 第 3 次复用 | [`tools/agent_eval/judge/llm_judge.py:judge_with_llm`](../tools/agent_eval/judge/llm_judge.py) 已就绪：支持自定义 `role_intro` / `criteria` / `score_min/max` / `temperature`，返回 `JudgeResult(score, reason, raw)`；本期是该 helper 第 3 次调用方（Phase 2.1 plan judge + Phase 2.2 plan-quality judge + 本期答案 quality judge），巩固 D6 抽象合理性 | 影响验收 ②（简答批改召回 ≥ 80%）|
+| **P23-G5** | CLI `/quiz` 命令组不存在 | [`src/cli/handlers.py:handle_study`](../src/cli/handlers.py) 提供完美模板（list / show / del 子命令 + `_parse_plan_id` 整数校验 helper + `_format_plan_brief` / `_print_plan_detail` 渲染 helper + `_STUDY_USAGE` 帮助文本 + abandon 二次确认）；仿照即可 | 影响验收 ③（跨 session 列 / 查测验历史）|
+| **P23-G6** | `create_quiz` 的 plan_id + stage_idx 路径需要从 `LearningPlanStore` 拉 stage 任务做 KB query | [`learning_plan_store.get_plan_with_tasks(plan_id)`](../src/memory/learning_plan_store.py) 返回完整任务列表（`task.stage_idx` 字段已是 ≥1 整数）— business tool 内部 filter `stage_idx==N` 拿到任务标题，拼成 query 做 search_knowledge，无 store 层 API 改动 | 影响验收 ④（plan_id + stage_idx 入口）|
+| **P23-G7** | Phase 2.3 golden set + `eval_quiz.py` 不存在 | [`tools/agent_eval/plan_business/dataset.json`](../tools/agent_eval/plan_business/dataset.json) 8 case（create / negative 双路径）+ [`eval_learning_plan.py`](../tools/agent_eval/plan_business/eval_learning_plan.py) 双阈值判据（识别率 ≥ 80% AND quality ≥ 4/5）是完美模板；仿写 `tools/agent_eval/quiz/` 同结构 | 影响 Step 5 评估 |
+| **P23-G8** | LLM-judge 新增**两套 criteria**：出题质量 + 批改质量 | [`tools/agent_eval/plan_business/eval_learning_plan.py:_PLAN_QUALITY_CRITERIA`](../tools/agent_eval/plan_business/eval_learning_plan.py) 4 维模板已成熟（满分权重 + 维度描述）；本期照搬框架，把 4 维替换为测验维度（相关性 / 难度 / 答案可推导 / 覆盖度）+ 批改维度（识别 / 评分公平 / 反馈具体） | 影响验收 ①②（两个 judge）|
+| **P23-G9** | 是否需要在 system_prompt 注入 `<active_quiz>` 块 | [`src/agent/agent.py:build_active_study_plan_block`](../src/agent/agent.py) 已建立 system 块注入模式（base → rules → memory → active_study_plan）；测验不像 learning_plan 长期持久化常驻，本期是否注入 `<active_quiz>` 是 Step 1 review 浮现的额外决策点 → **D8 待 Step 2 决策** | 决定 system_prompt 是否加第 5 层 |
+| **P23-G10** | `quiz-maker` skill catalog 注册路径 | [`src/cli/skill_loader.py::scan_skills`](../src/cli/skill_loader.py) 进程启动时自动扫 `.agenta/skills/*/SKILL.md`，frontmatter 解析 + body 切分；只新建 `quiz-maker/SKILL.md` 文件即可被发现，无代码改动 | 验收 ⑥ 自动满足 |
+
+**复用资源**（不动）：
+
+- `judge_with_llm` helper → 第 3 次复用，巩固 [§4.9.7 D6](#497-学习计划生成-phase-22) 抽象
+- `LearningPlanStore` 二表模式 / 进程单例 / `with self._conn:` 事务 / 时间戳 helper → `QuizStore` 全量套用
+- `_STUDY_PLAN_TOOLS` JSON Schema 写法 + `_get_study_plan_store()` 延迟 import 模式 → `_QUIZ_TOOLS` 套用
+- `handle_study` 子命令分发 + `_parse_plan_id` 错误提示 helper → `handle_quiz` 仿写
+- `scan_skills()` catalog 自动发现 + L1 注入 → quiz-maker skill 自动接入
+- [`CitationBuilder`](../src/agent/core/citation_builder.py) → `create_quiz` 内 `search_knowledge` 时自动复用（Phase 1.4 引用 `[n]` + sources 块统一走）
+
+**设计调整**：仅 1 处增量决策（D8 `<active_quiz>` 系统注入），其它路径清晰，无结构性阻碍。
+
+**Step 2 · 实施计划**
+
+新决策表（D8-D13，Step 1 review 后浮现，D8/D11/D13 经 AskQuestion 拍板；D9/D10/D12 沿用 §4.9.7 平行默选）：
+
+| # | 决策 | 选用 | 一句话理由 |
+|---|---|---|---|
+| **D8** | 是否给 system_prompt 增第 5 层 `<active_quiz>` 注入块 | 不注入 | 测验是短期**用户主动触发**的会话不是长期常驻状态；需要时让 LLM 主动调 `query_quiz_history`，节 context |
+| **D9** | `quiz_sets.status` 状态枚举 | 三态：`created`（出完未批）/ `graded`（已批改）/ `archived`（用户归档） | 跟 [§4.9.7 D9](#497-学习计划生成-phase-22) `learning_plans.status` 三态同思路；CLI `/quiz archive` 是后续轻拓 |
+| **D10** | `quiz_questions` 答案 schema | 加 `q_type` ENUM 字段（`mcq_single` / `mcq_multi` / `short_answer`）+ `correct_answer` TEXT（MCQ 是 `"A"` / `"AC"` 字符串，简答是标准答案文本） | 显式 type 字段比靠 correct_answer 串结构推断清晰；grade 路径直接按 type 分发 |
+| **D11** | `grade_quiz` 入参 `user_answers` 形态 | dict `{question_id: "user answer"}`，由 quiz-maker skill 在上一轮 LLM 推理时根据上下文（题号 + 用户自然语言回复）拼出 | LLM 本来就能看到题号与用户答复，输出结构化 dict 成本低；不在 tool 内重复调 LLM 做映射，节一次 token |
+| **D12** | `query_quiz_history` 默认返回粒度 | 默认摘要 + `detail=True` 完整 | 跟 [§4.9.7 D12](#497-学习计划生成-phase-22) `query_study_status` 一致；节 context |
+| **D13** | `create_quiz` 是否开放 `question_types` 比例参数 | **不开放**：固定 60% MCQ（单选 / 多选各半）+ 40% short_answer | YAGNI；下期视用户反馈再迭代；现阶段固定比例 LLM 易稳定遵守 |
+
+实施步骤（按依赖排序，**严格分 9 step**，每 step 出口判据明确）：
+
+| 序 | 实施内容 | 关联 Gap / D | 文件 | 估算行数 |
+|---|---|---|---|---|
+| 1 | `quiz_sets` + `quiz_questions` 二表 schema + `QuizStore` 数据层（init / `create_quiz_set` / `add_questions` / `get_quiz_with_questions` / `list_quiz_sets` / `update_grading` / `archive_quiz_set` / `delete_quiz_set` / `render_summary_for_history`）+ 进程级单例 `get_shared_store()` / `reset_shared_store_for_testing` | G1 + D1 + D9 + D10 | 新建 [`src/memory/quiz_store.py`](../src/memory/quiz_store.py) | + ~280 行 |
+| 2 | config 配置 + `.env.example` / `.env` 三处同步 | [§5.1](../.cursor/rules/agenta-conventions.mdc) | [`src/config.py`](../src/config.py) 加 `QUIZ_DB_PATH`（默认 `./sqlite_db/quiz.db`）+ `QUIZ_DEFAULT_NUM_QUESTIONS`（默认 10）+ `QUIZ_HISTORY_LIST_LIMIT`（默认 20）；`.env.example` + `.env` 同步 | + ~10 行 / .env 同步 |
+| 3 | 三业务 tool JSON Schema（`create_quiz` 含 topic/plan_id/stage_idx/num_questions 互斥三入口 + minQ/maxQ；`grade_quiz` user_answers dict 嵌套 schema；`query_quiz_history` plan_id/limit/detail）+ 实现函数 + `_get_quiz_store()` 延迟 import + `execute_tool` 路由 + `get_tools()` 永远塞入 | G2 + D3 + D4 + D5 + D10 + D11 + D12 + D13 | [`src/agent/tools.py`](../src/agent/tools.py) 加 `_QUIZ_TOOLS` + `_tool_create_quiz` / `_tool_grade_quiz` / `_tool_query_quiz_history` + `_render_quiz_summary` 共用 helper | + ~350 行 |
+| 4 | 新建 `.agenta/skills/quiz-maker/SKILL.md`（D7 嵌套：`make_plan(steps=[解析意图/查KB/出题/落库])` → 各步对应 tool）+ "批改工作流"（用户作答 → LLM 拼 `user_answers` dict → 调 `grade_quiz`）+ "查历史工作流" + 反模式清单 + 用户呈现层模板（题目展示 / 批改结果展示） | G3 + G10 + D7 | [`.agenta/skills/quiz-maker/SKILL.md`](../.agenta/skills/quiz-maker/SKILL.md) | + ~150 行 |
+| 5 | CLI `/quiz` 命令组：`list` / `show <quiz_set_id>` / `del <quiz_set_id>` + `_QUIZ_USAGE` 帮助 + `_format_quiz_brief` / `_print_quiz_list` / `_print_quiz_detail` / `_parse_quiz_id` helper + `handle_quiz` 主分发 + main.py case 路由 + tab 补全 + ui.py HELP_TEXT 同步 | G5 + D2 | [`src/cli/handlers.py`](../src/cli/handlers.py) + [`main.py`](../main.py) + [`src/cli/tab_complete.py`](../src/cli/tab_complete.py) + [`src/cli/ui.py`](../src/cli/ui.py) | + ~180 行 |
+| 6 | Phase 2.3 评估器：`tools/agent_eval/quiz/dataset.json` 10 case（5 create：RAG / 5G NR / Python / ML 面试 / PMP + 3 negative：闲聊 / 单事实查 / "教我 X"歧义 + 2 grade case：标答对错混合）+ `eval_quiz.py`（双判定：触发识别率 + plan 质量 LLM-judge + 可选 grade 质量 judge；复用 `judge_with_llm` 第 3 次）+ `_QUIZ_QUALITY_CRITERIA`（相关性 / 难度 / 答案可推导 / 覆盖度）+ `_GRADE_QUALITY_CRITERIA`（识别 / 评分公平 / 反馈具体）；entry point 顶部 `load_dotenv(override=True)` | G6 + G7 + G8 + D6 | 新建 [`tools/agent_eval/quiz/__init__.py`](../tools/agent_eval/quiz/__init__.py) + [`tools/agent_eval/quiz/dataset.json`](../tools/agent_eval/quiz/dataset.json) + [`tools/agent_eval/quiz/eval_quiz.py`](../tools/agent_eval/quiz/eval_quiz.py) | + ~450 行 |
+| 7 | UT 全套：`QuizStore` CRUD / 三业务 tool 函数 / CLI 命令 / skill catalog（quiz-maker 是否被 scan_skills 发现） | 所有 G | 新建 [`tests/test_quiz_store.py`](../tests/test_quiz_store.py) ~30 case + [`tests/test_quiz_tools.py`](../tests/test_quiz_tools.py) ~25 case + [`tests/test_cli_handlers_quiz.py`](../tests/test_cli_handlers_quiz.py) ~15 case + 扩 [`tests/test_skill_loader.py`](../tests/test_skill_loader.py)（已有，加 1 case 确认 quiz-maker 被发现） | + ~600 行 |
+| 8 | 全量回归 + smoke 跑 evaluator（`--no-judge` 解析 dataset / `--case <id>` 单跑）+ ReadLints | — | `pytest -q --ignore=tests/test_rag.py --ignore=tests/test_llm.py` 应净增 ~70（543 + 70 = ~613）；0 退化 | — |
+| 9 | design.md 同步：新增 §3.10 测验业务（6-7 子节，仿 §3.9 学习计划业务结构）+ §5 IMP 表加 `QuizStore` 依赖行 + `tools.py` 加 Phase 2.3 三 tool 备注；iter_2.md Step 3-6 落地 | 所有 G | [`docs/design.md`](design.md) + [`docs/iter_2.md`](iter_2.md) | + ~300 行 |
+
+**Punt 项**（同步登记入 §4.13）：[§4.13.1 #15 #16 #17 #18 #19](#4131-deferred-backlog暂时不做)（CLI `/quiz` 交互答题模式 / SRS 字段预留 / Harness 自评 / 测验 export / Chainlit 可视化）已登记；[§4.13.2 #30 #31 #32](#4132-dropped永久不做)（多用户排行榜 / 难度自适应 / 题目去重）永久 punt。
+
+**Step 3 · 代码实现**
+
+| 改动 | 实现位置 |
+|---|---|
+| 测验数据层（G1 + D1 + D9 + D10） | 新建 [`src/memory/quiz_store.py`](../src/memory/quiz_store.py) `QuizStore`：二表 schema（`quiz_sets` 含 `status` 三态 / `total_score` / `plan_id` + `stage_idx` 软引用；`quiz_questions` 含 `q_type` ENUM / `correct_answer` / `user_answer` / `score` / `feedback` + `ON DELETE CASCADE`）+ 完整 CRUD（`create_quiz_set` / `add_questions` 非法 row 静默跳过 + options JSON 序列化 / `get_quiz_with_questions` / `list_quiz_sets` 含 plan_id 过滤 + archived 排除 + limit / `update_grading` 含跨 set qid 拒改 + total_score 区间裁剪 / `archive_quiz_set` / `delete_quiz_set` 级联）+ 进程级单例 `get_shared_store()` / `reset_shared_store_for_testing()`，仿 [§4.9.7](#497-学习计划生成-phase-22) `LearningPlanStore` 模板 |
+| config 配置（§5.1 三处同步） | [`src/config.py`](../src/config.py) 新增 `QUIZ_DB_PATH`（默认 `./sqlite_db/quiz.db`）+ `QUIZ_DEFAULT_NUM_QUESTIONS`（默认 10）+ `QUIZ_HISTORY_LIST_LIMIT`（默认 20）；`.env.example` + `.env` 三处同步 |
+| 三业务 tool（G2 + D3 + D4 + D5 + D10 + D11 + D12 + D13） | [`src/agent/tools.py`](../src/agent/tools.py)：新增 `_QUIZ_TOOLS` 三 JSON Schema（`create_quiz(topic?, plan_id?, stage_idx?, questions[])` 含 question item 嵌套 schema（order_idx/q_type enum/stem/options?/correct_answer/explanation?）/ `grade_quiz(quiz_set_id, user_answers)` user_answers 是 additionalProperties string dict / `query_quiz_history(quiz_set_id?, plan_id?, limit?, detail?)` 三路径互斥）+ `_tool_create_quiz`（≥ 10 类入参校验 + topic 缺则从 plan goal 派生 + 落库）/ `_tool_grade_quiz`（按 q_type 分发：`_grade_one_mcq` 字符串归一化比对，`_grade_one_short_answer` 内置 LLM-judge 调 `chat()` + 正则解析 JSON + 软返回失败原因）/ `_tool_query_quiz_history`（单套测验详情 / plan 过滤列表 / 全局列表 三路径）+ `_normalize_mcq_answer`（"ad" / "a,d" / "DA" → "AD"）+ `_render_quiz_brief` / `_render_quiz_detail` 共用 helper + `_get_quiz_store()` 延迟 import；`execute_tool` 加三 case 路由；`get_tools()` 永远塞入 |
+| `quiz-maker` skill（G3 + G10 + D7） | 新建 [`.agenta/skills/quiz-maker/SKILL.md`](../.agenta/skills/quiz-maker/SKILL.md) 200 行：触发条件 + 6 类意图 × tool 映射表 + D5 嵌套工作流（`make_plan(steps=[解析意图 / 查 KB / 60% MCQ + 40% 简答组题 / 落库 4 步])` → 各步对应 tool）+ create_quiz questions 严格格式约束 + 批改工作流（用户题号 → question_id 映射 → grade_quiz）+ 查历史工作流 + 反模式清单 + 用户呈现层模板（题目展示 / 批改结果展示）；description 字段含三新 tool 名 + D5 嵌套关键字 |
+| CLI `/quiz` 命令组（G5 + D2） | [`src/cli/handlers.py`](../src/cli/handlers.py) 加 `_QUIZ_USAGE` + `_format_quiz_brief` / `_print_quiz_list`（含 plan_id 过滤路径）/ `_print_quiz_detail`（含批改细节）/ `_parse_quiz_id` 4 helper + `handle_quiz(store, cmd_parts)` 主函数（match `list` / `show` / `del` 三子命令；`del` 二次确认）；[`main.py`](../main.py) 加 `case "/quiz"` 路由复用 `get_shared_store()`；[`src/cli/tab_complete.py`](../src/cli/tab_complete.py) 加 5 个 `/quiz*` 补全项；[`src/cli/ui.py`](../src/cli/ui.py) HELP_TEXT 加 4 行测验命令说明 |
+| Phase 2.3 评估器（G6 + G7 + G8 + D6 第 3 次复用） | 新建 [`tools/agent_eval/quiz/__init__.py`](../tools/agent_eval/quiz/__init__.py) 空 + [`tools/agent_eval/quiz/dataset.json`](../tools/agent_eval/quiz/dataset.json) 12 case（6 create：RAG / Python / ML / 5G NR / plan stage / Transformer 复习 + 2 history：列测验 / 错题复盘 + 4 negative：定义查询 / 闲聊 / 学习计划新建 / 概念对比）+ [`tools/agent_eval/quiz/eval_quiz.py`](../tools/agent_eval/quiz/eval_quiz.py) 460 行：仿 `eval_learning_plan.py` 套路 — `_EVAL_SYSTEM_PROMPT`（quiz-maker 模拟 + 学习计划 vs 测验边界引导）+ `_PLAN_QUALITY_CRITERIA`（4 维：意图解析 / KB 检索 / 出题组织 60/40 / 落库步骤）+ `_judge_recall` 加 history category 第三路径 + 双阈值退出码（识别率 ≥ 80% AND plan 质量均分 ≥ 4.0/5）；顶部 `load_dotenv(override=True)` |
+| UT 全套（覆盖所有 G） | 新建 3 个测试文件 + 扩 1 个 — [`tests/test_quiz_store.py`](../tests/test_quiz_store.py) 29 case（基本 CRUD 11 / update_grading 7 / lifecycle 5 / list_quiz_sets 5 / context manager 1）+ [`tests/test_quiz_tools.py`](../tests/test_quiz_tools.py) 43 case（schema 5 / create_quiz 10 含 plan goal 派生 + LearningPlanStore mock / grade_quiz 7 含 MCQ 归一化 + short answer judge mock / query_quiz_history 8 三路径 / 路由 1 / MCQ 归一化 helper 7 / 简答 judge 5）+ [`tests/test_cli_handlers_quiz.py`](../tests/test_cli_handlers_quiz.py) 18 case（list 6 含 plan 过滤 / show 7 含批改细节 / del 4 含 confirm mock / unknown 1）+ 扩 [`tests/test_skill_loader.py`](../tests/test_skill_loader.py) `TestRealAgentaSkills::test_repo_skills_loadable` 加 `quiz-maker in result.loaded` 断言 |
+
+**Step 4 · UT 结果**
+
+```text
+新增测试文件（3 个）：
+  tests/test_quiz_store.py             29 passed
+  tests/test_quiz_tools.py             43 passed
+  tests/test_cli_handlers_quiz.py      18 passed
+扩展测试文件（1 个）：
+  tests/test_skill_loader.py           +1 case（quiz-maker 自动发现断言）
+
+全量回归：python -m pytest -q
+→ 677 passed, 2 failed, 110 deselected, 3 warnings in 71.73s
+```
+
+较 Phase 2.2 末态净增 ~90，全部来自本节新增 case，**0 业务退化**。`ReadLints` 全部 clean。
+
+2 个失败用例（`tests/test_agent.py::TestCustomSystemPrompt`）经 git stash 验证为 **Phase 2.2 残留 fixture 隔离 bug**（`_isolate_project_rules` fixture 只 patch 了 `_get_shared_project_rules`，没 patch `build_active_study_plan_block`，导致 sqlite_db/learning.db 有 active plan 时会把 `<active_study_plan>` 块追加到 system_prompt 末尾破坏断言）—— 跟 Phase 2.3 改动无关，已登记 [§4.13.1 #20](#4131-deferred-backlog暂时不做) 后续单独清理。
+
+**Step 5 · 评估**
+
+```bash
+# Phase 2.3 quiz 业务（推荐设 PYTHONIOENCODING=utf-8 防 Windows GBK emoji 报错）
+python -m tools.agent_eval.quiz.eval_quiz              # 跑全部 + LLM-judge
+python -m tools.agent_eval.quiz.eval_quiz --case Q01-create-rag
+python -m tools.agent_eval.quiz.eval_quiz --no-judge   # 仅触发识别
+```
+
+实测结果（qwen provider，2026-05-28）：
+
+| 指标 | 值 | 判据 | 状态 |
+|---|---|---|---|
+| 样本数 | 12 | — | — |
+| 识别通过数 | 12 | — | — |
+| 识别通过率 | **100%** | ≥ 80% | ✅ |
+| plan 质量均分（create 通过） | **4.60/5** | ≥ 4.0/5 | ✅ |
+
+分组：create 6/6、history 2/2、negative 4/4 全部通过。报告落 `tools/agent_eval/reports/quiz-eval-20260528-215611.md`，含核心指标 + 分组 + 全 case 总览 + create 通过 case plan 详情 + Fail 用例诊断（本次无 fail）。**双阈值判据**均达标，exit 0。
+
+**Step 6 · design.md 同步**
+
+新增 [`design.md §3.10 测验业务`](design.md#310-测验业务) 完整章节（仿 §3.9 学习计划业务结构，含 §3.10.4 简答批改内联 LLM-judge 与评估器公共 helper 的关系说明）+ [`§5 IMP 表`](design.md#5imp) 加 `QuizStore` 依赖行 + `tools.py` 行更新含 Phase 2.3 三 tool 备注；[§3.5.2](design.md#352-三层注入顺序) **不变**（D8 决策：quiz 不注入 system_prompt 第 5 层）。
+
+> 注：本节首版曾把 LLM-judge framework 单独列为 design.md §3.10（沿用 Phase 2.2 抽出的章节），测验业务列为 §3.11；后期判定该 framework 已不需要独立成节（接口稳定后核心抉择记在代码 docstring 即可），删 §3.10 并把测验业务降为 §3.10。当前版本 §3.10.4 仅说明生产内联 judge 与评估器公共 helper 的区分。
+
+
+### 4.9.9 SRS 主动复习调度 (phase 2.4)
+
+**功能描述**：用户做 quiz 答错的题 / 手动新建的卡片自动进 SRS 队列，agent 用 SM-2 算法（Anki 风格 4 档自评：again / hard / good / easy）调度"下次该复习的时刻"；用户来 agent 问"今天有什么要复习 / 给我出 due 的卡片"时 agent 列出 due 卡片，复习完用户自评 → SRS 更新 `next_review_at`。
+
+> Phase 2 学习/研究助理（[§4.7.1 项目定位](#471-项目定位)）的第 3 个业务 feature。区别于 [§4.9.8 Phase 2.3](#498-quiz-出题-phase-23) 的"一次性出题 + 批改 + 落库"，SRS 是"每张卡有 `next_review_at`、按调度反复回炉"。区别于 [§4.7.2 #6](#472-选定-feature-列表) 早期描述的"后台 scheduler + 邮件通知"，本期遵 [§4.13.2 #29](#4132-dropped永久不做) 永久 punt 通知机制约定，做"应用内被动查询 + LLM 按需推送"组合 — 由 LLM 在用户表达复习意图时自决调用 `query_srs_due` tool。
+
+**Step 0 · 需求规格**
+
+| 字段 | 内容 |
+|---|---|
+| **用户故事** | 我做 quiz 答错了几道题 / 看到有想"长期记住"的知识点 → 希望 agent 帮我**自动加入 SRS 队列**，按记忆心理学算法（SM-2 / Anki 风格）调度下次该回炉的时刻；后续我说"我今天还要复习什么 / 把今天 due 的卡片给我" → agent 列出 due 卡片（题面 / 正面 + 选项 / 答案），我**自评 4 档**（again / hard / good / easy）→ agent **更新调度**（下次 due 时刻）；跨 session 我能查"我 SRS 队列现在有多少卡 / 即将到期的有哪些 / 我对哪类题最弱"；某张卡不想再复习了能 `archive` / `delete` |
+| **验收标准** | ① **算法正确性**：SM-2 公式实现与 Anki 默认调度行为对齐（同输入 ease / interval / repetitions → 同输出 next interval / ease），UT 覆盖 ≥ 95% 分支（含 `again` 重置 / `easy` bonus / `interval` 累积 / `ease_factor` 下限 1.3 等边界）<br>② **核心场景跑通**：用户做完 quiz 答错的题（grade_quiz 后 LLM 自决调 `add_to_srs`）能自动进队列；用户问"今天有什么要复习" → agent 调 `query_srs_due` 列题面；用户给 4 档自评 → agent 调 `review_srs_card` 更新 `next_review_at`；跨 session 重启 agent → 队列 + 调度状态 100% 持久<br>③ **触发识别准确**：用户说"复习 / 出 due 的卡片 / 我今天的 SRS / 把 srs 卡片背一下"等 → LLM 调 `query_srs_due` 触发识别率 ≥ 80%（dataset LLM-judge 评测）<br>④ **CLI 可视化**：`/srs` 命令组 — `list [filter]` / `due` / `show <id>` / `stats`（总数 / due 数 / 各 ease bucket）/ `del <id>`<br>⑤ **不污染 system prompt**：默认**不**注入 `<srs_due>` 第 5 层 system block（与 [§4.9.8 D8](#498-quiz-出题-phase-23) 一致约定：短期 / 按需业务一律不常驻 system_prompt）；用户表达复习意图后 LLM 自决调 tool |
+| **Scope** | **本期做**：<br>① 新建 `srs_cards` 独立表 + `SRSStore` 数据层（D3 — R2 软引用 quiz_questions / manual 卡）<br>② 新建 `src/agent/core/srs_scheduler.py` SM-2 算法核心（D1 + D4 — Anki 4 档 → SM-2 公式 mapping）<br>③ 4 个业务 tool：`add_to_srs(source_type, source_ref?, front?, back?)` / `query_srs_due(limit?, detail?)` / `review_srs_card(card_id, rating)` / `query_srs_stats()`<br>④ 新建 `.agenta/skills/srs-review/SKILL.md`（D7 — 与 study-planner / quiz-maker 平级，承载 SRS 业务指引）<br>⑤ Phase 2.3 quiz-maker skill 强化：grade_quiz 后 LLM 自决把错题（score < 0.6）调 `add_to_srs`（D5 钩子）<br>⑥ CLI `/srs` 命令组：`list` / `due` / `show <id>` / `stats` / `del <id>`<br>⑦ Phase 2.4 golden set：`tools/agent_eval/srs/`（触发识别 + Anki 行为对齐测试，复用 `judge_with_llm` 第 4 次）<br>**暂时不做**：详 [§4.13.1 #21 #22 #23 #24 #25](#4131-deferred-backlog暂时不做)<br>**显式不做**：详 [§4.13.2 #29 #33](#4132-dropped永久不做) |
+| **依赖** | [§4.9.6 Phase 2.1](#496-agent-循环升级-phase-21) plan-execute loop（批量复习时 LLM 可嵌套 `make_plan`）/ [§4.9.7 Phase 2.2](#497-学习计划生成-phase-22) `LearningPlanStore` 模板（`SRSStore` 沿用进程级单例 + 事务模式）/ [§4.9.8 Phase 2.3](#498-quiz-出题-phase-23) `QuizStore`（R2 软引用 `quiz_questions` + quiz-maker skill 钩子）/ [§4.9.5 Phase 1.5](#495-skills-框架强化-phase-15) skill 框架（srs-review 自动激活）/ `judge_with_llm` helper（只用于 Phase 2.4 dataset 触发识别评分，**第 4 次复用**；review 路径纯自评无 LLM judge） |
+
+**关键决策摘要**（D1-D7，完整推导留 [Step 2](#step-2--实施计划-4)）：
+
+| # | 决策点 | 选用 | 一句话理由 |
+|---|---|---|---|
+| **D1** | 调度算法 | **SM-2**（SuperMemo 2，1987 Wozniak） | 30 行核心 / 0 hyperparam / Anki 默认调度的算法祖先；MVP 体量（review < 1000 张）下 FSRS / NN 的长尾精度优势体现不出来 |
+| **D2** | 触发策略 | **应用内被动查询 + LLM 按需推送**；不做后台 scheduler | 后台 cron / OS 通知 / 邮件已 [§4.13.2 #29](#4132-dropped永久不做) 永久 punt；本期组合让 LLM 在用户表达复习意图时自决调 `query_srs_due`，无需外部 infra |
+| **D3** | 数据建模 | **独立 `srs_cards` 表 + 软引用**（R2） | quiz_questions / learning_tasks 不污染 / 未来扩 source_type 不动现表 / 与 [§4.13.1 #14 #16](#4131-deferred-backlog暂时不做) "YAGNI 不预留 SRS 字段"决策路径一致 |
+| **D4** | 评分粒度 | **Anki 4 档（again / hard / good / easy）→ SM-2 公式 mapping** | SM-2 原版 0-5 自评用户体验差（不知道怎么打分）；Anki 4 档行业事实标准 — 用户心智 + 算法兼容性最佳折衷 |
+| **D5** | 卡片来源 | **quiz_question + manual** 两种 source_type | quiz_question 是 Phase 2.3 自然延伸（错题进 SRS 核心场景）；manual 卡覆盖 Anki 手动卡场景；learning_task 不进 → 详 [§4.13.1 #23](#4131-deferred-backlog暂时不做) |
+| **D6** | review 评分机制 | **纯用户自评 4 档**，无 LLM judge | SRS 是"回忆 + 自评"，跟 quiz 的"考核 + 评分"是不同 mental model（Anki 心智一致）；LLM-judge 复用 → 详 [§4.13.1 #25](#4131-deferred-backlog暂时不做) |
+| **D7** | skill 承载 | **新建 srs-review skill**（与 study-planner / quiz-maker 平级） | 巩固"业务 = 对应 skill"约定（Phase 2.2 / 2.3 一致）；让 LLM 通过 scan_skills catalog + L2 load_skill 自然走 SRS 流程 |
+
+**Punt 项**（同步登记入 §4.13）：[§4.13.1 #21 #22 #23 #24 #25](#4131-deferred-backlog暂时不做)（Chainlit SRS 可视化 / FSRS 算法升级 / learning_task 进 SRS / SRS export / LLM-judge 复用）已登记；[§4.13.2 #29 #33](#4132-dropped永久不做)（后台 scheduler/OS 通知 — 既有 / 多用户 SRS + 多设备同步 — 本期新登记）。
 
 
 ## 4.10. 配套 tools（tools/agent_eval）
@@ -1903,7 +2102,7 @@ import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
 | **[§4.13.2 Dropped](#4132-dropped永久不做)** | 项目 scope 之内，**永久 punt**（未来也不做） |
 | **[§5 Future](#5-future)** | 项目 scope **之外**的横向扩展方向（如[§5.1 企业内 Q&A](#51-企业内-qa)） |
 
-**新增条目时的强约束**：
+**新增条目时的强制要求**：
 
 1. 每次 §4.9.x feature 写 Step 0，**Scope 字段中"暂时不做" / "显式不做"项**必须同步往本节对应子节加一条；§4.9.x 正文里**不复述** punt 详情，只写 "详 [§4.13.1 #x](#4131-deferred-backlog暂时不做)" 或 "详 [§4.13.2 #x](#4132-dropped永久不做)"
 2. **归类判定标准**：有**明确的触发条件**（如"等 webui 优化任务"）或**明确的计划阶段**（如"phase 2.x sandbox"）→ §4.13.1；都没有 → §4.13.2
@@ -1917,7 +2116,7 @@ import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
 
 | # | 项 | 来源 phase | 计划阶段 | 推迟原因 |
 |---|---|---|---|---|
-| 1 | Session 列表支持分页 / 命名 / 标签 / 收藏 | Phase 1.1 | Phase 2 / Phase 3 视用户实际 session 量决定 | MVP 阶段 session 量小（< 100）不需要；over-engineering for MVP |
+| 1 | Session 列表支持分页 / 命名 / 标签 / 收藏 | Phase 1.1 | Phase 2 / Phase 3 视用户实际 session 量决定 | MVP 阶段 session 量小（< 100）不需要；过度设计（MVP 阶段不必要） |
 | 2 | Chainlit 端 Session 管理同步（list / search / switch） | Phase 1.1 | 后续 WebUI 优化任务（[design.md §4.2 WebUI](design.md#42webui)） | Phase 1.1 出口判据明写 "CLI 能"；WebUI 端统一在专门 WebUI 优化任务做 |
 | 3 | Session 关联 project 层（分层 Memory 的 session 维度） | Phase 1.1 | 待 Memory 分层方案重新启动后（当前 §4.13.2 已 Dropped 三层）| 上游"三层 user/project/local" 当前永久 punt（§4.13.2 #1），Session 分层无意义；如未来重启分层方案再考虑 |
 | 4 | LLM-judge 评估（Memory 召回打分） | Phase 1.2 | Phase 2 Plan / Quiz 第 2 次复用时一并上 framework | 单 feature 不上 LLM-judge framework；等第 2 个用例出现再上抽象（[§4.8.2 硬约束](#482-评估工具列表)） |
@@ -1925,12 +2124,23 @@ import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
 | 6 | Chainlit / CLI 把引用 `[n]` 渲染成可点击超链接 | Phase 1.4 | 后续 WebUI 优化任务（与 #2 / #5 同任务） | [§4.7.3 Phase 1.4](#473-实施顺序) 出口已写 "本次任务不实现"；文本形式已足以验证溯源能力 |
 | 7 | Skills L3 — `scripts/` 自动执行（agent 主动跑 skill 里的 Python） | Phase 1.5 | Phase 2.x （sandbox / 权限机制设计完成后） | L3 涉及 code execution，需要 sandbox 设计 + 信任模型；本期资源不够 |
 | 8 | Skills L3 — `references/` 按需加载 | Phase 1.5 | Phase 2.x （与 #7 同阶段） | L3 渐进披露的副入口；本期 L1 + L2 已足够覆盖 study-planner / quiz_maker 等典型 skill 场景 |
-| 9 | Skill 激活后 catalog 同步移除该 skill 的 description 块（H1） | Phase 1.5 | 实测有 LLM 因为重复信息走偏 / context 紧张时再修 | 已激活的 skill body 已注入 system_prompt，catalog 里的 description 块成了重复信息；当前 LLM 实测未受影响 — over-engineering for MVP |
+| 9 | Skill 激活后 catalog 同步移除该 skill 的 description 块（H1） | Phase 1.5 | 实测有 LLM 因为重复信息走偏 / context 紧张时再修 | 已激活的 skill body 已注入 system_prompt，catalog 里的 description 块成了重复信息；当前 LLM 实测未受影响 — 过度设计（MVP 阶段不必要） |
 | 10 | Plan 执行前用户审批 / 编辑（plan 出来后用户 yes / edit / no 三选一再执行，Cursor Plan Mode / CC plan permission mode 风格） | Phase 2.1 | Phase 2.5 Harness 或 Phase 3.3 防 prompt injection 时一起做 | 跟反思 / 安全 mode 强相关，单独做没收益；MVP 单用户场景每步审批反降 UX |
 | 11 | Chainlit plan step UI 渲染（plan 步骤 / 进度可视化到 Chainlit 端） | Phase 2.1 | 后续 WebUI 优化任务（与 #2 / #5 / #6 同任务，[design.md §4.2 WebUI](design.md#42webui)） | Phase 2.1 验收按 CLI 端 plan 可见即可；Chainlit 端 step UI 跟其他 WebUI 优化项统一在 WebUI 优化任务做（同 #2 / #5 / #6 逻辑） |
 | 12 | Chainlit 学习计划进度可视化（plan / task 进度推 Chainlit 端） | Phase 2.2 | 后续 WebUI 优化任务（同 #2 / #5 / #6 / #11 一并做） | Phase 2.2 验收按 CLI 端 `/study show` 文本可见即可；统一在 WebUI 优化任务做 |
 | 13 | 学习计划 export（导出为 Markdown / Anki 卡片 / Notion DB） | Phase 2.2 | 用户实际需求触发后做 | MVP 阶段 CLI 端 `/study show` 文本输出已足够；export 涉及目标格式适配 + 真用户痛点验证 |
 | 14 | `learning_tasks` 预留 SRS 字段（`srs_next_review` / `srs_ease` / `srs_interval`） | Phase 2.2 | Phase 2.4 SRS 启动时 ALTER TABLE 加 | [§4.9.7 D7](#497-plan学习计划生成-phase-22) 决策：YAGNI；Phase 2.4 不一定还用同一表（Anki SRS card 与 task 不是 1:1），ALTER TABLE 在 SQLite 廉价 |
+| 15 | CLI `/quiz` 交互答题模式（逐题问答 input() 循环） | Phase 2.3 | Phase 2.5 Harness 或单独 CLI UX 优化任务 | [§4.9.8 D2](#498-quiz-出题-phase-23) 决策：本期走"两阶段对话"（agent 出题 → 用户作答 → agent 批改）已满足验收 ⑤；交互模式需新建 quiz_loop.py + 与 agent 主 loop 解耦，复杂度高，等 Harness 自检场景一起做 |
+| 16 | `quiz_questions` 预留 SRS 字段（`next_review_at` / `ease_factor` / `interval_days`） | Phase 2.3 | Phase 2.4 SRS 启动时 ALTER TABLE 加 | [§4.9.8 D7](#498-quiz-出题-phase-23) 决策：YAGNI，跟 §4.13.1 #14 同思路；Phase 2.4 不一定按 quiz_questions 建模 SRS card，ALTER TABLE 在 SQLite 廉价 |
+| 17 | 测验 Harness 自检（agent 对自己出题质量 / 批改判定的反思） | Phase 2.3 | Phase 2.5 Harness | [§4.9.8 Step 0](#498-quiz-出题-phase-23) 验收"结合 Harness 自评"明示 Harness 是 Phase 2.5；本期只做基础自动批改 |
+| 18 | 测验结果 export（导出为 Markdown / Anki 卡 / Notion） | Phase 2.3 | 用户实际需求触发后做（同 §4.13.1 #13 思路） | MVP 阶段 CLI `/quiz show <id>` 文本输出已足够；export 涉及目标格式适配 + 真用户痛点验证 |
+| 19 | Chainlit 测验题目 / 答题进度可视化（含 MCQ 选项渲染、批改可视化） | Phase 2.3 | 后续 WebUI 优化任务（同 §4.13.1 #2 #5 #6 #11 #12 同任务） | Phase 2.3 验收按 CLI 端可见即可；统一在 WebUI 优化任务做 |
+| 20 | ~~`tests/test_agent.py::TestCustomSystemPrompt` 两条用例 fixture 隔离缺口（Phase 2.2 残留 bug）~~ **RESOLVED**（[§4.9.7 Step 7](#497-plan学习计划生成-phase-22) 路线 C 切换顺带修复）| Phase 2.3 Step 4 浮现 | 路线 A → C 后默认不注入，测试 session 无 `/study load` 即不会污染 system_prompt；2/2 case 实测通过 | 原因：`_isolate_project_rules` fixture 只 patch 了 `_get_shared_project_rules` 没 patch learning_plan store；路线 A 下 `sqlite_db/learning.db` 真存在 active plan 时会把 `<active_study_plan>` 块追加到 system_prompt 末尾破坏断言。路线 C 改完后此路径不再触发，自然消失 |
+| 21 | Chainlit SRS 队列 / 复习进度可视化（含 4 档评分按钮 / due 卡日历视图） | Phase 2.4 | 后续 WebUI 优化任务（同 #2 #5 #6 #11 #12 #19 同任务，[design.md §4.2 WebUI](design.md#42webui)）| Phase 2.4 验收按 CLI 端 `/srs` 文本输出已足够；统一在 WebUI 优化任务做 |
+| 22 | SRS 算法升级（SM-2 → FSRS / Half-life regression / NN-based） | Phase 2.4 | 待用户 review 量 > 1000 张 / 实测 SM-2 精度明显不足 | [§4.9.9 D1](#499-srs-主动复习调度-phase-24) 决策：MVP 体量下 SM-2 精度足够；FSRS 17 参数调参成本高且需训练数据；review 量未上来不冒进 |
+| 23 | learning_task 进 SRS 队列（task 作为 source_type） | Phase 2.4 | 视用户实际需求触发后做 | [§4.9.9 D5](#499-srs-主动复习调度-phase-24) 决策：task 是"做"不是"记住"，语义勉强；先观察用户是否真有该诉求 |
+| 24 | SRS 卡片 export（导出为 Anki .apkg / Notion DB / Markdown） | Phase 2.4 | 用户实际需求触发后做（同 #13 #18 思路）| MVP 阶段 CLI `/srs list` 文本输出已足够；export 涉及目标格式适配 + 真用户痛点验证 |
+| 25 | SRS review 路径接入 `judge_with_llm`（用户作答简答卡时 LLM 给反馈） | Phase 2.4 | Phase 2.5 Harness 自检场景 | [§4.9.9 D6](#499-srs-主动复习调度-phase-24) 决策：SRS 是"回忆+自评"不是"考核+评分"；review 路径强行接 LLM-judge 会模糊 mental model；留 Phase 2.5 一并做 |
 
 ---
 
@@ -1943,7 +2153,7 @@ import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
 | 1 | 三层 user/project/local memory | Phase 1.2 | 单用户场景动机不成立（见 §4.9.2 Step 1） |
 | 2 | LLM-driven memory consolidation | Phase 1.2 | 30-100 条体量用不上 |
 | 3 | `/project` 切换 CLI 命令 | Phase 1.2 | 不分层（#1）就不需要 |
-| 4 | Memory MD sidecar 双向 sync | Phase 1.2 | over-engineering（200 行 sync 代码换批量编辑能力，单用户场景用不上） |
+| 4 | Memory MD 伴生文件双向 sync | Phase 1.2 | 过度设计（200 行 sync 代码换批量编辑能力，单用户场景用不上） |
 | 5 | Memory 评估 baseline 对比（with vs without） | Phase 1.2 | 本期只做绝对召回，达 80% 即合格 |
 | 6 | 多文件 `.agenta/rules/*.md` | Phase 1.3 | 单用户 CLI 场景单文件够；真有需求再扩 |
 | 7 | rules frontmatter（`alwaysApply` / `globs`） | Phase 1.3 | 单文件不需要选择性应用 |
@@ -1969,6 +2179,10 @@ import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
 | 27 | 自动学习时长追踪（agent 自动记录"每天学了几小时"） | Phase 2.2 | 数据来源不可靠（屏幕时间 / 进程监控 / 浏览器历史都侵入隐私且不准）；让用户在 `update_study_progress` 时备注 `note` 字段已足够 |
 | 28 | 多用户学习计划（社交 / 排行榜 / 共享 plan / 协作学习） | Phase 2.2 | 本项目永久单用户场景定位（类比 §4.13.2 #1 三层 memory） |
 | 29 | 计划自动调度提醒（push notification / email / 系统 toast） | Phase 2.2 | Phase 2.4 SRS 才做时间触发；通知机制涉及 OS 集成 / 邮件服务 / 跨平台适配，超 AgentA scope；如需要由用户外部工具（Cron / Reminders）触发 agent 查询即可 |
+| 30 | 多用户测验排行榜 / 比赛模式 / 共享测验题库 | Phase 2.3 | 本项目永久单用户场景定位（类比 §4.13.2 #1 三层 memory / §4.13.2 #28 多用户学习计划） |
+| 31 | 测验难度自适应（按用户历史正确率动态调难度） | Phase 2.3 | 需长期数据积累 + 复杂调度策略，超 MVP scope；让用户在 `create_quiz` 时显式说"出难一点 / 简单点"即可 |
+| 32 | 测验题目去重（同主题多次出题不重复 / 跨 quiz_set 去重） | Phase 2.3 | 实现复杂度高（需语义相似度判定 + 历史扫描），MVP 阶段用户能容忍偶尔重复；真实使用时让 LLM 在 prompt 里看到最近题目即可缓解 |
+| 33 | 多用户 SRS 队列共享 / 排行榜 / 多设备 SRS 同步（cloud sync） | Phase 2.4 | 本项目永久单用户场景定位（类比 §4.13.2 #1 #28 #30）；多设备同步涉及 cloud sync infra（冲突解决 / 增量同步 / 时区处理），超 AgentA scope |
 
 
 # 5. Future

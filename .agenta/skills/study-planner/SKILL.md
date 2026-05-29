@@ -70,9 +70,10 @@ make_plan(steps=[
 
 用户新 session 问"我学到哪了 / 我有啥计划"：
 
-- 默认先 `query_study_status()` 看 active plan
+- **优先**：若 system_prompt 中存在 `<active_study_plan>` 块（说明用户已 `/study load`），直接基于此回答，不必再调 tool
+- 若 system_prompt 无 `<active_study_plan>` 块 → 调 `query_study_status()` 看 active plan
 - 若返回 `[empty]`，再调 `query_study_status(list_all=true)` 列全部
-- 若全部为空，转去引导用户新建计划
+- 若全部为空，转去引导用户新建计划，并在最后温和提示「用 `/study load [id]` 把计划加载进当前会话后，我就能默认看到你的进度」
 
 ## 反模式（不要做）
 

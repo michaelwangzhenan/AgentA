@@ -219,7 +219,11 @@ def main() -> None:
                 continue
             case "/study":
                 from src.memory.learning_plan_store import get_shared_store as _get_lp_store
-                handlers.handle_study(_get_lp_store(), cmd_parts)
+                handlers.handle_study(_get_lp_store(), cmd_parts, session_id=agent.session_id)
+                continue
+            case "/quiz":
+                from src.memory.quiz_store import get_shared_store as _get_quiz_store
+                handlers.handle_quiz(_get_quiz_store(), cmd_parts)
                 continue
         
         # ── 用户显式 Skill 激活 ──────────────────────────────────────────────

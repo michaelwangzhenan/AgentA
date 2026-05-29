@@ -35,8 +35,13 @@ HELP_TEXT = """
   /memory clear              清空全部用户记忆
   /study                     列出全部学习计划（▶ 标记 active）
   /study show [plan_id]      查看 active plan / 指定 plan 全貌
-  /study switch <plan_id>    切换 active plan
+  /study switch <plan_id>    切换 active plan（改 DB is_active）
+  /study load [plan_id]      把 plan（不传则 active）加载进当前会话 prompt
   /study abandon <plan_id>   放弃指定 plan（标记 abandoned，不删数据）
+  /quiz                      列出最近的 quiz（不含 archived）
+  /quiz list [plan <pid>]    同上 / 过滤某 plan 的 quiz
+  /quiz show <quiz_set_id>   查看单个 quiz 详情（含题目 + 批改细节）
+  /quiz del <quiz_set_id>    删除指定 quiz（不可恢复）
   /quit                      退出程序
   /exit                      退出程序（同 /quit）
 

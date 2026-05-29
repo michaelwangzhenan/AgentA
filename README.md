@@ -28,6 +28,9 @@
 - **项目偏好规则**：项目根放一份 `.agenta/rules.md`（参考 Cursor Rules / AGENTS.md），Agent 启动时自动注入到 system prompt，例如"始终用中文""引用要带页码"，不必每轮重申；可被会话中临时偏好覆写。
 - **答案带可溯源引用**：使用 RAG 召回时，正文带 `[1] [2]` 行内标号，回答末尾自动追加 `— sources —` 块写明文件 / 章节 / 页号，可直接溯源到知识库原文；同源 chunk 自动合并，反 LLM 幻觉引用。
 - **Skills 框架**：`.agenta/skills/<name>/SKILL.md` 兼容 agentskills.io 规范；启动 banner 显式回显已加载 / 失败列表，LLM 主动按 description 认出该用哪个 skill 并按指令执行（也支持 `/<name>` 手动激活），skill 内调 `search_knowledge` 自动复用引用机制。
+- **Plan-Execute 循环**：Agent 主动用 `make_plan` 把复杂任务拆成有序 step 再逐步执行，每步可调 tool 并 emit `plan_step_*` 事件；CLI 端 ☐/✓/✗/⏭ 实时勾选可见。
+- **学习计划长期跟踪**：跟 Agent 说"我想 8 周准备 ML 面试" → 自动拆阶段任务清单落库 SQLite，跨 session 可见 + LLM 自动注入 `<active_study_plan>` 到 system prompt；用 `/study` 命令列 / 切换 / 放弃多个 plan，task 进度更新走对话（"完成了第 3 题"）。
+- **Quiz 自检练习**：跟 Agent 说"考考我 RAG / 出 5 道 ML 题" → 用 `quiz-maker` skill 走 4 步嵌套（解析意图 / 查 KB / 60% MCQ + 40% 简答组题 / 落库），用户用一段自然语言批量作答 → MCQ 字符串比对 + 简答 LLM-judge 自动批改 + 反馈薄弱点；quiz 跨 session 留档复盘，可用 `/quiz` 命令查历史 / 看错题。
 - **三套实现可选**：`PYTHON`（手写 ReAct，默认）/ `LANGCHAIN`（create_agent 驱动）/ `AUTOGPT`（Plan-Execute 双循环）。
 
 

@@ -1,0 +1,98 @@
+[
+  {
+    "id": "Q01-create-rag",
+    "category": "create",
+    "question": "考考我 RAG 检索基础，出 10 道题",
+    "expected_first_tool": ["make_plan", "create_quiz"],
+    "judge_after": true,
+    "note": "明确出题主题 + 题数 → 应触发 make_plan 嵌套 4 步（D5）或一次性 create_quiz"
+  },
+  {
+    "id": "Q02-create-python",
+    "category": "create",
+    "question": "给我出 5 道 Python 列表与字典的小测",
+    "expected_first_tool": ["make_plan", "create_quiz"],
+    "judge_after": true,
+    "note": "明确出题主题 + 题数 → 应触发 make_plan 嵌套"
+  },
+  {
+    "id": "Q03-create-ml-default-n",
+    "category": "create",
+    "question": "我想测一下 ML 基础，能不能给我出几道题？",
+    "expected_first_tool": ["make_plan", "create_quiz"],
+    "judge_after": true,
+    "note": "明确出题主题但题数模糊 → LLM 应按默认 10 道"
+  },
+  {
+    "id": "Q04-create-5g-nr",
+    "category": "create",
+    "question": "用 5G NR 物理层的内容出 8 道自测题",
+    "expected_first_tool": ["make_plan", "create_quiz"],
+    "judge_after": true,
+    "note": "明确出题主题 + 数量 + 领域 → 应触发 make_plan 嵌套；需 KB 检索"
+  },
+  {
+    "id": "Q05-create-plan-stage",
+    "category": "create",
+    "question": "把我 active 学习计划的 stage 2 出成 quiz",
+    "expected_first_tool": ["make_plan", "create_quiz", "query_study_status"],
+    "judge_after": true,
+    "note": "学习计划阶段触发出题 → 应触发 make_plan 嵌套，或先 query_study_status 拿 plan 详情再出题（合理预步）"
+  },
+  {
+    "id": "Q06-create-review",
+    "category": "create",
+    "question": "出几道复习题让我自检一下 Transformer 自注意力机制",
+    "expected_first_tool": ["make_plan", "create_quiz"],
+    "judge_after": true,
+    "note": "复习自检需求 → 应触发 make_plan 嵌套，未指题数走默认"
+  },
+  {
+    "id": "Q07-history-list",
+    "category": "history",
+    "question": "我做过哪些 quiz？列一下",
+    "expected_first_tool": ["query_quiz_history"],
+    "judge_after": false,
+    "note": "查 quiz 历史列表 → 应直接调 query_quiz_history（不传参）"
+  },
+  {
+    "id": "Q08-history-error-review",
+    "category": "history",
+    "question": "上次 quiz 我哪些错了？quiz_set_id=5",
+    "expected_first_tool": ["query_quiz_history"],
+    "judge_after": false,
+    "note": "错题复盘 → 应调 query_quiz_history(quiz_set_id=5, detail=true)"
+  },
+  {
+    "id": "Q09-negative-define",
+    "category": "negative",
+    "question": "Transformer 是什么？",
+    "expected_first_tool_not": ["make_plan", "create_quiz", "grade_quiz", "query_quiz_history"],
+    "judge_after": false,
+    "note": "单一事实问答 → 不应触发 quiz 工具；应直接 search_knowledge"
+  },
+  {
+    "id": "Q10-negative-chitchat",
+    "category": "negative",
+    "question": "你好，今天天气如何？",
+    "expected_first_tool_not": ["make_plan", "create_quiz", "grade_quiz", "query_quiz_history"],
+    "judge_after": false,
+    "note": "闲聊 → 不应触发任何 quiz 工具；应直接回答"
+  },
+  {
+    "id": "Q11-negative-study-plan-create",
+    "category": "negative",
+    "question": "我想 8 周准备 ML 面试，帮我系统规划一下",
+    "expected_first_tool_not": ["create_quiz", "grade_quiz", "query_quiz_history"],
+    "judge_after": false,
+    "note": "学习计划创建 → 应触发 create_study_plan / make_plan，**不应**触发 quiz（边界 case：学习计划 vs quiz 区分）"
+  },
+  {
+    "id": "Q12-negative-explain-concept",
+    "category": "negative",
+    "question": "解释一下什么是 BM25 和 dense retrieval 的区别",
+    "expected_first_tool_not": ["make_plan", "create_quiz", "grade_quiz", "query_quiz_history"],
+    "judge_after": false,
+    "note": "概念对比解释 → 应 search_knowledge；不应触发 quiz"
+  }
+]

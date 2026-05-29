@@ -40,7 +40,13 @@ CLI_COMMANDS: list[str] = [
     "/study list",
     "/study show",
     "/study switch",
+    "/study load",
     "/study abandon",
+    "/quiz",
+    "/quiz list",
+    "/quiz list plan",
+    "/quiz show",
+    "/quiz del",
     "/quit",
     "/exit",
 ]

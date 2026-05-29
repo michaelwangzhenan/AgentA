@@ -8,7 +8,8 @@
     - update_task_status 校验：非法 status / 跨 plan task_id
     - abandon_plan / complete_plan：状态变更 + is_active=0
     - list_plans 排序（active 优先 + 创建时间倒序）+ include_abandoned 过滤
-    - render_active_for_prompt：active / 无 active / max_chars 截断 / stage 分组渲染
+    - render_plan_for_prompt：基础渲染 / 不存在 / abandoned / max_chars 截断 / stage 分组
+    - mark_loaded / get_loaded / clear_loaded：基础 / stale 自动 evict / 多 session 隔离
     - delete_plan：级联删除 learning_tasks（ON DELETE CASCADE）
 """
 
@@ -275,17 +276,22 @@ class TestListPlans:
         assert p["done_count"] == 2  # 仅 success 计入 done
 
 
-# ── render_active_for_prompt ────────────────────────────────────────────────
+# ── render_plan_for_prompt ──────────────────────────────────────────────────
 
-class TestRenderActiveForPrompt:
+class TestRenderPlanForPrompt:
 
-    def test_empty_when_no_active(self, store: LearningPlanStore) -> None:
-        assert store.render_active_for_prompt() == ""
+    def test_empty_when_plan_not_exists(self, store: LearningPlanStore) -> None:
+        assert store.render_plan_for_prompt(plan_id=99999) == ""
+
+    def test_empty_when_plan_abandoned(self, store: LearningPlanStore) -> None:
+        pid = store.create_plan(goal="x")
+        store.abandon_plan(pid)
+        assert store.render_plan_for_prompt(plan_id=pid) == ""
 
     def test_basic_render_has_id_goal_progress(self, store: LearningPlanStore) -> None:
         pid = store.create_plan(goal="8 周准备 ML 面试", weeks=8)
         store.add_tasks(pid, _sample_tasks())
-        out = store.render_active_for_prompt()
+        out = store.render_plan_for_prompt(plan_id=pid)
         assert f"plan_id={pid}" in out
         assert "8 周准备 ML 面试" in out
         assert "8 周" in out
@@ -294,7 +300,7 @@ class TestRenderActiveForPrompt:
     def test_stage_grouping(self, store: LearningPlanStore) -> None:
         pid = store.create_plan(goal="x")
         store.add_tasks(pid, _sample_tasks())
-        out = store.render_active_for_prompt()
+        out = store.render_plan_for_prompt(plan_id=pid)
         assert "Stage 1" in out
         assert "Stage 2" in out
 
@@ -304,21 +310,94 @@ class TestRenderActiveForPrompt:
         tasks = store.get_plan_with_tasks(pid)["tasks"]
         store.update_task_status(pid, tasks[0]["id"], "success")
         store.update_task_status(pid, tasks[1]["id"], "skipped")
-        out = store.render_active_for_prompt()
-        # 至少含三种 icon
+        out = store.render_plan_for_prompt(plan_id=pid)
         assert "✓" in out and "⏭" in out and "☐" in out
 
     def test_truncates_when_exceeds_max_chars(self, store: LearningPlanStore) -> None:
         pid = store.create_plan(goal="x" * 100)
-        # 制造一个很长 task 列表
         tasks = [
             {"stage_idx": 1, "order_idx": i, "title": f"task {i} " * 20}
             for i in range(1, 30)
         ]
         store.add_tasks(pid, tasks)
-        out = store.render_active_for_prompt(max_chars=200)
+        out = store.render_plan_for_prompt(plan_id=pid, max_chars=200)
         assert len(out) <= 200
         assert "截断" in out
+
+
+# ── session 级 loaded 映射（mark_loaded / get_loaded / clear_loaded） ──────
+
+class TestLoadedSession:
+
+    def test_default_no_loaded(self, store: LearningPlanStore) -> None:
+        """新 session 默认无 loaded 映射。"""
+        assert store.get_loaded("sess-A") is None
+
+    def test_mark_and_get(self, store: LearningPlanStore) -> None:
+        pid = store.create_plan(goal="x")
+        assert store.mark_loaded("sess-A", pid) is True
+        assert store.get_loaded("sess-A") == pid
+
+    def test_mark_returns_false_for_nonexistent_plan(self, store: LearningPlanStore) -> None:
+        assert store.mark_loaded("sess-A", 99999) is False
+        assert store.get_loaded("sess-A") is None
+
+    def test_mark_returns_false_for_abandoned_plan(self, store: LearningPlanStore) -> None:
+        pid = store.create_plan(goal="x")
+        store.abandon_plan(pid)
+        assert store.mark_loaded("sess-A", pid) is False
+        assert store.get_loaded("sess-A") is None
+
+    def test_mark_replaces_previous(self, store: LearningPlanStore) -> None:
+        """同 session 再次 mark 覆盖上次（单 plan 注入避免叠加爆 token）。"""
+        p1 = store.create_plan(goal="ML")
+        p2 = store.create_plan(goal="5G")
+        store.mark_loaded("sess-A", p1)
+        store.mark_loaded("sess-A", p2)
+        assert store.get_loaded("sess-A") == p2
+
+    def test_sessions_isolated(self, store: LearningPlanStore) -> None:
+        """不同 session 的 loaded 映射互不影响。"""
+        p1 = store.create_plan(goal="ML")
+        p2 = store.create_plan(goal="5G")
+        store.mark_loaded("sess-A", p1)
+        store.mark_loaded("sess-B", p2)
+        assert store.get_loaded("sess-A") == p1
+        assert store.get_loaded("sess-B") == p2
+        assert store.get_loaded("sess-C") is None
+
+    def test_get_loaded_auto_evicts_when_abandoned(self, store: LearningPlanStore) -> None:
+        """load 后 plan 被 abandon → get_loaded 返回 None 并自动 evict 映射。"""
+        pid = store.create_plan(goal="x")
+        store.mark_loaded("sess-A", pid)
+        assert store.get_loaded("sess-A") == pid
+        store.abandon_plan(pid)
+        assert store.get_loaded("sess-A") is None
+        assert "sess-A" not in store._loaded_by_session  # 已 evict
+
+    def test_get_loaded_auto_evicts_when_deleted(self, store: LearningPlanStore) -> None:
+        """load 后 plan 被 delete → get_loaded 返回 None 并自动 evict 映射。"""
+        pid = store.create_plan(goal="x")
+        store.mark_loaded("sess-A", pid)
+        store.delete_plan(pid)
+        assert store.get_loaded("sess-A") is None
+        assert "sess-A" not in store._loaded_by_session
+
+    def test_clear_loaded_single_session(self, store: LearningPlanStore) -> None:
+        p1 = store.create_plan(goal="ML")
+        store.mark_loaded("sess-A", p1)
+        store.mark_loaded("sess-B", p1)
+        store.clear_loaded("sess-A")
+        assert store.get_loaded("sess-A") is None
+        assert store.get_loaded("sess-B") == p1
+
+    def test_clear_loaded_all_sessions(self, store: LearningPlanStore) -> None:
+        p1 = store.create_plan(goal="ML")
+        store.mark_loaded("sess-A", p1)
+        store.mark_loaded("sess-B", p1)
+        store.clear_loaded()  # 不传 session_id → 清全部
+        assert store.get_loaded("sess-A") is None
+        assert store.get_loaded("sess-B") is None
 
 
 # ── 资源管理 ──────────────────────────────────────────────────────────────────

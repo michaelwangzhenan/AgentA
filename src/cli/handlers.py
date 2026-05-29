@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 import src.config as config
 from src.memory.chat_history import ChatHistoryStore
 from src.memory.learning_plan_store import LearningPlanStore
+from src.memory.quiz_store import QuizStore
 from src.memory.user_memory import UserMemoryStore
 
 # 历史记录预览截断长度
@@ -560,7 +561,10 @@ _STUDY_USAGE = (
     "    /study                            列出全部学习计划（不含 abandoned）\n"
     "    /study list                       同上\n"
     "    /study show [plan_id]             查看 active plan / 指定 plan 全貌（含全部任务）\n"
-    "    /study switch <plan_id>           切换 active plan\n"
+    "    /study switch <plan_id>           切换 active plan（改 DB is_active）\n"
+    "    /study load [plan_id]             把指定 plan（不传则当前 active）加载进当前\n"
+    "                                      会话的 system prompt；切 session 后失效，\n"
+    "                                      需重新 load（类比 skill 的 load_skill）\n"
     "    /study abandon <plan_id>          放弃指定 plan（标 abandoned，不删除数据）\n"
 )
 
@@ -641,15 +645,17 @@ def _parse_plan_id(rest: str, out: OutputFn) -> int | None:
 def handle_study(
     store: LearningPlanStore,
     cmd_parts: list[str],
+    session_id: str = "",
     out: OutputFn = _stdout,
 ) -> None:
     """
-    处理 /study 子命令组（list / show / switch / abandon）。
+    处理 /study 子命令组（list / show / switch / load / abandon）。
 
     Args:
         store: LearningPlanStore 实例（main.py 传入共享单例）。
         cmd_parts: prompt_toolkit `input.split(maxsplit=1)` 的结果 — `["/study"]`
                    或 `["/study", "show 3"]`。
+        session_id: 当前会话 id；用于 `load` 子命令记录 session 级激活映射。
     """
     raw = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""
     if not raw:
@@ -690,6 +696,26 @@ def handle_study(
             else:
                 out(f"❌ 切换失败：plan_id={pid} 不存在或已 abandoned。\n")
 
+        case "load":
+            # /study load [plan_id]：把指定 plan（不传则 active）注入当前 session prompt
+            if not rest:
+                active = store.get_active()
+                if active is None:
+                    out("📭 没有 active 学习计划可加载。用 /study list 查看全部，或新建一个；"
+                        "或用 /study load <plan_id> 加载指定 plan。\n")
+                    return
+                pid = active["id"]
+            else:
+                parsed = _parse_plan_id(rest, out)
+                if parsed is None:
+                    return
+                pid = parsed
+            if store.mark_loaded(session_id, pid):
+                out(f"📌 已加载 plan_id={pid} 到本会话 system prompt；"
+                    "切 session 后会失效，需重新 load。\n")
+            else:
+                out(f"❌ 加载失败：plan_id={pid} 不存在或已 abandoned。\n")
+
         case "abandon":
             pid = _parse_plan_id(rest, out)
             if pid is None:
@@ -710,3 +736,172 @@ def handle_study(
 
         case _:
             out(_STUDY_USAGE)
+
+
+# ── Phase 2.3 — /quiz 命令组 ─────────────────────────────────────────────────
+
+_QUIZ_USAGE = (
+    "⚠️  未知子命令。用法：\n"
+    "    /quiz                            列出最近的 quiz（不含 archived）\n"
+    "    /quiz list [plan <plan_id>]      同上 / 过滤某 plan 的 quiz\n"
+    "    /quiz show <quiz_set_id>         查看单个 quiz 详情（含题目 + 批改细节）\n"
+    "    /quiz del <quiz_set_id>          删除指定 quiz（含全部题目；不可恢复）\n"
+)
+
+
+def _format_quiz_brief(quiz_set: dict[str, Any]) -> str:
+    """一行 quiz 摘要：id + 状态 + 题数 + 总分 + topic 前 40 字。"""
+    qid = quiz_set["id"]
+    status = quiz_set["status"]
+    n = quiz_set["num_questions"]
+    topic = (quiz_set["topic"] or "")[:40]
+    score = quiz_set.get("total_score")
+    score_part = f"{score:5.1f}/100" if isinstance(score, (int, float)) else "    —    "
+    plan_suffix = ""
+    if quiz_set.get("plan_id"):
+        plan_suffix = f"  plan {quiz_set['plan_id']}"
+        if quiz_set.get("stage_idx"):
+            plan_suffix += f".S{quiz_set['stage_idx']}"
+    return f"  [{qid:>3d}] [{status:<8}] {n:>2}题  {score_part}  {topic}{plan_suffix}"
+
+
+def _print_quiz_list(
+    store: QuizStore,
+    plan_id: int | None = None,
+    limit: int | None = None,
+    out: OutputFn = _stdout,
+) -> None:
+    """`/quiz` / `/quiz list`：按创建时间倒序列出 quiz；可选 plan_id 过滤。"""
+    eff_limit = limit if isinstance(limit, int) and limit > 0 else config.QUIZ_HISTORY_LIST_LIMIT
+    quizzes = store.list_quiz_sets(plan_id=plan_id, limit=eff_limit)
+    if not quizzes:
+        if plan_id is not None:
+            out(f"📭 plan_id={plan_id} 暂无关联 quiz。\n")
+        else:
+            out("📭 暂无 quiz 历史。可在对话中说\"考考我 X\"等让 Agent 帮你新建。\n")
+        return
+    title_suffix = f"（plan_id={plan_id}）" if plan_id is not None else ""
+    out(f"\n📝 Quiz 列表{title_suffix}（共 {len(quizzes)} 个）：")
+    out(f"  {'ID':<6}  {'状态':<10}  {'题数':<6}  {'总分':<10}  主题")
+    out(f"  {'-'*4:<6}  {'-'*8:<10}  {'-'*4:<6}  {'-'*8:<10}  {'-'*40}")
+    for q in quizzes:
+        out(_format_quiz_brief(q))
+    out("")
+
+
+def _print_quiz_detail(quiz: dict[str, Any], out: OutputFn = _stdout) -> None:
+    """`/quiz show`：单个 quiz 完整细节（题目 + 选项 + 标答 + 批改反馈）。"""
+    status_tag = f" [{quiz['status']}]"
+    plan_suffix = ""
+    if quiz.get("plan_id"):
+        plan_suffix = f"，plan_id={quiz['plan_id']}"
+        if quiz.get("stage_idx"):
+            plan_suffix += f" Stage {quiz['stage_idx']}"
+    out(f"\n📝 quiz_set_id={quiz['id']}{status_tag}")
+    out(f"   主题：{quiz['topic']}{plan_suffix}")
+    out(f"   题数：{quiz['num_questions']}")
+    if quiz.get("total_score") is not None:
+        out(f"   总分：{quiz['total_score']:.1f}/100")
+    out(f"   创建：{_format_relative_time(quiz['created_at'])}")
+    if quiz.get("graded_at"):
+        out(f"   批改：{_format_relative_time(quiz['graded_at'])}")
+    questions = quiz.get("questions", [])
+    if not questions:
+        out("   （暂无题目）\n")
+        return
+    out("")
+    for q in questions:
+        out(f"   ── 第 {q['order_idx']} 题（{q['q_type']}）──")
+        out(f"   {q['stem']}")
+        if q["q_type"] in ("mcq_single", "mcq_multi") and q.get("options"):
+            for i, opt in enumerate(q["options"]):
+                letter = chr(ord("A") + i)
+                out(f"     {letter}. {opt}")
+        out(f"   标答：{q['correct_answer']}")
+        if q.get("user_answer"):
+            out(f"   你的答案：{q['user_answer']}")
+        if q.get("score") is not None:
+            out(f"   得分：{q['score']:.1f}/1.0  反馈：{q.get('feedback', '')}")
+        if q.get("explanation"):
+            out(f"   考点：{q['explanation']}")
+        out("")
+
+
+def _parse_quiz_id(rest: str, out: OutputFn) -> int | None:
+    """从命令参数串解析正整数 quiz_set_id；失败时打印提示并返回 None。"""
+    if not rest:
+        out("⚠️  请提供 quiz_set_id。\n")
+        return None
+    try:
+        qid = int(rest.split()[0])
+    except ValueError:
+        out(f"❌ 无效 quiz_set_id：{rest!r}，应为整数。\n")
+        return None
+    if qid < 1:
+        out(f"❌ quiz_set_id 必须 ≥ 1，收到 {qid}。\n")
+        return None
+    return qid
+
+
+def handle_quiz(
+    store: QuizStore,
+    cmd_parts: list[str],
+    out: OutputFn = _stdout,
+) -> None:
+    """
+    处理 /quiz 子命令组（list / show / del）。
+
+    Args:
+        store: QuizStore 实例（main.py 传入共享单例）。
+        cmd_parts: prompt_toolkit `input.split(maxsplit=1)` 的结果。
+    """
+    raw = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""
+    if not raw:
+        _print_quiz_list(store, out=out)
+        return
+
+    head, _, rest = raw.partition(" ")
+    sub_cmd = head.lower()
+    rest = rest.strip()
+
+    match sub_cmd:
+        case "list":
+            # 支持 `/quiz list plan <plan_id>` 过滤
+            plan_id: int | None = None
+            if rest.lower().startswith("plan"):
+                _, _, plan_rest = rest.partition(" ")
+                plan_id = _parse_plan_id(plan_rest.strip(), out)
+                if plan_id is None:
+                    return
+            _print_quiz_list(store, plan_id=plan_id, out=out)
+
+        case "show":
+            qid = _parse_quiz_id(rest, out)
+            if qid is None:
+                return
+            quiz = store.get_quiz_with_questions(qid)
+            if quiz is None:
+                out(f"❌ quiz_set_id={qid} 不存在。\n")
+                return
+            _print_quiz_detail(quiz, out)
+
+        case "del":
+            qid = _parse_quiz_id(rest, out)
+            if qid is None:
+                return
+            quiz = store.get_quiz_set(qid)
+            if quiz is None:
+                out(f"❌ quiz_set_id={qid} 不存在。\n")
+                return
+            confirm = input(
+                f"⚠️  即将删除 quiz_set_id={qid} \"{quiz['topic']}\""
+                f"（含 {quiz['num_questions']} 题；不可恢复），确认请输入 yes："
+            ).strip().lower()
+            if confirm == "yes":
+                store.delete_quiz_set(qid)
+                out(f"🗑️  quiz_set_id={qid} 已删除。\n")
+            else:
+                out("已取消。\n")
+
+        case _:
+            out(_QUIZ_USAGE)
