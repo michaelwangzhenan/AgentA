@@ -1719,3 +1719,53 @@ src/agent/core/
 
 ## AutoGPT
 
+# A. Debugging
+
+## A.1 CLI 输出落盘
+
+CLI 终端的所有可见输出（banner / 用户输入 / Agent 回答 / 模块日志 / 异常堆栈）按开关同步写到 `./logs/agenta-<时间戳>.log`，便于离线复盘对话与排查 bug。开关默认关，关闭时零副作用。
+
+**输出流分布**
+
+| 来源 | 路径 | 是否落盘 |
+|---|---|---|
+| `print()` 调用 | `sys.stdout` | ✅ 通过 stdout tee |
+| `logger.*` 调用 | `logging.StreamHandler` → `sys.stderr` | ✅ 通过 stderr tee（复用，不另起 `FileHandler`） |
+| `prompt_toolkit` 渲染（`你: ` 提示符 / 补全菜单 / 控制码） | 终端原生 API（Win32 console / Vt100），绕 Python stream | ❌ 控制码进文件无意义 |
+| 用户键入字符 | TTY 驱动回显，不经 Python | ❌ → 由主循环显式补写 `你: <input>` 行 |
+
+**数据流**
+
+```mermaid
+flowchart LR
+    P[print] --> O[sys.stdout = _Tee]
+    L[logger] --> H[StreamHandler] --> E[sys.stderr = _Tee]
+    PT[prompt_toolkit] -. 终端原生 API .-> T[终端]
+    O --> T
+    O --> F[(agenta-时间戳.log)]
+    E --> T
+    E --> F
+    UI[用户键入] -. TTY 回显 .-> T
+    UI -. 主循环显式补写 .-> F
+```
+
+**设计取舍**
+
+| 维度 | 选择 | 取舍 |
+|---|---|---|
+| 分流机制 | Python 内置 `_Tee` 包装 `sys.stdout` / `sys.stderr` | 不用 shell 重定向 / `tee` 管道 —— 后者破坏 TTY，`prompt_toolkit` 检测不到 TTY 退化为盲打，且 Win / bash 不通用 |
+| logger 衔接 | 复用 stderr tee | 不另起 `FileHandler` 避免与 tee 重复写 |
+| 用户输入 | 主循环手动写文件，不走 stdout | 不在终端重复打一遍（TTY 已回显过） |
+| 文件粒度 | 每次启动新建带时间戳文件，无 rotation | 复盘时一眼对应到哪次会话；开发期临时录无须 rotation |
+
+**`_Tee` 透明性约定**：包装类只代理 `write` / `flush`，其余属性（`isatty` / `fileno` / `encoding` / `buffer` 等）透传原 stream，确保 `prompt_toolkit` 的 TTY 检测与底层二进制 buffer 访问不受影响。
+
+**配置**
+
+| key | 类型 | 默认 | 含义 |
+|---|---|---|---|
+| `CLI_LOG_TO_FILE` | bool | `false` | 是否启用 tee 落盘；路径固定 `./logs/agenta-YYYYMMDD-HHMMSS.log` |
+| `LOG_LEVEL` | str | `INFO` | root logger 输出级别（`DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL`）；同时作用于终端 stderr 与落盘文件（同一 stream 两路输出）；非法值降级 `INFO` 并 warn。三方噪声库（`httpx` / `chromadb` 等）独立固定 `WARNING`，不随本值缩放 |
+
+实施细节详 [`iter_8_debugging.md §1`](iter_8_debugging.md#1-cli-打印写文件)（落盘）与 [`§2`](iter_8_debugging.md#2-logger-级别可配置)（级别）。
+
