@@ -280,6 +280,15 @@ def run_query(agent: "Agent", question: str, out: OutputFn = _stdout) -> None:
     streamed = False
     header_printed = False
 
+    # Phase 3.1 thinking 渲染状态机（详 iter_2_agent.md §4.9.11 D5/D6/D7）：
+    # - thinking_round_idx：已开过的 thinking 段轮次，首段 chunk 到来时 += 1
+    # - thinking_active：当前是否在 thinking 段（footer 未打 = True）
+    # - thinking_at_line_start：下一字符是否在行首（决定是否注入 │ 前缀）
+    # 单轮场景 header / footer 不带编号；≥2 轮才带 `（第 N 轮）`，保持单轮极简。
+    thinking_round_idx = 0
+    thinking_active = False
+    thinking_at_line_start = True
+
     def _on_token_chunk(chunk: str) -> None:
         nonlocal streamed, header_printed
         if not chunk:
@@ -292,16 +301,60 @@ def run_query(agent: "Agent", question: str, out: OutputFn = _stdout) -> None:
         sys.stdout.write(chunk)
         sys.stdout.flush()
 
+    def _on_thinking_chunk(chunk: str) -> None:
+        """流式 thinking：首 chunk 打 header（≥2 轮带编号），按行注入 │ 前缀。"""
+        nonlocal thinking_round_idx, thinking_active, thinking_at_line_start
+        if not chunk:
+            return
+        if not thinking_active:
+            thinking_round_idx += 1
+            header_suffix = "" if thinking_round_idx == 1 else f"（第 {thinking_round_idx} 轮）"
+            sys.stdout.write(f"\n\U0001f4ad 思考中{header_suffix}...\n")
+            thinking_active = True
+            thinking_at_line_start = True
+        for ch in chunk:
+            if thinking_at_line_start and ch != "\n":
+                sys.stdout.write("│ ")
+                thinking_at_line_start = False
+            sys.stdout.write(ch)
+            if ch == "\n":
+                thinking_at_line_start = True
+        sys.stdout.flush()
+
+    def _close_thinking_segment() -> None:
+        """段切换或 run 结束时关闭未关闭的 thinking 段，打 footer（首轮无编号 / ≥2 轮带编号）。"""
+        nonlocal thinking_active, thinking_at_line_start
+        if not thinking_active:
+            return
+        if not thinking_at_line_start:
+            sys.stdout.write("\n")
+        footer_body = (
+            "─── 思考结束 ───"
+            if thinking_round_idx == 1
+            else f"─── 第 {thinking_round_idx} 轮思考结束 ───"
+        )
+        sys.stdout.write(f"\n{footer_body}\n")
+        sys.stdout.flush()
+        thinking_active = False
+        thinking_at_line_start = True
+
     # 用 AgentAPI 的统一事件入口：按 event.type 派发：
-    # - token_chunk:    流式正文
-    # - plan_created:   📋 plan checkbox 整块
-    # - plan_step_end:  ✓/✗/⏭ 单步状态行
-    # - plan_step_start: CLI 不渲染（GUI 端用于高亮当前步，CLI 静默）
+    # - thinking_chunk: 💭 思考段流式输出（首段打 header，行首加 │，多轮带编号）
+    # - token_chunk:    流式正文（正文出现前先关闭 thinking 段）
+    # - plan_created:   📋 plan checkbox 整块（先关闭 thinking）
+    # - plan_step_end:  ✓/✗/⏭ 单步状态行（先关闭 thinking）
+    # - tool_call_start: CLI 不渲染该事件本身，但作为段切换信号关闭 thinking
+    # - plan_step_start: CLI 不渲染（GUI 端用于高亮当前步）
     # - 其它事件:        CLI 这里不渲染
     set_event_cb = getattr(agent, "set_event_callback", None)
+    _SEGMENT_BREAK_EVENTS = {"token_chunk", "plan_created", "plan_step_end", "tool_call_start"}
 
     def _event_router(event) -> None:
-        if event.type == "token_chunk":
+        if event.type in _SEGMENT_BREAK_EVENTS:
+            _close_thinking_segment()
+        if event.type == "thinking_chunk":
+            _on_thinking_chunk(event.payload.get("text", ""))
+        elif event.type == "token_chunk":
             _on_token_chunk(event.payload.get("text", ""))
         elif event.type == "plan_created":
             _render_plan_created(event.payload)
@@ -329,6 +382,8 @@ def run_query(agent: "Agent", question: str, out: OutputFn = _stdout) -> None:
     except Exception as e:
         out(f"❌ 出错了: {e}\n")
     finally:
+        # 兜底关闭 thinking 段：覆盖 run 内仅 thinking 无 token / 异常退出 / 中断 三种边界
+        _close_thinking_segment()
         if set_event_cb is not None:
             set_event_cb(None)
 

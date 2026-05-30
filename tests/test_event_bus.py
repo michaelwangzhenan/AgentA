@@ -8,9 +8,13 @@
 本文件覆盖：
 - 初始状态：默认无订阅者；ctor 的 `on_thinking_chunk` 参数自动注册为订阅者
 - 统一 API：`set_event_callback(fn)` 一次性接所有事件类型（覆盖语义 last-wins）
-- `_on_thinking_chunk` 把 chunk 派发到 EventBus；无订阅者时降级 stdout
+- `_on_thinking_chunk` 把 chunk 派发到 EventBus；无订阅者时静默（不再降级 stdout）
 - 多订阅者扇出（直接 `events.subscribe` 多次）
 - 订阅者抛异常被 EventBus 隔离，单订阅 / 多订阅均不影响其他流程
+
+Phase 3.1 起 stdout 降级路径已下沉到 `src.cli.handlers.run_query`（详
+[`docs/iter_2_agent.md §4.9.11`](../docs/iter_2_agent.md#4911-thinking-cli-渲染-phase-31)
+D1：CLI thinking 渲染统一走 EventBus，agent.py 不再 print 兜底）。
 """
 from __future__ import annotations
 
@@ -114,18 +118,16 @@ class TestOnThinkingChunkDispatch:
         agent._on_thinking_chunk("hello ")
         agent._on_thinking_chunk("world")
         assert captured == [{"text": "hello "}, {"text": "world"}]
-        assert agent._thinking_started is True
 
-    def test_no_subscriber_falls_back_to_stdout(self, capsys) -> None:
-        """无订阅者时走 CLI stdout 分支：首 chunk 打印头部 + chunk 内容本身。"""
+    def test_no_subscriber_silently_dropped(self, capsys) -> None:
+        """无订阅者时 publish 静默（不再降级 stdout）—— Phase 3.1 后渲染由 handlers.py 负责。"""
         agent = _mk_agent()
         agent._on_thinking_chunk("第一段")
         agent._on_thinking_chunk("第二段")
         out = capsys.readouterr().out
-        assert out.count("思考中") == 1
-        assert "第一段" in out
-        assert "第二段" in out
-        assert agent._thinking_started is True
+        assert "思考中" not in out
+        assert "第一段" not in out
+        assert "第二段" not in out
 
 
 # ── EventBus 多订阅扇出 ────────────────────────────────────────────────────

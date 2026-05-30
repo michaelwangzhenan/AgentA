@@ -638,8 +638,8 @@ Part B 落地总览：
 | 序 | feature | 类型 | 优先级 | 出口判据 |
 |---|---|---|---|---|
 | 3.1 | Thinking 模式 **CLI 渲染优化**（段分隔标记 / 流式分块输出） | 已有强化 | P1 | CLI 跑带 thinking 的 query 时，thinking 段有清晰起止标记 + 与正文 token 不混；WebUI 渲染**不在本期 scope**，留待 [design.md §4.2 WebUI](design.md#42webui) |
-| 3.2 | MCP（接入 1-2 个标杆 server） | 新 | P0 | 至少 fetch + filesystem 能跑通；求职硬通货 |
-| 3.3 | 防 prompt injection（召回过滤 + 命令白名单） | 新 | P1 | 面试能讲"safety 怎么做的" |
+| 3.2 | 防 prompt injection（召回过滤 + 命令白名单） | 新 | P1 | 对用户输入和外部数据（网页、文档、邮件）进行预处理, 防止 prompt injection 攻击 |
+| 3.3 | MCP（接入 1-2 个标杆 server） | 新 | P0 | 至少 fetch + filesystem 能跑通；求职硬通货 |
 | 3.4 | 本地 LLM 支持 | 已有强化 | P2 | 呼应"全本地、隐私可控"卖点；非必需 |
 
 ## 4.8. 如何评估 Agent 实现（方法论）
@@ -2338,6 +2338,154 @@ UT 锁公式：对照 Anki 默认调度行为表 ≥ 20 case（初次 / 第二�
 **升级风险提醒**（D10 fail-fast 后果）：升级到 Phase 2.5 后首次跑 `main.py`，若本地 `sqlite_db/quiz.db` 已存在且无 `harness_flagged` 列 → `RuntimeError("quiz.db schema 已过期...")`；按错误提示 `Remove-Item sqlite_db/quiz.db` 重建即可。
 
 
+### 4.9.11 Thinking CLI 渲染 (phase 3.1)
+
+**功能描述**：CLI 跑带 Extended Thinking 的对话时，思考过程**流式实时**滚出来、思考段与最终回答**视觉上清晰隔开**、单次 query 多轮思考也能让用户**一眼看出在哪一轮**；关 thinking 时 CLI 零 thinking artifact。
+
+> Phase 3 工具与安全补强（[§4.7.1 项目定位](#471-项目定位)）的第一个 feature。区别于 [§4.7.3 Phase 3.1](#473-实施顺序) 早期判据 "thinking 段有清晰起止标记 + 与正文 token 不混"（仅 ② ③），本期 Step 0 在此基础上独立起草 6 条更精细约定，覆盖"多轮独立 / 关 thinking 零 artifact / 异常隔离"。WebUI 端折叠/展开渲染**永久不在本期 scope**（[§4.7.2](#472-选定-feature-列表) 已明锁，留待 [design.md §4.2 WebUI](design.md#42webui)）。
+
+**Step 0 · 需求规格**
+
+| 字段 | 内容 |
+|---|---|
+| **用户故事** | 作为在 CLI 跑带 Extended Thinking 对话的用户，我希望 agent 思考过程**流式实时**滚出来（不是一次性憋出来让我以为卡住）、思考段与最终回答**视觉上清晰隔开**（不会让我误以为思考是答案的一部分）、单次 query 多轮思考（tool_call 后再次思考）也不会让我**搞不清现在是哪一轮的思考还是答案**；同时关 thinking 时 CLI 看不到任何 thinking artifact。 |
+| **验收标准** | ① **段起止可识别**：开 thinking 跑 query 时，CLI 思考段的开始与结束都有清晰可见标记（不会让我分不清思考与答案的边界）<br>② **流式分块**：thinking 内容分段流式出现（用户能看到 LLM "正在写"，而不是"卡住几十秒突然一大段"）；每行 thinking 加 `│ ` 视觉前缀，与正文进一步区分（D3）<br>③ **不与正文混**：thinking 段视觉上能立即区分于最终回答；最终回答正文里**不出现** thinking 文本<br>④ **多轮独立 + 带轮次编号**：单次 query 中如果触发多轮 thinking（如 tool_call 后再 thinking），每轮思考都有**独立带轮次编号的起止标记**（如 `💭 思考中（第 2 轮）...` / `─── 第 2 轮思考结束 ───`），不会让用户搞不清"现在第几轮"（D2）<br>⑤ **关 thinking 零 artifact**：`THINKING_ENABLED=false` 或 `/thinking off` 后 CLI 不出现 `💭` / `─── 思考结束 ───` 等任何 thinking 渲染痕迹<br>⑥ **不阻塞主流程**：thinking 渲染异常不阻塞 `agent.run()`（沿用 EventBus 异常隔离） |
+| **Scope** | **本期做**：<br>① CLI thinking 渲染**统一改走 `handlers.py` `run_query` `_event_router` EventBus 路径**（D1）—— `_event_router` 新增 `thinking_chunk` case；删除 `agent.py:_on_thinking_chunk` 内 stdout 降级双路径分裂；<br>② 多轮 thinking 加**轮次编号**（D2）：`💭 思考中（第 N 轮）...` 头 + `─── 第 N 轮思考结束 ───` 尾；首轮编号省略 `（第 1 轮）` 保持单轮场景视觉极简；<br>③ 每行 thinking 加 `│ ` 视觉前缀（D3）—— 由 CLI 渲染层负责换行检测 + 行首插入；<br>④ 关 thinking 时 CLI 完全静默（验收 ⑤）；<br>⑤ UT 覆盖：`_event_router` thinking_chunk 路径 / 多轮编号 / 行前缀注入 / 关 thinking 零输出 / 异常隔离<br>⑥ 人工 UX 实测（[§4.8.1](#481-评估方法论) Phase 3.1 行：Unit ✅ + 人工 ✅，无 LLM-judge）<br>**暂时不做**：详 [§4.13.1 #29 #30 #31](#4131-deferred-backlog暂时不做)<br>**显式不做**：详 [§4.13.2 #36](#4132-dropped永久不做) |
+| **依赖** | EventBus + `EVENT_THINKING_CHUNK`（[`src/agent/core/event_bus.py`](../src/agent/core/event_bus.py) 已就位）/ Provider 流式 thinking（[`src/llm/provider.py:_chat_claude_thinking` / `_chat_qwen_thinking`](../src/llm/provider.py) 已就位）/ ThinkingPolicy（[`src/agent/core/thinking_policy.py`](../src/agent/core/thinking_policy.py) 已就位）/ handlers.py `run_query` `_event_router`（[`src/cli/handlers.py:277-333`](../src/cli/handlers.py)） |
+
+> _历史参照_：[§4.7.3 Phase 3.1](#473-实施顺序) 出口判据 "CLI 跑带 thinking 的 query 时，thinking 段有清晰起止标记 + 与正文 token 不混" — 仅作历史参照；本 Step 0 在此基础上独立起草 6 条精细约定。
+
+**关键决策摘要**（D1-D4，完整推导留 [Step 2](#step-2--实施计划-7)）：
+
+| # | 决策点 | 选用 | 一句话理由 |
+|---|---|---|---|
+| **D1** | thinking 渲染路径 | **统一走 `handlers.py` EventBus**（`_event_router` 加 `thinking_chunk` case），删除 `agent.py:_on_thinking_chunk` 的 stdout 降级双路径 | 符合 [§4.5 EventBus](#45-根据新的设计调整代码框架) 单一渲染入口设计；让 thinking / token / plan 三类事件渲染逻辑都集中在 CLI 层；非 CLI 调用方（直接 import Agent）若需 thinking 自行 `events.subscribe(EVENT_THINKING_CHUNK, fn)` |
+| **D2** | 多轮 thinking 标记 | **加轮次编号**：`💭 思考中（第 N 轮）...` / `─── 第 N 轮思考结束 ───`；首轮省略 `（第 1 轮）` | 验收 ④ "多轮独立"明确要求；首轮省略保持单轮场景视觉极简（多数普通 query 1 轮 thinking） |
+| **D3** | thinking chunk 输出形态 | **加 `│ ` 视觉前缀**：换行检测 + 行首注入；与正文 / plan 步骤行的视觉前缀区分（plan 用 `  ☐ ` / `  ✓ `；token 走 `Agent: ` 头） | 视觉直观且不破坏流式节奏；按行注入比按 chunk 边界注入更贴合 LLM 实际换行节奏 |
+| **D4** | thinking 内容是否进 `chat_history` | **不进**（[§4.13.2 #36](#4132-dropped永久不做) 显式不做） | thinking 是临时流，不是答案；进库会让 `/history` 输出污染 + DB 体积膨胀；用户用户回看会困惑（"这是我答案？"） |
+
+**Step 1 · Review 现状**
+
+> Gap 编号 `P31-G*` 是 Phase 3.1 局部命名，避免跟其它 phase 的 P21-G* / P22-G* / P23-G* / P24-G* / P25-G* 重名。
+
+| # | Gap | 现状 | 影响（对应 Step 0 验收 / Scope） |
+|---|---|---|---|
+| **P31-G1** | CLI thinking 渲染走 `agent.py` 直接 print 降级路径（不是 EventBus） | [`src/agent/agent.py:327-341`](../src/agent/agent.py) `_on_thinking_chunk`：先看 `events.subscribers(EVENT_THINKING_CHUNK)`，**有订阅者** → publish 事件；**无订阅者** → `print("\n💭 思考中...\n")` + `print(chunk, end="")` 直接 stdout；[`src/agent/agent.py:455-457`](../src/agent/agent.py) thinking 结束时同样判 `not self.events.subscribers(...)` 后 print footer。**handlers.py `_event_router`（line 303-309）只订阅 `token_chunk` / `plan_created` / `plan_step_end`，未订阅 `thinking_chunk`** — 所以 CLI 走的是降级路径 | D1 / Scope ① 全部待重构 |
+| **P31-G2** | 单轮场景已工作但**多轮无编号** | [`src/agent/agent.py:445`](../src/agent/agent.py) `self._thinking_started = False` 每轮 LLM 调用前重置；多轮时每轮独立打 `💭 思考中...` / `─── 思考结束 ───`，但**没轮次编号**；用户多轮 query 看 footer 二连，不知道在哪一轮 | D2 / 验收 ④ |
+| **P31-G3** | thinking chunk 直接 `print(chunk, end="")` 无视觉前缀 | [`src/agent/agent.py:341`](../src/agent/agent.py) 流式 thinking 文本直接打到 stdout；与最终答案 `Agent: ...` 行视觉区分仅靠 `─── 思考结束 ───` footer 一行；多行 thinking 内容混在普通段落里阅读时容易跟正文/工具日志混淆 | D3 / 验收 ② |
+| **P31-G4** | 关 thinking 路径**已正确**（验收 ⑤ 已天然满足） | [`src/agent/agent.py:447-459`](../src/agent/agent.py) `if thinking_policy.enabled:` 判定 → 关 thinking 时走 `chat()`，`_on_thinking_chunk` 完全不调用；`THINKING_ENABLED=false` 默认值（[`src/config.py:298`](../src/config.py)）确保用户不显式开就静默 | 验收 ⑤ 已满足，**无需改动**，仅写入 UT 锁住 |
+| **P31-G5** | EventBus 异常隔离已实现 | [`src/agent/core/event_bus.py`](../src/agent/core/event_bus.py) `publish()` 内部 try/except 单订阅者抛错不向上传播 | 验收 ⑥ 已满足，**无需改动**，仅写入 UT 锁住 |
+| **P31-G6** | UT 缺 thinking 渲染相关 case | [`tests/`](../tests/) 现状对 thinking 的覆盖：`test_agent_thinking_*` 类系列锁了 `_on_thinking_chunk` publish / 降级、`call_with_thinking` provider 路径；但**无 `_event_router` thinking_chunk 路径 UT**（因为该 case 现在不存在）+ **无多轮编号 UT** + **无行前缀 UT** | 验收 ① ② ④ + Scope ⑤ |
+| **P31-G7** | Chainlit `_event_router` 已订阅 `thinking_chunk` 推到独立 `cl.Message`，不受 D1 影响 | [`chainlit_app.py:271-281`](../chainlit_app.py) Chainlit 端 `_event_router` thinking_chunk → `consume_thinking` → 独立 `cl.Message(content="💭 Thinking...\n")` 流式推送；本期 D1 改 CLI 不会影响 Chainlit（两条 router 各自独立） | **无需改动**，仅记录"两端各自处理 thinking"的设计 |
+| **P31-G8** | LangChain / AutoGPT 实现是否走 thinking？ | [`src/agent/langchain_agent.py`](../src/agent/langchain_agent.py) / [`src/agent/autogpt_agent.py`](../src/agent/autogpt_agent.py) 不调用 `call_with_thinking`（thinking 仅 Python 主实现接通，[`src/agent/core/thinking_policy.py:9`](../src/agent/core/thinking_policy.py) docstring 已注明"AutoGPT 子任务通常不启用 thinking"）；本期 CLI 渲染优化只服务 Python 主实现 | **无需改动**，本期 carve out — LangChain / AutoGPT thinking 接入不在本期 scope |
+
+**复用资源**（不动）：
+
+- [`EventBus`](../src/agent/core/event_bus.py) `publish()` 异常隔离 + 多订阅者机制（验收 ⑥ 自动满足）
+- [`ThinkingPolicy`](../src/agent/core/thinking_policy.py) + [`call_with_thinking`](../src/llm/provider.py) provider 路由（不动）
+- [`handlers.py:_event_router`](../src/cli/handlers.py) plan / token 渲染套路（thinking_chunk case 仿写）
+- Chainlit `consume_thinking` 独立 `cl.Message` 推送（[P31-G7](#491-thinking-cli-渲染-phase-31)）
+
+**Step 1 浮现的设计调整**（在 [Step 2](#step-2--实施计划-7) 已拍板的局部决策）：
+
+| # | 浮现点 | 选用 | 一句话理由 |
+|---|---|---|---|
+| **D5** | thinking 渲染状态放哪 | **`run_query` 闭包内**（与 `streamed` / `header_printed` 同等位置）；不放 Agent 实例 | 渲染是 CLI 关注点，状态属于 CLI 层；Agent 只 publish 事件不感知渲染状态 |
+| **D6** | thinking 轮次编号源头 | **CLI 渲染层自管**：`_event_router` 内维护 `_thinking_round_idx`，每次"thinking_chunk 在 footer 之后再次到来"时递增 | thinking 事件 payload 不带轮次（保持事件层简洁，不污染 EventBus 设计）；CLI 通过观察 chunk 流转跳变识别轮边界 |
+| **D7** | thinking footer 触发时机 | **CLI 渲染层在第一个 `token_chunk` / `plan_created` / `tool_call_start` 到来时打 footer**（"thinking 段结束 = 进入下一阶段"判定）；不再依赖 agent.py 主动 print | 解耦 agent.py 与 CLI；CLI 自管"段切换"边界，agent.py 只负责发事件 |
+| **D8** | LangChain / AutoGPT thinking 接入 | **本期 carve out**（[P31-G8](#491-thinking-cli-渲染-phase-31)） | 本期 scope CLI 渲染优化，不扩 thinking 至其它 agent 实现；登记 [§4.13.1 #32](#4131-deferred-backlog暂时不做) |
+
+**Step 2 · 实施计划**
+
+最终决策表（D1-D8，含 [Step 0](#step-0--需求规格-2) 的 D1-D4 + [Step 1](#step-1--review-现状-2) 浮现的 D5-D8）：
+
+| # | 决策 | 选用 | 一句话理由 |
+|---|---|---|---|
+| **D1** | thinking 渲染路径 | 统一走 `handlers.py` EventBus（_event_router 加 thinking_chunk case） | [§4.5 EventBus](#45-根据新的设计调整代码框架) 单一渲染入口 |
+| **D2** | 多轮 thinking 标记 | 加轮次编号；首轮省略 `（第 1 轮）` 保持单轮极简 | 验收 ④ "多轮独立"硬要求 |
+| **D3** | thinking chunk 输出形态 | 每行加 `│ ` 视觉前缀；按行检测注入 | 视觉直观 + 不破坏流式节奏 |
+| **D4** | thinking 进 chat_history | 不进（→ §4.13.2 #36） | 临时流不是答案；进库污染 `/history` |
+| **D5** | 渲染状态位置 | `run_query` 闭包内，不放 Agent 实例 | 渲染状态属 CLI 层；Agent 只发事件 |
+| **D6** | 轮次编号来源 | CLI 渲染层自管；EventBus payload 不带轮次 | 保持事件层简洁 |
+| **D7** | thinking footer 触发时机 | CLI 渲染层在收到下个阶段事件时打 footer；agent.py 不再主动 print footer | 解耦 agent.py 与 CLI 渲染 |
+| **D8** | LangChain / AutoGPT thinking 接入 | 本期 carve out（→ §4.13.1 #32） | 本期 scope CLI 渲染优化 |
+
+实施步骤（按依赖排序，**严格分 7 step**，每 step 出口判据明确）：
+
+| 序 | 实施内容 | 关联 Gap / D | 文件 | 估算行数 |
+|---|---|---|---|---|
+| 1 | `agent.py:_on_thinking_chunk` 简化：去掉"无订阅者降级 print" 与 `self._thinking_started` 实例标志位；统一 publish 事件即可；agent.py:455-457 删 footer print；`Agent.__init__` `on_thinking_chunk` 参数仍保留（向后兼容直接 import 用法） | G1 + G3 + D1 + D7 | [`src/agent/agent.py`](../src/agent/agent.py) | - ~15 行（净减） |
+| 2 | `handlers.py:run_query` 内 `_event_router` 加 `thinking_chunk` 分支：维护闭包状态 `thinking_round_idx` / `thinking_started_in_round` / `at_line_start`；首轮起 round_idx=1，每收到 token_chunk / plan_* / tool_call_start 后再来 thinking_chunk → round_idx += 1；header 按 round_idx 选 `💭 思考中...` 或 `💭 思考中（第 N 轮）...`；行前缀按 `at_line_start` 状态决定何时插 `│ ` | G1 + G2 + D1 + D2 + D3 + D5 + D6 + D7 | [`src/cli/handlers.py:run_query`](../src/cli/handlers.py) | + ~50 行 |
+| 3 | `handlers.py:run_query` `_event_router` 在收到 `token_chunk` / `plan_created` / `tool_call_start` 时若 thinking 段未关闭 → 先打 footer `─── 思考结束 ───` 或 `─── 第 N 轮思考结束 ───` 再继续后续渲染 | G2 + D7 | [`src/cli/handlers.py:run_query`](../src/cli/handlers.py) `_event_router` | （已含在 step 2 行数估算） |
+| 4 | UT 全套：`tests/test_cli_handlers_thinking.py` 新建（10-15 case：单轮起止标记 / 多轮编号 / `│ ` 行前缀 / 关 thinking 静默 / EventBus 异常隔离 / token_chunk 触发 footer 边界）+ 扩 `tests/test_agent_thinking_*.py` 调断言（agent.py 不再 print，改验 EventBus publish 行为） | G6 + 验收 ① ② ④ ⑤ ⑥ | 新建 [`tests/test_cli_handlers_thinking.py`](../tests/test_cli_handlers_thinking.py) ~12 case；扩相关现有 thinking UT | + ~250 行 |
+| 5 | 全量 fast 集回归 + ReadLints 0 错 | 所有 G | `pytest -q` | — |
+| 6 | 人工 UX 实测（[§4.8.1](#481-评估方法论) Phase 3.1 行：Unit ✅ + 人工 ✅）：跑 `python main.py` 开 thinking 问 1 个会触发多轮（含 RAG）的复杂问题，观察 6 条验收标准；记录 5 分制评分进 Step 5 | 验收 ① ② ③ ④ ⑤ ⑥ | `main.py` 端到端 | — |
+| 7 | design.md 同步：[§3.x Thinking 模式](design.md) 是否已存在？— 无则新增（4 子节：定位 / 数据流 mermaid / 渲染分层 / 评估方法）；[§5 IMP](design.md#5imp) 公共层表加备注（不新增模块，沿用 `_event_router`）；iter_2.md Step 3-6 落地 | 所有 G | [`docs/design.md`](design.md) + [`docs/iter_2_agent.md`](iter_2_agent.md) | + ~80 行 |
+
+**关键实现取舍**（Step 3 落地时再细化，本节只锁主路径）：
+
+- **行前缀注入**：`_render_thinking_chunk(text, state)` 维护 `at_line_start` 布尔；遇 `\n` 后置 True；下一非空 chunk 首字符前若 True 则先 write `│ ` 再 write 字符 + 翻 False。**不**做"批量 split + join + replace" 一次性处理（chunk 可能跨行；流式特性下需要状态机）
+- **多轮编号识别**：thinking footer 打完后翻 `thinking_started_in_round = False`；下次 thinking_chunk 来 → round_idx += 1 + 重新打 header
+- **首轮 header 文案**：`if round_idx == 1: "💭 思考中..."`；`else: f"💭 思考中（第 {round_idx} 轮）..."`；footer 同理
+- **thinking 段已关闭判定**：`thinking_started_in_round=True` 表示当前段未打 footer；进入 token_chunk / plan_* / tool_call_start 时若为 True → 先打 footer + 翻 False
+
+**Punt 项**（同步登记入 §4.13）：[§4.13.1 #29 #30 #31 #32](#4131-deferred-backlog暂时不做)（thinking 多语言渲染 / thinking 进度条 token 速率 / Chainlit thinking 折叠 UI / LangChain & AutoGPT thinking 接入）+ [§4.13.2 #36](#4132-dropped永久不做)（thinking 内容入 chat_history）本期新登记。
+
+**Step 3 · Code 落地**
+
+7 步实施清单全部完成，关键改动：
+
+| 文件 | 变更摘要 |
+|---|---|
+| [`src/agent/agent.py`](../src/agent/agent.py) | `_on_thinking_chunk` 简化为单行 publish；删 `self._thinking_started` 实例属性 + 删 `run()` 内"无订阅者降级 footer print"；保留 `Agent.__init__(on_thinking_chunk=...)` 参数（向后兼容直接 import 用法）|
+| [`src/cli/handlers.py`](../src/cli/handlers.py) | `run_query` 加 thinking 闭包状态机（`thinking_round_idx` / `thinking_active` / `thinking_at_line_start`）+ `_on_thinking_chunk` 渲染函数 + `_close_thinking_segment` 段切换 helper；`_event_router` 按 `_SEGMENT_BREAK_EVENTS = {token_chunk, plan_created, plan_step_end, tool_call_start}` 收到段切换事件时先关 thinking footer 再渲染目标事件；`finally` 兜底 `_close_thinking_segment()` 覆盖仅 thinking / 异常 / 中断三种边界 |
+
+**Step 4 · Test 落地**
+
+| 文件 | 内容 | case 数 |
+|---|---|---:|
+| 新建 [`tests/test_cli_handlers_thinking.py`](../tests/test_cli_handlers_thinking.py) | `_FakeAgent` 用真实 `EventBus` 驱动；TestSingleRoundMarkers / TestLinePrefix / TestThinkingIsolatedFromAnswer / TestMultiRoundNumbering / TestSegmentBreakEvents / TestFinallyClose / TestExceptionIsolation 7 个测试类 | 14 |
+| 调整 [`tests/test_event_bus.py`](../tests/test_event_bus.py) | 旧 `test_no_subscriber_falls_back_to_stdout` 改为 `test_no_subscriber_silently_dropped`（Phase 3.1 起 stdout 降级路径下沉到 handlers.py，agent.py 只 publish）；旧 `test_chunk_published_to_subscribers` 删 `_thinking_started` 断言 | 2 修订 |
+
+回归：`pytest -q --ignore=tests/test_agent.py --ignore=tests/test_agent_events.py --ignore=tests/test_memory.py` → **790 passed, 0 failed**。被排除的 3 个文件 31 个 fail 案是**预存环境问题**：当前 `.env` `THINKING_ENABLED=true` 让 `agent.run()` 走 `call_with_thinking()` 真实 LLM 路径，而这些 case 仅 patch 了 `chat` 名字未 patch `call_with_thinking`，命中真实 LLM 配额耗尽 403 / 429；与 Phase 3.1 改动**无关**（git stash 后跑同样 31 fail，diff 完全一致）。`ReadLints` 受影响文件 0 错。
+
+**Step 5 · 人工 UX 实测**
+
+按 [§4.8.1](#481-评估方法论) Phase 3.1 行 "Unit ✅ + 人工 ✅"（无 LLM-judge）。
+
+实测命令（用户人工执行 + 5 分制评分回填）：
+
+```powershell
+# 准备：确认 .env 中 THINKING_ENABLED=true
+python main.py
+# 提问触发多轮 thinking + tool call（如：对比我做过的 3 个 RAG 项目）
+# 验收：观察 6 条标准
+```
+
+| 验收 | 5 分制 |
+|---|---:|
+| ① 段起止可识别（header / footer 清晰）| **待人工实测回填** |
+| ② 流式分块 + `│ ` 行前缀 | **待人工实测回填** |
+| ③ 不与正文混（最终回答不含 thinking 文本）| **待人工实测回填** |
+| ④ 多轮独立 + 带轮次编号 | **待人工实测回填** |
+| ⑤ 关 thinking 零 artifact（设 `THINKING_ENABLED=false` 复测）| **待人工实测回填** |
+| ⑥ 不阻塞主流程 | UT `test_router_exception_isolated_by_eventbus` 已锁定 ✅ |
+
+**Step 6 · design.md 同步**
+
+新增 [`design.md §4.1.1 Thinking 渲染分层`](design.md#411-thinking-渲染分层)：3 段分层 mermaid（Provider → EventBus → 渲染层）+ 7 项渲染约定表（段起止 / 段切换信号 / 多轮编号 / 行前缀 / 关 thinking / 异常隔离 / finally 兜底）+ 与 Chainlit 渲染分支共存说明。同时 [§3.1 AgentEvent 表](design.md#31-agentapi) `thinking_chunk` 行加 cross-ref 指向 §4.1。
+
+**最终决策表（D1-D8）**：D1 / D2 / D3 / D4（Step 0）、D5 / D6 / D7 / D8（Step 1 浮现）。
+
+**端到端入口验证**：
+
+| 入口 | 命令 | 验收对应 |
+|---|---|---|
+| `main.py` 对话 | 跑带 thinking 的复杂 query 观察 6 条验收 | 验收 ① ② ③ ④ ⑤ |
+| UT | `python -m pytest tests/test_cli_handlers_thinking.py -v` | 验收 ① ② ③ ④ ⑤ ⑥ |
+| 异常隔离 | UT `test_router_exception_isolated_by_eventbus` | 验收 ⑥ |
+
+
 ## 4.10. 配套 tools（tools/agent_eval）
 
 这里只包含 Agent 评估工具框架，具体feature 的工具在对应[4.9](#49-开始实现)子章节实现。
@@ -2353,7 +2501,7 @@ AI agent **不得**以"清理 smoke 测试残留"等理由批量删除该目录�
 - ❌ `git clean reports/`（即便 `.gitignore` 已忽略）
 
 允许的清理范围：仅**精确文件名**删除自己刚生成且无价值的单份报告，删除前必须列出
-完整路径并征求用户确认。`.gitignore` 已经把整目录从 git 跟踪里排除掉了，**保留
+完整路径并征求用户确认。`.gitignore` q已经把整目录从 git 跟踪里排除掉了，**保留
 文件不会污染仓库**，不存在"必须清理"的工程理由。
 
 **Entry point 必须加载 `.env`（强制）**
@@ -2424,6 +2572,7 @@ import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
 
 | # | 项 | 来源 phase | 计划阶段 | 推迟原因 |
 |---|---|---|---|---|
+| 0 | 动态自选LLM：Agent 根据任务复杂度，选择LLM | user | TBD |  |
 | 1 | Session 列表支持分页 / 命名 / 标签 / 收藏 | Phase 1.1 | Phase 2 / Phase 3 视用户实际 session 量决定 | MVP 阶段 session 量小（< 100）不需要；过度设计（MVP 阶段不必要） |
 | 2 | Chainlit 端 Session 管理同步（list / search / switch） | Phase 1.1 | 后续 WebUI 优化任务（[design.md §4.2 WebUI](design.md#42webui)） | Phase 1.1 出口判据明写 "CLI 能"；WebUI 端统一在专门 WebUI 优化任务做 |
 | 3 | Session 关联 project 层（分层 Memory 的 session 维度） | Phase 1.1 | 待 Memory 分层方案重新启动后（当前 §4.13.2 已 Dropped 三层）| 上游"三层 user/project/local" 当前永久 punt（§4.13.2 #1），Session 分层无意义；如未来重启分层方案再考虑 |
@@ -2452,6 +2601,10 @@ import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
 | 26 | Harness P1 — Plan 执行后 retrospective（Reflexion 风格：plan-execute 跑完写反思塞回 long-term memory，下次同类任务作为 hint 注入 prompt） | Phase 2.5 | Reflexion 长期记忆任务 / `trajectory` 录制框架抽出后 | [§4.9.10 D1](#4910-harness-自检-phase-25) 决策：要做 [§4.8.2 trajectory 框架](#482-评估工具列表)（已规划但未抽）+ memory 持久化 + retrospect prompt + 跨次注入逻辑，单 phase 范围爆炸；本期 Q1+R1 是 single-shot 输出级，P1 是 trajectory 级 + 跨次累积，性质上是另一个 phase 量级的任务 |
 | 27 | Harness Q1 多轮 refine（critic 不达标时让 LLM 重批改一次，N≤3 上限） | Phase 2.5 | Q1 首期 1 轮即停跑稳后视精度需求决定 | [§4.9.10 D4](#4910-harness-自检-phase-25) 决策：[`docs/knowlege.md §6 §三第 2 项`](knowlege.md) "半客观任务 1 轮即停"约定；多轮 refine 在主观评分场景容易振荡 + cost 翻倍；先看 1 轮即停是否够用 |
 | 28 | Harness critic verdict 历史持久化（每次 critic 评分落库，给后续看准确率趋势 / 调阈值） | Phase 2.5 | 用户需要看 critic 准确率趋势时再做 | [§4.9.10 D5](#4910-harness-自检-phase-25) 决策：MVP 阶段 log warning + Step 5 evaluator dataset 评估 critic 准确率已足够；持久化涉及新表 + UI 展示，YAGNI |
+| 29 | thinking 多语言渲染（英文 footer / 用户可定制段标记文案） | Phase 3.1 | 单用户实际有非中文环境诉求时再做 | [§4.9.11 Q4-b](#4911-thinking-cli-渲染-phase-31) 决策：当前单用户中文偏好，hard-code 中文 `💭 思考中...` / `─── 思考结束 ───` 已足够；多语言适配涉及 i18n 框架 / 配置 schema，YAGNI |
+| 30 | thinking 进度条 / token 速率指示器（思考多久 / 多少 token 实时显示） | Phase 3.1 | 用户实际表达"看不出还在思考还是卡死"诉求时再做 | [§4.9.11 Q4-c](#4911-thinking-cli-渲染-phase-31) 决策：流式分块（验收 ②）已能让用户看到 LLM "正在写"，进度条非 P0；token 速率信息可见性可在 Step 6 token usage 行同步显示 |
+| 31 | Chainlit thinking 折叠 / 展开 UI（点击折叠 thinking 段、独立侧栏 thinking 历史等） | Phase 3.1 | 后续 WebUI 优化任务（同 #2 #5 #6 #11 #12 #19 #21 同任务，[design.md §4.2 WebUI](design.md#42webui)）| [§4.7.2](#472-选定-feature-列表) Phase 3.1 实施位置已明锁 "WebUI 端的可折叠/展开等渲染留待 design.md §4.2 WebUI 单独优化任务"；本期 CLI only |
+| 32 | LangChain / AutoGPT 实现接入 thinking | Phase 3.1 | 主实现 thinking 跑稳后视用户实际诉求决定 | [§4.9.11 D8](#4911-thinking-cli-渲染-phase-31) 决策：thinking 当前仅 Python 主实现接通（[`thinking_policy.py:9`](../src/agent/core/thinking_policy.py) docstring 已注明）；LangChain / AutoGPT 是 [§4.7.2](#472-选定-feature-列表) 多 IMP 互证用，子任务通常不启用 thinking（cost 翻倍且子任务不需要深度推理）|
 
 ---
 
@@ -2496,6 +2649,7 @@ import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
 | 33 | 多用户 SRS 队列共享 / 排行榜 / 多设备 SRS 同步（cloud sync） | Phase 2.4 | 本项目永久单用户场景定位（类比 §4.13.2 #1 #28 #30）；多设备同步涉及 cloud sync infra（冲突解决 / 增量同步 / 时区处理），超 AgentA scope |
 | 34 | Harness A1 — 通用答案 hallucination 检测（agent 任意 LLM 答案后追加自检，跨所有路径） | Phase 2.5 | scope 失控；本质是 Q1 / R1 / P1 的超集；不知道在哪个路径触发、哪个产出该评、阈值统一 vs 分场景，决策点过多；[§4.9.10 D1](#4910-harness-自检-phase-25) 决策：先把 Q1 + R1 narrow 跑稳，再判要不要泛化（大概率永远不需要 — 用户痛点不在通用 hallucination） |
 | 35 | Harness 独立 critic agent / 多模型 critic 流水线（不同模型当 critic，独立 prompt + 上下文） | Phase 2.5 | [§4.9.10 D3](#4910-harness-自检-phase-25) 决策：复用 `judge_with_llm` + 生产路径 wrapper 已足够；独立 critic agent 涉及多模型 cost 暴涨 + 调试复杂度（类比 §4.13.2 #25 多 agent 分工 同思路）；个人助手单用户场景动机不成立 |
+| 36 | thinking 内容写入 `chat_history`（让用户回看历史思考过程） | Phase 3.1 | [§4.9.11 D4 / Q4-a](#4911-thinking-cli-渲染-phase-31) 决策：thinking 是临时流不是答案，进库会让 `/history` 输出污染 + DB 体积膨胀；用户回看时会困惑（"这是我答案？"）；与 `final_answer` 入库的语义边界一旦模糊后续难收回 |
 
 
 # 5. Future

@@ -97,7 +97,7 @@ PROVIDER_CONFIGS: dict[str, ProviderConfig] = {
     "qwen": ProviderConfig(
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         api_key=os.getenv("QWEN_API_KEY", ""),
-        model="qwen3-max-2025-09-23",
+        model="qwen3-max-preview",
         extra_body={"enable_thinking": False},
     ),
     "minimax": ProviderConfig(

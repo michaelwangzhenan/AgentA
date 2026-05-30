@@ -311,8 +311,6 @@ class Agent:
         self.last_usage: TokenUsage | None = None  # 最近一次 run() 的 token 统计
         # Extended Thinking 配置：共享同一 ThinkingConfig 实例，修改后无需重建 Agent
         self.thinking_cfg: ThinkingConfig = thinking_config if thinking_config is not None else ThinkingConfig.from_config()
-        # 本次 run() 流式 thinking 状态标志（实例变量，避免嵌套函数）
-        self._thinking_started: bool = False
         # 事件总线：thinking / token / tool_call_start / tool_call_end / final_answer / error / info
         # 简单订阅一类事件：agent.events.subscribe(EVENT_X, fn)
         # 一次性接所有事件类型（带 type/ts 元信息）：agent.set_event_callback(fn)
@@ -325,20 +323,8 @@ class Agent:
         )
 
     def _on_thinking_chunk(self, chunk: str) -> None:
-        """
-        思考过程流式回调，分发到 EventBus；无订阅者时降级到 CLI stdout（默认 UX）。
-
-        异常隔离由 EventBus.publish 内部完成，单订阅者抛错不会向上传播。
-        """
-        subs = self.events.subscribers(EVENT_THINKING_CHUNK)
-        if subs:
-            self._thinking_started = True
-            self.events.publish(AgentEvent(type=EVENT_THINKING_CHUNK, payload={"text": chunk}))
-            return
-        if not self._thinking_started:
-            print("\n\U0001f4ad 思考中...\n", flush=True)
-            self._thinking_started = True
-        print(chunk, end="", flush=True)
+        """思考过程流式回调，统一 publish 到 EventBus；订阅者负责渲染（CLI → handlers.py，Chainlit → chainlit_app.py）。"""
+        self.events.publish(AgentEvent(type=EVENT_THINKING_CHUNK, payload={"text": chunk}))
 
     def _on_token_chunk(self, chunk: str) -> None:
         """正文 token 流式回调：发到 EventBus（订阅者负责渲染）。无订阅者时静默。"""
@@ -442,7 +428,6 @@ class Agent:
                 logger.warning("[Agent] 工具调用已达上限 %d 轮（含 plan 自适应），强制生成最终回答", eff_tool_max)
 
             # 调用 LLM：开启 thinking 时走流式 thinking 分支，否则普通 chat()
-            self._thinking_started = False
             try:
                 if thinking_policy.enabled:
                     response = call_with_thinking(
@@ -452,9 +437,6 @@ class Agent:
                         on_thinking_chunk=self._on_thinking_chunk,
                         on_token_chunk=self._token_callback_for_provider(),
                     )
-                    # CLI 默认 stdout 模式（无 thinking 订阅者）下打印"思考结束"分隔符
-                    if self._thinking_started and not self.events.subscribers(EVENT_THINKING_CHUNK):
-                        print("\n\n─── 思考结束 ───\n", flush=True)
                 else:
                     response = chat(messages, tools=active_tools, on_token_chunk=self._token_callback_for_provider())
             except Exception as exc:

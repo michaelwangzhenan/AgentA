@@ -434,7 +434,7 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 
 | event.type | payload | 触发时机 |
 |---|---|---|
-| `thinking_chunk` | `{text}` | Extended Thinking 流式 |
+| `thinking_chunk` | `{text}` | Extended Thinking 流式（CLI 渲染分层详 [§4.1](#41cli)） |
 | `token_chunk` | `{text}` | 正文 token 流式 |
 | `tool_call_start` | `{name, args, call_id}` | LLM 决定调用工具 |
 | `tool_call_end` | `{call_id, status, preview}` | 工具返回（`ok` / `empty` / `error`） |
@@ -1616,6 +1616,38 @@ flowchart TB
 - **本期范围**：CLI 形态完成重构（命令解析 / handler / render 三段分离）；Web UI / SDK 留接口位，后续任务实现。
 
 ## 4.1.CLI
+
+### 4.1.1 Thinking 渲染分层
+
+Extended Thinking 的"思考流"在 CLI 端按"Provider 推流 → EventBus 分发 → 渲染层组装"三段分层，渲染状态全部在渲染层闭包内自管，Agent core 不感知 UI 细节。
+
+```mermaid
+flowchart LR
+    PROV["LLM Provider<br/>流式 thinking_delta"]
+    AG["Agent._on_thinking_chunk<br/>publish(EVENT_THINKING_CHUNK)"]
+    BUS["EventBus<br/>异常隔离 + 多订阅扇出"]
+    CLI["handlers.run_query<br/>_event_router 闭包状态机"]
+    CHL["chainlit_app._event_router<br/>独立 cl.Message 推送"]
+    OUT["stdout 终端"]
+
+    PROV --> AG --> BUS
+    BUS --> CLI --> OUT
+    BUS --> CHL
+```
+
+**渲染约定**
+
+| 维度 | 约定 |
+|---|---|
+| 段起止 | 首段 thinking_chunk 到来时打 header（`💭 思考中...`），段切换时打 footer（`─── 思考结束 ───`）|
+| 段切换信号 | `token_chunk` / `plan_created` / `plan_step_end` / `tool_call_start` 任一事件到达，渲染层先关闭未关闭的 thinking 段再渲染目标事件 |
+| 多轮编号 | 单 query 多轮 thinking（tool 调用后再思考）独立分段；首轮不带编号，第 N≥2 轮 header / footer 带 `（第 N 轮）`，编号由渲染层自管不污染 EventBus payload |
+| 行前缀 | 每行 thinking 文本前注入 `│ ` 视觉前缀，与正文 `Agent: ...` 行视觉区分；按行检测 + chunk 跨行状态机驱动 |
+| 关 thinking | `THINKING_ENABLED=false` 时 Provider 不推 thinking_chunk，渲染层零 artifact（无 `💭` 头 / 无 `─── ───` 尾）|
+| 异常隔离 | 渲染端抛异常由 `EventBus.publish` try/except 吞掉，不影响 `agent.run()` 主循环 |
+| `run_query` finally | 兜底 `_close_thinking_segment()`，覆盖"仅 thinking 无 token / 异常 / 中断"三种边界 |
+
+**与其他渲染分支共存**：CLI `_event_router` 同时订阅 thinking / token / plan_created / plan_step_end，按段切换协议互不交错；Chainlit 端 `_event_router` 把 thinking / token / plan 各自推到独立 `cl.Message`，与 CLI 渲染策略解耦。
 
 ## 4.2.WebUI
 
