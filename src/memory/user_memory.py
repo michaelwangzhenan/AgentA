@@ -37,6 +37,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+# prompt injection 风险模式：物理位置统一在 src/agent/core/security_filter，
+# 本模块 import 复用（详 docs/iter_2_agent.md §4.9.12 D7）
+from src.agent.core.security_filter import _INJECTION_PATTERNS
+
 logger = logging.getLogger(__name__)
 
 
@@ -86,18 +90,6 @@ _REMEMBER_TRIGGERS: frozenset[str] = frozenset({
     "记住以下", "以后记住", "永久记住",
     "remember this", "remember that", "please remember", "keep in mind",
 })
-
-# prompt injection 风险模式（value 和 key 写入前均做校验）
-_INJECTION_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r'ignore\s+(?:all\s+)?previous\s+instructions?', re.IGNORECASE),
-    re.compile(r'you\s+are\s+now\s+(?:a\s+)?', re.IGNORECASE),
-    re.compile(r'new\s+(?:system\s+)?instructions?\s*:', re.IGNORECASE),
-    re.compile(r'忽略.{0,10}指令', re.IGNORECASE),
-    re.compile(r'你现在是', re.IGNORECASE),
-    re.compile(r'新的.{0,6}指令', re.IGNORECASE),
-    re.compile(r'system\s*:\s', re.IGNORECASE),
-    re.compile(r'<\|(?:im_start|im_end|endoftext)\|>', re.IGNORECASE),
-]
 
 # 单条记忆 value 最大字符数
 _MAX_VALUE_CHARS: int = 500

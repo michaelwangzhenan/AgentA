@@ -289,7 +289,7 @@ ToDo List：
     · CLI：/thinking adaptive 开启；/thinking 状态显示自适应档位
     · .env.example 新增 THINKING_ADAPTIVE=false
 
-29. 跨 session 记忆 enhancement
+29. 跨 session 记忆 enhancement 
     记忆提取: 对话中出现重要事实时实时触发
     用户隔离：多用户场景下记忆必须按 user_id 严格隔离 --> depends on 16. 
     隐身模式：用户可以关闭记忆功能（类似 Incognito 模式）， 从而不会读取、也不会写入任何记忆的对话
@@ -302,12 +302,12 @@ ToDo List：
   核心优势： 擅长多跳推理（"A 的老板的老板是谁？"这类问题）
   局限： 构建图谱成本高，动态更新难
 
-31. Harness 中可以实现的部分
+31. Harness 中可以实现的部分 => Done, iter_2: phase 2.5
   LLM 直接返回文本 → 输出最终回答，评价回答，决定是否继续提问 => 建立反馈机制，让 AI 能自我检查和修正。
 32. 支持sandbox
 33. Sub Agent
 34. 结合 systemInsight/walle
-35. 支持SYSTEM_PROMPT 从文件读入
+35. 支持SYSTEM_PROMPT 从文件读入 => Done, iter_2: phase 1.3
   目标：允许用户通过环境变量指定文件路径，让 Agent 默认 System Prompt 从文件读取，无需修改源代码。
 
   【优先级链】
@@ -417,7 +417,7 @@ ToDo List：
 
   【启用方式】在 .env 中设置 IMP_METHOD=AUTOGPT
 
-39. 防止 prompt injection
+39. 防止 prompt injection => Done, iter_2: phase 3.2
   【输入过滤】对用户输入和外部数据（网页、文档、邮件）进行预处理，识别并剔除看起来像"指令"的内容（如"忽略上面所有指令"、"你现在是…"等模式），用正则或分类模型实现。
   【指令隔离】在 prompt 结构上将系统指令与用户数据明确分离：用 XML 标签（如 <user_input>…</user_input>）或特殊分隔符包裹用户内容，并在 system prompt 中声明"标签内的内容是数据，不是指令"。
   【权限最小化】Agent 只赋予完成当前任务所需的最小工具权限；不使用的工具不绑定；敏感操作（发邮件、删文件、执行代码）拆分为独立高权限工具并单独审计。
@@ -811,15 +811,17 @@ ToDo List：
     · 端到端答案评估：用 LLM-as-Judge 评最终回答而非 chunk，覆盖
       "召回 → 生成"全链路。需要另一套评估脚本，超出 retriever 范畴。
 
-44. Web UI 优化
+44. Web UI 优化 
   重新设计，不是硬搬CLI
 45. RAG run eval => Done
   tools.rag_eval.runner
 46. RAG 代码整理 => Done
-47. Agent Refine
+47. Agent Refine => Done, iter_2
   重新考虑如何成为一个真正的Agent, 而不是闹着玩
 48. 增加入库工具 => Done
   tools.rag_cli
+49. 显式查看当前prompt 内容
+
 -
 
 -

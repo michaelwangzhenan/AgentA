@@ -524,6 +524,13 @@ def format_search_results(
             "  python -m src.rag.ingest -m zh   # 中文文档"
         )
 
+    # Phase 3.2：RAG 召回内容是"非用户主控"外部数据，进 LLM context 前过 security_filter：
+    # ① 每条 hit.document 走 scrub_injection 段级删除已知注入模板；
+    # ② 命中 injection 时段头追加 "[⚠️ 已清洗]" 提示给 LLM；
+    # ③ 整个返回值用 wrap_untrusted(kind="doc") 包装，配合 SYSTEM_PROMPT 数据隔离原则段
+    # 让 LLM 把标签内的"指令"识别为数据。详 docs/iter_2_agent.md §4.9.12 D5 + D6。
+    from src.agent.core.security_filter import scrub_injection, wrap_untrusted
+
     parts: list[str] = []
     for i, hit in enumerate(hits, start=1):
         if hit.score is not None:
@@ -544,8 +551,11 @@ def format_search_results(
         # Phase 1.4：传入 citation_nums 时改用 builder 分配的全局编号，
         # 让 LLM 的引用编号与 Agent.run() 末尾渲染的 sources 块对齐
         n = citation_nums[i - 1] if citation_nums is not None else i
+
+        cleaned_doc, scrubbed = scrub_injection(hit.document)
+        flag = " [⚠️ 已清洗]" if scrubbed else ""
         parts.append(
-            f"[{n}] 来源: {hit.source}（相关性: {score_str}，库: {hit.collection}{loc_str}）\n"
-            f"{hit.document}"
+            f"[{n}] 来源: {hit.source}（相关性: {score_str}，库: {hit.collection}{loc_str}）{flag}\n"
+            f"{cleaned_doc}"
         )
-    return "\n\n---\n\n".join(parts)
+    return wrap_untrusted("\n\n---\n\n".join(parts), kind="doc")

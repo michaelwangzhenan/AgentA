@@ -363,6 +363,29 @@ def run_query(agent: "Agent", question: str, out: OutputFn = _stdout) -> None:
 
     if set_event_cb is not None:
         set_event_cb(_event_router)
+
+    # Phase 3.2 plan 用户审批 mode：PLAN_PERMISSION_MODE=true 时 LLM 调 make_plan 后
+    # tool_call_engine 会经 agent.request_plan_approval 调到此 callback；用户回 no
+    # 即抛 PlanAbortedByUser 由 agent.run 接住返回 cancel_msg。先 flush 已渲染的
+    # plan tool 调用 + thinking 段，再问用户，避免提示行混入 plan checkbox 区。
+    prev_approval_cb = getattr(agent, "approval_callback", None)
+
+    def _ask_user_plan_approval(payload: dict) -> str:
+        _close_thinking_segment()
+        steps = payload.get("steps") or []
+        sys.stdout.write("\n📋 plan 待审批：\n")
+        for s in steps:
+            sys.stdout.write(f"  {s.get('id')}. {s.get('text', '')}\n")
+        sys.stdout.flush()
+        try:
+            answer = input("是否执行该 plan？(yes/no): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            sys.stdout.write("\n")
+            return "no"
+        return "no" if answer in {"n", "no"} else "yes"
+
+    if hasattr(agent, "approval_callback"):
+        agent.approval_callback = _ask_user_plan_approval
     try:
         reply = agent.run(question)
         safe = _sanitize_cli_text(reply).strip()
@@ -386,6 +409,8 @@ def run_query(agent: "Agent", question: str, out: OutputFn = _stdout) -> None:
         _close_thinking_segment()
         if set_event_cb is not None:
             set_event_cb(None)
+        if hasattr(agent, "approval_callback"):
+            agent.approval_callback = prev_approval_cb
 
 
 def handle_thinking_cfg(

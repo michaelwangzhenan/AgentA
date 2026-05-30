@@ -89,6 +89,10 @@ def get_tools(skill_bodies: dict[str, str] | None = None) -> list[dict[str, Any]
       - Phase 2.3 Quiz 业务 3 tool（create_quiz / grade_quiz / query_quiz_history）
       - Phase 2.4 SRS 业务 4 tool（add_to_srs / query_srs_due / review_srs_card / query_srs_stats）
     若传入 skill_bodies，再追加 load_skill 工具定义（name 字段限定为已有名称枚举）。
+
+    Phase 3.2：返回前过 security_filter.is_tool_allowed 名单门——按 SECURITY_MODE
+    切换 fail-open + BLOCKLIST 或 fail-close + ALLOWLIST。命中拒绝的 tool 静默跳过
+    + log warning（已在 is_tool_allowed 内部 log）；execute_tool 入口同样 double-check。
     """
     tools = (
         list(TOOLS)
@@ -99,7 +103,9 @@ def get_tools(skill_bodies: dict[str, str] | None = None) -> list[dict[str, Any]
     )
     if skill_bodies:
         tools.append(_build_load_skill_def(list(skill_bodies.keys())))
-    return tools
+
+    from src.agent.core.security_filter import is_tool_allowed
+    return [t for t in tools if is_tool_allowed(t.get("function", {}).get("name", ""))]
 
 
 def _build_load_skill_def(skill_names: list[str]) -> dict[str, Any]:
@@ -495,14 +501,21 @@ def _tool_web_search(query: str, num: int = 5) -> ToolResult:
     if not organic:
         return ToolResult(status="empty", content="搜索未返回任何结果，请尝试换一种关键词。")
 
+    # Phase 3.2：web 搜索结果是"非用户主控"外部数据，进 LLM context 前过 security_filter：
+    # ① 每条 snippet 走 scrub_injection 段级删除已知注入模板；
+    # ② 整个返回值用 wrap_untrusted(kind="web") 包装。详 docs/iter_2_agent.md §4.9.12 D5。
+    from src.agent.core.security_filter import scrub_injection, wrap_untrusted
+
     lines: list[str] = []
     for i, item in enumerate(organic[:num], 1):
         title = item.get("title", "(无标题)")
         link = item.get("link", "")
         snippet = item.get("snippet", "")
-        lines.append(f"[{i}] {title}\n    URL: {link}\n    摘要: {snippet}")
+        cleaned_snippet, scrubbed = scrub_injection(snippet)
+        flag = " [⚠️ 已清洗]" if scrubbed else ""
+        lines.append(f"[{i}] {title}{flag}\n    URL: {link}\n    摘要: {cleaned_snippet}")
 
-    return ToolResult(status="ok", content="\n\n".join(lines))
+    return ToolResult(status="ok", content=wrap_untrusted("\n\n".join(lines), kind="web"))
 
 
 def _tool_search_knowledge(
@@ -704,6 +717,7 @@ def _tool_fetch_url(url: str, max_chars: int = 3000) -> ToolResult:
 
     Returns:
         网页正文纯文本（截断至 max_chars），抓取失败时返回错误说明。
+        ok 状态的内容会先过 security_filter（scrub + wrap_untrusted(kind="web")）。
     """
     logger.info("[tool] fetch_url: url=%r, max_chars=%d", url, max_chars)
 
@@ -721,7 +735,16 @@ def _tool_fetch_url(url: str, max_chars: int = 3000) -> ToolResult:
 
     # SPA fallback：正文过短或含典型 SPA 根挂载点时，改用 Jina Reader
     if result.status in ("ok", "empty") and _is_likely_spa(result.content, raw.text):
-        return _fetch_via_jina(url, max_chars)
+        result = _fetch_via_jina(url, max_chars)
+
+    # Phase 3.2：fetch_url 返回正文是"非用户主控"外部数据，过 security_filter；
+    # 仅 ok 状态 wrap（empty/error 的 content 是程序错误描述，不该 wrap）。
+    if result.status == "ok":
+        from src.agent.core.security_filter import scrub_injection, wrap_untrusted
+        cleaned, scrubbed = scrub_injection(result.content)
+        flag = "[⚠️ 已清洗] " if scrubbed else ""
+        wrapped = wrap_untrusted(f"{flag}{cleaned}", kind="web")
+        return ToolResult(status="ok", content=wrapped)
 
     return result
 
@@ -2189,6 +2212,16 @@ def execute_tool(
         任何异常（含未知工具名）均被捕获，以 status="error" 返回，不向上抛出。
     """
     logger.info("执行工具: %s，参数: %s", name, json.dumps(args, ensure_ascii=False))
+
+    # Phase 3.2 双层保险：get_tools 已按名单门过滤掉被屏蔽 tool，但 LLM 可能因
+    # context 缓存 / 历史 messages 含旧 tool name 仍发起调用；此处再 double-check
+    # 命中即拒绝（status=error 让 tool_call_engine 引导 LLM 换工具），防绕过。
+    from src.agent.core.security_filter import is_tool_allowed
+    if not is_tool_allowed(name):
+        return ToolResult(
+            status="error",
+            content=f"工具 {name!r} 当前被名单门拒绝（SECURITY_MODE / TOOL_BLOCKLIST / TOOL_ALLOWLIST）。请改用其它工具或如实告知用户当前无法获取该信息。",
+        )
 
     try:
         match name:

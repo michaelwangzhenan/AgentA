@@ -29,6 +29,8 @@ from src.agent.tools import execute_tool, ToolResult
 from src.memory.chat_history import ChatHistoryStore
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from src.agent.core.citation_builder import CitationBuilder  # noqa: F401
 
 logger = logging.getLogger(__name__)
@@ -65,6 +67,7 @@ class ToolCallEngine:
         verbose: bool = False,
         events: EventBus | None = None,
         citation_builder: "CitationBuilder | None" = None,
+        approval_fn: "Callable[[dict[str, Any]], str] | None" = None,
     ) -> None:
         self._chat_history = chat_history
         self._session_id = session_id
@@ -72,6 +75,9 @@ class ToolCallEngine:
         self._verbose = verbose
         self._events = events
         self._citation_builder = citation_builder
+        # Phase 3.2：plan-execute 用户审批入口；非 None 时在 make_plan 后调用，
+        # 返 "no" 即抛 PlanAbortedByUser 让 agent.run 中止当前 query
+        self._approval_fn = approval_fn
 
     def process(self, message: Any, messages: list[dict[str, Any]]) -> None:
         """
@@ -129,14 +135,10 @@ class ToolCallEngine:
                     type=EVENT_TOOL_CALL_END,
                     payload={"call_id": tool_call.id, "status": result.status, "preview": preview},
                 ))
-                # Phase 2.1：plan tool 调用成功后叠加发 plan_* 事件，供 CLI / Chainlit
-                # 渲染 plan checkbox 进度。reconstruct_from_messages 此时 messages
-                # 已含本轮 assistant tool_calls（line 81），所以 update_step 状态
-                # 即得最新 plan 视图。
-                if result.status == "ok":
-                    self._maybe_publish_plan_events(tool_name, tool_args, messages)
 
-            # DB 写入干净内容（无引导提示），避免污染历史
+            # DB 写入干净内容（无引导提示），避免污染历史。
+            # Phase 3.2：先写入 tool 结果再调 plan 审批 hook，保证 PlanAbortedByUser
+            # 抛出时 chat_history 一致性（assistant_msg 已写入 + tool_msg 已写入）。
             db_content = result.to_llm_str()
             db_msg: dict[str, Any] = {
                 "role": "tool",
@@ -155,10 +157,24 @@ class ToolCallEngine:
             live_msg: dict[str, Any] = {**db_msg, "content": llm_content}
             messages.append(live_msg)
 
+            # Phase 2.1：plan tool 调用成功后叠加发 plan_* 事件，供 CLI / Chainlit
+            # 渲染 plan checkbox 进度。reconstruct_from_messages 此时 messages
+            # 已含本轮 assistant tool_calls（line 81），所以 update_step 状态
+            # 即得最新 plan 视图。
+            # Phase 3.2：make_plan 分支内会调 approval_fn，用户拒绝即抛 PlanAbortedByUser；
+            # 此时 chat_history 已含 assistant_msg + tool_msg（一致性保住），让上游 agent.run
+            # 接住异常后追加 cancel_msg 即可。
+            if self._events is not None and result.status == "ok":
+                self._maybe_publish_plan_events(tool_name, tool_args, messages)
+
     def _maybe_publish_plan_events(
         self, tool_name: str, tool_args: dict[str, Any], messages: list[dict[str, Any]],
     ) -> None:
-        """Phase 2.1：plan tool 调用成功后 publish 对应 plan_* 事件。"""
+        """Phase 2.1：plan tool 调用成功后 publish 对应 plan_* 事件。
+
+        Phase 3.2：make_plan 分支在 publish plan_created 前调用 approval_fn 询问用户；
+        用户回 "no" → 抛 PlanAbortedByUser 让上游 agent.run 中止 query。
+        """
         if self._events is None:
             return
         if tool_name == "make_plan":
@@ -166,9 +182,17 @@ class ToolCallEngine:
             if not (isinstance(steps, list) and all(isinstance(s, str) and s.strip() for s in steps)):
                 return
             cleaned = [s.strip() for s in steps]
+            plan_payload = {"steps": [{"id": i + 1, "text": t} for i, t in enumerate(cleaned)]}
+
+            if self._approval_fn is not None:
+                answer = self._approval_fn(plan_payload)
+                if answer == "no":
+                    from src.agent.agent import PlanAbortedByUser
+                    raise PlanAbortedByUser(f"用户拒绝 plan：{cleaned}")
+
             self._events.publish(AgentEvent(
                 type=EVENT_PLAN_CREATED,
-                payload={"steps": [{"id": i + 1, "text": t} for i, t in enumerate(cleaned)]},
+                payload=plan_payload,
             ))
             self._events.publish(AgentEvent(
                 type=EVENT_PLAN_STEP_START,

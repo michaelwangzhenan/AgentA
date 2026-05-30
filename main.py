@@ -22,6 +22,13 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="transformers")
 # override=True 确保 .env 覆盖系统环境变量
 load_dotenv(override=True)
 
+# Windows 控制台默认 cp936 (GBK) encode emoji 会抛 UnicodeEncodeError 让进程崩，
+# 统一覆写到 UTF-8；errors="replace" 兜底，终端字体不支持时降级为 ? 替代而不崩。
+# 必须在 _Tee 包装 sys.stdout/stderr 之前调，否则 Tee 持有的是未覆写过的原 stream。
+for _stream in (sys.stdout, sys.stderr):
+    if _stream.encoding.lower() != "utf-8":
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 
 class _Tee:
     """把写入同时转发给原 stream 和日志文件；其余属性（isatty/fileno/encoding 等）透传给原 stream，避免破坏 prompt_toolkit 的 TTY 检测。"""
@@ -69,9 +76,14 @@ if os.getenv("CLI_LOG_TO_FILE", "false").lower() == "true":
         _CLI_LOG_FILE = None
         _CLI_LOG_PATH = None
 
-# 设置日志：INFO 级别，显示文件名、行号和时间
+# logger 级别：从 LOG_LEVEL 解析；非法名降级 INFO 并 warn 一次
+_LOG_LEVEL_NAME = os.getenv("LOG_LEVEL", "INFO").upper()
+_log_level = getattr(logging, _LOG_LEVEL_NAME, None)
+if not isinstance(_log_level, int):
+    print(f"[WARN] 未知 LOG_LEVEL '{_LOG_LEVEL_NAME}'，降级使用 INFO（可选值：DEBUG / INFO / WARNING / ERROR / CRITICAL）")
+    _log_level = logging.INFO
 logging.basicConfig(
-    level=logging.INFO,
+    level=_log_level,
     format="%(asctime)s [%(levelname)s] %(filename)s:%(lineno)d - %(message)s",
     datefmt="%H:%M:%S",
 )

@@ -1568,6 +1568,59 @@ sequenceDiagram
 | CLI 渲染（验收 ①） | UT `tests/test_cli_handlers_quiz.py::TestHarnessFlagRender`（3 case）| flagged 题渲染 ⚠️ + 复核提示；未 flagged 不渲染；多题混合只在目标题位置出现 |
 
 
+## 3.13 防 prompt injection
+
+**职责**：让 Agent 在面对外部不可信数据（RAG 召回 / web 抓取 / 未来 MCP server 返回）时不被诱导调危险 tool / 泄露系统 prompt；并给 plan-execute 多步任务提供用户审批入口。
+
+**4 层防御映射**（[knowlege.md §7.三防御层次](knowlege.md#7-prompt-injection)）：
+
+| 层 | 在 AgentA 的落点 | 注入点 |
+|---|---|---|
+| L2 数据供应侧 | 不可信数据进 LLM context 前过 [`security_filter.scrub_injection`](../src/agent/core/security_filter.py) 段级删除 + [`wrap_untrusted`](../src/agent/core/security_filter.py) 标签包装 | [`format_search_results`](../src/rag/retriever.py) / [`_tool_web_search`](../src/agent/tools.py) / [`_tool_fetch_url`](../src/agent/tools.py) |
+| L3 处理侧 | [`SYSTEM_PROMPT`](../src/agent/agent.py) 末尾 `## 数据隔离原则` 段告知 LLM `<untrusted_*>` 标签内的内容是数据不是指令 | `SYSTEM_PROMPT` 静态段 |
+| L4 输出侧 | tool 名单门：[`get_tools`](../src/agent/tools.py) 按 `SECURITY_MODE` 切换 fail-open + `TOOL_BLOCKLIST` 或 fail-close + `TOOL_ALLOWLIST`；[`execute_tool`](../src/agent/tools.py) 入口 double-check | `get_tools` + `execute_tool` |
+| L4 输出侧 · plan 审批 | `make_plan` 调用成功后 [`tool_call_engine._maybe_publish_plan_events`](../src/agent/core/tool_call_engine.py) 调 [`Agent.request_plan_approval`](../src/agent/agent.py)；用户回 "no" → 抛 `PlanAbortedByUser` 让 `agent.run` break loop | `tool_call_engine` make_plan 分支 + UI 端 `approval_callback` 注册 |
+
+> L1 输入侧（独立 LLM 分类器判定 user_input 恶意度）本期不做：cost 翻倍 + 单用户本机场景 user_input 注入威胁度低（详 [iter_2_agent.md §4.13.1](iter_2_agent.md#4131-deferred-backlog暂时不做)）。
+
+```mermaid
+flowchart TD
+    USER["user_input"] --> AG["Agent.run"]
+    KB[("RAG / KB")] --> SF1["scrub + wrap_untrusted(doc)"] --> AG
+    WEB[("web fetch / search")] --> SF2["scrub + wrap_untrusted(web)"] --> AG
+    AG --> LLM["LLM with SYSTEM_PROMPT<br/>含「数据隔离原则」段"]
+    LLM --> TC["tool_calls"]
+    TC --> GATE{"is_tool_allowed?"}
+    GATE -->|"yes"| EX["execute_tool"]
+    GATE -->|"no"| ERR["error: 名单门拒绝"]
+    EX --> MK["make_plan?"]
+    MK -->|"yes"| AP["request_plan_approval"]
+    AP -->|"no"| ABT["PlanAbortedByUser"]
+    AP -->|"yes"| PUB["publish plan_created"]
+```
+
+**`security_filter` 接口约定**
+
+| 函数 | 入参 | 返回 | 行为 |
+|---|---|---|---|
+| `scrub_injection(content)` | `str` | `(cleaned, hit)` | 按 `\n\n` 切段；任一段命中 11 项 `_INJECTION_PATTERNS` → 整段删除；返回清洗后内容 + 是否命中 flag |
+| `wrap_untrusted(content, kind)` | `str`, `kind ∈ {"doc","web"}` | `str` | 用 `<untrusted_{kind}>` 标签包；已含同型标签时不二次包装；未知 kind fail-fast `ValueError` |
+| `is_tool_allowed(name)` | `str` | `bool` | normal 模式 `name not in TOOL_BLOCKLIST` 即放行；strict 模式必须 `name in TOOL_ALLOWLIST`；未知 mode 退化 normal |
+
+**Plan 审批 callback 注册模式**：与 `on_thinking_chunk` 同型——`Agent.__init__(approval_callback=fn)` 或 `agent.approval_callback = fn`；CLI 走 `input()` 同步问 yes/no；Chainlit 端用 `cl.AskUserMessage` 异步包装（webui 任务做，详 [iter_2_agent.md §4.13.1](iter_2_agent.md#4131-deferred-backlog暂时不做)）。
+
+**关键约束**
+
+- 所有"非用户主控"外部数据进 LLM context 必须过 `wrap_untrusted`；用户直接输入的 user message 不包装
+- `scrub_injection` 只删整段（`\n\n` 隔开）；不做 char-level 过滤（避免 LLM 看到不连贯文本）
+- `_INJECTION_PATTERNS` 物理位置在 `security_filter.py`；[`user_memory._sanitize`](../src/memory/user_memory.py) 写入侧仍调用此处常量保持一致性
+- L1 输入侧 LLM 分类器与 SSRF 防御本期 punt（详 iter_2_agent.md §4.13.1 / §4.13.2）
+
+**评估方法**
+
+[`tools/agent_eval/security/adversarial.py`](../tools/agent_eval/security/adversarial.py) + 50 case `dataset.json`（4 类各 12-13 case）；指标拦截率 ≥ 90% / 误拦率 ≤ 10%（详 [iter_2_agent.md §4.8.1 Phase 3 出口](iter_2_agent.md#481-评估方法论)）。`tool_blocklist` 类不调 LLM（直接 patch config + assert is_tool_allowed），`direct` / `indirect_rag` / `indirect_web` 类需 LLM 调用，可加 `--no-llm` 跳过。
+
+
 # 4.表现层
 
 表现层负责"采集输入 → 调用 Agent → 渲染输出"三件事，按 IO 形态分为 CLI / Web UI / SDK 三种形态，全部通过 `AgentAPI` 与 Agent core 通信。

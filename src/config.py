@@ -383,6 +383,23 @@ AUTOGPT_MAX_TASK_TOOL_ROUNDS: int = int(os.getenv('AUTOGPT_MAX_TASK_TOOL_ROUNDS'
 # Serper.dev API Key（用于 web_search 工具；在 .env 中配置 SERPAPI_API_KEY）
 SERPAPI_API_KEY: str = os.getenv('SERPAPI_API_KEY', '')
 
+# logger 输出级别（可选值：DEBUG / INFO / WARNING / ERROR / CRITICAL）
+# 同时应用于终端 stderr 输出与 CLI_LOG_TO_FILE 落盘文件；非法值降级 INFO 并 warn
+LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").upper()
+
 # 是否把 CLI 终端的所有输出同步写到日志文件（可选值：true / false）
 # 开启后每次启动新建 ./logs/agenta-YYYYMMDD-HHMMSS.log，关闭时完全无副作用
 CLI_LOG_TO_FILE: bool = os.getenv("CLI_LOG_TO_FILE", "false").lower() == "true"
+
+# ── 防 prompt injection（Phase 3.2）配置 ──────────────────────────────────────
+# tool 名单门工作模式（可选值：normal / strict）
+# normal：fail-open + TOOL_BLOCKLIST，不在黑名单即放行
+# strict：fail-close + TOOL_ALLOWLIST，必须在白名单才放行（空白名单 = 全拒）
+SECURITY_MODE: str = os.getenv("SECURITY_MODE", "normal")
+# tool 黑名单（normal 模式生效，逗号分隔；如 "fetch_url,web_search"）
+TOOL_BLOCKLIST: str = os.getenv("TOOL_BLOCKLIST", "")
+# tool 白名单（仅 strict 模式生效，逗号分隔；如 "search_knowledge,make_plan"）
+TOOL_ALLOWLIST: str = os.getenv("TOOL_ALLOWLIST", "")
+# 是否启用 plan-execute 用户审批 mode（可选值：true / false）
+# 开启后 LLM 调 make_plan 后 CLI 弹 yes/no 提问；no → 当前 query 中止
+PLAN_PERMISSION_MODE: bool = os.getenv("PLAN_PERMISSION_MODE", "false").lower() == "true"
