@@ -387,9 +387,12 @@ SERPAPI_API_KEY: str = os.getenv('SERPAPI_API_KEY', '')
 # 同时应用于终端 stderr 输出与 CLI_LOG_TO_FILE 落盘文件；非法值降级 INFO 并 warn
 LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").upper()
 
-# 是否把 CLI 终端的所有输出同步写到日志文件（可选值：true / false）
-# 开启后每次启动新建 ./logs/agenta-YYYYMMDD-HHMMSS.log，关闭时完全无副作用
-CLI_LOG_TO_FILE: bool = os.getenv("CLI_LOG_TO_FILE", "false").lower() == "true"
+# CLI 终端输出落盘模式（可选值：NONE / SINGLE / MULTI；大小写不敏感）
+# NONE   不写文件
+# SINGLE 固定 ./logs/agenta.log，跨启动追加（append）
+# MULTI  每次启动新建 ./logs/agenta-YYYYMMDD-HHMMSS.log（write 覆盖）
+# 非法值降级 NONE 并 warn
+CLI_LOG_MODE: str = os.getenv("CLI_LOG_MODE", "NONE").upper()
 
 # ── 防 prompt injection（Phase 3.2）配置 ──────────────────────────────────────
 # tool 名单门工作模式（可选值：normal / strict）

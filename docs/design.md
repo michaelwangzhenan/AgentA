@@ -1776,7 +1776,7 @@ src/agent/core/
 
 ## A.1 CLI 输出落盘
 
-CLI 终端的所有可见输出（banner / 用户输入 / Agent 回答 / 模块日志 / 异常堆栈）按开关同步写到 `./logs/agenta-<时间戳>.log`，便于离线复盘对话与排查 bug。开关默认关，关闭时零副作用。
+CLI 终端的所有可见输出（banner / 用户输入 / Agent 回答 / 模块日志 / 异常堆栈）按 `CLI_LOG_MODE` 同步写到 `./logs/` 下的日志文件，便于离线复盘对话与排查 bug。模式默认 `NONE`（不写），关闭时零副作用。支持两种落盘策略：单文件追加（`SINGLE`，固定 `agenta.log`，跨启动 append）与多文件分卷（`MULTI`，每次启动新建带时间戳文件）。
 
 **输出流分布**
 
@@ -1795,7 +1795,7 @@ flowchart LR
     L[logger] --> H[StreamHandler] --> E[sys.stderr = _Tee]
     PT[prompt_toolkit] -. 终端原生 API .-> T[终端]
     O --> T
-    O --> F[(agenta-时间戳.log)]
+    O --> F[(SINGLE: agenta.log / MULTI: agenta-时间戳.log)]
     E --> T
     E --> F
     UI[用户键入] -. TTY 回显 .-> T
@@ -1809,7 +1809,7 @@ flowchart LR
 | 分流机制 | Python 内置 `_Tee` 包装 `sys.stdout` / `sys.stderr` | 不用 shell 重定向 / `tee` 管道 —— 后者破坏 TTY，`prompt_toolkit` 检测不到 TTY 退化为盲打，且 Win / bash 不通用 |
 | logger 衔接 | 复用 stderr tee | 不另起 `FileHandler` 避免与 tee 重复写 |
 | 用户输入 | 主循环手动写文件，不走 stdout | 不在终端重复打一遍（TTY 已回显过） |
-| 文件粒度 | 每次启动新建带时间戳文件，无 rotation | 复盘时一眼对应到哪次会话；开发期临时录无须 rotation |
+| 文件粒度 | 模式枚举（`SINGLE` 单文件 append / `MULTI` 多文件分卷），不含 rotation | 同一开关收口"长期追加排查"与"单次会话复盘"两种用法；rotation 需求出现再扩 |
 
 **`_Tee` 透明性约定**：包装类只代理 `write` / `flush`，其余属性（`isatty` / `fileno` / `encoding` / `buffer` 等）透传原 stream，确保 `prompt_toolkit` 的 TTY 检测与底层二进制 buffer 访问不受影响。
 
@@ -1817,7 +1817,7 @@ flowchart LR
 
 | key | 类型 | 默认 | 含义 |
 |---|---|---|---|
-| `CLI_LOG_TO_FILE` | bool | `false` | 是否启用 tee 落盘；路径固定 `./logs/agenta-YYYYMMDD-HHMMSS.log` |
+| `CLI_LOG_MODE` | str | `NONE` | tee 落盘模式（`NONE` / `SINGLE` / `MULTI`，大小写不敏感）：`NONE` 不写；`SINGLE` 固定 `./logs/agenta.log` 跨启动 append；`MULTI` 每次启动新建 `./logs/agenta-YYYYMMDD-HHMMSS.log` 覆盖；非法值降级 `NONE` 并 warn |
 | `LOG_LEVEL` | str | `INFO` | root logger 输出级别（`DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL`）；同时作用于终端 stderr 与落盘文件（同一 stream 两路输出）；非法值降级 `INFO` 并 warn。三方噪声库（`httpx` / `chromadb` 等）独立固定 `WARNING`，不随本值缩放 |
 
 实施细节详 [`iter_8_debugging.md §1`](iter_8_debugging.md#1-cli-打印写文件)（落盘）与 [`§2`](iter_8_debugging.md#2-logger-级别可配置)（级别）。

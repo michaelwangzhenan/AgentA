@@ -60,19 +60,29 @@ class _Tee:
 
 # CLI 终端输出落盘开关 —— 必须在 logging.basicConfig 之前完成 stream 包装，
 # 否则 StreamHandler 在构造时已绑定到未包装的 sys.stderr，logger 输出进不了文件。
+# 三种模式：NONE 不写；SINGLE 固定 ./logs/agenta.log 跨启动追加；MULTI 每次新建带时间戳文件。
 _CLI_LOG_FILE = None
 _CLI_LOG_PATH: Path | None = None
-if os.getenv("CLI_LOG_TO_FILE", "false").lower() == "true":
+_CLI_LOG_MODE = os.getenv("CLI_LOG_MODE", "NONE").upper()
+if _CLI_LOG_MODE not in ("NONE", "SINGLE", "MULTI"):
+    print(f"[WARN] 未知 CLI_LOG_MODE '{_CLI_LOG_MODE}'，降级使用 NONE（可选值：NONE / SINGLE / MULTI）")
+    _CLI_LOG_MODE = "NONE"
+if _CLI_LOG_MODE != "NONE":
     try:
         _log_dir = Path("./logs")
         _log_dir.mkdir(parents=True, exist_ok=True)
-        _CLI_LOG_PATH = _log_dir / f"agenta-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
+        if _CLI_LOG_MODE == "SINGLE":
+            _CLI_LOG_PATH = _log_dir / "agenta.log"
+            _open_mode = "a"
+        else:  # MULTI
+            _CLI_LOG_PATH = _log_dir / f"agenta-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
+            _open_mode = "w"
         # buffering=1 → 行缓冲，每条 \n 立即刷盘，进程异常退出也不丢日志
-        _CLI_LOG_FILE = open(_CLI_LOG_PATH, "w", encoding="utf-8", buffering=1)
+        _CLI_LOG_FILE = open(_CLI_LOG_PATH, _open_mode, encoding="utf-8", buffering=1)
         sys.stdout = _Tee(sys.stdout, _CLI_LOG_FILE)
         sys.stderr = _Tee(sys.stderr, _CLI_LOG_FILE)
     except OSError as e:
-        print(f"⚠️  无法打开 CLI 日志文件：{e}，本次运行不写文件")
+        print(f"[WARN] 无法打开 CLI 日志文件：{e}，本次运行不写文件")
         _CLI_LOG_FILE = None
         _CLI_LOG_PATH = None
 
@@ -126,7 +136,8 @@ def main() -> None:
     print(BANNER)
 
     if _CLI_LOG_PATH:
-        print(f"📝 终端输出同步写入：{_CLI_LOG_PATH}\n")
+        _mode_hint = "追加" if _CLI_LOG_MODE == "SINGLE" else "覆盖"
+        print(f"📝 终端输出同步写入（{_CLI_LOG_MODE} / {_mode_hint}）：{_CLI_LOG_PATH}\n")
 
     # _warm_up_rag_models()
 
