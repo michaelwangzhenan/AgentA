@@ -131,6 +131,31 @@ def _warm_up_rag_models() -> None:
     print(f"✅ {targets} 已就绪。\n", flush=True)
 
 
+def _bootstrap_mcp() -> None:
+    """按 `.agenta/mcp/config.json` 启动 MCP server 子进程；空配 / 失败一律静默不阻塞。
+
+    设计：失败 server 由 MCPManager 内部标 `failed` 并 log warning；本函数只负责
+    入口编排（加载 config → start_all → 注册 atexit shutdown），任何异常吞掉。
+    """
+    if not config.MCP_ENABLED:
+        return
+    try:
+        from src.agent.core.mcp_config import load_mcp_config
+        from src.agent.core.mcp_manager import get_shared_manager
+        specs = load_mcp_config()
+        if not specs:
+            return
+        manager = get_shared_manager()
+        manager.start_all(specs)
+        import atexit
+        atexit.register(manager.shutdown)
+        statuses = manager.status()
+        connected = sum(1 for s in statuses if s["status"] == "connected")
+        print(f"🔌 MCP server 已加载（{connected}/{len(statuses)} connected）\n")
+    except Exception as exc:
+        logging.getLogger(__name__).warning("[main] MCP bootstrap 失败：%s", exc)
+
+
 def main() -> None:
     """CLI 主循环。"""
     print(BANNER)
@@ -172,6 +197,9 @@ def main() -> None:
     if user_memory:
         cnt = len(user_memory.load_all())
         print(f"🧠 跨 session 记忆已加载（共 {cnt} 条）\n")
+
+    # Phase 3.3：按 .agenta/mcp/config.json 拉起 MCP server 子进程；失败永远不阻塞 Agent
+    _bootstrap_mcp()
 
     agent = handlers.make_agent(chat_history, skills_map, thinking_cfg, SYSTEM_PROMPT, user_memory=user_memory)
     print(f"💬 当前 Session: {agent.session_id}\n")
@@ -314,6 +342,10 @@ def main() -> None:
             case "/srs":
                 from src.memory.srs_store import get_shared_store as _get_srs_store
                 handlers.handle_srs(_get_srs_store(), cmd_parts)
+                continue
+            case "/mcp":
+                from src.agent.core.mcp_manager import get_shared_manager as _get_mcp_mgr
+                handlers.handle_mcp(_get_mcp_mgr(), cmd_parts)
                 continue
         
         # ── 用户显式 Skill 激活 ──────────────────────────────────────────────

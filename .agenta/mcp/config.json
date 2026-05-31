@@ -1,0 +1,22 @@
+{
+  "_about": "MCP server 接入清单（Phase 3.3）。复制本文件为 .agenta/mcp/config.json，按需编辑；不存在则 agent 启动时静默跳过。详 docs/iter_2_agent.md §4.9.13。",
+  "servers": {
+    "filesystem": {
+      "_comment": "本地文件读/写/列。args 末尾的路径就是 server 暴露给 LLM 的工作目录（可写多个）。需 Node.js（首次使用 npx 会自动下载该包到本机缓存）。",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "./"
+      ]
+    },
+    "fetch": {
+      "_comment": "HTTP GET → Markdown。SSRF 检查由 AgentA url_guard 入口侧拦截。先在 .venv 里 'pip install mcp-server-fetch'。",
+      "command": ".venv/Scripts/python.exe",
+      "args": [
+        "-m",
+        "mcp_server_fetch"
+      ]
+    }
+  }
+}

@@ -8,8 +8,9 @@ security_filter —— Prompt Injection 防御工具集（Helper 层）
 
 不做：
 - LLM 分类器 / 语义级判定（cost 翻倍单用户场景动机弱，详 §4.13.1 #34）
-- SSRF 防御 / URL 校验（详 §4.13.1 #33，Phase 3.3 MCP 一起做）
 - system prompt 泄露 fingerprint 检测（详 §4.13.2 #37，SaaS 才需要）
+
+SSRF 防御 / URL 校验由 [`url_guard`](./url_guard.py) 单独承担（Phase 3.3）。
 
 详见 docs/iter_2_agent.md §4.9.12 / docs/knowlege.md §7。
 """
@@ -52,7 +53,10 @@ _INJECTION_PATTERNS: list[re.Pattern[str]] = [
 # ── 标签包装 ──────────────────────────────────────────────────────────────────
 
 # wrap_untrusted 支持的"不可信数据"类别。新增类别请同时更新 SYSTEM_PROMPT 数据隔离原则段。
-_WRAP_KINDS: frozenset[str] = frozenset({"doc", "web"})
+# - doc：RAG 召回的本地知识库片段
+# - web：内置 web_search / fetch_url 返回
+# - tool：MCP server 返回（Phase 3.3；通用 tool 返回标签，含未来其它第三方 tool）
+_WRAP_KINDS: frozenset[str] = frozenset({"doc", "web", "tool"})
 
 
 def wrap_untrusted(content: str, kind: str = "doc") -> str:
@@ -65,8 +69,8 @@ def wrap_untrusted(content: str, kind: str = "doc") -> str:
 
     Args:
         content: 待包装的工具返回原文。
-        kind:    类别标签，当前支持 'doc'（RAG 召回）/ 'web'（web_search / fetch_url）。
-                 未知类别 fail-fast，便于发现拼写错误。
+        kind:    类别标签，当前支持 'doc'（RAG 召回）/ 'web'（web_search / fetch_url）/
+                 'tool'（MCP server 等第三方 tool 返回）。未知类别 fail-fast，便于发现拼写错误。
 
     Returns:
         `<untrusted_{kind}>\n{content}\n</untrusted_{kind}>` 形态字符串。

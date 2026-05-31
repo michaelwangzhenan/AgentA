@@ -1570,18 +1570,20 @@ sequenceDiagram
 
 ## 3.13 防 prompt injection
 
-**职责**：让 Agent 在面对外部不可信数据（RAG 召回 / web 抓取 / 未来 MCP server 返回）时不被诱导调危险 tool / 泄露系统 prompt；并给 plan-execute 多步任务提供用户审批入口。
+让 Agent 在面对外部不可信数据（RAG 召回 / web 抓取 / MCP server 返回）时不被诱导调危险 tool / 泄露系统 prompt，并给 plan-execute 多步任务提供用户审批入口。SSRF / URL 校验由独立模块承担，详 [§3.14](#314-mcp-接入-与-ssrf-防御)。
 
-**4 层防御映射**（[knowlege.md §7.三防御层次](knowlege.md#7-prompt-injection)）：
+### 3.13.1 防御层次
+
+对照 [knowlege.md §7.3 4 层纵深防御](knowlege.md#73-防御层次4-层纵深防御)：
 
 | 层 | 在 AgentA 的落点 | 注入点 |
 |---|---|---|
-| L2 数据供应侧 | 不可信数据进 LLM context 前过 [`security_filter.scrub_injection`](../src/agent/core/security_filter.py) 段级删除 + [`wrap_untrusted`](../src/agent/core/security_filter.py) 标签包装 | [`format_search_results`](../src/rag/retriever.py) / [`_tool_web_search`](../src/agent/tools.py) / [`_tool_fetch_url`](../src/agent/tools.py) |
-| L3 处理侧 | [`SYSTEM_PROMPT`](../src/agent/agent.py) 末尾 `## 数据隔离原则` 段告知 LLM `<untrusted_*>` 标签内的内容是数据不是指令 | `SYSTEM_PROMPT` 静态段 |
-| L4 输出侧 | tool 名单门：[`get_tools`](../src/agent/tools.py) 按 `SECURITY_MODE` 切换 fail-open + `TOOL_BLOCKLIST` 或 fail-close + `TOOL_ALLOWLIST`；[`execute_tool`](../src/agent/tools.py) 入口 double-check | `get_tools` + `execute_tool` |
+| L2 数据供应侧 | 不可信数据进 LLM context 前过 [`security_filter.scrub_injection`](../src/agent/core/security_filter.py) 段级删除 + [`wrap_untrusted`](../src/agent/core/security_filter.py) 标签包装（kind `doc` / `web` / `tool`） | [`format_search_results`](../src/rag/retriever.py) / [`_tool_web_search`](../src/agent/tools.py) / [`_tool_fetch_url`](../src/agent/tools.py) / MCP tool 转发出口 [`_execute_mcp_tool`](../src/agent/tools.py) |
+| L3 处理侧 | [`SYSTEM_PROMPT`](../src/agent/agent.py) 末尾「数据隔离原则」段告知 LLM `<untrusted_*>` 标签内的内容是数据不是指令 | `SYSTEM_PROMPT` 静态段 |
+| L4 输出侧 · 名单门 | tool 名单门：[`get_tools`](../src/agent/tools.py) 按 `SECURITY_MODE` 切换 fail-open + `TOOL_BLOCKLIST` 或 fail-close + `TOOL_ALLOWLIST`；[`execute_tool`](../src/agent/tools.py) 入口 double-check | `get_tools` + `execute_tool` |
 | L4 输出侧 · plan 审批 | `make_plan` 调用成功后 [`tool_call_engine._maybe_publish_plan_events`](../src/agent/core/tool_call_engine.py) 调 [`Agent.request_plan_approval`](../src/agent/agent.py)；用户回 "no" → 抛 `PlanAbortedByUser` 让 `agent.run` break loop | `tool_call_engine` make_plan 分支 + UI 端 `approval_callback` 注册 |
 
-> L1 输入侧（独立 LLM 分类器判定 user_input 恶意度）本期不做：cost 翻倍 + 单用户本机场景 user_input 注入威胁度低（详 [iter_2_agent.md §4.13.1](iter_2_agent.md#4131-deferred-backlog暂时不做)）。
+L1 输入侧（独立 LLM 分类器判定 user_input 恶意度）不做：cost 翻倍 + 单用户本机场景威胁度低，详 [iter_2_agent.md §4.13.1](iter_2_agent.md#4131-deferred-backlog暂时不做)。
 
 ```mermaid
 flowchart TD
@@ -1599,26 +1601,141 @@ flowchart TD
     AP -->|"yes"| PUB["publish plan_created"]
 ```
 
-**`security_filter` 接口约定**
+### 3.13.2 security_filter 接口
 
 | 函数 | 入参 | 返回 | 行为 |
 |---|---|---|---|
 | `scrub_injection(content)` | `str` | `(cleaned, hit)` | 按 `\n\n` 切段；任一段命中 11 项 `_INJECTION_PATTERNS` → 整段删除；返回清洗后内容 + 是否命中 flag |
-| `wrap_untrusted(content, kind)` | `str`, `kind ∈ {"doc","web"}` | `str` | 用 `<untrusted_{kind}>` 标签包；已含同型标签时不二次包装；未知 kind fail-fast `ValueError` |
+| `wrap_untrusted(content, kind)` | `str`, `kind ∈ {"doc","web","tool"}` | `str` | 用 `<untrusted_{kind}>` 标签包；已含同型标签时不二次包装；未知 kind fail-fast `ValueError` |
 | `is_tool_allowed(name)` | `str` | `bool` | normal 模式 `name not in TOOL_BLOCKLIST` 即放行；strict 模式必须 `name in TOOL_ALLOWLIST`；未知 mode 退化 normal |
 
-**Plan 审批 callback 注册模式**：与 `on_thinking_chunk` 同型——`Agent.__init__(approval_callback=fn)` 或 `agent.approval_callback = fn`；CLI 走 `input()` 同步问 yes/no；Chainlit 端用 `cl.AskUserMessage` 异步包装（webui 任务做，详 [iter_2_agent.md §4.13.1](iter_2_agent.md#4131-deferred-backlog暂时不做)）。
+**关键约束**：
 
-**关键约束**
+- 所有「非用户主控」外部数据进 LLM context 必须过 `wrap_untrusted`；用户直接输入的 user message 不包装
+- `scrub_injection` 只删整段（`\n\n` 隔开），不做 char-level 过滤（避免 LLM 看到不连贯文本）
+- `_INJECTION_PATTERNS` 物理位置在 `security_filter.py`；[`user_memory._sanitize`](../src/memory/user_memory.py) 写入侧也复用同一份常量保持一致
 
-- 所有"非用户主控"外部数据进 LLM context 必须过 `wrap_untrusted`；用户直接输入的 user message 不包装
-- `scrub_injection` 只删整段（`\n\n` 隔开）；不做 char-level 过滤（避免 LLM 看到不连贯文本）
-- `_INJECTION_PATTERNS` 物理位置在 `security_filter.py`；[`user_memory._sanitize`](../src/memory/user_memory.py) 写入侧仍调用此处常量保持一致性
-- L1 输入侧 LLM 分类器与 SSRF 防御本期 punt（详 iter_2_agent.md §4.13.1 / §4.13.2）
+### 3.13.3 Plan 审批 callback
 
-**评估方法**
+与 `on_thinking_chunk` 同型注册模式：`Agent.__init__(approval_callback=fn)` 或 `agent.approval_callback = fn`。
 
-[`tools/agent_eval/security/adversarial.py`](../tools/agent_eval/security/adversarial.py) + 50 case `dataset.json`（4 类各 12-13 case）；指标拦截率 ≥ 90% / 误拦率 ≤ 10%（详 [iter_2_agent.md §4.8.1 Phase 3 出口](iter_2_agent.md#481-评估方法论)）。`tool_blocklist` 类不调 LLM（直接 patch config + assert is_tool_allowed），`direct` / `indirect_rag` / `indirect_web` 类需 LLM 调用，可加 `--no-llm` 跳过。
+| UI 形态 | 实现 | 阻塞模型 |
+|---|---|---|
+| CLI | [`handlers._ask_user_plan_approval`](../src/cli/handlers.py) 用 `input()` 同步问 yes/no | 同轮等用户确认 |
+| Chainlit / WebUI | `cl.AskUserMessage` 异步包装，详 [iter_2_agent.md §4.13.1](iter_2_agent.md#4131-deferred-backlog暂时不做) | 待 webui 任务做 |
+
+`PLAN_PERMISSION_MODE=false` 时 `request_plan_approval` 直接返 `"yes"`，不调 callback。
+
+### 3.13.4 评估方法
+
+| 维度 | 工具 | 判据 |
+|---|---|---|
+| Adversarial | [`tools/agent_eval/security/adversarial.py`](../tools/agent_eval/security/adversarial.py) + `dataset.json` 50 case 分 4 类（direct / indirect_rag / indirect_web / tool_blocklist） | 拦截率 ≥ 90% / 误拦率 ≤ 10%（详 [iter_2_agent.md §4.8.1](iter_2_agent.md#481-评估方法论)）|
+
+`tool_blocklist` 类不调 LLM（直接 patch config + assert `is_tool_allowed`）；`--no-llm` 跳过 LLM 三类只跑名单门。
+
+
+## 3.14 MCP 接入 与 SSRF 防御
+
+让 Agent 作为 [Model Context Protocol](https://modelcontextprotocol.io) Host，通过一份本地配置文件接入业界标准 MCP server（如官方 `@modelcontextprotocol/server-filesystem` / `mcp-server-fetch`），把 server 暴露的 tool 合流到 LLM 视野——用户加新能力无需改 Python 代码。同时承担 SSRF（Server-Side Request Forgery）防御，统一拦截内置 `fetch_url` 与 MCP `fetch.fetch` 双入口。
+
+### 3.14.1 角色映射
+
+| MCP 角色 | 在 AgentA 的实体 |
+|---|---|
+| Host | `python main.py` 主进程（含 Agent core + LLM 客户端） |
+| Client | [`MCPManager`](../src/agent/core/mcp_manager.py)：每个 server 对应一个 `ClientSession`，由模块级单例 + 后台 thread 持有 |
+| Server | 配置文件里写的 `command + args` 启起来的子进程（stdio transport） |
+
+```mermaid
+flowchart LR
+    subgraph HOST["AgentA (Host)"]
+        AGENT["Agent.run"]
+        TOOLS["tools.get_tools / execute_tool"]
+        MGR["MCPManager (singleton)<br/>后台 thread + event loop"]
+        UG["url_guard.is_url_safe"]
+        SF["security_filter<br/>scrub + wrap_untrusted(tool)"]
+        AGENT --> TOOLS
+        TOOLS -->|"name 含 '.'"| MGR
+        MGR -->|"call_tool 返回"| SF --> AGENT
+        TOOLS -->|"fetch_url 入口"| UG
+    end
+
+    subgraph SERVERS["MCP Servers (子进程)"]
+        FS["filesystem<br/>npx ... server-filesystem"]
+        FETCH["fetch<br/>python -m mcp_server_fetch"]
+    end
+
+    MGR -->|"stdio + JSON-RPC"| FS
+    MGR -->|"stdio + JSON-RPC"| FETCH
+
+    CONF[(".agenta/mcp/<br/>config.json")] -.->|"mcp_config.load_mcp_config"| MGR
+```
+
+### 3.14.2 MCPManager 接口
+
+同步外壳；内部用 `asyncio.run_coroutine_threadsafe` 把同步调用桥接到后台 event loop。
+
+| 方法 | 入参 | 返回 | 行为 |
+|---|---|---|---|
+| `start_all(specs)` | `list[ServerSpec]` | `None` | 并发拉起所有 server + `initialize` 握手；单 server 启动失败 / 超时标 `failed`，不阻塞其它 server 或 Agent 主流程；idempotent |
+| `list_tools()` | — | `list[dict]` | 合流所有 `connected` server 的 tool，每条带 `<server>.<tool>` namespace 前缀，含 `description` / `inputSchema` / `server` |
+| `call_tool(name, args, timeout)` | `str`, `dict`, `float\|None` | `str` | 按第一个 `.` 拆 server / tool 名转发；返回 `CallToolResult.content` 拼接的字符串；缺 namespace / 未知 server / failed server / 调用超时 / SDK 抛错统一抛 `MCPCallError` |
+| `status()` | — | `list[dict]` | 每个 server 的 `name` / `status` / `tool_count` / `error` / `command`，CLI `/mcp list` 渲染用 |
+| `shutdown()` | — | `None` | 触发所有 server 优雅关闭 + 停 event loop + join 后台 thread；idempotent；`atexit` 自动注册 |
+
+**关键约束**：
+
+- 后台单 event loop 跑所有 server：`ClientSession` 必须持有在创建它的同一个 event loop 内；主流程同步 API 通过 `asyncio.run_coroutine_threadsafe(...).result(timeout)` 桥接（防 SDK 的 `async with` 跨线程使用）
+- server 启动失败宽松处理：log warning + 标 `failed`，不抛错；保证多 server 配置下任一失败不连累其它
+- 协议表面边界：stdio transport + `tools` primitive；Streamable HTTP transport 与 `resources` / `prompts` / `sampling` / `roots` / `elicitation` 等高级能力作为 punt 项，详 [iter_2_agent.md §4.13.1](iter_2_agent.md#4131-deferred-backlog暂时不做)
+
+### 3.14.3 SSRF 防御（url_guard）
+
+[`url_guard.is_url_safe(url) -> bool`](../src/agent/core/url_guard.py) 把所有外发 HTTP 请求收敛到一道入口防线：
+
+| 拒绝类别 | 覆盖范围 |
+|---|---|
+| 非法 scheme | 非 `http(s)`（含 `file://` / `ftp://` / 自定义 scheme） |
+| localhost 字面值 | `localhost` / `localhost.localdomain` / `ip6-localhost` / `ip6-loopback` |
+| 私有 IPv4 | 10/8、172.16/12、192.168/16、127/8 |
+| 保留 IP | loopback / link-local（含 AWS metadata `169.254.169.254`）/ multicast / reserved / unspecified |
+| 域名 DNS 反查 | `socket.gethostbyname` 解析后再判私有/保留段，防 DNS rebinding |
+| 解析失败 | 一律拒（保守路径） |
+
+作用域：内置 [`_tool_fetch_url`](../src/agent/tools.py) 入口直接调用 `is_url_safe`；其它非 fetch 系 MCP tool（如 `filesystem.read_file`）不走 URL 检查 —— filesystem server 自身路径白名单由启动 args 自行决定。
+
+### 3.14.4 tool 合流策略
+
+| 策略 | 行为 |
+|---|---|
+| namespace 强制 | MCP tool 暴露给 LLM 时一律 `<server>.<tool>` 前缀；server 名禁含 `.`（[`mcp_config._parse_server`](../src/agent/core/mcp_config.py) 拒） |
+| fetch fallback | MCP `fetch` server 启动成功时 `get_tools()` 从基础 tool 集移除内置 `fetch_url`，LLM 只看到 `fetch.fetch`，避免功能重叠；fetch server 启动失败则保留 `fetch_url`，行为零退化 |
+| 零影响降级 | `MCP_ENABLED=false` 或 `.agenta/mcp/config.json` 不存在时 `MCPManager` 不启动，`get_tools()` 返回基础 tool 集，Agent 行为与 MCP 引入前 100% 一致 |
+| 名单门统一 | MCP tool 调用走 [`is_tool_allowed`](../src/agent/core/security_filter.py)，与内置 tool 共用 `TOOL_BLOCKLIST` / `TOOL_ALLOWLIST`；namespaced tool 按严格全名进白名单（如 `filesystem.read_file` 整名匹配） |
+| 安全衔接 | MCP tool 返回值过 [`security_filter`](../src/agent/core/security_filter.py) `scrub_injection` + `wrap_untrusted(kind="tool")`，与 RAG / web 同等待遇，详 [§3.13](#313-防-prompt-injection) |
+
+### 3.14.5 配置文件 schema
+
+`.agenta/mcp/config.json` 顶层为 `servers` 对象，每个 server 是一个条目（参考 Cursor / Claude Desktop 习惯）：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `servers.<name>` | object | ✅ | server 名作为 namespace 前缀；禁含 `.` |
+| `servers.<name>.command` | string | ✅ | 可执行命令名或绝对路径（如 `npx` / `.venv/Scripts/python.exe`） |
+| `servers.<name>.args` | string[] | 可选 | 命令行参数，缺省为 `[]` |
+| `servers.<name>.env` | object | 可选 | 注入 server 子进程的环境变量；value 内 `${VAR}` 从进程 env 展开，缺失保留原样 |
+
+schema 错 / 文件缺失 / JSON 解析失败一律 graceful 返 `None`（log warning，不抛异常向上阻塞 Agent 启动）。`.agenta/mcp/config.json.example` 提供 filesystem + fetch 两段官方 reference server 模板。
+
+### 3.14.6 评估方法
+
+| 维度 | 工具 | 判据 |
+|---|---|---|
+| 端到端结构 | [`tools/agent_eval/mcp/eval_mcp.py`](../tools/agent_eval/mcp/eval_mcp.py) + `dataset.json` 7 条 `structural` case，真启 filesystem + fetch 子进程不调 LLM | 全部 7 case 对照 [iter_2_agent.md §4.9.13](iter_2_agent.md#4913-mcp-接入-phase-33) 验收 ①-⑦ 通过 |
+| LLM 端到端 | 同上 + 2 条 `llm-e2e` case（验证 LLM 自动选 namespaced tool + fetch fallback 优先 `fetch.fetch`） | LLM 调用观察到期望 `tool_called` / 未观察到 `tool_not_called` |
+
+报告落 `tools/agent_eval/reports/mcp-<ts>.md`；`--no-llm` 模式跳过 LLM e2e。
 
 
 # 4.表现层

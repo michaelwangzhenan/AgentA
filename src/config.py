@@ -97,7 +97,7 @@ PROVIDER_CONFIGS: dict[str, ProviderConfig] = {
     "qwen": ProviderConfig(
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         api_key=os.getenv("QWEN_API_KEY", ""),
-        model="qwen3-max-preview",
+        model="qwen3.7-max",
         extra_body={"enable_thinking": False},
     ),
     "minimax": ProviderConfig(
@@ -406,3 +406,17 @@ TOOL_ALLOWLIST: str = os.getenv("TOOL_ALLOWLIST", "")
 # 是否启用 plan-execute 用户审批 mode（可选值：true / false）
 # 开启后 LLM 调 make_plan 后 CLI 弹 yes/no 提问；no → 当前 query 中止
 PLAN_PERMISSION_MODE: bool = os.getenv("PLAN_PERMISSION_MODE", "false").lower() == "true"
+
+# ── MCP（Model Context Protocol）接入（Phase 3.3）配置 ────────────────────────
+# 是否启用 MCP 接入（可选值：true / false）
+# false 时跳过 MCP 初始化；true 但配置文件不存在/为空仍静默跳过
+MCP_ENABLED: bool = os.getenv("MCP_ENABLED", "true").lower() == "true"
+
+# MCP server 配置文件路径（相对项目根；文件不存在静默跳过）
+MCP_CONFIG_FILE: str = os.getenv("MCP_CONFIG_FILE", ".agenta/mcp/config.json")
+
+# server 启动 + initialize 握手单步超时（秒，整数）
+MCP_CONNECT_TIMEOUT_SEC: int = int(os.getenv("MCP_CONNECT_TIMEOUT_SEC", "10"))
+
+# 单次 tools/call 调用超时（秒，整数）
+MCP_CALL_TIMEOUT_SEC: int = int(os.getenv("MCP_CALL_TIMEOUT_SEC", "30"))

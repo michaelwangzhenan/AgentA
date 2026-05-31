@@ -1,0 +1,100 @@
+[
+  {
+    "id": "C1-config-driven-load",
+    "verify": 1,
+    "category": "structural",
+    "description": "按 .agenta/mcp/config.json.example 模板能解析出 filesystem + fetch 两个 ServerSpec（验收 ① 配置驱动接入）",
+    "expect": {
+      "server_count": 2,
+      "server_names_subset": ["filesystem", "fetch"]
+    }
+  },
+  {
+    "id": "C2-two-reference-servers-up",
+    "verify": 2,
+    "category": "structural",
+    "description": "按 .example 模板真起 filesystem (npx) + fetch (python -m mcp_server_fetch) 两个 server，等握手完成（验收 ② 两个标杆 server 跑通）",
+    "expect": {
+      "connected_servers": ["filesystem", "fetch"],
+      "min_tool_count": {"filesystem": 1, "fetch": 1}
+    }
+  },
+  {
+    "id": "C3-tools-merge-with-namespace",
+    "verify": 3,
+    "category": "structural",
+    "description": "get_tools() 合流 MCP tool，每条带 <server>.<tool> 前缀；D8 fallback：fetch 接入时内置 fetch_url 不再可见（验收 ③ LLM 自动看到）",
+    "expect": {
+      "mcp_tool_present": ["filesystem.read_file", "fetch.fetch"],
+      "builtin_fetch_url_hidden": true
+    }
+  },
+  {
+    "id": "C4-cli-status-visible",
+    "verify": 4,
+    "category": "structural",
+    "description": "handle_mcp(mgr, ['/mcp']) 输出含 connected/failed 状态 + tool 数；handle_mcp(mgr, ['/mcp', 'tools']) 列 namespaced tool（验收 ④ CLI 可见 MCP 状态）",
+    "expect": {
+      "list_output_contains": ["MCP server 列表", "connected", "filesystem"],
+      "tools_output_contains": ["MCP tool 列表", "filesystem."]
+    }
+  },
+  {
+    "id": "C5-security-chain-wraps-mcp-return",
+    "verify": 5,
+    "category": "structural",
+    "description": "execute_tool('filesystem.read_file', ...) 返回值用 wrap_untrusted(kind='tool') 包装；含 injection 模板时被 scrub_injection 剔除并加 [⚠️ 已清洗] 前缀（验收 ⑤ 安全衔接 §4.9.12）",
+    "expect": {
+      "wrap_tag": "<untrusted_tool>",
+      "scrub_flag": "[⚠️ 已清洗]"
+    }
+  },
+  {
+    "id": "C6-ssrf-defense-blocks-internal",
+    "verify": 6,
+    "category": "structural",
+    "description": "fetch_url 入口的 SSRF 防御拦内网 IP / file:// / localhost / AWS metadata IP / DNS rebinding（验收 ⑥）",
+    "expect": {
+      "blocked_urls": [
+        "http://10.0.0.1/",
+        "http://192.168.1.1/",
+        "http://127.0.0.1/admin",
+        "http://localhost:8080/",
+        "file:///etc/passwd",
+        "http://169.254.169.254/latest/meta-data/"
+      ]
+    }
+  },
+  {
+    "id": "C7-zero-impact-when-not-configured",
+    "verify": 7,
+    "category": "structural",
+    "description": "MCP_ENABLED=false 或配置文件不存在时，get_tools() 返回基础 tool 集，无 namespaced tool（验收 ⑦ 配置不写 = 零影响）",
+    "expect": {
+      "no_mcp_tools_when_disabled": true,
+      "no_mcp_tools_when_missing": true,
+      "basic_tools_intact": ["search_knowledge", "fetch_url", "web_search"]
+    }
+  },
+  {
+    "id": "E1-llm-uses-filesystem-read-file",
+    "verify": 3,
+    "category": "llm-e2e",
+    "description": "真发 LLM：query='用 MCP 读项目根的 README.md 前 20 行' → 期望 LLM 调用 filesystem.read_file tool（验收 ③ LLM 自动看到并能调用）",
+    "query": "用 MCP 读项目根的 README.md 文件，告诉我前 3 行写了什么。",
+    "expect": {
+      "tool_called": "filesystem.read_file"
+    }
+  },
+  {
+    "id": "E2-llm-uses-fetch-mcp",
+    "verify": 3,
+    "category": "llm-e2e",
+    "description": "真发 LLM：query='用 MCP fetch 抓取 example.com 首页摘要' → 期望调 fetch.fetch（不是内置 fetch_url，因 D8 fallback）",
+    "query": "用 MCP 抓取 https://example.com 首页，告诉我 title 是什么。",
+    "expect": {
+      "tool_called": "fetch.fetch",
+      "tool_not_called": "fetch_url"
+    }
+  }
+]

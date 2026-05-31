@@ -1184,3 +1184,79 @@ def handle_srs(
 
         case _:
             out(_SRS_USAGE)
+
+
+# ── /mcp 命令组（Phase 3.3） ──────────────────────────────────────────────────
+
+
+_MCP_USAGE = (
+    "⚠️  未知子命令。用法：\n"
+    "    /mcp                              列 MCP server 状态（同 /mcp list）\n"
+    "    /mcp list                         同上\n"
+    "    /mcp tools                        列所有 MCP tool（含来源 server）\n"
+)
+
+
+def _print_mcp_servers(manager: "Any", out: OutputFn = _stdout) -> None:
+    """列每个 MCP server 的连接状态 / tool 数 / 启动命令 / 错误信息。"""
+    statuses = manager.status() if manager is not None else []
+    if not statuses:
+        out("（当前无 MCP server；检查 .agenta/mcp/config.json 是否存在或 MCP_ENABLED）\n")
+        return
+
+    out("MCP server 列表：\n")
+    for s in statuses:
+        badge = {
+            "connected": "🟢",
+            "failed": "🔴",
+            "connecting": "🟡",
+            "closed": "⚫",
+        }.get(s["status"], "❓")
+        out(
+            f"  {badge} {s['name']:<14} {s['status']:<10} "
+            f"tools={s['tool_count']:<3} cmd={s['command']}\n"
+        )
+        if s.get("error"):
+            out(f"        error: {s['error']}\n")
+
+
+def _print_mcp_tools(manager: "Any", out: OutputFn = _stdout) -> None:
+    """列所有 connected MCP server 的 tool（namespaced name + 来源 + description 截断）。"""
+    tools = manager.list_tools() if manager is not None else []
+    if not tools:
+        out("（当前无可用 MCP tool；可能 server 未连接或未配置）\n")
+        return
+
+    out(f"MCP tool 列表（共 {len(tools)}）：\n")
+    for t in tools:
+        desc = (t.get("description") or "").strip().splitlines()[0]
+        if len(desc) > 60:
+            desc = desc[:60] + "…"
+        out(f"  • {t['name']:<32} [{t.get('server', '?')}]  {desc}\n")
+
+
+def handle_mcp(
+    manager: "Any",
+    cmd_parts: list[str],
+    out: OutputFn = _stdout,
+) -> None:
+    """
+    处理 /mcp 子命令组（list / tools）。
+
+    Args:
+        manager: 共享 MCPManager 实例（main.py 传入；可能为 None 表示禁用）。
+        cmd_parts: prompt_toolkit `input.split(maxsplit=1)` 的结果。
+    """
+    raw = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""
+    if not raw:
+        _print_mcp_servers(manager, out=out)
+        return
+
+    sub_cmd = raw.lower().split()[0]
+    match sub_cmd:
+        case "list":
+            _print_mcp_servers(manager, out=out)
+        case "tools":
+            _print_mcp_tools(manager, out=out)
+        case _:
+            out(_MCP_USAGE)

@@ -33,6 +33,7 @@
 - **Quiz 自检练习**：跟 Agent 说"考考我 RAG / 出 5 道 ML 题" → 用 `quiz-maker` skill 走 4 步嵌套（解析意图 / 查 KB / 60% MCQ + 40% 简答组题 / 落库），用户用一段自然语言批量作答 → MCQ 字符串比对 + 简答 LLM-judge 自动批改 + 反馈薄弱点；quiz 跨 session 留档复盘，可用 `/quiz` 命令查历史 / 看错题。
 - **SRS 主动复习**：用 SM-2 算法（Anki 1987 同款）按遗忘曲线调度卡片：测验错题一句"加 SRS"入队、用户也能手动加自定义卡（正面 + 背面）；之后说"今天复习" → Agent 用 `srs-review` skill 一张张带过 → 用户用 again / hard / good / easy 4 档自评 → 自动算下次回炉时间。卡片跨 session 持久化，可用 `/srs` 命令查队列 / 看统计。
 - **Harness 自检**：在两条容易飘的路径上多走一步 LLM-as-Judge 复审（`HARNESS_*` 配置默认开）—— 简答题批改完 critic 复审"给分跟答案语义匹配吗"，不达标就给该题打 ⚠️ 标记落库；RAG 召回拿到 chunks 后 critic 一次评 K 条相关性，把跟问题跑偏的 chunk 过滤掉再给 LLM 看。critic 超时 / 异常一律软放行不阻塞主流程；CLI `/quiz show` 自动渲染 ⚠️ 提示用户人工复核。
+- **MCP 接入（业界开放协议）**：作为 [Model Context Protocol](https://modelcontextprotocol.io) Host，写一份 `.agenta/mcp/config.json` 就能把官方 / 第三方 MCP server（如 `@modelcontextprotocol/server-filesystem` / `mcp-server-fetch`）暴露给 LLM 当 tool 调；**无需改 Python 代码**就能加新能力，且同一份 server 配置在 Cursor / Claude Desktop 也能复用。返回值统一过 `<untrusted_tool>` 标签包装 + injection 启发式清洗，与 RAG / web 同等安全待遇；SSRF 防御（`url_guard.py`）覆盖内置 `fetch_url` + MCP `fetch.fetch` 双入口。CLI `/mcp list` / `/mcp tools` 实时查 server 状态与 tool 清单。
 - **三套实现可选**：`PYTHON`（手写 ReAct，默认）/ `LANGCHAIN`（create_agent 驱动）/ `AUTOGPT`（Plan-Execute 双循环）。
 
 

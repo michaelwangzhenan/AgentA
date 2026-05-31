@@ -55,6 +55,9 @@ CLI_COMMANDS: list[str] = [
     "/srs show",
     "/srs stats",
     "/srs del",
+    "/mcp",
+    "/mcp list",
+    "/mcp tools",
     "/quit",
     "/exit",
 ]

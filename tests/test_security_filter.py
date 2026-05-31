@@ -68,6 +68,11 @@ class TestWrapUntrusted:
         assert wrapped.startswith("<untrusted_web>")
         assert wrapped.endswith("</untrusted_web>")
 
+    def test_wrap_tool_kind(self):
+        """Phase 3.3：MCP server 等第三方 tool 返回用 'tool' kind 包装。"""
+        wrapped = wrap_untrusted("mcp returned text", kind="tool")
+        assert wrapped == "<untrusted_tool>\nmcp returned text\n</untrusted_tool>"
+
     def test_wrap_default_kind_is_doc(self):
         wrapped = wrap_untrusted("x")
         assert wrapped.startswith("<untrusted_doc>")

@@ -639,7 +639,7 @@ Part B 落地总览：
 |---|---|---|---|---|
 | 3.1 | Thinking 模式 **CLI 渲染优化**（段分隔标记 / 流式分块输出） | 已有强化 | P1 | CLI 跑带 thinking 的 query 时，thinking 段有清晰起止标记 + 与正文 token 不混；WebUI 渲染**不在本期 scope**，留待 [design.md §4.2 WebUI](design.md#42webui) |
 | 3.2 | 防 prompt injection（召回过滤 + 命令白名单） | 新 | P1 | 对用户输入和外部数据（网页、文档、邮件）进行预处理, 防止 prompt injection 攻击 |
-| 3.3 | MCP（接入 1-2 个标杆 server） | 新 | P0 | 至少 fetch + filesystem 能跑通；求职硬通货 |
+| 3.3 | MCP（接入 1-2 个标杆 server） | 新 | P0 | 至少 fetch + filesystem 能跑通 |
 | 3.4 | 本地 LLM 支持 | 已有强化 | P2 | 呼应"全本地、隐私可控"卖点；非必需 |
 
 ## 4.8. 如何评估 Agent 实现（方法论）
@@ -2210,7 +2210,7 @@ UT 锁公式：对照 Anki 默认调度行为表 ≥ 20 case（初次 / 第二�
 | **D1** | scope 范围 | **Q1 测验自评 + R1 RAG 召回自判**两个 P0；P1（Plan retrospective）/ Q2（SRS LLM 反馈）/ A1（通用 hallucination）全 punt | MVP narrow + 不引入 trajectory 录制框架；P1 留 Reflexion 长期记忆任务一并做（[§4.13.1 #26](#4131-deferred-backlog暂时不做)） |
 | **D2** | 触发模式 | **Q1 / R1 各自默认开**，用户可在 .env 独立关闭某路径调试 | RAG 召回判定 cost 低收益高；测验主观打分必判；用户调试时能各自 carve out |
 | **D3** | critic 实现路径 | **复用 `judge_with_llm` + 加生产路径 wrapper** `HarnessGate` | 第 5 次复用，巩固 [§4.9.7 D6](#497-学习计划生成-phase-22) 抽象；wrapper 加 timeout + fallback 解耦评估路径 / 生产路径的延迟约束差异 |
-| **D4** | 迭代轮数 | **1 轮即停**，不达标静默降级返原始结果 | [`docs/knowlege.md §6 §三第 2 项`](knowlege.md) "半客观任务 1 轮即停"约定；多轮 refine 振荡风险大于收益；保 cost ×2 上限 |
+| **D4** | 迭代轮数 | **1 轮即停**，不达标静默降级返原始结果 | [`docs/knowlege.md §6.3.2`](knowlege.md#632-单轮-vs-迭代修正的收敛性) "半客观任务 1 轮即停"约定；多轮 refine 振荡风险大于收益；保 cost ×2 上限 |
 | **D5** | Q1 自评不达标的输出影响 | **元数据 mark `harness_flagged` + 返回追加 `harness_warning` 字段**；CLI `/quiz show` 加 ⚠️；不修改原批改结果 / 不让 LLM 重判 | 跟 D4 "1 轮即停"一致；让用户在看到批改时知道"agent 不太确定"，但不替用户做二次决定（保持用户主权） |
 | **D6** | R1 召回自判的输出影响 | **过滤 not_relevant 给后续，过滤后 0 条 → 正常返 0 条**（不重新召回） | 重召回 = 多 1+ 次工具调用，cost 翻倍且可能再召不到；返 0 条让后续 LLM 说"未找到相关资料"是更诚实的 UX |
 | **D7** | critic 是否走 skill 承载 | **不走 skill**，硬编码进 grade_quiz / rag_search 主流程 wrapper | critic 是底层"质量门"不是用户感知业务（区别于 quiz / SRS / 学习计划这些走 skill 的业务）；硬编码确保触发率 100% 不被 LLM 自决干扰 |
@@ -2263,7 +2263,7 @@ UT 锁公式：对照 Anki 默认调度行为表 ≥ 20 case（初次 / 第二�
 | **D1** | scope 范围 | Q1 + R1 两个 P0；P1 / Q2 / A1 全 punt | MVP narrow + 不引入 trajectory 录制框架 |
 | **D2** | 触发模式 | Q1 / R1 各自默认开，`HARNESS_QUIZ_ENABLED` / `HARNESS_RAG_ENABLED` 独立开关 | RAG 召回判定 cost 低收益高；测验主观打分必判 |
 | **D3** | critic 实现路径 | 复用 `judge_with_llm` + 加生产路径 wrapper（`HarnessManager`） | 第 5 次复用，巩固 [§4.9.7 D6](#497-学习计划生成-phase-22) 抽象 |
-| **D4** | 迭代轮数 | 1 轮即停，不达标静默降级 | [`docs/knowlege.md §6 §三第 2 项`](knowlege.md) 半客观任务约定 |
+| **D4** | 迭代轮数 | 1 轮即停，不达标静默降级 | [`docs/knowlege.md §6.3.2`](knowlege.md#632-单轮-vs-迭代修正的收敛性) 半客观任务约定 |
 | **D5** | Q1 自评不达标的输出影响 | 元数据 mark `harness_flagged` + grade_quiz 返回 `harness_warning` 字段；CLI `/quiz show` 加 ⚠️ | 保持用户主权：让用户知道但不替用户做二次决定 |
 | **D6** | R1 召回自判输出影响 | 过滤 not_relevant 给后续，过滤后 0 条 → 返 0 条不重召回 | 重召回 cost 翻倍且可能再召不到；返 0 条让 LLM 说"未找到相关资料"是更诚实的 UX |
 | **D7** | critic 是否走 skill 承载 | 不走 skill，硬编码进 grade_quiz / search_knowledge 主流程 | critic 是底层质量门，硬编码确保触发率 100% |
@@ -2629,7 +2629,7 @@ python -m tools.agent_eval.security.adversarial
 
 | 文档 | 变更 |
 |---|---|
-| [`docs/knowlege.md`](knowlege.md) | 新增 `# 7. Prompt Injection` 章：本质 / 7 类威胁分类（直接 / 间接 RAG / 间接 web / tool 返回 / memory / tool 越权 / system prompt 泄露）/ L1-L4 4 层防御 / 关键取舍 / 风险 checklist；`# A. 缩写` 加 OWASP / LLM01 |
+| [`docs/knowlege.md`](knowlege.md) | 新增 `# 7. Prompt Injection` 章：本质 / 7 类威胁分类（直接 / 间接 RAG / 间接 web / tool 返回 / memory / tool 越权 / system prompt 泄露）/ L1-L4 4 层防御 / 关键取舍 / 风险 checklist；`# 9. 缩写` 加 OWASP / LLM01 |
 | [`docs/design.md`](design.md) | 新增 [`§3.13 防 prompt injection`](design.md#313-防-prompt-injection)：4 层防御映射表 + mermaid 流程图 + `security_filter` 接口约定表 + plan 审批 callback 注册模式 + 关键约束 + 评估方法 |
 | [`docs/iter_2_agent.md`](#4912-防-prompt-injection-phase-32) | 本节 Step 0 / Step 1 / Step 2 / Step 3-6 全部落地 |
 
@@ -2643,6 +2643,233 @@ python -m tools.agent_eval.security.adversarial
 | Adversarial 评估 | `python -m tools.agent_eval.security.adversarial` | 验收 ⑥ |
 | UT | `pytest tests/test_security_filter.py tests/test_tool_blocklist.py tests/test_plan_permission.py -v` | 验收 ① ② ③ ④ ⑤ |
 | RAG / web 标签包装 | `pytest tests/test_rag.py tests/test_tools.py -v` | 验收 ① |
+
+
+### 4.9.13 MCP 接入 (phase 3.3)
+
+**功能描述**：让 agent 通过配置文件接入业界标准 MCP server（filesystem / fetch / 等），LLM 像调内置 tool 一样调用这些 server 暴露的 tool —— **AgentA 用户**只需写一份 `.agenta/mcp/config.json`（列出要接入的 server），**无需改任何 Python 代码**就能给自己的 agent 加新能力。
+
+> Phase 3 工具与安全补强（[§4.7.1 项目定位](#471-项目定位)）的第三个 feature，也是 [§4.7.2 新增 feature #1](#472-选定-feature-列表) 唯一"基础设施"类。本 Step 0 在 [§4.7.3 Phase 3.3](#473-实施顺序) 早期判据"至少 fetch + filesystem 能跑通"基础上独立起草用户视角约定。背景知识详 [`docs/knowlege.md §8 MCP`](knowlege.md#8-mcpmodel-context-protocol模型上下文协议)。
+
+**Step 0 · 需求规格**
+
+| 字段 | 内容 |
+|---|---|
+| **用户故事** | 作为在本机用 AgentA 跑个人 KB / 学习计划的用户，我希望通过**编辑一份配置文件**就能给 agent 接入业界已有的 MCP server（filesystem 操作本地文件、fetch 抓网页等），不用自己写 Python 代码；同时我希望这套接入符合 Anthropic 官方 MCP 标准，**同一个 server 既能挂 AgentA，也能挂 Cursor / Claude Desktop**，让本项目作为 GitHub 求职展示能演示对"业界开放协议"的对接能力。 |
+| **验收标准** | ① **配置驱动接入**：用户在 `.agenta/mcp/config.json` 写一份 server 清单（每条含 `command` / `args` / `env`），agent 启动时按配置拉起 server 子进程并完成 MCP `initialize` 握手<br>② **2 个官方标杆 server 跑通**：`filesystem-server`（读 / 写 / 列工作区文件）+ `fetch-server`（HTTP GET → markdown）端到端可用<br>③ **LLM 自动看到并能调用**：MCP tool 进 [`get_tools()`](../src/agent/tools.py) 合流，LLM 像调内置 tool 一样能触发调用；CLI 实测 query "用 MCP 读 README" / "用 MCP 抓某 URL" 能成功调到对应 MCP tool<br>④ **CLI 可见 MCP 状态**：`/mcp list` 列出当前接入的 server（含每个 server 的 tool 数 + 连接状态 `connected` / `failed`）；`/mcp tools` 列所有 MCP tool（含来源 server）<br>⑤ **安全衔接 §4.9.12**：MCP tool 返回值进 LLM context 时走 [`security_filter`](../src/agent/core/security_filter.py)（L2 标签包装 + 启发式检测），与 RAG / web 路径同等待遇；MCP tool 调用走 §4.9.12 D4 的 `TOOL_BLOCKLIST` / `TOOL_ALLOWLIST` 名单门<br>⑥ **SSRF 防御兑现**：完成 [§4.13.1 #33](#4131-deferred-backlog暂时不做)（fetch / 任何 MCP server 调用前的 URL 黑名单 — 拒内网 IP / `file://` / `localhost`）<br>⑦ **配置不写 = 零影响**：`.agenta/mcp/config.json` 不存在或 `MCP_ENABLED=false` 时 agent 行为与本期前 100% 一致 |
+| **Scope** | **本期做**：<br>① 新建 [`src/agent/core/mcp_manager.py`](../src/agent/core/mcp_manager.py) — MCP client 生命周期管理（启动 server 子进程 / `initialize` 握手 / `tools/list` 拉清单 / `tools/call` 转发 / 优雅 shutdown），底层用官方 `mcp` Python SDK（D5）；server 启动失败按 D7 宽松处理（log warning + 标记 `failed` 不阻塞）<br>② 新建 [`src/agent/core/mcp_config.py`](../src/agent/core/mcp_config.py) — 解析 `.agenta/mcp/config.json`（schema 校验 + env 变量展开 + 默认值填充）<br>③ 改 [`get_tools()`](../src/agent/tools.py) — 合流 MCP tool 到 LLM 看到的 tool 列表，强制 namespace 前缀 `<server>.<tool>`（D6）；D8 fallback 逻辑：MCP `fetch-server` 启动成功时 LLM **仅看到** `fetch.fetch`，启动失败时降级 LLM **仅看到** 内置 `fetch_url`<br>④ 改 [`execute_tool()`](../src/agent/tools.py) — 识别 MCP tool（按 namespace 前缀）并转发到对应 `MCPManager.call_tool()`；返回值过 `security_filter` 包装（验收 ⑤）<br>⑤ 接通 2 个官方 reference server：`@modelcontextprotocol/server-filesystem`（Node.js 包）+ `mcp-server-fetch`（Python 包），写到 `.agenta/mcp/config.json.example` 作模板（验收 ② / D3）<br>⑥ SSRF 防御：新建 [`src/agent/core/url_guard.py`](../src/agent/core/url_guard.py) — `is_url_safe(url) -> bool` 拒内网 IP（10/8 / 172.16/12 / 192.168/16 / 127/8 / `::1` / link-local）/ `file://` / 非 http/https scheme；改 [`_tool_fetch_url`](../src/agent/tools.py) 接入（验收 ⑥）<br>⑦ CLI 命令：[`handlers.py`](../src/cli/handlers.py) 新增 `mcp_list` / `mcp_tools` 处理（`/mcp list` 显示 server + 状态 `connected` / `failed`；`/mcp tools` 显示所有 MCP tool）；[`ui.py`](../src/cli/ui.py) help 文本 + [`tab_complete.py`](../src/cli/tab_complete.py) 补全（验收 ④）<br>⑧ 4 个 config 三段同步：`MCP_ENABLED`（默认 `true`，但 `.agenta/mcp/config.json` 不存在静默跳过 = 验收 ⑦）/ `MCP_CONFIG_FILE`（默认 `.agenta/mcp/config.json`）/ `MCP_CONNECT_TIMEOUT_SEC`（默认 `10`）/ `MCP_CALL_TIMEOUT_SEC`（默认 `30`）<br>⑨ UT：mcp_manager（mock server 子进程 + 启动失败宽松路径）/ mcp_config（schema 校验）/ url_guard（IP 黑名单）/ get_tools 合流 + fetch fallback 路径<br>⑩ 评估：D10 纯端到端手动 demo（验收 ② ③）+ UT 覆盖安全 / SSRF 单元路径（验收 ⑤ ⑥）<br>**暂时不做**：详 [§4.13.1 #37 #38 #39 #40 #41 #42 #43](#4131-deferred-backlog暂时不做)<br>**显式不做**：详 [§4.13.2 #38 #39](#4132-dropped永久不做) |
+| **依赖** | [`get_tools()` / `execute_tool()`](../src/agent/tools.py)（MCP tool 合流 / 转发注入点）/ [`security_filter`](../src/agent/core/security_filter.py)（§4.9.12 L2 包装 + 启发式 — MCP tool 返回必须走同一组防御）/ [`TOOL_BLOCKLIST` / `TOOL_ALLOWLIST` / `SECURITY_MODE`](../src/config.py)（§4.9.12 D4 名单门复用）/ [`_tool_fetch_url`](../src/agent/tools.py)（验收 ⑥ SSRF 防御同步接入点）/ [`handlers.py` / `ui.py` / `tab_complete.py`](../src/cli/)（CLI 命令组）/ 配置三段同步约定（[`agenta-conventions.mdc §5.1`](../.cursor/rules/agenta-conventions.mdc)）/ **外部依赖**：官方 `mcp` Python SDK（`pip install mcp`） + Node.js 环境（跑 `npx @modelcontextprotocol/server-filesystem`）+ `mcp-server-fetch` Python 包 |
+
+> _历史参照_：[§4.7.3 Phase 3.3](#473-实施顺序) 出口判据"至少 fetch + filesystem 能跑通；求职硬通货" / [§3 #8](#3-当前-agenta-的-agent-部分) "支持标准 MCP (https://modelcontextprotocol.io/docs/getting-started/intro)，实现参考 GHC/Cursor"。仅作历史参照；本 Step 0 在此基础上独立起草 7 条用户视角约定。
+
+**关键决策摘要**（D1-D10 Step 0 全部拍板；D11+ Step 1 浮现后回填）：
+
+| # | 决策点 | 选用 | 一句话理由 |
+|---|---|---|---|
+| **D1** | Transport | **仅 stdio**（远程 Streamable HTTP punt → [§4.13.1 #39](#4131-deferred-backlog暂时不做)） | 个人本机场景；99% 官方 reference server 默认 stdio；HTTP 涉及 OAuth / 鉴权 / 部署，超 MVP |
+| **D2** | Primitive | **仅 tools**（resources / prompts punt → [§4.13.1 #37](#4131-deferred-backlog暂时不做)；sampling / roots / elicitation punt → [§4.13.1 #38](#4131-deferred-backlog暂时不做)） | 求职演示价值集中在 tools；resources 是"应用代码塞 context"在本项目内置 RAG 已覆盖；prompts 是 slash command 跟 CLI `/cmd` 重叠 |
+| **D3** | 接哪些标杆 server | **仅 filesystem + fetch 两个**（不加第 3 个 server）| 最小 P0 / scope 最稳；两个已足以演示"标准协议接入"求职价值；第 3 个 server 若用户后续实际想要，单独追加 PR 即可 |
+| **D4** | 配置文件 | **`.agenta/mcp/config.json`** | 跟 Cursor / Claude Desktop 业界一致；JSON schema 见 modelcontextprotocol.io；放 `.agenta/mcp/` 子目录下，留扩展空间（如未来加 `.agenta/mcp/cache/` / `.agenta/mcp/logs/` 等 MCP 相关产物） |
+| **D5** | SDK | **官方 `mcp` Python SDK** | capability 协商 / 序列化模板代码 SDK 覆盖；自撸 JSON-RPC 容易跟 host 兼容性出问题（[`knowlege.md §8.7.3`](knowlege.md#873-用官方-sdk-vs-自己撸-json-rpc)） |
+| **D6** | tool 命名冲突解决 | **namespace 强制前缀**：所有 MCP tool 命名为 `<server_name>.<tool_name>`（如 `filesystem.read_file`）| 清晰无冲突 + 行为可预测；多花的几十个 token 在本期 2 个 server 量级可忽略；与业界 GHC toolsets header / Cursor MCP namespace 一致 |
+| **D7** | server 启动失败行为 | **宽松 log warning 跳过**：failed server 不阻塞 agent 启动；`/mcp list` 中显式标 `failed` 让用户看到（验收 ④）| UX 优先；新用户首次跑 / 漏装 npx 不被卡；与 §4 错误处理"LLM / 网络等外部调用不向上传播让主流程崩"一致（MCP server 本质是外部进程） |
+| **D8** | 与内置 `fetch_url` 关系 | **MCP 优先 + 内置 fallback**：MCP `fetch-server` 启动成功时 LLM 仅看到 `fetch.fetch`；启动失败（被 D7 跳过）时降级仅暴露内置 `fetch_url` | UX 最好；保留内置 fetch_url 代码作 fallback，向用户屏蔽底层选择；同时锻炼"两实现 一接口"的 fallback 设计模式 |
+| **D9** | SSRF 防御本期兑现 | **本期做**（[§4.13.1 #33](#4131-deferred-backlog暂时不做) 完成实施 → 完成后删条目）| §4.9.12 D1 已明示"Phase 3.3 一起做"；本期 MCP 接入会带来多个 server 走外部 URL，统一加 url_guard 最经济 |
+| **D10** | 评估方式 | **纯端到端手动 demo**：CLI 跑几条 query 验证 LLM 调到 MCP tool（验收 ② ③）+ UT 覆盖关键单元（验收 ⑤ ⑥ 走 url_guard / security_filter UT） | feature 偏"基础设施"，端到端 LLM 行为最直观；少量 golden case 自动跑 punt → [§4.13.1 #43](#4131-deferred-backlog暂时不做) |
+| **D11** | MCP tool 返回值 `wrap_untrusted` 的 `kind` | **新增 `'tool'`**（通用名）—— `_WRAP_KINDS` 加该值 + SYSTEM_PROMPT 数据隔离原则段同步加一项 | 表达"外部工具返回"最精准；扩展性最好（未来非 MCP 外部 tool 也能复用同 kind，避免`'mcp'`/`'web'`/`'xxx'` 越加越细）|
+| **D12** | namespaced tool 名单门匹配 | **严格全名匹配**：BLOCKLIST / ALLOWLIST 写 `<server>.<tool>` 完整名；`<server>.*` 通配 punt → [§4.13.1 #44](#4131-deferred-backlog暂时不做) | 本期 2 server 量级足够；通配是为"10+ server"场景预设，违反公约 §6 "简洁 > 兼容" |
+| **D13** | `MCPManager` 生命周期 | **模块级单例 `get_shared_manager()`**（跟 `*_store` 模式一致），进程内 server 子进程复用；CLI handler / Agent / tools.py 都从同一入口拿 | 跟项目现有 store 模式对齐 (`learning_plan_store.get_shared_store()` 等)；MCP server 是子进程，进程内单点起停最稳；UT mock 在 `get_shared_manager` 入口替换即可 |
+| **D14** | async ↔ sync 桥接 | **后台 thread + 长驻 asyncio event loop**：`get_shared_manager()` 启动时拉起 daemon thread 跑 event loop，每个 server 开长驻 `ClientSession`；同步 API (`list_tools` / `call_tool`) 内部 `run_coroutine_threadsafe` 提交到该 thread + 等结果 | 业界主流（Cursor / Claude Desktop 同款）；server 长驻避免每次 call_tool 重复 `initialize` 握手（filesystem 启动需 30-40s 首次 + ~50-200ms 复连）；改 AgentA 主循环为 async 超 MVP scope |
+| **D15** | `mcp_manager` UT mock 粒度 | **SDK 层 mock**：`unittest.mock.patch` 替换 `mcp.client.stdio.stdio_client` async ctx mgr + `ClientSession`，喂假的 `list_tools` / `call_tool` 返回；端到端 smoke（真起子进程）走 Step 5 手动 demo，不进 fast UT | 在抽象边界 mock 是工程主流；不依赖网络 + 不依赖 npx / pip 装包；测的是"我们调 SDK 的姿势"而非 SDK 自身（SDK 测试是 Anthropic 团队的责任） |
+
+---
+
+**Step 1 · Review 现状**
+
+> Gap 编号 `P33-G*` 是 Phase 3.3 局部命名，避免跟其它 phase 重名。
+
+| # | Gap | 现状 | 影响（对应 Step 0 验收 / Scope） |
+|---|---|---|---|
+| **P33-G1** | MCP 接入完全不存在 — 无 client / 无配置 / 无目录 | 项目内 `src/agent/core/` 12 个 helper 中**无** `mcp_*` 任何模块；`.agenta/` 下**无** `mcp/` 子目录；[`src/config.py`](../src/config.py) 无 `MCP_*` 任何 config 项；[`.env.example`](../.env.example) / [`.env`](../.env) 同步缺失 | 验收 ① ⑦ / Scope ① ② ⑧ — 全部待新建 |
+| **P33-G2** | `get_tools()` 无 MCP tool 合流 | [`get_tools`](../src/agent/tools.py:81) 仅合 `TOOLS + _PLAN_TOOLS + _STUDY_PLAN_TOOLS + _QUIZ_TOOLS + _SRS_TOOLS + load_skill` 5 组内置；末尾过 [`is_tool_allowed`](../src/agent/core/security_filter.py:136) 名单门 | 验收 ③ / Scope ③ — D8 fallback 路径（fetch server 启动状态决定是否暴露内置 `fetch_url`）一并待加 |
+| **P33-G3** | `execute_tool()` 无 namespaced tool 转发 | [`execute_tool`](../src/agent/tools.py:2190) 入口已有 [`is_tool_allowed`](../src/agent/core/security_filter.py:136) double-check（Phase 3.2 已加）；内层 `match name:` 大表逐个 case 路由，未知 tool 走 `case _:` 报错；无 `if "." in name` 拦截分支 | 验收 ③ ⑤ / Scope ④ — D12 严格全名匹配天然支持带 `.` 的 namespaced 名（无需改 `is_tool_allowed`） |
+| **P33-G4** | `_tool_fetch_url` 无 SSRF 防御 | [`_tool_fetch_url`](../src/agent/tools.py:709) 仅 scheme 校验（`url.startswith(("http://", "https://"))`）拒非 http(s)；无内网 IP / `localhost` / 127/8 / 私有网段 / `::1` / link-local 黑名单 | 验收 ⑥ / Scope ⑥ — 完成后同步删 [§4.13.1 #33](#4131-deferred-backlog暂时不做) |
+| **P33-G5** | `security_filter._WRAP_KINDS` 仅 `"doc"` / `"web"`，无 `"tool"` | [`_WRAP_KINDS`](../src/agent/core/security_filter.py:55) frozenset；[`SYSTEM_PROMPT`](../src/agent/agent.py) 数据隔离原则段仅声明 `<untrusted_doc>` / `<untrusted_web>` 标签；security_filter docstring 第 10-11 行明确写"SSRF 防御 / URL 校验留 Phase 3.3 一起做"（§4.9.12 已埋伏笔） | 验收 ⑤ / Scope ④ — D11 拍板新增 `"tool"`，要同步改 `_WRAP_KINDS` + SYSTEM_PROMPT 段 |
+| **P33-G6** | CLI 无 `/mcp` 命令组 | [`handlers.py`](../src/cli/handlers.py) 已有 4 个 `handle_<group>` 模板（`memory` / `study` / `quiz` / `srs`），跟 `/mcp` 模式高度契合；[`ui.py`](../src/cli/ui.py) HELP_TEXT / [`tab_complete.py`](../src/cli/tab_complete.py) CLI_COMMANDS / [`main.py`](../main.py) dispatch（行 300-317 与 `/srs` 同款 case + continue）全无 `/mcp` 痕迹 | 验收 ④ / Scope ⑦ — D13 拍板模块级单例后，注入用 `handlers.handle_mcp(get_shared_manager(), cmd_parts)` |
+| **P33-G7** | tests/ 无 subprocess / async stdio mock 经验 | tests/ 现有 `unittest.mock.patch` 改 `_cfg` 模式 + `MagicMock` mock Store / 业务对象模式（典范 [`test_tool_blocklist.py`](../tests/test_tool_blocklist.py)）；但**全无** mock `subprocess.Popen` / mock async ctx mgr / mock asyncio loop 经验 | 验收 ⑤ ⑥ / Scope ⑨ — D15 拍板 SDK 层 mock，要引入新约定：mock `mcp.client.stdio.stdio_client` (async ctx mgr) + `ClientSession`，绕过真子进程 |
+| **P33-G8** | LangChain / AutoGPT 实现是否走 MCP？ | [`langchain_agent.py`](../src/agent/langchain_agent.py) / [`autogpt_agent.py`](../src/agent/autogpt_agent.py) 通过 `get_tools()` 拿 tool list — 间接受益于 D6 namespace 前缀 + 名单门，但各自 tool dispatcher 识别 `<server>.<tool>` 并转发到 `MCPManager.call_tool` 需各 IMP 配合改造 | 本期 carve out — 与 [§4.9.11 D8](#4911-thinking-cli-渲染-phase-31) thinking carve out / [§4.9.12 P32-G7](#4912-防-prompt-injection-phase-32) security_filter carve out 同型，登记 [§4.13.1 #41](#4131-deferred-backlog暂时不做) |
+
+**复用资源（不动）**：
+
+- [`is_tool_allowed`](../src/agent/core/security_filter.py:136) — D12 严格全名匹配天然支持 `<server>.<tool>` 名，无需改名单门匹配逻辑
+- [`scrub_injection`](../src/agent/core/security_filter.py:93) — 段级 11 patterns，MCP tool 返回值直接复用
+- [`rules_loader`](../src/agent/core/rules_loader.py) — "文件不存在静默返 `None`" 模式，`mcp_config.load_mcp_config()` 复用此约定（验收 ⑦）
+- [`handle_srs`](../src/cli/handlers.py:1117) — 命令组模板（无子命令 → 默认 helper / `match sub_cmd:` 分发 / `case _: out(_USAGE)`），`handle_mcp` 复用此结构
+- [`get_shared_store()`](../src/memory/learning_plan_store.py) — 模块级单例 + 进程内复用模式，`get_shared_manager()` 复用（D13）
+- [`main.py`](../main.py:300) dispatch 模式（行 300-317）— `case "/mcp":` 一条 case + `continue` 复用
+- [`test_tool_blocklist.py`](../tests/test_tool_blocklist.py) — `unittest.mock.patch` 改 `_cfg.MCP_*` 字段模式 + class 分组锁行为约束，新 MCP UT 套用
+
+**Step 1 浮现的设计调整**（在 [Step 2](#step-2--implementation-plan) 已拍板的局部决策）：D11-D15 已全部并入上方决策摘要表。
+
+---
+
+**Step 2 · Implementation Plan**
+
+> 在 D1-D15 锁定后、Step 3 Code 开工前的任务拆分 + 实施顺序。按 [§4.9.0 实现文档风格](#490-实现文档风格) 浓缩到一页（不写过程描述 / 不写业界对比）。
+
+**任务清单（按 Scope 10 项映射）**
+
+| # | 任务 | 关键文件 | 验收挂钩 |
+|---|---|---|---|
+| **T1** | `pip install mcp-server-fetch` | `.venv` | ② |
+| **T2** | 新建 [`src/agent/core/mcp_config.py`](../src/agent/core/mcp_config.py)：`load_mcp_config(path) -> list[ServerSpec] \| None`，schema 校验 + env 变量展开 + 文件不存在静默返 `None`（参考 [`rules_loader.py`](../src/agent/core/rules_loader.py) 模式）| 新建 | ① ⑦ |
+| **T3** | 新建 [`src/agent/core/mcp_manager.py`](../src/agent/core/mcp_manager.py)：`MCPManager` 类 + `get_shared_manager()` 模块级单例工厂（D13）；内部后台 thread + 长驻 event loop（D14）；同步 API：`start_all()` / `list_tools()` / `call_tool(name, args, timeout)` / `status()` / `shutdown()`；server 启动失败标 `status="failed"` 不阻塞（D7）| 新建 | ① ② ④ |
+| **T4** | 新建 [`src/agent/core/url_guard.py`](../src/agent/core/url_guard.py)：`is_url_safe(url) -> bool` 拒内网 IP（10/8 / 172.16/12 / 192.168/16 / 127/8 / `::1` / link-local）/ `file://` / 非 http(s) scheme | 新建 | ⑥ |
+| **T5** | [`src/config.py`](../src/config.py) 加 4 个 MCP 项：`MCP_ENABLED` / `MCP_CONFIG_FILE` / `MCP_CONNECT_TIMEOUT_SEC` / `MCP_CALL_TIMEOUT_SEC`；[`.env.example`](../.env.example) 末尾追加 MCP section；[`.env`](../.env) 本地同步（公约 §5.1 三同步强约束）| 改 3 处 | ① ⑦ |
+| **T6** | [`src/agent/core/security_filter.py`](../src/agent/core/security_filter.py)：`_WRAP_KINDS` 加 `"tool"`；SYSTEM_PROMPT 数据隔离原则段同步加一项（D11）| 改 1 处 + system prompt | ⑤ |
+| **T7** | [`src/agent/tools.py`](../src/agent/tools.py) 改造 4 处：<br>① `get_tools()`：合流 `get_shared_manager().list_tools()`，每个 tool 加 `<server>.<tool>` 前缀；D8 fallback — `fetch` server 启动成功时 LLM 只看到 `fetch.fetch`，失败时降级只看内置 `fetch_url`<br>② `execute_tool()`：`match` 之前加 `if "." in name` 分支转发到 `MCPManager.call_tool()`，返回值过 `scrub_injection` + `wrap_untrusted(kind="tool")`<br>③ `_tool_fetch_url()` 入口加 `is_url_safe(url)` 检查（拒绝时返 `ToolResult(status="error", ...)`）<br>④ `is_tool_allowed(name)` 自然支持带 `.` 的 namespaced 名（D12 严格全名匹配 = 无代码改动） | 改 4 处 | ③ ⑤ ⑥ |
+| **T8** | CLI：<br>① [`handlers.py`](../src/cli/handlers.py) 新增 `handle_mcp(mcp_manager, cmd_parts, out)` + `_print_mcp_servers` / `_print_mcp_tools`，模式参考 `handle_srs`<br>② [`ui.py`](../src/cli/ui.py) HELP_TEXT 加 `/mcp list` / `/mcp tools` 两行<br>③ [`tab_complete.py`](../src/cli/tab_complete.py) CLI_COMMANDS 加 `/mcp` / `/mcp list` / `/mcp tools`<br>④ [`main.py`](../main.py) dispatch 加 `case "/mcp":` 一段，注入 `get_shared_manager()` | 改 4 处 | ④ |
+| **T9** | 新建 [`.agenta/mcp/config.json.example`](../.agenta/mcp/config.json.example)：包含 `filesystem` + `fetch` 两段官方 reference server 配置作模板 | 新建 | ② |
+| **T10** | UT 新增（D15 SDK 层 mock）：<br>① `tests/test_url_guard.py` — IP 黑名单 / scheme 边界<br>② `tests/test_mcp_config.py` — schema 校验 / 缺文件静默 / env 展开<br>③ `tests/test_mcp_manager.py` — mock `stdio_client` + `ClientSession`：list_tools / call_tool / 启动失败宽松 / shutdown<br>④ `tests/test_tools_mcp_integration.py` — get_tools 合流 + namespace 前缀 / execute_tool 转发 / fetch fallback 路径<br>⑤ 扩展 `tests/test_security_filter.py` — 新 kind="tool" 覆盖 | 新建 4 + 改 1 | ⑤ ⑥ |
+| **T11** | `__init__.py` 模块清单 + §4.13.1 punt 项更新：<br>① [`src/agent/core/__init__.py`](../src/agent/core/__init__.py) docstring 加 3 行新模块<br>② §4.13.1 #33 SSRF 防御从 backlog 删除（本期兑现）；新增 #44 namespaced tool 名单门通配（D12 punt） | 改 2 处 | — |
+| **T12** | 端到端手动 demo（D10 评估）：CLI 跑 3-5 条 query 验证 LLM 调 MCP tool（②③）+ `/mcp list` `/mcp tools`（④）；fetch fallback 路径手动跑一次（②）；测试报告落 `tools/agent_eval/reports/mcp-e2e-<ts>.md` | 手动 | ② ③ ④ |
+| **T13** | 文档收尾：<br>① 本节末尾追加"Step 3 实施记录"段（按 §4.9.0 风格简洁记进展）<br>② [`README.md §1.2`](../README.md) 加一句 MCP feature bullet<br>③ [`design.md §3`](design.md) 加 MCP 子节按 §3.0 风格 | 改 3 处 | — |
+
+**实施顺序与依赖**
+
+```
+T1 ───────────────┐
+                   ├─ T7 (tools.py) ── T8 (CLI) ── T12 (demo) ── T13 (docs)
+T2 ─┐              │
+T3 ─┼─ T6 ────────┤
+T4 ─┘              │
+T5 ──── (并行) ────┘
+T9 ──── (独立)
+T10 ─── (跟 T2/T3/T4/T7 边写边补)
+T11 ─── (T7/T6 完后)
+```
+
+**Scope 总览**：新建 9 文件 / 改 11 文件 / 1 个 demo / 3 段文档；预计 UT 总数增量 ~30-40 条。
+
+---
+
+**Step 0 附录 · 环境探查结论（实施前铺垫）**
+
+> 在 Step 0 决策拍板后、Step 1 review 前做的一次性环境摸底 + 实证装机。不算 Step 1 review 内容（Step 1 重点是**代码现状** gap）；本附录记录**实施 Step 3 前用户的环境准备状态**，避免到 Step 3 才发现卡壳。
+>
+> 状态：**Node.js 侧 + Python 侧均已就绪**（2026-05-31 实证），可直接进 Step 3。
+
+**本机现状**（实证日期：2026-05-31，Windows 11，无管理员权限）：
+
+| 项 | 状态 | 备注 |
+|---|---|---|
+| Python 3.11.9 | ✅ | 项目 `.venv` 已就绪 |
+| `mcp` Python SDK 1.27.1 | ✅ | 已在 `.venv\Lib\site-packages\` |
+| **`mcp-server-fetch` 2025.4.7** | ✅ **已装** | `pip install mcp-server-fetch` 走通；`python -m mcp_server_fetch --help` 正常返 usage（3 个 CLI 参数：`--user-agent` / `--ignore-robots-txt` / `--proxy-url`）；副作用：`httpx` 0.28.1 → 0.27.2 降级（fetch-server `httpx<0.28` 约束），项目内目前无模块硬依赖 `httpx>=0.28` |
+| **Node.js v22.22.3** | ✅ **已装**（portable zip，无 admin） | 解压路径 `C:\DiskD\sourceCode\node-v22.22.3-win-x64\`；已加用户 PATH（permanent）|
+| **npm 10.9.8 / npx 10.9.8** | ✅ **可用** | `where.exe node` 优先解析到上述路径，Cursor IDE 自带 helper 排第二位 |
+| **`npx -y cowsay hello`** | ✅ **通**（13 秒含拉包） | 验证 npm registry（`registry.npmjs.org`）公司网络不拦 |
+| **`npx -y @modelcontextprotocol/server-filesystem`** | ✅ **能拉能起** | 首次拉包约 30-40 秒，启动后输出 `Secure MCP Filesystem Server running on stdio`，等 MCP `initialize` 消息；cache 落在 `%LOCALAPPDATA%\npm-cache\_npx\` |
+
+**部署路径（实际走通）**：[§8.12.2 方案 B（手动 zip portable）](knowlege.md#8122-验证清单任意方案装完后跑)
+
+**决策溯源**（原 plan 与实际走通的差异）：
+
+| 原 plan | 实际走通 | 原因 |
+|---|---|---|
+| 方案 A：`winget install Schniz.fnm` → `fnm install --lts` | 跳过 winget / fnm，直接走 portable zip | 公司网络对 winget 双层拦截：(a) `msstore` source SSL MITM；(b) `winget` 的 fnm 安装包要从 GitHub releases 下载（`github.com/Schniz/fnm/releases/...`）网络超时。两个 fallback 都被拦，但**浏览器访问 `nodejs.org/dist/` 可通** —— 直接下 `node-v22.22.3-win-x64.zip`（约 30 MB）解压 + 加 PATH 即可。`registry.npmjs.org` 没被拦，`npx -y` 正常工作 |
+
+**Step 3 实施前剩余工作**：**无**（环境全部就绪）。
+
+**剩余风险**：
+
+| 风险 | 触发条件 | 兜底 |
+|---|---|---|
+| 后续装其他 MCP server（npm 系）首次拉包超时 | 公司网络对个别大包不稳 | 配 `~/.npmrc` 公司 mirror（如有）；或一次性手动 `npm install -g <pkg>` 让 npx 复用全局 cache |
+| `httpx` 0.27.2 降级影响项目其他模块 | 项目内某模块硬依赖 `httpx>=0.28` API 调用失败 | 当前实证未发现（核心调用走 `requests` / `openai` SDK 自带 httpx）；如出现 fail-fast 报错按错误升级 fetch-server 或锁老 httpx |
+
+**Step 3 · Code 落地**
+
+[Step 2](#step-2--implementation-plan) T1-T13 实施清单全部完成，关键改动：
+
+| 文件 | 变更摘要 |
+|---|---|
+| 新建 [`src/agent/core/mcp_config.py`](../src/agent/core/mcp_config.py) | `ServerSpec` frozen dataclass（`name` / `command` / `args` / `env`）；`load_mcp_config(root, *, file) -> list[ServerSpec] \| None`：缺文件 / 空内容 / JSON 解析失败 / schema 错全部 graceful 返 `None`；`${VAR}` env 变量展开（缺失保留原样）；server 名禁含 `.`（避免 namespace 拆分歧义） |
+| 新建 [`src/agent/core/mcp_manager.py`](../src/agent/core/mcp_manager.py) | `MCPManager` 同步外壳：后台 thread + 长驻 event loop（D14）跑官方 `mcp` Python SDK；`start_all(specs)` 并发拉起所有 server + initialize 握手（超时 / 异常按 D7 标 `failed` 不阻塞）；`list_tools()` 合流 + `<server>.<tool>` 前缀（D6）；`call_tool(name, args, timeout)` 同步桥接到 SDK `session.call_tool`，结果 `TextContent` 拼接为 LLM 友好字符串；`status()` CLI 用；`shutdown()` 关 server + 停 loop + join thread；`get_shared_manager()` 模块级单例工厂（D13） |
+| 新建 [`src/agent/core/url_guard.py`](../src/agent/core/url_guard.py) | `is_url_safe(url)`：拒非 http(s) scheme / `file://` / localhost 字面别名 / 私有 IP / loopback / link-local / multicast / reserved / unspecified；域名走 `socket.gethostbyname` 反查后再判（防 DNS rebinding）；解析失败一律拒（保守路径） |
+| [`src/agent/core/security_filter.py`](../src/agent/core/security_filter.py) | `_WRAP_KINDS` 加 `"tool"`；`wrap_untrusted` docstring 同步扩描述；顶部 "不做" 清单移除"SSRF 防御 / URL 校验"条目（已由 `url_guard.py` 兑现） |
+| [`src/agent/agent.py`](../src/agent/agent.py) | `SYSTEM_PROMPT` 数据隔离段加 `<untrusted_tool>` 第三类标签；"知识库文档 / 网页正文" 扩为含"第三方 tool 返回" |
+| [`src/agent/tools.py`](../src/agent/tools.py) | `get_tools` 合流 `get_shared_manager().list_tools()`，每条添 OpenAI function 包装；D8 fallback：fetch.* 接入成功时屏蔽内置 `fetch_url`；新增 `_load_mcp_tools_safe` 让 MCP 未启动 / 异常时静默降级；`execute_tool` 加 `if "." in name:` 分支转发到新 `_execute_mcp_tool`；`_execute_mcp_tool` 调 `MCPManager.call_tool`，结果走 `scrub_injection` + `wrap_untrusted(kind="tool")`，`MCPCallError` / 异常降级为 `ToolResult(status="error", ...)`；`_tool_fetch_url` 入口替换原有 scheme 检查为 `is_url_safe` 一道统一防线 |
+| [`src/config.py`](../src/config.py) + [`.env.example`](../.env.example) + [`.env`](../.env) | 新增 4 项 config：`MCP_ENABLED`（默认 true）/ `MCP_CONFIG_FILE`（默认 `.agenta/mcp/config.json`）/ `MCP_CONNECT_TIMEOUT_SEC`（默认 10）/ `MCP_CALL_TIMEOUT_SEC`（默认 30）。三处同步按 [agenta-conventions §5.1](../.cursor/rules/agenta-conventions.mdc) 强制要求 |
+| [`src/cli/handlers.py`](../src/cli/handlers.py) | 新增 `handle_mcp(manager, cmd_parts, out)` + `_print_mcp_servers` / `_print_mcp_tools` + `_MCP_USAGE`；server 状态用 🟢 / 🔴 / 🟡 / ⚫ badge 显示连通性；tool 列表显示 namespaced name + 来源 server + description（≤ 60 字截断） |
+| [`src/cli/ui.py`](../src/cli/ui.py) + [`src/cli/tab_complete.py`](../src/cli/tab_complete.py) | HELP_TEXT 加 `/mcp` / `/mcp list` / `/mcp tools` 三行；CLI_COMMANDS 同步补 3 项 |
+| [`main.py`](../main.py) | 新增 `_bootstrap_mcp()`：启动早期 `load_mcp_config` → `get_shared_manager().start_all(specs)` → `atexit.register(manager.shutdown)`；任何异常吞掉只 log warning（不阻塞 Agent 主流程）；dispatch 加 `case "/mcp":` 注入 `get_shared_manager()` |
+| 新建 [`.agenta/mcp/config.json.example`](../.agenta/mcp/config.json.example) | 含 `filesystem`（npx + `@modelcontextprotocol/server-filesystem`）+ `fetch`（python + `mcp_server_fetch`）两段 reference server 配置；附带 `_about` / `_comment` 字段说明（mcp_config 自动忽略非 servers 顶层字段 + 非 command/args/env 的 server 内字段，模板可自由加注释） |
+| [`src/agent/core/__init__.py`](../src/agent/core/__init__.py) | 模块清单补 `security_filter` / `mcp_config` / `mcp_manager` / `url_guard` 四行 |
+| [`docs/iter_2_agent.md §4.13.1 #33`](#4131-deferred-backlog暂时不做) | 标 ✅ Phase 3.3 已兑现，链回本节验收 ⑥ + `url_guard.py` |
+
+**Step 4 · Test 落地**
+
+| 文件 | 内容 | case 数 |
+|---|---|---:|
+| 新建 [`tests/test_url_guard.py`](../tests/test_url_guard.py) | 非法输入 / scheme 白名单 / 字面私有 IP 13 种 / localhost 别名 / 公网 IP / 域名 DNS 反查（mock）/ DNS rebinding / 解析失败拒 / 边界（含 port / 含 userinfo / trailing whitespace） | 39 |
+| 新建 [`tests/test_mcp_config.py`](../tests/test_mcp_config.py) | 缺文件 / 空 / 全空白 / disable 路径 / JSON 解析失败 / 顶层非 object / `servers` 缺失 / `servers` 非 object / 单 server 字段校验 5 种 / server 名含 `.` 拒 / 空 servers 返 `[]` / 正常加载 + 顺序 / env 展开（args / env value / 缺失保留）/ 显式 file 覆盖 | 19 |
+| 新建 [`tests/test_mcp_manager.py`](../tests/test_mcp_manager.py) | D15 SDK 层 mock（手写 `FakeSession` 兼当 stdio 出口 + ClientSession context manager）；start_all 空 / 单成功 / initialize 抛错 → failed / connect timeout → failed / 多 server 互不影响 / idempotent；list_tools 含 namespace 前缀 + failed server 不在合流；call_tool 缺 namespace / 未知 server / failed server / 转发返字符串 / 多 text 拼接 / isError 标记 / 非 text 占位 / 调用超时 / SDK 抛错；shutdown idempotent + shutdown 后 call 抛错；`get_shared_manager` 单例 + `reset_shared_manager_for_tests` 清单例 | 21 |
+| 新建 [`tests/test_tools_mcp_integration.py`](../tests/test_tools_mcp_integration.py) | `get_tools` 合流 + namespace + D8 fallback（fetch.* 接入屏蔽 fetch_url / 只 filesystem 接入保留 fetch_url）/ manager 异常不阻塞 / inputSchema 透传；`execute_tool` namespaced 转发 / `MCPCallError` 降级 / 未预期异常降级 / injection 段 scrub + `[⚠️ 已清洗]` / 空返回仍 wrap；fetch_url + url_guard 集成（localhost / 私有 IP / file:// / AWS metadata IP 全拒） | 14 |
+| 新建 [`tests/test_cli_handlers_mcp.py`](../tests/test_cli_handlers_mcp.py) | `/mcp` 无参 / `/mcp list` 同效 / 空 manager 友好提示 / `manager=None` 不崩；`/mcp tools` 列 namespaced + 来源 / 空 list / description 截断；未知子命令显示用法 | 8 |
+| 扩 [`tests/test_security_filter.py`](../tests/test_security_filter.py) | `wrap_untrusted(kind="tool")` 包装行为新增 1 case（43 → 44） | +1 |
+
+**回归**：
+
+- Phase 3.3 新增/扩展集单跑：`pytest tests/test_url_guard.py tests/test_mcp_config.py tests/test_mcp_manager.py tests/test_tools_mcp_integration.py tests/test_cli_handlers_mcp.py tests/test_security_filter.py -q` → **145 passed in 6.64s**
+- 周边 + 回归批（排 `test_agent*` 因 LLM free tier 配额耗尽导致 `with patch chat` 测试 pre-existing fail，与本期改动无关）：`pytest -q` 28 文件批 → **799 passed, 5 deselected in 38.11s**
+- `ReadLints` 受影响文件 0 错
+
+**Step 5 · 评估**
+
+按 [§4.8.1](#481-评估方法论) Phase 3.3 行 "MCP server 接入端到端可用 + 安全衔接对照验收 ①-⑦ 逐条过线"。
+
+**评估资产**：
+
+| 资产 | 内容 |
+|---|---|
+| [`tools/agent_eval/mcp/dataset.json`](../tools/agent_eval/mcp/dataset.json) | 9 case 分 2 类：`structural` 7 条按验收标准 ①-⑦ 逐条覆盖（C1-C7）；`llm-e2e` 2 条（E1-E2）覆盖验收 ③ "LLM 自动看到并能调用"端到端链路；每条 case 显式声明 `verify` 字段对应的验收编号，对齐公约 §7.1 "评估 case 必须对照 Step 0 验收标准逐条" |
+| 新建 [`tools/agent_eval/mcp/eval_mcp.py`](../tools/agent_eval/mcp/eval_mcp.py) | runner：真起 filesystem (npx) + fetch (python -m mcp_server_fetch) 两个 server；分 case 类型分别走 `_run_c1` ~ `_run_c7` / `_run_llm_e2e`；`--no-llm` mode 跳过 e2e 类不烧 LLM 配额；输出 Markdown 报告到 `tools/agent_eval/reports/mcp-<ts>.md`（按 [§4.10 强制约定](#410-配套-toolstoolsagent_eval)） |
+
+**评估命令**：
+
+```powershell
+# 仅跑 structural 7 case（真起 server 但不调 LLM；首次跑 npx 拉包约 30-40 秒）
+.\.venv\Scripts\python.exe -m tools.agent_eval.mcp.eval_mcp --no-llm
+
+# 全量 9 case（含 LLM e2e；需 LLM 配额）
+.\.venv\Scripts\python.exe -m tools.agent_eval.mcp.eval_mcp
+```
+
+**Smoke 跑通结果**：`--no-llm` 模式 **7/7 全过**（验收 ①②③④⑤⑥⑦ 结构层均符合），报告留档
+[`tools/agent_eval/reports/mcp-20260531-113542.md`](../tools/agent_eval/reports/)。E1 / E2 LLM e2e 留待用户 LLM
+配额充裕时段跑（dataset 已写明期望 `tool_called` / `tool_not_called`，与验收 ③ "LLM 像调内置 tool 一样能触发调用 + D8 fallback 优先 fetch.fetch" 一一对应）。
+
+**Step 6 · 文档同步**
+
+| 文档 | 变更 |
+|---|---|
+| [`docs/knowlege.md`](knowlege.md) | `§8.7-8.12` MCP 章扩写：协议 / Host-Client-Server 模型 / stdio + Streamable HTTP 两种 transport / Python SDK 用法 / server 部署生命周期；受限环境 Node.js 部署（portable zip / PowerShell ExecutionPolicy / Git Bash PATH）；`§9` 缩写加 MCP / Node.js / npm / npx / TS / WSL |
+| [`docs/design.md`](design.md) | `§3.x MCP 接入` 子节（待 T13 落地）：架构图 + Host-Client-Server 角色映射 + `MCPManager` 接口约定 + URL guard 防线位置 + 评估方法 |
+| [`docs/iter_2_agent.md`](#4913-mcp-接入-phase-33) | 本节 Step 0 / Step 1 / Step 2 / Step 3-6 全部落地；§4.13.1 #33 标 RESOLVED；§4.13.1 #44 punt 项登记（namespaced tool wildcard 匹配） |
+
+**最终决策表（D1-D15）**：D1-D10（Step 0）、D11-D15（Step 2 浮现）均已落地，与上方"关键决策摘要"表一致。
+
+**端到端入口验证**：
+
+| 入口 | 命令 | 验收对应 |
+|---|---|---|
+| `main.py` 启动 | 复制 `.agenta/mcp/config.json.example` 为 `.agenta/mcp/config.json`（按需删/留 server），跑 `python main.py` 观察 `🔌 MCP server 已加载（N/M connected）` banner | 验收 ① ② |
+| CLI `/mcp list` | 进入 main.py 后输入 `/mcp` 或 `/mcp list` 看 server 状态 + tool 数 | 验收 ④ |
+| CLI `/mcp tools` | `/mcp tools` 列所有 namespaced MCP tool | 验收 ④ |
+| LLM 端到端 | query "用 MCP 读项目根 README 前 3 行" → 期望 LLM 调 `filesystem.read_file` | 验收 ③ |
+| 评估 | `python -m tools.agent_eval.mcp.eval_mcp --no-llm` → 7/7 structural pass | 验收 ① ② ③ ④ ⑤ ⑥ ⑦ |
+| UT | `pytest tests/test_url_guard.py tests/test_mcp_config.py tests/test_mcp_manager.py tests/test_tools_mcp_integration.py tests/test_cli_handlers_mcp.py -v` | 验收 ① ② ③ ④ ⑤ ⑥ ⑦ |
 
 
 ## 4.10. 配套 tools（tools/agent_eval）
@@ -2757,16 +2984,24 @@ import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
 | 24 | SRS 卡片 export（导出为 Anki .apkg / Notion DB / Markdown） | Phase 2.4 | 用户实际需求触发后做（同 #13 #18 思路）| MVP 阶段 CLI `/srs list` 文本输出已足够；export 涉及目标格式适配 + 真用户痛点验证 |
 | 25 | SRS review 路径接入 `judge_with_llm`（用户作答简答卡时 LLM 给反馈） | Phase 2.4 | 用户实际表达需要时再做 | [§4.9.9 D6](#499-srs-主动复习调度-phase-24) 决策：SRS 是"回忆+自评"不是"考核+评分"；review 路径强行接 LLM-judge 会模糊 mental model；[§4.9.10 D1](#4910-harness-自检-phase-25) 本期评估继续 punt（同样心智冲突），等用户真表达"想要简答卡 LLM 反馈"再做 |
 | 26 | Harness P1 — Plan 执行后 retrospective（Reflexion 风格：plan-execute 跑完写反思塞回 long-term memory，下次同类任务作为 hint 注入 prompt） | Phase 2.5 | Reflexion 长期记忆任务 / `trajectory` 录制框架抽出后 | [§4.9.10 D1](#4910-harness-自检-phase-25) 决策：要做 [§4.8.2 trajectory 框架](#482-评估工具列表)（已规划但未抽）+ memory 持久化 + retrospect prompt + 跨次注入逻辑，单 phase 范围爆炸；本期 Q1+R1 是 single-shot 输出级，P1 是 trajectory 级 + 跨次累积，性质上是另一个 phase 量级的任务 |
-| 27 | Harness Q1 多轮 refine（critic 不达标时让 LLM 重批改一次，N≤3 上限） | Phase 2.5 | Q1 首期 1 轮即停跑稳后视精度需求决定 | [§4.9.10 D4](#4910-harness-自检-phase-25) 决策：[`docs/knowlege.md §6 §三第 2 项`](knowlege.md) "半客观任务 1 轮即停"约定；多轮 refine 在主观评分场景容易振荡 + cost 翻倍；先看 1 轮即停是否够用 |
+| 27 | Harness Q1 多轮 refine（critic 不达标时让 LLM 重批改一次，N≤3 上限） | Phase 2.5 | Q1 首期 1 轮即停跑稳后视精度需求决定 | [§4.9.10 D4](#4910-harness-自检-phase-25) 决策：[`docs/knowlege.md §6.3.2`](knowlege.md#632-单轮-vs-迭代修正的收敛性) "半客观任务 1 轮即停"约定；多轮 refine 在主观评分场景容易振荡 + cost 翻倍；先看 1 轮即停是否够用 |
 | 28 | Harness critic verdict 历史持久化（每次 critic 评分落库，给后续看准确率趋势 / 调阈值） | Phase 2.5 | 用户需要看 critic 准确率趋势时再做 | [§4.9.10 D5](#4910-harness-自检-phase-25) 决策：MVP 阶段 log warning + Step 5 evaluator dataset 评估 critic 准确率已足够；持久化涉及新表 + UI 展示，YAGNI |
 | 29 | thinking 多语言渲染（英文 footer / 用户可定制段标记文案） | Phase 3.1 | 单用户实际有非中文环境诉求时再做 | [§4.9.11 Q4-b](#4911-thinking-cli-渲染-phase-31) 决策：当前单用户中文偏好，hard-code 中文 `💭 思考中...` / `─── 思考结束 ───` 已足够；多语言适配涉及 i18n 框架 / 配置 schema，YAGNI |
 | 30 | thinking 进度条 / token 速率指示器（思考多久 / 多少 token 实时显示） | Phase 3.1 | 用户实际表达"看不出还在思考还是卡死"诉求时再做 | [§4.9.11 Q4-c](#4911-thinking-cli-渲染-phase-31) 决策：流式分块（验收 ②）已能让用户看到 LLM "正在写"，进度条非 P0；token 速率信息可见性可在 Step 6 token usage 行同步显示 |
 | 31 | Chainlit thinking 折叠 / 展开 UI（点击折叠 thinking 段、独立侧栏 thinking 历史等） | Phase 3.1 | 后续 WebUI 优化任务（同 #2 #5 #6 #11 #12 #19 #21 同任务，[design.md §4.2 WebUI](design.md#42webui)）| [§4.7.2](#472-选定-feature-列表) Phase 3.1 实施位置已明锁 "WebUI 端的可折叠/展开等渲染留待 design.md §4.2 WebUI 单独优化任务"；本期 CLI only |
 | 32 | LangChain / AutoGPT 实现接入 thinking | Phase 3.1 | 主实现 thinking 跑稳后视用户实际诉求决定 | [§4.9.11 D8](#4911-thinking-cli-渲染-phase-31) 决策：thinking 当前仅 Python 主实现接通（[`thinking_policy.py:9`](../src/agent/core/thinking_policy.py) docstring 已注明）；LangChain / AutoGPT 是 [§4.7.2](#472-选定-feature-列表) 多 IMP 互证用，子任务通常不启用 thinking（cost 翻倍且子任务不需要深度推理）|
-| 33 | `fetch_url` SSRF 防御（拒内网 IP / `file://` / `localhost`）| Phase 3.2 | Phase 3.3 MCP 一起做 | [§4.9.12 D1](#4912-防-prompt-injection-phase-32) 决策：MCP 接入会让多个 server 都需路径限制 / IP 黑名单，到时统一设计；当前个人本机场景全外网不走公网 = SSRF 威胁度低 |
-| 34 | 输入侧 LLM 分类器（独立 LLM 判定 user_input 恶意度）| Phase 3.2 | 用户实际场景出现 user-input 注入诉求时再做 | [§4.9.12 三、防御层次](knowlege.md#7-prompt-injection) L1 推荐做法但 cost 翻倍（每次 query 多 1 次 LLM 调用）；单用户本机场景 user_input 注入威胁度低（自己骂自己没意义）；启发式 + 标签包装已覆盖大头 |
+| 33 | `fetch_url` SSRF 防御（拒内网 IP / `file://` / `localhost`）| Phase 3.2 | ✅ **Phase 3.3 已兑现** | [§4.9.12 D1](#4912-防-prompt-injection-phase-32) 决策：MCP 接入会让多个 server 都需路径限制 / IP 黑名单，到时统一设计；当前个人本机场景全外网不走公网 = SSRF 威胁度低 → [§4.9.13 验收 ⑥](#4913-mcp-接入-phase-33) 新建 [`url_guard.py`](../src/agent/core/url_guard.py) 统一拦截 fetch_url + MCP fetch.fetch 入口 |
+| 34 | 输入侧 LLM 分类器（独立 LLM 判定 user_input 恶意度）| Phase 3.2 | 用户实际场景出现 user-input 注入诉求时再做 | [`knowlege.md §7.3 防御层次`](knowlege.md#73-防御层次4-层纵深防御) L1 推荐做法但 cost 翻倍（每次 query 多 1 次 LLM 调用）；单用户本机场景 user_input 注入威胁度低（自己骂自己没意义）；启发式 + 标签包装已覆盖大头 |
 | 35 | Plan 用户审批 mode `edit` 选项（plan 出来后用户 yes/edit/no 三选一，edit 让用户改 plan steps） | Phase 3.2 | 用户实际表达"想改 LLM 给的 plan"诉求时再做 | [§4.9.12 D8](#4912-防-prompt-injection-phase-32) 决策：本期 yes/no 二选一已覆盖"挡住跑偏 plan"主诉求；edit 涉及 plan re-edit + 重发 make_plan + messages 重写，复杂度爆炸；用户想 edit 直接发新 query 即可 |
 | 36 | Chainlit / WebUI 端 plan permission UI | Phase 3.2 | 后续 WebUI 优化任务（同 #2 #5 #6 #11 #12 #19 #21 #31 同任务，[design.md §4.2 WebUI](design.md#42webui)）+ LangChain / AutoGPT 端 security_filter 接入（与 [§4.9.11 D8 / §4.13.1 #32](#4131-deferred-backlog暂时不做) 同型 carve out）| [§4.9.12 D8](#4912-防-prompt-injection-phase-32) `approval_callback` 模式与 `on_thinking_chunk` 同型；CLI 端走 `input()` 已通；Chainlit `cl.AskUserMessage` 异步 wrap 留 webui 任务统一做 |
+| 37 | MCP `resources` / `prompts` primitive | Phase 3.3 | 用户实际有"应用代码主动塞 context"或"用 MCP 暴露 slash command"诉求时再做 | [§4.9.13 D2](#4913-mcp-接入-phase-33) 决策：求职演示价值集中在 tools；resources 与本项目内置 RAG 路径重叠（应用代码塞 context）；prompts 与 CLI `/cmd` 命令重叠；本期 P0 不必三件套全做 |
+| 38 | MCP 高级能力 `sampling` / `roots` / `elicitation` | Phase 3.3 | 实际场景出现需求再做（如想让 server 反向借 LLM 推理 / server 反向问用户） | [§4.9.13 D2](#4913-mcp-接入-phase-33) 决策：这三项都是 server → client 反向能力，需要 host 端实现额外回调；本期 P0 主线是 client 调 server tool，反向能力 YAGNI |
+| 39 | MCP Streamable HTTP transport（远程 / 云端 server） | Phase 3.3 | 用户有跨网 / 团队共享 server 诉求时再做 | [§4.9.13 D1](#4913-mcp-接入-phase-33) 决策：个人本机场景 stdio 够；HTTP 涉及 OAuth 2.1 鉴权 / token 管理 / 部署，超 MVP；99% 官方 reference server 默认 stdio |
+| 40 | AgentA 自建 MCP server 把内部能力（`search_knowledge` / `list_memory` 等）暴露给其他 host | Phase 3.3 | 用户想"在 Cursor / Claude Desktop 里查 AgentA KB"等跨 host 复用诉求出现时再做 | [§4.9.13 Scope](#4913-mcp-接入-phase-33) 决策：本期主线是 **AgentA 作为 client 接入业界 server**；反过来"AgentA 当 server"是另一方向工程量（FastMCP server 框架 + 鉴权 + 多 host 适配） |
+| 41 | LangChain / AutoGPT 实现接 MCP（Python 主实现外的 IMP 接入） | Phase 3.3 | 主实现 MCP 跑稳后视用户实际诉求决定（与 [§4.13.1 #32](#4131-deferred-backlog暂时不做) thinking carve out / [§4.13.1 #36](#4131-deferred-backlog暂时不做) security_filter carve out 同型） | [§4.9.13 Scope](#4913-mcp-接入-phase-33) 决策：本期 MCP 仅 Python 主实现接通；LangChain / AutoGPT 走各自 tool dispatcher，复用 `MCPManager` 需各 IMP 改动；与 [§4.7.2](#472-选定-feature-列表) 多 IMP 互证目标弱相关 |
+| 42 | MCP server 来源审计自动化（diff `tools/list` 检测 rug pull / 签名校验 / tool poisoning 主动 LLM 扫 description）| Phase 3.3 | 用户实际遇到第三方 server 安全事件 / 装 ≥5 个第三方 server 时再做 | [§4.9.13 验收 ⑤](#4913-mcp-接入-phase-33) 决策：本期接入仅 2 个官方 reference server，社区已 vetted；安装前人工 review `tools/list` 即可；自动化审计涉及签名 infra + LLM 扫描 cost，YAGNI |
+| 43 | MCP 自动化 golden case 评估（3-5 case 在 `tools/agent_eval/mcp/` 端到端断言 LLM 调到 MCP tool）| Phase 3.3 | Phase 3.3 跑稳后 / 用户实际想看 MCP 路径回归保障时再做 | [§4.9.13 D10](#4913-mcp-接入-phase-33) 决策：本期端到端手动 demo + UT 已覆盖验收 ② ③ ⑤ ⑥；MCP tool 调用涉及 LLM 自主决策不稳定，golden case 设计复杂度高（断言"LLM 必须调 `filesystem.read_file`"易因 prompt 微调失败）；先看 1 个 phase 跑稳再决定上 |
+| 44 | namespaced tool 名单门通配语法（如 `BLOCKLIST=filesystem.*` 屏蔽整个 server 的全部 tool）| Phase 3.3 | 用户实际接入 ≥10 个 MCP server / 需要按 server 整批屏蔽时再做 | [§4.9.13 D12](#4913-mcp-接入-phase-33) 决策：本期 2 server 量级下严格全名匹配（如 `filesystem.read_file,filesystem.list_dir,...`）已够用；通配语法要在 `security_filter.is_tool_allowed` 加 `fnmatch` / 前缀匹配，违反公约 §6 "简洁 > 兼容"；后续 server 数量上来再扩 |
 
 ---
 
@@ -2813,6 +3048,8 @@ import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
 | 35 | Harness 独立 critic agent / 多模型 critic 流水线（不同模型当 critic，独立 prompt + 上下文） | Phase 2.5 | [§4.9.10 D3](#4910-harness-自检-phase-25) 决策：复用 `judge_with_llm` + 生产路径 wrapper 已足够；独立 critic agent 涉及多模型 cost 暴涨 + 调试复杂度（类比 §4.13.2 #25 多 agent 分工 同思路）；个人助手单用户场景动机不成立 |
 | 36 | thinking 内容写入 `chat_history`（让用户回看历史思考过程） | Phase 3.1 | [§4.9.11 D4 / Q4-a](#4911-thinking-cli-渲染-phase-31) 决策：thinking 是临时流不是答案，进库会让 `/history` 输出污染 + DB 体积膨胀；用户回看时会困惑（"这是我答案？"）；与 `final_answer` 入库的语义边界一旦模糊后续难收回 |
 | 37 | system prompt 泄露 fingerprint 检测（监测 LLM 输出是否含系统 prompt 片段并报警 / 阻断） | Phase 3.2 | [§4.9.12 Step 0](#4912-防-prompt-injection-phase-32) 决策：单用户本机场景 system prompt 不是商业机密（开源仓库可见）；fingerprint 检测是 SaaS 多租户场景才需要的能力（防止租户 A 通过 prompt injection 套取租户 B 的 system prompt）；个人项目永久不需要 |
+| 38 | MCP server marketplace / 分发管理（自建 server 包注册中心 / `.agenta/mcp_servers/` 仓库式分发）| Phase 3.3 | [§4.9.13 Scope](#4913-mcp-接入-phase-33) 决策：业界 Anthropic `modelcontextprotocol/servers` repo + npm / pip 已覆盖 server 分发；个人项目自建 marketplace 永久 punt（类比 [§4.13.2 #21](#4132-dropped永久不做) 跨 catalog skill 思路 / [§4.13.2 #28 #30 #33](#4132-dropped永久不做) 多用户场景）|
+| 39 | MCP server 热重载（不重启 agent 改 `.agenta/mcp/config.json` 即生效）| Phase 3.3 | [§4.9.13 Scope](#4913-mcp-接入-phase-33) 决策：重启 agent 即可；同 [§4.13.2 #8 #22](#4132-dropped永久不做) 思路（rules / skills 热重载 punt）；引入 watcher 增加复杂度 + server 子进程生命周期管理 edge case |
 
 
 # 5. Future

@@ -93,6 +93,10 @@ def get_tools(skill_bodies: dict[str, str] | None = None) -> list[dict[str, Any]
     Phase 3.2：返回前过 security_filter.is_tool_allowed 名单门——按 SECURITY_MODE
     切换 fail-open + BLOCKLIST 或 fail-close + ALLOWLIST。命中拒绝的 tool 静默跳过
     + log warning（已在 is_tool_allowed 内部 log）；execute_tool 入口同样 double-check。
+
+    Phase 3.3：合流 MCP server 暴露的 tool（带 `<server>.<tool>` namespace 前缀）。
+    D8 fallback：MCP `fetch` server 启动成功时屏蔽内置 `fetch_url`，让 LLM 只看到
+    `fetch.fetch`，避免功能重叠导致选择困难。
     """
     tools = (
         list(TOOLS)
@@ -101,11 +105,40 @@ def get_tools(skill_bodies: dict[str, str] | None = None) -> list[dict[str, Any]
         + list(_QUIZ_TOOLS)
         + list(_SRS_TOOLS)
     )
+
+    mcp_tools = _load_mcp_tools_safe()
+    if mcp_tools:
+        # D8：fetch.* 接入成功时，从基础工具集移除 fetch_url
+        if any(t.get("server") == "fetch" for t in mcp_tools):
+            tools = [t for t in tools if t["function"]["name"] != "fetch_url"]
+        for mt in mcp_tools:
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": mt["name"],
+                    "description": (
+                        mt.get("description")
+                        or f"MCP tool from {mt.get('server', '?')} server"
+                    ),
+                    "parameters": mt.get("inputSchema") or {"type": "object"},
+                },
+            })
+
     if skill_bodies:
         tools.append(_build_load_skill_def(list(skill_bodies.keys())))
 
     from src.agent.core.security_filter import is_tool_allowed
     return [t for t in tools if is_tool_allowed(t.get("function", {}).get("name", ""))]
+
+
+def _load_mcp_tools_safe() -> list[dict[str, Any]]:
+    """读 MCP shared manager 的 list_tools；任何异常 / 未启动一律返空，避免阻塞 LLM 主流程。"""
+    try:
+        from src.agent.core.mcp_manager import get_shared_manager
+        return get_shared_manager().list_tools()
+    except Exception as exc:
+        logger.debug("[tools] MCP list_tools 跳过：%s", exc)
+        return []
 
 
 def _build_load_skill_def(skill_names: list[str]) -> dict[str, Any]:
@@ -721,10 +754,15 @@ def _tool_fetch_url(url: str, max_chars: int = 3000) -> ToolResult:
     """
     logger.info("[tool] fetch_url: url=%r, max_chars=%d", url, max_chars)
 
-    if not url.startswith(("http://", "https://")):
+    # Phase 3.3：SSRF 防御统一入口，拦 file:// / 内网 IP / 解析失败的域名
+    from src.agent.core.url_guard import is_url_safe
+    if not is_url_safe(url):
         return ToolResult(
             status="error",
-            content=f"URL 必须以 http:// 或 https:// 开头，收到：{url!r}",
+            content=(
+                f"URL 被安全策略拒绝（须为公网 http(s)，禁内网 IP / localhost / "
+                f"file:// 等），收到：{url!r}"
+            ),
         )
 
     raw = _fetch_raw_response(url)
@@ -2184,6 +2222,36 @@ def _tool_load_skill(name: str, skill_bodies: dict[str, str]) -> ToolResult:
     return ToolResult(status="ok", content=content)
 
 
+# ── MCP namespaced tool 转发（Phase 3.3） ────────────────────────────────────
+
+
+def _execute_mcp_tool(name: str, args: dict[str, Any]) -> ToolResult:
+    """把 `<server>.<tool>` 调用转发到 MCPManager，返回值过 security_filter 包装。
+
+    包装策略与 fetch_url 同步：仅 ok 状态 wrap kind="tool"；命中 injection 段被剔除时
+    前缀 `[⚠️ 已清洗]`，与 web / doc 一致让 LLM 感知。
+
+    MCPCallError（未连接 / 超时 / SDK 抛错）统一降级为 `status='error'` 让 ToolCallEngine
+    继续引导 LLM 换工具，不向上抛。
+    """
+    from src.agent.core.mcp_manager import MCPCallError, get_shared_manager
+    from src.agent.core.security_filter import scrub_injection, wrap_untrusted
+
+    try:
+        text = get_shared_manager().call_tool(name, args)
+    except MCPCallError as exc:
+        logger.warning("[tool] MCP %s 调用失败：%s", name, exc)
+        return ToolResult(status="error", content=f"MCP 工具调用失败: {exc}")
+    except Exception as exc:
+        logger.warning("[tool] MCP %s 未预期异常：%s", name, exc)
+        return ToolResult(status="error", content=f"MCP 工具异常: {exc}")
+
+    cleaned, scrubbed = scrub_injection(text or "")
+    flag = "[⚠️ 已清洗] " if scrubbed else ""
+    wrapped = wrap_untrusted(f"{flag}{cleaned}", kind="tool")
+    return ToolResult(status="ok", content=wrapped)
+
+
 # ── 统一路由入口 ──────────────────────────────────────────────────────────────
 
 
@@ -2222,6 +2290,10 @@ def execute_tool(
             status="error",
             content=f"工具 {name!r} 当前被名单门拒绝（SECURITY_MODE / TOOL_BLOCKLIST / TOOL_ALLOWLIST）。请改用其它工具或如实告知用户当前无法获取该信息。",
         )
+
+    # Phase 3.3：namespaced tool 走 MCP 转发（D6 强制 "<server>.<tool>"）
+    if "." in name:
+        return _execute_mcp_tool(name, args)
 
     try:
         match name:

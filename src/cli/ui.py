@@ -48,6 +48,9 @@ HELP_TEXT = """
   /srs show <card_id>        查看单卡完整详情（front + back + SM-2 字段）
   /srs stats                 SRS 队列统计（总数 / due / 平均 ease / mature）
   /srs del <card_id>         删除指定卡（不可恢复；推荐 archive 软删）
+  /mcp                       列 MCP server 状态（同 /mcp list）
+  /mcp list                  同上
+  /mcp tools                 列所有 MCP tool（含来源 server）
   /quit                      退出程序
   /exit                      退出程序（同 /quit）
 
