@@ -96,6 +96,8 @@ flowchart TB
     class IMP,LLMP,FILES,EMB swappable
 ```
 
+> 完整设计文档（接口约定 / 模块职责 / 取舍说明）：**[`docs/design.md`](docs/design.md)**
+
 ---
 
 ## 1. 核心能力
@@ -376,13 +378,14 @@ python -m tools.agent_eval.perf_eval --target all
 
 ## 文档导读
 
-| 文档 | 内容 |
-|---|---|
-| `docs/iter_0_init.md` | 项目初版规划：目标 / 架构 / 技术选型 |
-| `docs/iter_2_agent.md` | Agent core 设计：四层 context / Memory / Plan-Execute / Skills / 防注入 |
-| `docs/iter_3_CI.md` | GitHub Actions CI 接入：免费额度 / 性能门禁 / artifact |
-| `docs/iter_4_UI.md` | UI 形态反思 |
-| `docs/iter_5_LangChain.md` | LangChain 实现路径 |
-| `docs/iter_6_AutoGPT.md` | AutoGPT 风格实现 |
-| `docs/iter_7_CnP.md` | 模型上下文协议（MCP）接入设计 |
-| `docs/iter_8_debugging.md` | 线上调试 / 远端联调 |
+| 文档 | 类型 | 内容 |
+|---|---|---|
+| **[`docs/design.md`](docs/design.md)** | **当前态设计** | **整体架构 / RAG（Ingest + Retrieval + Eval + 代码导读）/ Agent（API · 会话 · 记忆 · Prompt · Citation · Plan · Skills · MCP · 防注入）—— 项目的 single source of truth** |
+| `docs/iter_0_init.md` | 迭代记录 | 项目初版规划：目标 / 架构 / 技术选型 |
+| `docs/iter_2_agent.md` | 迭代记录 | Agent core 设计：四层 context / Memory / Plan-Execute / Skills / 防注入 |
+| `docs/iter_3_CI.md` | 迭代记录 | GitHub Actions CI 接入：免费额度 / 性能门禁 / artifact |
+| `docs/iter_4_UI.md` | 迭代记录 | UI 形态反思 |
+| `docs/iter_5_LangChain.md` | 迭代记录 | LangChain 实现路径 |
+| `docs/iter_6_AutoGPT.md` | 迭代记录 | AutoGPT 风格实现 |
+| `docs/iter_7_CnP.md` | 迭代记录 | 模型上下文协议（MCP）接入设计 |
+| `docs/iter_8_debugging.md` | 迭代记录 | 线上调试 / 远端联调 |
