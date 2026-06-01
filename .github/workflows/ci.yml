@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: fast UT
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      # 让 test_provider_api_key_not_empty 等"非空校验"型 UT 通过
+      # 这里只要求字符串非空，不真发 LLM 请求；故用明文 dummy，无需 Secrets
+      MOONSHOT_API_KEY: ci-dummy
+      QWEN_API_KEY: ci-dummy
+      # 关掉 HF 镜像 / 离线开关，避免 transformers 启动时尝试连接镜像
+      TRANSFORMERS_OFFLINE: "1"
+      HF_DATASETS_OFFLINE: "1"
+      TOKENIZERS_PARALLELISM: "false"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run fast UT
+        # pytest.ini 默认 addopts 已 deselect integration/langchain/autogpt/extended_providers
+        # 直接 pytest 即可，无需重复加 -m
+        run: pytest -q
