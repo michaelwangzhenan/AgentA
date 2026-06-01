@@ -1,30 +1,204 @@
-# AgentA 编码规范
+---
+description: AgentA 项目工程公约 — 代码注释 / 文件命名 / 测试 / 文档同步 / AI 决策边界 / AI ↔ 用户交互节奏。所有针对本仓库的代码生成与修改都要遵守。
+alwaysApply: true
+---
 
-> 私有知识库 ReAct Agent，核心栈：Python 3.10+ / ChromaDB / sentence-transformers / OpenAI-compatible LLM / SQLite 记忆 / prompt_toolkit CLI
+# AgentA 工程公约
 
-## 通用
-- **用中文**回复和注释
-- Python 3.10+：match/case、`X | Y` 联合类型、f-string
-- 全量类型注解；`-> None` 显式标注；可空用 `X | None`
-- 异常捕获具体类型，禁止裸 `except`
+本项目是个人学习用 RAG + Agent 实验工程，作者优先级：**简洁可读 > 全面**。所有为本仓库写代码或文档的 AI agent / 协作者都需按本规则执行。**违反时被简化掉，而不是被讨论。**
 
-## 命名
-- 类 `PascalCase`，函数/变量 `snake_case`，私有成员 `_前缀`，常量 `UPPER_CASE`
+## 1. 语言规范
 
-## 设计
-- 数据容器用 `@dataclass(frozen=True)` 或 `NamedTuple`
-- 接口用 `Protocol`，优先组合而非继承
-- 缓存用 `functools.cache` / `lru_cache`
-- 资源管理用 `with` 语句
-- 推荐 `collections.abc`（`Sequence`、`Mapping`、`Iterable`）做参数类型
+### 1.1 中英文选择
+
+默认是用中文。
+
+**保持单一语言**：中文叙述里不要随手夹英文词；只有以下情况才允许保留英文：
+
+1. **代码标识符 / API 名**：`get_tools()` / `chat_history` / `EventBus`
+2. **行业专有名词**：`RAG` / `LLM` / `ReAct` / `RAG` / `prompt injection` / `ReWoo`
+3. **翻译后不准确或带歧义**：当中文译法不止一种或译后失真时保留英文 + 首次出现给个中文解释
+
+| ❌ 中英夹杂 | ✅ 单一语言 |
+|---|---|
+| 单 query 内 ephemeral plan | 单次问答内**用完即弃**的 plan |
+| pending / active / archived 状态 | 待执行 / 进行中 / 已归档（首次出现可加括号原文） |
+| LLM 自主 trigger plan | LLM 自主**触发** plan |
+| over-engineering for MVP | **过度设计**（MVP 阶段不必要） |
+
+判定准则：能用中文准确表达就用中文；保留英文必须满足上面 3 条之一。
+
+### 1.2 用词要易懂
+
+包括：书写文档， 对话回复， 代码注释
+
+避免拗口、过度抽象的工程化词；能用日常词就不用术语：
+
+| ❌ 拗口 | ✅ 通俗 |
+|---|---|
+| 契约 | 约定 / 规则 |
+| 编号契约 | 编号规则 |
+| 落盘 | 存储 / 写入 |
+| 强约束 | 必须 / 强制 |
+| 闭环 | 完整流程 / 跑通；标题里 "评估闭环" 一律改 "评估方法" |
+| 卡口 | 检查点 |
+| 雏形 | 初稿 |
+
+例外：**架构层面**的"接口约定"等已成行业术语场景可保留（如 design.md 描述 Protocol 设计），但日常描述用通俗词。
+
+**借喻禁区**（专有术语不要跨语境借用）：
+
+| 词 | 严格语义（仅可用于） | 误用借喻（一律禁止） | 正确替代 |
+|---|---|---|---|
+| `阻塞 / 非阻塞` | 线程 / I/O 是否同步等待（blocking I/O / `await`） | 借喻"业务流程是否同轮执行" / "是否等用户确认" | `同轮执行 / 分轮执行`、`两阶段（two-stage）`、`ack-only`、`是否需要用户审批` |
+| `同步 / 异步` | 线程 / 并发模型 | 借喻"是否实时返回"、"是否对齐进度" | `立即返回 / 延后返回`、`实时 / 周期性` |
+| `cap` | 代码层标识符（`MAX_*_CAP` / `xxx_cap` 变量名） | 中文叙述里裸用 `cap`、"小 cap 拦掉" | `上限`、`轮次上限`、`tool 上限`、`总上限` |
+
+判定准则：你描述的是**操作系统 / 并发原语**层面的等待？是 → 用；否 → 换通俗词。代码 identifier 保持英文，但中文文档 / 注释里指代其语义时一律换通俗词。
+
+### 1.3 缩写
+
+第一次用的缩写时要进行 inline 解释说明。
+
+如：MRR（Mean Reciprocal Rank, 平均倒数排名）
+
+## 2. 代码规范
+
+### 2.1 配置项注释（src/config.py）
+
+只写**配置项本身的意义和可选值**，不写设计思想 / 历史背景 / Phase 来源。每项 1-2 行注释足够。
+
+```python
+# ✅ 好：说明意义 + 类型 / 默认行为
+# 是否启用项目级 rules 注入（可选值：true / false）
+USER_RULES_ENABLED: bool = os.getenv("USER_RULES_ENABLED", "true").lower() == "true"
+
+# rules 文件路径（相对项目根；文件不存在静默跳过）
+USER_RULES_FILE: str = os.getenv("USER_RULES_FILE", ".agenta/rules.md")
+```
+
+```python
+# ❌ 差：解释设计思想 / Phase / 跟其他模块的关系
+# 项目级用户偏好（详 iter_2_agent.md §4.9.3）：在项目根放 .agenta/rules.md，启动时一次性
+# 加载并注入到 system prompt 的 <project_rules> 块。与 user_memory（动态学到的偏好）
+# 形成两层：rules 是稳定基础设定，memory 在其之后注入做临时覆写。
+USER_RULES_ENABLED: bool = ...
+```
+
+### 2.2 函数 / 类 docstring
+
+- **函数**：1 句话讲做什么；参数 / 返回 / 异常需要时再列，不需要时不要硬凑
+- **类**：1-2 句话讲职责边界；不复述模块 docstring
+- 避免"逐行复述代码"的 docstring，例如 `def upsert(...)` 写成 "Upserts a record"
+
+### 2.3 注释规范
+
+- 解释**为什么**这么写，不解释**什么代码做了什么**
+- ❌ `# 自增计数器` `# 调用 LLM` `# 返回结果`
+- ✅ `# 显式触发不消耗也不重置 auto 计数器 —— 两条流水线独立`
+
+### 2.4. 配置同步
+
+代码 / 配置 / CLI 命令改动时同步更新：
+
+| 改动类型 | 同步到 |
+|---|---|
+| 新 config 项 | `src/config.py` **+ `.env.example` + `.env`（三处必须同步）** |
+| 新 CLI 命令 | `src/cli/ui.py` help + `src/cli/tab_complete.py` |
+| 评估工具 | 评估报告使用Markdown格式，不用JSON |
+
+**强制：新 config 项三处同步**
+
+新增 `os.getenv("XXX", ...)` 时**必须**同步三个文件，缺一不可：
+
+| 文件 | 内容 | 不同步的后果 |
+|---|---|---|
+| `src/config.py` | 定义 + 注释（按 §2.1 风格） | — |
+| `.env.example` | 列出 key + 默认值 + 用途短注释 | 新用户克隆仓库后不知道有这项可调 |
+| `.env` | 实际值（即便用默认值也写一行注释提示存在） | **当前运行环境漏配，跑到这段代码时取默认值而不是用户期望值**；尤其涉及 API key / 路径 / feature flag 时会静默走错分支 |
+
+`.env` 不进 git（被 `.gitignore` 忽略），但**本地必须有这行**。AI 改完 `config.py` 必须主动检查 `.env` 是否已含对应 key；缺则补一行（值用 `.env.example` 默认值），不要等用户运行时才发现。
+
+### 2.5 文件 / 模块命名
+
+| 类型 | 位置 | 命名 |
+|---|---|---|
+| Agent core helper | `src/agent/core/` | `*_manager.py` / `*_engine.py` / `*_policy.py` / `*_bus.py` / `*_loader.py` |
+| 数据持久化 | `src/memory/` | `<name>.py` 含 `<Name>Store` 类（如 `UserMemoryStore`） |
+| CLI 命令处理 | `src/cli/handlers.py` | `handle_<command>` 函数 |
+| LLM 调用入口 | `src/llm/provider.py` | 一个 `chat(...)` 函数为主出口 |
+| 评估脚本 | `tools/agent_eval/<feature>/` | `<task>.py`（如 `recall_golden.py` / `perf_eval.py`） |
+| 评估报告 | `tools/agent_eval/reports/` | `<feature>-<target>-<YYYYMMDD-HHMMSS>.md`（**强制 Markdown，禁 JSON**，详 iter_2_agent.md §4.10） |
+| 单元测试 | `tests/test_<module>.py` | Test 类名 `Test<Behavior>`，方法 `test_<scenario>` |
+
+不允许引入新的 helper / store / manager 类型时再开新文件；先尝试在已有文件添加。
 
 
-## 如何制定实施计划
-- 计划必须极度简洁，为了简洁，可以牺牲语法
-- 每个计划结束时，列出尚未解决的问题列表（如果有的话）
+### 2.6 写文档不要想当然（让读者读懂）
+
+读者不一定按你写文档的顺序看，跳进任意一节都该能读懂。任何"心照不宣"的代号 / 缩写都得给出处。
+
+| 反模式 | ❌ 想当然写法 | ✅ 显式上下文写法 |
+|---|---|---|
+| **跨节代号孤儿** | "承载 C3 的 quiz_maker..."（C3 在另一节定义） | "承载学习/研究助理（Phase 2 业务）的 quiz_maker..." 或 "承载 [§4.7.1 项目定位](#471-项目定位) C3 的..." |
+| **同字母两次占不同含义** | §4.6 定义 C1-C7 是 Session 维度；§4.7 又拿 C1/C3 当业务场景 | 同一文档内**一组字母只定义一次**；要再分类换前缀（`S1/S2`） |
+| **泛用术语无范围** | "对照 Step 0 验收"（文档里 Step 0 出现 20+ 次） | "对照 [§4.9.5 Step 0](#495-skills-框架强化-phase-15) 验收"；同节内紧邻段可省 |
+| **章节标题带未定义代号** | `## 5.1. C4 企业内 Q&A` | `## 5.1. 企业内 Q&A` |
+| **历史代号未清理** | 重写需求后留早期代号引用没删 | 改名时全文 grep 同步；早期代号留到 `_历史参照_` 段，正文一律用新词 |
+
+**强约束**：
+
+- 任何 `C1/C3/C4` / `A1/A2` / `D1/D2` / `Q1/Q2` / `S0x/R0x/C0x` 等代号引用，**当前节没定义就必须 cross-ref 定义出处**（用 `[§x.y](#anchor)`）
+- 跨节引用 `Step N` 必须带节号；同节紧邻段内可省
+- 章节标题里不带未定义代号
+- 评估 case id（如 `M01-lang-zh` / `S05-negative-greet`）允许在脚本输出 / dataset.json 里裸用，**写进文档**时必须紧邻一句话说明该 case 测什么
+
+## 3. 设计文档写作约束
+
+本约束主要用于`docs/design.md`的写作，确保文档的清晰性和可读性。
+
+| 维度 | 要求 |
+|---|---|
+| **视角** | **当前态**：不写"Phase X 完成 Y" / "本期实现" / "上一轮新增"等时效字眼；事实即可 |
+| **标题** | feature 名一两词足够，例：`Session 管理` / `Memory 管理` / `Prompt 管理`。不要堆"列表/搜索/恢复"这种长串。 |
+| **标题下首行** | 1-2 句话说明本节"本节是实现什么功能，解决什么问题"，不进入细节 |
+| **表达方式** | 优先 **Mermaid 图**表达结构 / 流程；**表格**表达字段 / 接口 / 决策；**不插代码块**（行内 ` `` ` 引用文件 / 类 / 函数 / 配置项除外） |
+| **内容深度** | 表达**设计思想 / 接口约定 / 取舍**；不列实现细节（具体 SQL DDL、初始化代码、迁移脚本、private 方法实现等） |
+| **语言** | 精炼；不写讨论过程 / 设计推理 / 自评反思|
 
 
-## 项目约定
-- 项目根目录：`README.md`、`.env.example`、`src/`、`datasets/`（按语种分 `data_en/` 与 `data_zh/`）
-- 业务代码在 `src/`，入口 `main.py`, 功能实现要模块化
+**反例**（已发生过 → 不要再犯）：
 
+| ❌ 反例 | ✅ 修正 |
+|---|---|
+| "Phase 1.2 完成『触发优化 + 手动写入 + source 字段 + 评估方法』" | 删时效字眼；直接陈述当前能力 |
+| 不做向后兼容 schema 迁移：升级时手动删除 ./sqlite_db/user_memory.db 重建即可 | 运维 / 实施细节不进设计文档|
+| `CREATE TABLE user_memories (id INTEGER PRIMARY KEY ...)` 代码块 | 用 Markdown 表格表达字段 / 类型 / 用途 |
+
+
+## 4. 测试
+
+- 用 `pytest`，markers 在 `pytest.ini` 里 deselect 默认 integration / langchain / autogpt / extended_providers — 跑 `pytest -q` 默认走 fast UT 集
+- 用 `MagicMock` mock 外部依赖（LLM / DB / 文件 IO），不要在 UT 里真发 LLM call
+- 评估脚本（recall / perf）放 `tools/agent_eval/`，不放 `tests/`
+- 新加 feature 必须有 UT 覆盖核心路径；触发节流 / 顺序约定这类"行为约束"要有独立 Test 类锁住
+
+
+## 5. AI 决策边界（遇歧途必须 ask）
+
+执行任务时遇到下表所列**有多条可行路径**的决策，**先用 AskQuestion 让用户拍板，不要默认替用户选** — 尤其不要默认选"看起来更保守 / 更兼容"的路径。本项目的工程偏好是**简洁 > 兼容**，不是反过来。
+
+| 决策场景 | 默认错误倾向 | 必须问什么 |
+|---|---|---|
+| **向后兼容 vs 激进清理**（schema 字段 / dead code / 弃用 API） | 默认保留旧字段 / dead code 维持兼容 | "保留旧 schema + dead code 维持兼容，还是删 DB 重建 + 全清？" |
+| **破坏性操作**（删 DB / 删未跟踪文件 / 改 schema / `git clean`） | 默认替用户执行 | 先列出受影响范围 + 是否可逆，让用户确认后才动 |
+| **scope 蔓延**（用户问 A，是否顺手处理相关 B） | 默认顺手做完 | "B 现在也处理一下吗？还是这次只动 A？" |
+
+## 6. 红线（违反 = 必须修正）
+
+- ❌ 评估报告落 JSON / CSV / TSV
+- ❌ `tools/agent_eval/reports/` 下批量删除文件（禁止主动清理 reports/目录）
+- ❌ `tools/agent_eval/**` entry point 不调 `load_dotenv()`（会导致 LLM 调用 401）
+- ❌ 新增 `os.getenv(...)` 只改 `src/config.py`，不同步 `.env.example` 和 `.env`
+- ❌ 不问用户就默认选向后兼容路径 / 默认执行破坏性操作 / 默认 scope 蔓延
+- ❌ config 注释解释设计思想 / Phase 来源（违反本文件 §2.1

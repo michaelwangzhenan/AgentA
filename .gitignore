@@ -8,7 +8,14 @@
 
 # ── 私有数据（本地知识库内容）──────────────────────────────────
 # 数据集根目录：英文/多语在 datasets/data_en，中文在 datasets/data_zh
-datasets/
+# 白名单用于 tests/test_parser.py 的 fixture（CI 必需），也是新用户克隆仓库后的 demo 样本。
+datasets/*
+!datasets/data_en/
+datasets/data_en/*
+!datasets/data_en/test/
+datasets/data_en/test/*
+!datasets/data_en/test/test_sample.*
+
 # ChromaDB 向量索引（自动生成）
 chroma_db/
 # BM25 倒排索引（自动生成，Iter-2）
