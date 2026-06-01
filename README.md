@@ -1,6 +1,6 @@
 # AgentA
 
-[![CI](https://img.shields.io/github/actions/workflow/status/michaelwangzhenan/AgentA/AgentA_CI.yml?branch=main&label=CI)](https://github.com/michaelwangzhenan/AgentA/actions/workflows/AgentA_CI.yml)
+[![CI](https://github.com/michaelwangzhenan/AgentA/actions/workflows/AgentA_CI.yml/badge.svg)](https://github.com/michaelwangzhenan/AgentA/actions/workflows/AgentA_CI.yml)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB)
 ![LLM Providers](https://img.shields.io/badge/LLM%20Providers-9-orange)
 ![Agent Loops](https://img.shields.io/badge/Agent%20Loops-3-blueviolet)
