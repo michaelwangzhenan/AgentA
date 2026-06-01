@@ -34,7 +34,7 @@ ubuntu runner **比 windows 便宜 10 倍**（私有仓库计费时 windows × 2
 
 | 步骤 | 预估时间 |
 |---|---|
-| 写 `.github/workflows/ci.yml`（下面给完整模板） | 10 分钟 |
+| 写 `.github/workflows/AgentA_CI.yml`（下面给完整模板） | 10 分钟 |
 | 仓库 Settings → Secrets 加 dummy 占位（仅 2 个非空 key 校验需要） | 5 分钟 |
 | push 后看 Actions 跑通、修红 | 15-30 分钟 |
 | 加 README badge + branch protection（可选） | 10 分钟 |
@@ -51,7 +51,7 @@ ubuntu runner **比 windows 便宜 10 倍**（私有仓库计费时 windows × 2
 |---|---|
 | `git push` 到任何分支 | runner 自动起一个 job，跑 fast UT |
 | 开 / 更新 PR | PR 页面底部出现 "checks" 区块，绿勾 = 通过、红叉 = 失败 |
-| 改了 `.github/workflows/ci.yml` 本身 | 同样按 push 触发，验证 workflow 自身可用 |
+| 改了 `.github/workflows/AgentA_CI.yml` 本身 | 同样按 push 触发，验证 workflow 自身可用 |
 | 手动 `workflow_dispatch` | 在 Actions tab 点 "Run workflow" 即可（用于重跑、改完不想 push 空 commit 时） |
 
 ## 2.2. 在哪看结果
@@ -77,10 +77,10 @@ CI 失败属于"红 → 修绿"的标准 loop，**没有线上事故压力**：
 
 ## 2.5. README 状态徽章（可选）
 
-在 README 顶部加一行：
+在 README 顶部加一行（`<owner>` 换成你的 GH 用户名；workflow 文件名跟 §3.3 选定的一致，本项目是 `AgentA_CI.yml`）：
 
 ```markdown
-![CI](https://github.com/<owner>/AgentA/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/<owner>/AgentA/actions/workflows/AgentA_CI.yml/badge.svg)
 ```
 
 效果：仓库首页就能看到当前 main 分支的 CI 是绿是红。
@@ -123,7 +123,7 @@ env:
 
 > 之所以不走 Secrets：Secrets 适合真敏感凭据；这里只要"非空字符串"，明文 dummy 反而让 CI 配置自洽、新人 fork 仓库也能直接跑。
 
-## 3.3. workflow 文件：`.github/workflows/ci.yml`
+## 3.3. workflow 文件：`.github/workflows/AgentA_CI.yml`
 
 完整可用版本，目录不存在要先建：
 
@@ -138,8 +138,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  ut:
-    name: fast UT
+  UT:
+    name: Fast UT
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -152,10 +152,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -169,8 +169,8 @@ jobs:
       - name: Run fast UT
         run: pytest -q
 
-  perf:
-    name: perf regression
+  PERF:
+    name: Performance Regression
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -183,10 +183,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -198,7 +198,6 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run perf_eval + grep gate
-        # perf_eval 自身不退非 0；靠 grep FAIL 把"判据失败"翻成 step fail
         run: |
           python -m tools.agent_eval.perf_eval --target all --sizes 100,1000
           if grep -l 'FAIL' tools/agent_eval/reports/perf-*.md; then
@@ -208,7 +207,7 @@ jobs:
 
       - name: Upload perf reports
         if: always()  # gate fail 时最需要报告
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: perf-reports
           path: tools/agent_eval/reports/perf-*.md
@@ -238,12 +237,14 @@ jobs:
 
 | # | 动作 | 验证方式 | 状态 |
 |---|---|---|---|
-| 1 | 新建 `.github/workflows/` 目录，写入 §3.3 的 `ci.yml` | 文件存在 | ✅ |
+| 1 | 新建 `.github/workflows/` 目录，写入 §3.3 的 `AgentA_CI.yml` | 文件存在 | ✅ |
 | 2 | commit + push 触发首跑 | GH Actions tab 看到 run 起来 | ✅ |
 | 3 | 修首跑暴露的 fixture 缺失：`tests/test_parser.py` 依赖的 6 个 `datasets/data_en/test/test_sample.*` 被 `.gitignore` 屏蔽，逐层放行加白名单（`.gitignore:14-20`） | `git check-ignore -v` 命中 `!datasets/data_en/test/test_sample.*` 这一行 | ✅ |
 | 4 | 再次 push，确认绿 | run 详情 `1057 passed, 3 skipped, 110 deselected`；首跑 3m10s（含 pip 装依赖 2m14s），后续 pip cache 命中可压到 1m 内 | ✅ |
 | 5 | README 顶部加 CI 状态 badge（替换 `**Badges(TBD)**` 占位） | 仓库主页 README 顶部显示绿底徽章 | ✅ |
-| 6 | `Settings → Branches → Add branch ruleset` 给 main 加规则：勾 "Require status checks to pass"，选 `fast UT` | 之后开 PR 时 ci 红则 merge 按钮变灰；裸 push 仍放行（这是个人项目刻意保留的弹性） | ⏳ 网页操作 |
+| 6 | 加 Perf regression 第二个 job 并行（`tools/agent_eval/perf_eval.py`）；emoji 判据 ✅/❌ 改 `PASS/FAIL` 文本 | 2 个 job 并行跑通；artifact 上传 `perf-reports` | ✅ |
+| 7 | 升级 actions 到 Node.js 24 runtime：`checkout@v4→v6` / `setup-python@v5→v6` / `upload-artifact@v4→v7`；GH deadline 2026-06-02 强制 | Annotations 区不再有 "Node.js 20 deprecated" warning | ✅ |
+| 8 | `Settings → Branches → Add branch ruleset` 给 main 加规则：勾 "Require status checks to pass"，选 `Fast UT`（`Performance Regression` 观察 1-2 周稳了再加） | 之后开 PR 时 ci 红则 merge 按钮变灰；裸 push 仍放行（这是个人项目刻意保留的弹性） | ⏳ 网页操作 |
 
 ## 3.6. 后续可叠加（不在本期）
 
@@ -274,7 +275,7 @@ workflow（一个 yml 文件）
 
 | 层级 | 数量关系 | 我们当前 |
 |---|---|---|
-| `.github/workflows/` 目录 | ≥ 1 个 yml 文件 | 1 个（`ci.yml`）|
+| `.github/workflows/` 目录 | ≥ 1 个 yml 文件 | 1 个（`AgentA_CI.yml`）|
 | 一个 yml = 一个 workflow | 内部 ≥ 1 个 job | 1 个 job (`test`) |
 | 一个 job | 内部 ≥ 1 个 step | 4 个 step（Checkout / Setup Python / Install deps / Run fast UT）|
 
@@ -373,7 +374,7 @@ jobs:
 
 ```yaml
 - name: Setup Python
-  uses: actions/setup-python@v5
+  uses: actions/setup-python@v6
   with:
     python-version: "3.11"
     cache: pip
@@ -384,7 +385,7 @@ jobs:
 | `uses:` | 调已发布 action，格式 `<owner>/<repo>@<version>` |
 | `with:` | 给 action 的入参（每个 action 自定义支持哪些参数，看 Marketplace 描述） |
 
-`actions/checkout@v4` 几乎是所有 workflow 第一步——runner 是干净虚拟机，不 checkout 没你的代码。
+`actions/checkout@v6` 几乎是所有 workflow 第一步——runner 是干净虚拟机，不 checkout 没你的代码。版本号选最新（v6 起 Node.js 24 runtime；旧版 v4 在 Node.js 20，2026-06-02 起 GH 强制告警）。
 
 **`run:` 型——跑 shell 命令**
 
@@ -428,7 +429,7 @@ jobs:
 
 ```
 .github/workflows/
-├── ci.yml          # 现状：push/PR 触发，跑 fast UT；后续叠 lint job 跟它一起跑
+├── AgentA_CI.yml   # 现状：push/PR 触发，跑 fast UT + perf regression；后续叠 lint job 跟它一起跑
 ├── nightly.yml     # 待加：cron 触发，跑 integration / extended_providers
 └── release.yml     # 待加：tag v* 触发，构建 chainlit 镜像 / 发版
 ```

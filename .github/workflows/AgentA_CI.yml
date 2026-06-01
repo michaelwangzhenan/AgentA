@@ -8,8 +8,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  ut:
-    name: fast UT
+  UT:
+    name: Fast UT
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -22,10 +22,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -39,8 +39,8 @@ jobs:
       - name: Run fast UT
         run: pytest -q
 
-  perf:
-    name: perf regression
+  PERF:
+    name: Performance Regression
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -53,10 +53,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -68,7 +68,6 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run perf_eval + grep gate
-        # perf_eval 自身不退非 0；靠 grep FAIL 把"判据失败"翻成 step fail
         run: |
           python -m tools.agent_eval.perf_eval --target all --sizes 100,1000
           if grep -l 'FAIL' tools/agent_eval/reports/perf-*.md; then
@@ -78,7 +77,7 @@ jobs:
 
       - name: Upload perf reports
         if: always()  # gate fail 时最需要报告
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: perf-reports
           path: tools/agent_eval/reports/perf-*.md
