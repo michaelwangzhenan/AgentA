@@ -1,6 +1,6 @@
 # AgentA
 
-**Badges(TBD)**
+[![CI](https://github.com/michaelwangzhenan/AgentA/actions/workflows/ci.yml/badge.svg)](https://github.com/michaelwangzhenan/AgentA/actions/workflows/ci.yml)
 
 一个从零实现的 **本地化私有知识库 Agent**，集成进阶 RAG 检索与 ReAct 工具调用循环，支持 CLI 与 WebUI 两种交互方式，可在 9 个国内外主流 LLM 之间切换。
 

@@ -46,7 +46,7 @@ Phase 1 性能基准（session + memory 合二为一）
     - render-list < 100ms          —— 分组 + 多行输出
 
 报告会同时落盘到 `tools/agent_eval/reports/perf-<target>-<timestamp>.md`，
-含元信息（时间 / git / python / provider）+ 测量表 + 判据自动评估（✅/❌），
+含元信息（时间 / git / python / provider）+ 测量表 + 判据自动评估（PASS/FAIL），
 便于人工浏览和阶段间对比。
 """
 
@@ -159,7 +159,7 @@ def _render_session_md(rows: list[dict], env: dict[str, str]) -> str:
     lines.append("| 判据 | 结果 | 说明 |")
     lines.append("|---|:-:|---|")
     for name, ok, note in checks:
-        lines.append(f"| {name} | {'✅' if ok else '❌'} | {note} |")
+        lines.append(f"| {name} | {'PASS' if ok else 'FAIL'} | {note} |")
     lines.append("")
     return "\n".join(lines)
 
@@ -206,7 +206,7 @@ def _render_memory_md(rows: list[dict], env: dict[str, str]) -> str:
     lines.append("| 判据 | 结果 | 说明 |")
     lines.append("|---|:-:|---|")
     for name, ok, note in checks:
-        lines.append(f"| {name} | {'✅' if ok else '❌'} | {note} |")
+        lines.append(f"| {name} | {'PASS' if ok else 'FAIL'} | {note} |")
     lines.append("")
     return "\n".join(lines)
 
@@ -259,7 +259,7 @@ def _bench_session_size(size: int) -> dict[str, float]:
 
 
 def _print_session_table(rows: list[dict]) -> None:
-    print("\n📊 [session] /sessions 性能基准（每个测量 5 次中位数）\n")
+    print("\n[session] /sessions 性能基准（每个测量 5 次中位数）\n")
     header = (
         f"{'size':>6}  {'no-filter':>11}  {'id-prefix':>11}  {'keyword':>11}  "
         f"{'limit=20':>11}  {'render-full':>13}  {'render-filt':>13}"
@@ -345,7 +345,7 @@ def _bench_memory_size(size: int) -> dict[str, float]:
 
 
 def _print_memory_table(rows: list[dict]) -> None:
-    print("\n📊 [memory] /memory 性能基准（每个测量 5 次中位数）\n")
+    print("\n[memory] /memory 性能基准（每个测量 5 次中位数）\n")
     header = (
         f"{'size':>6}  {'load_all':>11}  {'load_ctx':>11}  {'upsert':>11}  "
         f"{'update_val':>11}  {'render-list':>13}"
@@ -425,7 +425,7 @@ def main() -> None:
             _print_memory_table(rows)
         if not args.no_report:
             path = _dump_report(t, rows, env)
-            print(f"📁 报告已保存：{path}")
+            print(f"报告已保存：{path}")
 
 
 if __name__ == "__main__":
