@@ -4,38 +4,103 @@
 
 一个从零实现的 **本地化私有知识库 Agent**，集成进阶 RAG 检索与 ReAct 工具调用循环，支持 CLI 与 WebUI 两种交互方式，可在 9 个国内外主流 LLM 之间切换。
 
-**整体架构(TBD)**
+**整体架构**
 
+- 三层职责：表现层 / Agent Core / RAG
+- 两套接口：`AgentAPI` / `RetrieverAPI`
+- 四档可换/可扩展：LLM Provider / Embedding 模型 / Agent 实现 / Skill·Prompt·MCP loader
+```mermaid
+flowchart TB
+    subgraph PRESENT["表现层"]
+        direction LR
+        CLI["CLI"]
+        WEB["Web UI"]
+        SDK["SDK / 脚本"]
+    end
 
+    AAPI["AgentAPI<br/>run · activate_skill<br/>· set_event_callback"]
+
+    subgraph AGENT["Agent core"]
+        IMP["三种 Agent loop ⇄<br/>Python · LangChain<br/>AutoGPT"]
+        subgraph SHARED["公共层"]
+            direction LR
+            BASE["Tools · Memory<br/> · EventBus · Helpers"]
+            LLMP["LLM Provider ⇄<br/>国内 / 国外 / 本地"]
+            FILES["Skill / Prompt / MCP loader ⇄<br/>文件驱动 · 热更新"]
+        end
+        IMP --> SHARED
+    end
+
+    RAPI["RetrieverAPI<br/>search · expand_queries<br/>· format · warm_up"]
+
+    subgraph RAG_BOX["RAG"]
+        direction LR
+        ING["Ingest<br/>Parse → Clean<br/>Split → Index"]
+        EMB["Embedding 模型 ⇄<br/>en / zh / m3"]
+        IDX[("索引存储<br/>ChromaDB + BM25")]
+        RET["Retrieval<br/>多 query → 召回<br/>RRF → 阈值<br/>Rerank → 去重"]
+        ING --> EMB
+        EMB --> IDX
+        RET --> EMB
+    end
+
+    CLI --> AAPI
+    WEB --> AAPI
+    SDK --> AAPI
+    AAPI --> IMP
+    IMP -.->|Agent Event| PRESENT
+    SHARED --> RAPI
+    RAPI --> RET
+
+    classDef swappable stroke:#d97706,stroke-width:2px,stroke-dasharray:5 3
+    class IMP,LLMP,FILES,EMB swappable
+```
 
 ## 1.功能特性
 
 ### 1.1.RAG
 
-- **多模型 Embedding**：内置 `all-MiniLM-L6-v2`（英文）/ `bge-small-zh`（中文）/ `bge-m3`（多语言）三套别名，分库存储自动路由。
+- **多模型 Embedding**：内置 `all-MiniLM-L6-v2`（英文）/ `bge-small-zh`（中文）/ `bge-m3`（多语言）三套模型，分库存储自动路由。
 - **混合检索**：Dense 向量召回 + BM25 关键词召回，通过 **Reciprocal Rank Fusion** 融合排名，对术语/缩写/版本号场景显著优于纯向量。
 - **二阶段精排**：使用 `bge-reranker-base` Cross-Encoder 对召回结果做精排，并按 per-model 阈值过滤低质 chunk。
 - **Query 改写**：Multi-Query 同义改写、HyDE 假设性答案、跨语言翻译轴三档可独立开关。
 - **多格式解析**：覆盖 PDF / DOCX / PPTX / XLSX / Markdown / HTML / TXT 七种格式，PDF 扫描件自动 OCR 兜底（rapidocr-onnxruntime）。
 - **评估方法**：`tools/rag_eval/runner.py` 内置黄金集 + `hit@1，hit@3，hit@k` / `MRR` 指标，每次调优结果存储 Markdown 报告（含 Miss 用例诊断），便于跨轮 diff。
+- **召回可溯源**：RAG 回答正文带 `[n]` 标号 + 末尾 `— sources —` 块写明文件 / 章节 / 页号，同源 chunk 自动合并，编号受控防幻觉。
 
 ### 1.2.Agent
 
-- **手写 ReAct 循环**：原生 OpenAI Function Calling 协议，支持 `search_knowledge` / `web_search` / `fetch_url` 三件套工具，SPA 页面自动 fallback 到 Jina Reader。
-- **多 Provider 切换**：通过 `.env` 中 `LLM_PROVIDER` 一行切换 Kimi / Qwen / DeepSeek / GLM / MiniMax / Ollama / OpenAI / Grok / Claude，业务代码零改动。
-- **Extended Thinking**：支持 Claude / Qwen3 的深度思考模式，可手动设置 budget 或开启 Adaptive 模式按问题复杂度自动估算。
-- **跨 Session 记忆**：独立 SQLite 存储用户偏好/事实，可自动提取也可通过"记住这个"指令即时触发。
-- **项目偏好规则**：项目根放一份 `.agenta/rules.md`（参考 Cursor Rules / AGENTS.md），Agent 启动时自动注入到 system prompt，例如"始终用中文""引用要带页码"，不必每轮重申；可被会话中临时偏好覆写。
-- **答案带可溯源引用**：使用 RAG 召回时，正文带 `[1] [2]` 行内标号，回答末尾自动追加 `— sources —` 块写明文件 / 章节 / 页号，可直接溯源到知识库原文；同源 chunk 自动合并，反 LLM 幻觉引用。
-- **Skills 框架**：`.agenta/skills/<name>/SKILL.md` 兼容 agentskills.io 规范；启动 banner 显式回显已加载 / 失败列表，LLM 主动按 description 认出该用哪个 skill 并按指令执行（也支持 `/<name>` 手动激活），skill 内调 `search_knowledge` 自动复用引用机制。
-- **Plan-Execute 循环**：Agent 主动用 `make_plan` 把复杂任务拆成有序 step 再逐步执行，每步可调 tool 并 emit `plan_step_*` 事件；CLI 端 ☐/✓/✗/⏭ 实时勾选可见。
-- **学习计划长期跟踪**：跟 Agent 说"我想 8 周准备 ML 面试" → 自动拆阶段任务清单落库 SQLite，跨 session 可见 + LLM 自动注入 `<active_study_plan>` 到 system prompt；用 `/study` 命令列 / 切换 / 放弃多个 plan，task 进度更新走对话（"完成了第 3 题"）。
-- **Quiz 自检练习**：跟 Agent 说"考考我 RAG / 出 5 道 ML 题" → 用 `quiz-maker` skill 走 4 步嵌套（解析意图 / 查 KB / 60% MCQ + 40% 简答组题 / 落库），用户用一段自然语言批量作答 → MCQ 字符串比对 + 简答 LLM-judge 自动批改 + 反馈薄弱点；quiz 跨 session 留档复盘，可用 `/quiz` 命令查历史 / 看错题。
-- **SRS 主动复习**：用 SM-2 算法（Anki 1987 同款）按遗忘曲线调度卡片：测验错题一句"加 SRS"入队、用户也能手动加自定义卡（正面 + 背面）；之后说"今天复习" → Agent 用 `srs-review` skill 一张张带过 → 用户用 again / hard / good / easy 4 档自评 → 自动算下次回炉时间。卡片跨 session 持久化，可用 `/srs` 命令查队列 / 看统计。
-- **Harness 自检**：在两条容易飘的路径上多走一步 LLM-as-Judge 复审（`HARNESS_*` 配置默认开）—— 简答题批改完 critic 复审"给分跟答案语义匹配吗"，不达标就给该题打 ⚠️ 标记落库；RAG 召回拿到 chunks 后 critic 一次评 K 条相关性，把跟问题跑偏的 chunk 过滤掉再给 LLM 看。critic 超时 / 异常一律软放行不阻塞主流程；CLI `/quiz show` 自动渲染 ⚠️ 提示用户人工复核。
-- **MCP 接入（业界开放协议）**：作为 [Model Context Protocol](https://modelcontextprotocol.io) Host，写一份 `.agenta/mcp/config.json` 就能把官方 / 第三方 MCP server（如 `@modelcontextprotocol/server-filesystem` / `mcp-server-fetch`）暴露给 LLM 当 tool 调；**无需改 Python 代码**就能加新能力，且同一份 server 配置在 Cursor / Claude Desktop 也能复用。返回值统一过 `<untrusted_tool>` 标签包装 + injection 启发式清洗，与 RAG / web 同等安全待遇；SSRF 防御（`url_guard.py`）覆盖内置 `fetch_url` + MCP `fetch.fetch` 双入口。CLI `/mcp list` / `/mcp tools` 实时查 server 状态与 tool 清单。
-- **三套实现可选**：`PYTHON`（手写 ReAct，默认）/ `LANGCHAIN`（create_agent 驱动）/ `AUTOGPT`（Plan-Execute 双循环）。
+- **Agent 推理循环**：
+  - 简单任务使用 ReAct 模式
+  - 复杂任务升级为 Plan-Execute 多步执行
+  - 测验批改 / RAG 召回结果用 Harness 自检 + LLM-as-Judge 复审
+- **Context 管理**：
+  - 四层注入：
+    - SYSTEM_PROMPT 常量 + Skill catalog
+    - 用户偏好 `.agenta/rules.md`
+    - 跨 session 用户记忆
+    - 临时上下文：学习计划 / 工具调用 / 用户输入
+  - 防 prompt 注入：`<untrusted_tool>` 包装 + 启发式清洗 + plan 审批 + SSRF 防护
+- **Thinking 模式**：Extended Thinking 开关 + budget / Adaptive 两种策略可配。
+- **多模型切换**：内置 9 个国内/外 LLM provider，`.env` 一键切换。
+- **用户记忆**：跨 session 管理用户偏好与事实，自动节流提取。
+- **Skills 支持**：兼容 agentskills.io 规范，LLM 按 description 自动激活或 `/<name>` 手动调起。
+- **MCP 接入**：作为 [Model Context Protocol](https://modelcontextprotocol.io) Host，配置文件挂载第三方 server，零代码扩 tool。
+- **业务功能**（学习/研究助理）：
+  - 创建学习计划：根据用户目标制定，可跨 session 注入 prompt
+  - 出题练习：基于知识库自动出 MCQ（多选题）+ 简答题
+  - 测试批改：作答后自动批改 + 跨 session 留档复盘
+  - 主动复习：按遗忘曲线调度卡片，提示复习，用户自评
 
+### 1.3 用户界面
+CLI
+WebUI
+
+
+### 1.4 三套实现
+PYTHON
+LANGCHAIN
+AUTOGPT
 
 ## 2.快速开始
 
@@ -106,7 +171,11 @@ RAG_QUERY_REWRITE_ENABLED=true    # Multi-Query 同义改写
 IMP_METHOD=PYTHON                 # PYTHON / LANGCHAIN / AUTOGPT
 THINKING_ENABLED=true             # Extended Thinking（Claude / Qwen3）
 USER_MEMORY_ENABLED=true          # 跨 session 用户记忆
-
+USER_RULES_ENABLED=true           # 项目级偏好 .agenta/rules.md 注入
+PLAN_PERMISSION_MODE=false        # plan 执行前是否需要用户审批
+HARNESS_QUIZ_ENABLED=true         # 测验批改 LLM-as-Judge 复审
+HARNESS_RAG_ENABLED=true          # RAG 召回 chunks 相关性过滤
+MCP_ENABLED=true                  # 启用 MCP 接入（.agenta/mcp/config.json）
 ```
 
 ## 4.实用工具
@@ -169,5 +238,107 @@ bash tools/ut.sh -all        # 全部case
 ```powershell
 .\tools\ui_debug.ps1                 # 默认 8000 端口
 .\tools\ui_debug.ps1 -Port 8080      # 自定义端口
+```
+
+### 4.6.Agent 评估
+
+Phase 1.2~3.3 引入的 Agent 能力各自带独立评估脚本，报告统一落到 `tools/agent_eval/reports/`，命名约定 `<feature>-<YYYYMMDD-HHMMSS>.md`。
+
+#### 4.6.1.Memory 召回
+
+`tools/agent_eval/memory/recall_golden.py` 把 case 里的"已有记忆 / 项目 rules / RAG 引用"灌入 system prompt，调真实 LLM 后用关键词检查回答是否遵循偏好。
+
+```bash
+python -m tools.agent_eval.memory.recall_golden                              # 跑全部
+python -m tools.agent_eval.memory.recall_golden --case M01-lang-zh           # 单 case
+python -m tools.agent_eval.memory.recall_golden --no-report                  # 不落盘
+```
+
+#### 4.6.2.Skills 激活识别
+
+`tools/agent_eval/skills/recall_skill.py` 验证 LLM 看到 skill catalog 后能否**主动**调对 `load_skill(name=…)`（positive 调对 / negative 不调）。
+
+```bash
+python -m tools.agent_eval.skills.recall_skill                              # 跑全部
+python -m tools.agent_eval.skills.recall_skill --case S01-positive-planner  # 单 case
+```
+
+#### 4.6.3.Plan-Execute 识别 + 结构
+
+`tools/agent_eval/plan/eval_plan.py` 评 LLM 对复杂任务是否调 `make_plan`、对简单任务是否不调；通过 case 再用 LLM-judge 打 plan 结构分。
+
+```bash
+python -m tools.agent_eval.plan.eval_plan                              # 跑全部
+python -m tools.agent_eval.plan.eval_plan --case P01-positive-...      # 单 case
+python -m tools.agent_eval.plan.eval_plan --no-judge                   # 不调 LLM-judge
+```
+
+#### 4.6.4.学习计划业务
+
+`tools/agent_eval/plan_business/eval_learning_plan.py` 评 LLM 看到学习目标后是否调对 `make_plan` / `create_study_plan` 落库 tool，并对 plan steps 评质量分。
+
+```bash
+python -m tools.agent_eval.plan_business.eval_learning_plan
+python -m tools.agent_eval.plan_business.eval_learning_plan --case L01-create-ml-8w
+python -m tools.agent_eval.plan_business.eval_learning_plan --no-judge
+```
+
+#### 4.6.5.Quiz 出题 / 批改
+
+`tools/agent_eval/quiz/eval_quiz.py` 评 LLM 看到出题 / 查历史需求时是否调对 `make_plan` / `create_quiz` / `query_quiz_history`，并对 plan 评质量分。
+
+```bash
+python -m tools.agent_eval.quiz.eval_quiz
+python -m tools.agent_eval.quiz.eval_quiz --case Q01-create-rag
+python -m tools.agent_eval.quiz.eval_quiz --no-judge
+```
+
+#### 4.6.6.SRS 调度触发
+
+`tools/agent_eval/srs/eval_srs.py` 评 LLM 看到 due / add / review 三类输入时是否调对 SRS 四 tool；SM-2 算法本身由 UT 保。
+
+```bash
+python -m tools.agent_eval.srs.eval_srs
+python -m tools.agent_eval.srs.eval_srs --case S01-due-today
+```
+
+#### 4.6.7.Harness 自检准确率
+
+`tools/agent_eval/harness/eval_harness.py` 评 critic 自身判得准不准 —— 给定 (input, expected verdict) 比对 quiz_critic / rag_critic 实际判定。
+
+```bash
+python -m tools.agent_eval.harness.eval_harness
+python -m tools.agent_eval.harness.eval_harness --case Q01-correct-grading-passes
+```
+
+#### 4.6.8.MCP 接入
+
+`tools/agent_eval/mcp/eval_mcp.py` 跑 MCP client 完整链路（配置 → server 启动 → tool 合流 → LLM 调用 → SSRF 拦截），对照 7 条验收标准。
+
+```bash
+python -m tools.agent_eval.mcp.eval_mcp                                          # 跑全部
+python -m tools.agent_eval.mcp.eval_mcp --no-llm                                 # 仅 structural（不烧 LLM 配额）
+python -m tools.agent_eval.mcp.eval_mcp --case C6-ssrf-defense-blocks-internal   # 单 case
+```
+
+#### 4.6.9.安全 / 防注入
+
+`tools/agent_eval/security/adversarial.py` 跑直接越狱 / RAG 间接 / web 间接 / tool 名单门 四类攻击 case，统计拦截率（≥ 90%）+ 误拦率（≤ 10%）。
+
+```bash
+python -m tools.agent_eval.security.adversarial                              # 跑全部
+python -m tools.agent_eval.security.adversarial --kind direct                # 仅一类
+python -m tools.agent_eval.security.adversarial --no-llm                     # 仅 tool_blocklist 类（不烧 LLM 配额）
+```
+
+#### 4.6.10.性能基准
+
+`tools/agent_eval/perf_eval.py` 跑 session 列出 / 搜索 + memory 列出 / 查询 在 10/100/1000/5000 数据档位下的延迟基准（中位数 ms）。
+
+```bash
+python -m tools.agent_eval.perf_eval                              # session 基准
+python -m tools.agent_eval.perf_eval --target memory              # memory 基准
+python -m tools.agent_eval.perf_eval --target all                 # 全部
+python -m tools.agent_eval.perf_eval --sizes 100,1000,5000        # 自定义档位
 ```
 
