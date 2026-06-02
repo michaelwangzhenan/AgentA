@@ -157,7 +157,7 @@ class ToolCallEngine:
             live_msg: dict[str, Any] = {**db_msg, "content": llm_content}
             messages.append(live_msg)
 
-            # Phase 2.1：plan tool 调用成功后叠加发 plan_* 事件，供 CLI / Chainlit
+            # Phase 2.1：plan tool 调用成功后叠加发 plan_* 事件，供 CLI
             # 渲染 plan checkbox 进度。reconstruct_from_messages 此时 messages
             # 已含本轮 assistant tool_calls（line 81），所以 update_step 状态
             # 即得最新 plan 视图。

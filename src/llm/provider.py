@@ -96,7 +96,7 @@ def chat(
         # 所有 tool_call delta 的 function.name 字段一律为 None（args 拼接正常），导致
         # ToolCallEngine 报"未知工具：''"循环失败。非流式模式则返回完整 name。
         # 因此：传 tools 时禁用 streaming，一次性拿完整 message；之后把 content 通过
-        # on_token_chunk 一次性回灌，保持 CLI / Chainlit 渲染入口一致。
+        # on_token_chunk 一次性回灌，保持 CLI 渲染入口一致。
         if tools:
             response = _openai_call(
                 provider_config,

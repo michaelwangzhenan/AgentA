@@ -11,7 +11,7 @@ autouse fixture：将 Agent 共享内存替换为每个测试独立的临时 SQL
     必须先 load_dotenv() 再 import src.* —— src.config 在 import 时即读取
     os.getenv()，否则 PROVIDER_CONFIGS 中的 api_key 全为空字符串，会让
     test_provider_api_key_not_empty / test_get_active_config_returns_provider_config
-    等"配置存在性"测试统一 fail。与 main.py / chainlit_app.py 同源行为。
+    等"配置存在性"测试统一 fail。与 main.py 同源行为。
 """
 from dotenv import load_dotenv
 load_dotenv(override=True)

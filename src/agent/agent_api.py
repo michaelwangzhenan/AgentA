@@ -2,7 +2,7 @@
 AgentAPI —— 表现层 ↔ Agent core 的对外契约（design.md §1.3 / §3.1）
 
 设计意图：
-- 表现层（CLI / Chainlit / 未来 Web UI / SDK）调用 Agent 只依赖本契约
+- 表现层（CLI / 未来 Web UI / SDK）调用 Agent 只依赖本契约
 - 三种 Agent 实现（Python / LangChain / AutoGPT）通过 duck typing 都满足此 Protocol
 - 任一实现破坏契约会在 `tests/test_agent_protocol.py` 的 `isinstance` 断言上 CI 红出来
 - 用 `typing.Protocol + runtime_checkable` 而非抽象基类 —— 三种 Agent 是并列实现,

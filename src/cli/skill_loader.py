@@ -21,7 +21,7 @@ MAX_SCAN_DEPTH = 4
 _SKIP_DIRS = frozenset({".git", "node_modules", "__pycache__", ".venv", "venv"})
 
 # 约定路径（相对项目根；不是 .env 可覆盖配置 — 单用户 CLI 场景没必要做成配置项）。
-# 调用方既可不传（默认用本路径，main.py / chainlit_app.py 等启动入口走该分支），
+# 调用方既可不传（默认用本路径，main.py 等启动入口走该分支），
 # 也可显式传绝对路径（评估脚本可能从任意 cwd 启动 — 见 recall_skill.py）。
 DEFAULT_SKILLS_DIR = Path(".agenta/skills")
 

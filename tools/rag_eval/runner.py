@@ -64,7 +64,7 @@ load_dotenv(override=True)
 # 评估期间彻底静音第三方进度条 / 下载条，避免 "Batches: 100%|##########|" 之类刷屏。
 # 这一段必须在 import sentence_transformers / huggingface_hub / chromadb 之前生效。
 # 仅 monkey-patch 当前进程的 tqdm 类，不修改任何 src/* 产品代码 ——
-# main.py / chainlit / ingestion 等其他入口照旧能看到自己的进度条。
+# main.py / ingestion 等其他入口照旧能看到自己的进度条。
 # ---------------------------------------------------------------------------
 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")

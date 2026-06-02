@@ -1,6 +1,14 @@
-# 1. Bi-Encoder vs Cross-Encoder
+# 1. CRUD
+CRUD = **Create / Read / Update / Delete**，数据存储最基础的 4 个操作，对应 SQL 里就是 `INSERT / SELECT / UPDATE / DELETE`。
 
-## 1.1. 编码方式
+说一个东西"只做 CRUD"，意思是它**只管把数据存进去、取出来、改、删**，不参与任何业务判断。
+
+- `ChatHistoryStore` 只做 CRUD → 给我一条 message 我存下来、给我 session_id 我返回最近 N 条，**不关心** "这是不是 skill 触发的轮、要不要保护成对、要不要截断"。
+- `HistoryManager` 才管这些"要不要、怎么截"的业务策略，背后调 `ChatHistoryStore` 的 CRUD 拿数据。
+- 
+# 2. Bi-Encoder vs Cross-Encoder
+
+## 2.1. 编码方式
 
 **Bi-Encoder（分开编码）：**
 ```
@@ -20,7 +28,7 @@ Chunk 向量可以**提前全部算好存库**，检索时只算一次 Query 向
 Query 和 Chunk 拼在一起送入 Transformer，两边 token 充分交互，模型能捕捉到
 "这个词在 Query 里是什么语境、对应 Chunk 里哪句话回应了它"——精度高，但慢。
 
-## 1.2. 对比
+## 2.2. 对比
 
 | | Bi-Encoder | Cross-Encoder |
 |--|--|--|
@@ -28,7 +36,7 @@ Query 和 Chunk 拼在一起送入 Transformer，两边 token 充分交互，模
 | 精度 | 较低（两边无词级交互） | 高（两边 token 互相 attend） |
 | 用途 | **召回**（从海量文档快速捞候选） | **精排**（对少量候选重新打分） |
 
-## 1.3. 在 RAG 里的分工
+## 2.3. 在 RAG 里的分工
 
 ```
 用户 Query
@@ -44,9 +52,9 @@ Cross-Encoder 精排  →  最终 top-K（慢但准）
 **Bi-Encoder 负责"海里捞鱼"，Cross-Encoder 负责"鱼里挑好的"。**
 
 
-# 2. BGE
+# 3. BGE
 
-## 2.1. 是什么
+## 3.1. 是什么
 
 **BGE** = **B**AAI **G**eneral **E**mbedding，智源研究院（Beijing Academy of Artificial Intelligence, BAAI）开源的嵌入模型家族。
 覆盖两类：
@@ -56,7 +64,7 @@ Cross-Encoder 精排  →  最终 top-K（慢但准）
 
 是 MTEB（Massive Text Embedding Benchmark）中英文榜单长期前列的开源 SOTA 之一。
 
-## 2.2. 模型谱系
+## 3.2. 模型谱系
 
 | 模型 | 用途 | 维度 / 大小 | 语种 |
 |---|---|---|---|
@@ -67,7 +75,7 @@ Cross-Encoder 精排  →  最终 top-K（慢但准）
 | `bge-reranker-base` | Cross-Encoder 精排 | ~1.1GB | 中英双语 |
 | `bge-reranker-v2-m3` | Cross-Encoder 精排 | 更大 | 多语种最佳 |
 
-## 2.3. 本项目用到哪些
+## 3.3. 本项目用到哪些
 
 | .env 配置 | 别名 | 实际模型 |
 |---|---|---|
@@ -77,7 +85,7 @@ Cross-Encoder 精排  →  最终 top-K（慢但准）
 
 > 英文别名 `en` 走的是 MiniLM（all-MiniLM-L6-v2，微软开源轻量英文 / 多语，384 维 / ~90MB），不是 BGE。
 
-## 2.4. 易踩坑：非对称 query prefix
+## 3.4. 易踩坑：非对称 query prefix
 
 BGE 早期版本（v1.0）训练时 query 和 doc 不对称，**query 必须加专属 prefix** 否则相似度对不齐：
 
@@ -89,7 +97,7 @@ doc 端原样不动
 
 **v1.5 和 m3 已修复对称性，不再需要 prefix**。本项目在 `src/rag/retriever.py:42-57` 按模型名自动判断是否注入 prefix，调用方无感知。
 
-## 2.5. 为什么选 BGE
+## 3.5. 为什么选 BGE
 
 - **本地可跑** · 免费 · 无需 API Key（不像 OpenAI text-embedding-3）
 - **中文场景质量 ≥ 商用闭源**（MTEB-zh 长期前列）
@@ -97,13 +105,6 @@ doc 端原样不动
 - **bge-m3 单模型覆盖中英**，省一份库
 
 
-# 3. CRUD
-CRUD = **Create / Read / Update / Delete**，数据存储最基础的 4 个操作，对应 SQL 里就是 `INSERT / SELECT / UPDATE / DELETE`。
-
-说一个东西"只做 CRUD"，意思是它**只管把数据存进去、取出来、改、删**，不参与任何业务判断。
-
-- `ChatHistoryStore` 只做 CRUD → 给我一条 message 我存下来、给我 session_id 我返回最近 N 条，**不关心** "这是不是 skill 触发的轮、要不要保护成对、要不要截断"。
-- `HistoryManager` 才管这些"要不要、怎么截"的业务策略，背后调 `ChatHistoryStore` 的 CRUD 拿数据。
 
 # 4. Skills
 
@@ -1013,10 +1014,60 @@ npx -y cowsay hello     → 首次会下载 cowsay 包并打印 ASCII 牛；验�
 | **公司组策略禁 PowerShell 脚本** | fnm 安装脚本跑不起来 | 用 winget 或 zip portable 路径 |
 | **Git Bash 跑 `npx` 报 `command not found`，但 PowerShell 能跑** | 用 PowerShell 的 `[Environment]::SetEnvironmentVariable(..., "User")` 写入的是**Windows 用户级 PATH**（注册表 `HKCU\Environment\Path`）。PowerShell / cmd 启动时自动合并，但 **Git Bash (MINGW64) 的启动 PATH 加载机制独立**，不保证读 Windows User PATH；且改 PATH 前已开着的 Git Bash 进程不会自动刷新 | 重启整个 IDE（Cursor / VSCode）让所有内嵌终端继承新的用户环境（重启单个终端窗口不一定够）；或在 `~/.bashrc` 显式 `export PATH="/c/path/to/node:$PATH"`（注意 `/c/...` 风格 + `:` 分隔）|
 
+# 9. Node.js Vs Next.js
+
+名字像兄弟，实际是**两层关系**：Next.js 跑在 Node.js 上。一个是框架（在机器上搭网站用的项目模板），一个是运行时（机器），Next.js 是基于 React 的框架，React 是基于 JavaScript 的库。
+
+```mermaid
+flowchart TB
+    subgraph Node["Node.js 运行时（基于 V8 引擎，装完自带 npm / npx）"]
+        direction LR
+        Next["Next.js<br/>全栈 Web 框架<br/>(内含 React 作为 UI 库)"]
+        MCP["MCP server<br/>(AgentA 用)"]
+        Other["其他 Node 应用<br/>Electron / prettier <br/>/ eslint ..."]
+    end
+
+    Browser["浏览器<br/>(打开 Next.js 生成的页面)"]
+    AgentA["AgentA<br/>(Python 主程序)"]
+
+    Next -. 输出页面 .-> Browser
+    AgentA -. stdio 调用 .-> MCP
+
+    style Node fill:#90EE90,stroke:#2E8B57,stroke-width:2px
+    style Next fill:#87CEEB,stroke:#1E90FF,stroke-width:2px
+    style MCP fill:#FFD700,stroke:#DAA520
+    style AgentA fill:#FFB6C1,stroke:#DC143C
+```
+
+读图规则（图里只有两种视觉元素）：
+
+- **大框包小框** = **内层跑在外层里**。绿色大框是 Node.js 运行时，里面的 Next.js / MCP server / 其他 Node 应用都跑在 Node 上
+- **虚线箭头** = **运行时的数据流 / 调用**。Next.js 把生成的页面送到浏览器；AgentA 通过 stdio 调 MCP server
+- **AgentA 在绿框外**：它是 Python 程序，本身不依赖 Node，只通过 MCP server 这一层间接接触 Node 生态；跟 Next.js 完全没关系
+
+| 维度 | Node.js | Next.js |
+|---|---|---|
+| 是什么 | JavaScript / TypeScript **运行时**（V8 引擎封装） | 基于 React 的**全栈 Web 框架**（Vercel 出品）|
+| 解决什么问题 | 让 JS 能在浏览器外跑：后端服务 / CLI(Command Line Interface, 命令行) 工具 / 桌面应用 | 拿 React 写网页，自带路由 / SSR(Server-Side Rendering, 服务端渲染) / API routes / 构建流水线 |
+| 装在哪 | 系统 / 用户级：装完多出 `node` / `npm` / `npx` 命令 | 项目级依赖：用 `npx create-next-app` 起步 |
+| 谁依赖谁 | 不依赖 Next | **必须有 Node 才能跑** |
+| Python 类比 | Python 解释器 | Django / FastAPI |
+| 跟本项目关系 | 跑 MCP server 必备（详 [§8.12](#812-受限环境无管理员权限的-nodejs-部署策略)）| 不直接相关，仅写 Web UI 时才用 |
+
+**一句话辨别**：
+
+- 命令行能跑 `node --version` 出现 `v22.x` 的 → **Node.js**（运行时）
+- 项目里有 `next.config.js` / `app/` / `pages/` 目录的 → **Next.js 项目**（业务代码）
+
+**AgentA 跟它俩的关系**：
+
+- **Node.js**：肯定要装。当前用于 MCP server（详 [§8.12](#812-受限环境无管理员权限的-nodejs-部署策略)）；后续 Web UI 不管选哪条路线，构建工具链（Vite / Next.js）都靠 Node 跑
+- **Next.js**：未定。新 Web UI 选型在 `Vite + React + shadcn/ui` 和 `Next.js + shadcn/ui` 之间二选一，详 [iter_4_UI.md](./iter_4_UI.md)
+
 ---
 
 
-# 9. 缩写
+# 10. 附录1. 缩写
 | 缩写 | 全称 | 含义 |
 |---|---|---|
 | **KB** | Knowledge Base | 知识库（向量库 + 关键词索引）|

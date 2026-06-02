@@ -15,7 +15,6 @@ httpx
 
 # CLI Tab completion
 prompt_toolkit
-chainlit
 
 # Document parsers
 pypdf

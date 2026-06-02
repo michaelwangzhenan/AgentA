@@ -337,8 +337,8 @@ class Agent:
         self._user_memory: UserMemoryStore | None = (
             user_memory if user_memory is not None else _get_shared_user_memory()
         )
-        # Phase 3.2 plan 用户审批 mode：CLI / Chainlit 等 UI 端通过此回调挂自身交互逻辑
-        # （CLI 走 input(), Chainlit 走 cl.AskUserMessage）；callback 应返 "yes"/"no"
+        # Phase 3.2 plan 用户审批 mode：CLI 等 UI 端通过此回调挂自身交互逻辑
+        # （CLI 走 input()）；callback 应返 "yes"/"no"
         self.approval_callback: Callable[[dict[str, Any]], str] | None = approval_callback
 
     def request_plan_approval(self, plan_payload: dict[str, Any]) -> str:
@@ -365,7 +365,7 @@ class Agent:
         return (answer or "").strip().lower() or "yes"
 
     def _on_thinking_chunk(self, chunk: str) -> None:
-        """思考过程流式回调，统一 publish 到 EventBus；订阅者负责渲染（CLI → handlers.py，Chainlit → chainlit_app.py）。"""
+        """思考过程流式回调，统一 publish 到 EventBus；订阅者负责渲染（CLI → handlers.py）。"""
         self.events.publish(AgentEvent(type=EVENT_THINKING_CHUNK, payload={"text": chunk}))
 
     def _on_token_chunk(self, chunk: str) -> None:
@@ -529,7 +529,7 @@ class Agent:
                 used_nums = citation_builder.extract_used(final_answer)
                 sources_block = citation_builder.render(used_nums)
                 if sources_block:
-                    # 把 sources 块也作为 token_chunk emit，让 CLI / Chainlit
+                    # 把 sources 块也作为 token_chunk emit，让 CLI
                     # 等流式 UI 能在正文 token 流完后继续渲染 sources 块；非流式
                     # UI（EventBus 无 TOKEN_CHUNK 订阅者）这次 publish 静默无副作用
                     self._on_token_chunk(sources_block)

@@ -34,7 +34,7 @@ CLI 用法（三个原语：读 / 写 / 抹）：
               想做"全量重建"就：clear → ingest，两步显式。
 
 设计说明：
-    - sidecar JSON 仅在本脚本读写，src/rag 产品代码不感知。换言之 main.py / chainlit_app.py 跑起来
+    - sidecar JSON 仅在本脚本读写，src/rag 产品代码不感知。换言之 main.py 跑起来
       不依赖也不读这份元数据，纯运维巡检用，删掉也不影响 RAG 工作。
     - 不同 embedding 维度不可混用同一 collection；切换模型只需换 alias，自动落不同 collection。
     - HuggingFace 模型未本地缓存时，ingest 会触发首次下载（建议先跑 download_models.py）。
@@ -482,7 +482,7 @@ def _nuke_chroma_root(chroma_root: Path | None = None) -> tuple[bool, Path]:
         return True, chroma_root
     except OSError as e:
         logger.warning(
-            "rm -rf %s 失败: %s（如有 main.py / chainlit 等进程占用，请先关闭再重试）",
+            "rm -rf %s 失败: %s（如有 main.py 等进程占用，请先关闭再重试）",
             chroma_root, e,
         )
         return False, chroma_root
