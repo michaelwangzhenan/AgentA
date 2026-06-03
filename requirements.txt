@@ -48,5 +48,8 @@ langchain
 langchain-openai
 langchain-anthropic
 
+# MCP (Model Context Protocol) host SDK（src/agent/core/mcp_manager.py）
+mcp
+
 # Testing
 pytest
