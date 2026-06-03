@@ -1695,7 +1695,7 @@ AgentA/                              # 项目根
 
 **人工验收步骤**：
 
-1. 终端 1：`uvicorn src.api.main:app --reload --port 8000` —— 看到 `Uvicorn running on http://0.0.0.0:8000`
+1. 终端 1：`.\.venv\Scripts\python -m uvicorn src.api.main:app --reload --reload-dir src --port 8000` —— 看到 `Will watch for changes in these directories: ['...\src']` + `Uvicorn running on http://127.0.0.1:8000`。`--reload-dir src` 限制只盯 Python 源码（不加的话默认 watch 项目根，改前端 / 文档也会误触发后端重启）
 2. 浏览器开 `http://localhost:8000/docs` —— 看到 Swagger UI，有 `GET /api/health` 端点；点 `Try it out` → `Execute`，返回 200 + `{"ok": true, "version": "..."}`
 3. 终端 2：`cd frontend && npm install`（首次）→ `npm run dev` —— 看到 `Local: http://localhost:5173/`
 4. 浏览器开 `http://localhost:5173` —— 页面显示 `API health: OK ✓`（或类似字样）

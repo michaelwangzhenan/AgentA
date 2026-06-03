@@ -75,6 +75,12 @@ dist/
 *.swp
 *.swo
 
+# ── 前端项目（frontend/）─────────────────────────────────────
+# frontend/.gitignore 已覆盖；此处作为兜底，防止顶级误提交
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
 # ── 操作系统 ───────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
