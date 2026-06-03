@@ -52,6 +52,7 @@ mcp
 fastapi
 uvicorn[standard]
 python-multipart
+sse-starlette
 
 # Testing
 pytest

@@ -13,10 +13,50 @@ from collections.abc import Callable
 from typing import Any
 
 import json
+import logging
+
 import httpx
 import openai
 
 import src.config as config
+
+logger = logging.getLogger(__name__)
+
+
+# ─── provider quirk: streaming chunk echo 剥离 ──────────────────────────
+# 现象：GLM（及部分 OpenAI 兼容 provider）在"非流式 + content + tool_call 混合返回"
+# 场景下，偶发把整段 streaming chunk 的 raw JSON 拼到 message.content 末尾（含
+# `{"index":N,"finish_reason":...,"delta":{...,"tool_calls":[...]}}` 结构），
+# 污染下游渲染（CLI 流式打字 / Web SSE 都会原样把这段 JSON 当正文打出）。
+# 这里在 provider 出口做一道 sanity strip：识别合法 JSON 块且含 chunk 标志字段
+# (`finish_reason` / `delta`) 才剥离，避免误伤正常含 JSON 的回答。
+_CHUNK_ECHO_START = '{"index":'
+_CHUNK_ECHO_MARKERS = ('"finish_reason"', '"delta"')
+
+
+def _strip_provider_chunk_echo(content: str) -> str:
+    """剥离 provider 在 message.content 内 echo 的 streaming chunk raw JSON。
+
+    用 json.JSONDecoder.raw_decode 找合法 JSON 块；命中 chunk 标志字段才剥离；
+    递归处理可能的多段污染。
+    """
+    if not content or _CHUNK_ECHO_START not in content:
+        return content
+    idx = content.find(_CHUNK_ECHO_START)
+    decoder = json.JSONDecoder()
+    try:
+        _, end = decoder.raw_decode(content, idx)
+    except json.JSONDecodeError:
+        return content
+    sample = content[idx:end]
+    if not any(m in sample for m in _CHUNK_ECHO_MARKERS):
+        return content
+    cleaned = (content[:idx] + content[end:]).rstrip()
+    logger.warning(
+        "[provider] 剥离 %d 字符 raw chunk echo（provider=%s）",
+        end - idx, config.ACTIVE_PROVIDER,
+    )
+    return _strip_provider_chunk_echo(cleaned)
 
 
 def _openai_call(
@@ -92,11 +132,12 @@ def chat(
     need_proxy = config.ACTIVE_PROVIDER in config.PROXIED_PROVIDERS and bool(config.LLM_PROXY)
 
     if on_token_chunk is not None:
-        # 工作绕道：qwen 在 streaming 模式下，当 LLM 同时输出 content + tool_call 时，
-        # 所有 tool_call delta 的 function.name 字段一律为 None（args 拼接正常），导致
-        # ToolCallEngine 报"未知工具：''"循环失败。非流式模式则返回完整 name。
-        # 因此：传 tools 时禁用 streaming，一次性拿完整 message；之后把 content 通过
-        # on_token_chunk 一次性回灌，保持 CLI 渲染入口一致。
+        # 工作绕道：qwen / glm 等 OpenAI 兼容 provider 在 streaming + tool_call
+        # 同时存在时存在 quirk（qwen: tool_call delta 的 function.name 一律为
+        # None；glm: content 字段会 echo tool 调用伪文本 + Agent loop 死循环），
+        # 故传 tools 时一律禁用 streaming，一次性拿完整 message 后通过
+        # on_token_chunk 回灌。代价是非流式打字感；待 "真流式优化" 专项再分
+        # provider 逐个验证后放开
         if tools:
             response = _openai_call(
                 provider_config,
@@ -105,8 +146,12 @@ def chat(
             )
             try:
                 msg_content = response.choices[0].message.content or ""
+                msg_content = _strip_provider_chunk_echo(msg_content)
                 if msg_content:
                     on_token_chunk(msg_content)
+                    # 把剥离后的干净 content 也同步回 response，避免 Agent 把
+                    # 污染数据继续写进 chat_history（影响后续多轮 + 持久化）
+                    response.choices[0].message.content = msg_content
             except Exception:
                 pass
             return response

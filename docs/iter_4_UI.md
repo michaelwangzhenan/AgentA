@@ -1794,7 +1794,131 @@ AgentA/                              # 项目根
 
 ### 6.4.3 Step 2 - 流式输出 + Agent 状态
 
-> 留待 Step 1 完成后展开。
+**目标**：把 Step 1 的"等几秒一次性返回"改成**实时打字流**，并把 Agent 内部的 `thinking` / `plan` / `tool` 三类过程信号也推到前端可视化。完成后体验对齐 ChatGPT / Claude 网页版。
+
+**本 Step 不做**：
+
+| 项 | 留给 |
+|---|---|
+| 真正中止正在跑的 Agent（前端只断流，后端继续跑完） | Step 6 / 后续 |
+| Session 列表 / 切换 / 历史持久化 | Step 3 |
+| 暗色模式 / 错误 toast / 重试按钮 | Step 6 |
+| Citation / 引用渲染 | Step 5 |
+
+**对接现有代码的策略**：
+
+- 复用 `agent.set_event_callback(fn)` —— Step 1 的单例 Agent 直接订阅事件 → SSE 推给前端
+- **Agent core 一行不动**：[`EventBus`](../src/agent/core/event_bus.py) 已就位，10 种事件 + payload schema 早已稳定，参 [`src/agent/agent.py`](../src/agent/agent.py) 各 `publish(AgentEvent(...))` 点
+- 流式协议用 **SSE（Server-Sent Events）**，不上 WebSocket：单向流足够、HTTP 兼容、免握手
+
+**Agent 事件 → SSE 帧映射**（按 [`event_bus.py`](../src/agent/core/event_bus.py) 现有 10 种）：
+
+| 事件类型 | payload schema（实证） | 前端怎么渲染 |
+|---|---|---|
+| `thinking_chunk` | `{"text": str}` | 累加到当前消息的 `ThinkingBlock`（默认折叠，仅显示 header） |
+| `token_chunk` | `{"text": str}` | 累加到当前消息正文 markdown 区 |
+| `tool_call_start` | `{"name": str, "args": dict, "call_id": str}` | 在正文上方插一张 `ToolBlock` 卡片（默认折叠，仅显示 `🔧 name`） |
+| `tool_call_end` | `{"call_id": str, "status": str, "preview": str}` | 找到对应 `call_id` 的卡片，置 status + preview |
+| `plan_created` | `{"steps": [{"id": int, "text": str}, ...], ...}` | 渲染 `PlanBlock` checklist |
+| `plan_step_start` | `{"step_id": int, "text": str}` | 高亮该步为"进行中"（⏳） |
+| `plan_step_end` | `{"step_id": int, "status": str, "note": str}` | 该步标 ✓ / ✗ / ⏭ |
+| `final_answer` | `{"text": str, "usage": ..., "aborted_by_user"?: bool}` | 收到即关流；用作"流结束"信号；正文 fallback（若 token_chunk 累加结果跟 text 不一致就以 text 为准） |
+| `error` | `{"message": str, "recoverable": bool, "phase": str}` | 红字插在消息底部；不一定关流（后续可能仍有 final_answer 兜底） |
+| `info` | `{"message": str, ...}` | 调试用，本 Step 不渲染（开发者 Network tab 看即可） |
+
+**关键决策**：
+
+| 决策点 | 选择 | 理由 |
+|---|---|---|
+| 流式协议 | SSE | 单向流足够；HTTP 友好；不用 ws 升级握手 |
+| POST body 携带 message | 前端用 [`@microsoft/fetch-event-source`](https://github.com/Azure/fetch-event-source) | 浏览器原生 `EventSource` 只支持 GET，message 太长走 URL 不优雅 |
+| 服务器 SSE 库 | `sse-starlette` 的 `EventSourceResponse` | 内置 ping / disconnect 处理；免手写 SSE 帧 |
+| 同步 Agent ↔ 异步流的桥 | `Agent.run` 扔 `loop.run_in_executor`；事件回调用 `loop.call_soon_threadsafe(queue.put_nowait, ...)` 入 `asyncio.Queue` | `Agent.run` 同步阻塞 + 事件回调同步；`asyncio.Queue` 非线程安全，必须 `call_soon_threadsafe` |
+| 一次请求一条流 | POST → 一条 SSE 流 → 收到 `final_answer` 或线程结束就关流 | 跟 ChatGPT 同款；不维持长连接 |
+| 帧格式 | 统一 `event: message` + `data: {"type": "...", "payload": {...}}` | 前端单 listener、按 type 派发；跟 `AgentEvent` 一一对应；OpenAPI 文档化 |
+| Thinking / Plan / Tool 折叠 | shadcn `collapsible` 组件 | 让长 thinking / 大 args 不刷屏 |
+| 取消语义 | 前端 `AbortController` 断 SSE → UI 停渲染；后端 Agent 继续跑完 | 真正中止 Agent 涉及 core 改造，本 Step 明确不做 |
+| 自动滚动 | 用户在底部 → 新 token 跟随滚动；用户向上滚 → 暂停跟随；用户重新滚到底 → 恢复跟随 | 业界标准体感 |
+| Step 1 的 `POST /api/chat` 怎么办 | **保留** | 非流式 fallback / 测试入口；前端默认调 `/api/chat/stream`，老接口不删 |
+
+**实现内容**：
+
+后端：
+
+- `requirements.txt` 加 `sse-starlette`（同步 `.env` 不涉及 —— 它是纯库不读环境变量）
+- `src/api/routes/chat.py` —— 新增 `POST /api/chat/stream`：
+  - 路由内建临时 `asyncio.Queue`
+  - `set_event_callback` 把所有事件经 `loop.call_soon_threadsafe` 入队
+  - `loop.run_in_executor(None, agent.run, req.message)` 异步跑 Agent
+  - async generator 从 queue 取事件 yield 给 `EventSourceResponse`
+  - 收到 `final_answer` 或 `error(recoverable=False)` 或 executor 完成 → 关流
+  - `finally` 里 `set_event_callback(None)` 解绑（沿用 Step 1 单例 Agent，必须解绑避免泄漏到下一轮）
+
+前端：
+
+- `npm install @microsoft/fetch-event-source react-markdown`（markdown 顺带装上，正文渲染加分项）
+- `npx shadcn@latest add collapsible`
+- `src/types/chat.ts` 加 `AgentStreamEvent` discriminated union（10 种 type 各自对应 payload）
+- `src/api/client.ts` 加 `streamChat(message, handlers, signal)` —— `fetchEventSource` POST + 按 type 派发到 handlers
+- `src/components/chat/MessageBubble.tsx` —— 一条消息完整渲染：user 简版 / assistant 含 `ThinkingBlock` + `PlanBlock` + `ToolBlock[]` + 正文 markdown
+- `src/components/chat/ThinkingBlock.tsx` —— 折叠展示 thinking 流，默认折叠，header 显示字数
+- `src/components/chat/PlanBlock.tsx` —— plan checklist（每步带 status icon）
+- `src/components/chat/ToolBlock.tsx` —— tool 调用卡片（name / args / status / preview，默认折叠）
+- `src/components/chat/MessageList.tsx` —— 改用 `MessageBubble`；管理"用户滚动到底"状态做条件自动滚动
+- `src/App.tsx` —— 改调 `streamChat`；维护"当前 in-flight assistant 消息"对象（含 thinking / plan / tools / content 子块）
+
+**修改 / 新增列表**：
+
+| 操作 | 文件 | 说明 |
+|---|---|---|
+| 修改 | `requirements.txt` | 加 `sse-starlette` |
+| 修改 | `src/api/routes/chat.py` | 加 `POST /api/chat/stream` 端点；保留旧 `POST /api/chat` |
+| 修改 | `src/api/schemas/chat.py` | 加 `ChatStreamEvent` Pydantic（仅 OpenAPI 文档化；实际 SSE 帧用 `EventSourceResponse` 手组装） |
+| 新增 | `tests/test_api_chat_stream.py` | mock Agent，按序 publish 几种事件，断言 SSE 帧序列对得上 |
+| 修改 | `frontend/package.json` | 加依赖：`@microsoft/fetch-event-source`、`react-markdown` |
+| 新增 | `frontend/src/components/ui/collapsible.tsx` | `shadcn add collapsible` 生成 |
+| 修改 | `frontend/src/types/chat.ts` | 加 `AgentStreamEvent` 类型 |
+| 修改 | `frontend/src/api/client.ts` | 加 `streamChat`；保留 `postChat`（开发期 fallback） |
+| 新增 | `frontend/src/components/chat/MessageBubble.tsx` | 一条消息的完整渲染 |
+| 新增 | `frontend/src/components/chat/ThinkingBlock.tsx` | 思考折叠块 |
+| 新增 | `frontend/src/components/chat/PlanBlock.tsx` | plan checklist |
+| 新增 | `frontend/src/components/chat/ToolBlock.tsx` | tool 调用卡片 |
+| 修改 | `frontend/src/components/chat/MessageList.tsx` | 改用 `MessageBubble`；条件自动滚动 |
+| 修改 | `frontend/src/App.tsx` | 改调 `streamChat`；维护 in-flight assistant 消息子块状态 |
+
+**UT 策略**：
+
+| 层 | 怎么测 |
+|---|---|
+| 后端 | `tests/test_api_chat_stream.py`：用 `dependency_overrides` 注入 `FakeAgent`（`run` 内同步连发几个 `events.publish(...)` 再返回 final_answer）。`TestClient` 的 `stream("POST", "/api/chat/stream", json=...)` 读 SSE 帧、解析 data 字段、断言 type 序列匹配 |
+| 后端 | 错误路径：FakeAgent 直接 publish `error(recoverable=False)` → 断言客户端收到 error 帧 + 流随后关闭 |
+| 后端 | 取消路径：客户端主动 close → 服务端日志可见、`set_event_callback(None)` 已解绑（下一轮 Agent 调用不触发上一轮 handler） |
+| 前端 | 不写 UT（前端 UT 整个 iter 不上） |
+
+**人工验收步骤**：
+
+1. 后端 + 前端两进程都在跑（沿用 Step 0 命令；首次跑前 `pip install -r requirements.txt` 装 `sse-starlette`）
+2. 浏览器开 `http://localhost:5173/`，输入 `用 3 句话讲一下牛顿三定律` → 正文 token **逐字浮现**（不再等 5-10 秒一次性出现）
+3. **F12 → Network → 找到 `POST /api/chat/stream`**：状态 200，Type 列 `eventsource`；点 `EventStream` 标签能看到 10+ 帧（`token_chunk` 一连串 + 最后一个 `final_answer`）
+4. 问一个需要工具的问题（前提：Step 2 范围内 Agent 默认已加载部分 builtin tool，没有也可以发 `调用 file_read 工具读 README.md` 触发）→ 正文上方先冒出 **🔧 工具调用** 卡片（默认折叠），点开看 name / args；几秒后状态变 ✓ + preview 出现
+5. 问一个会触发 plan 的问题（例：`帮我设计一份 4 周的『Rust 入门 → 写一个小项目』学习计划`）→ 上方出现 **📋 Plan** checklist；每步状态从 ⏳ 实时翻 ✓
+6. **滚动行为**：长回答打字到一半，手指往上滚看历史 → 新 token 不再强行把页面拉到底；再手动滚到底 → 恢复自动跟随
+7. **断流测试**：长回答中途**关闭当前浏览器 tab** → 后端 uvicorn 日志可见 `disconnected`；后端 `agent.set_event_callback(None)` 已解绑（新开 tab 发新消息流式正常，不会收到上一轮的残留事件）
+8. `pytest -q tests/test_api_chat_stream.py` 全过
+
+通过以上 7-8 条 = Step 2 完成。
+
+**风险点 / 已知限制**（不影响本 Step 验收）：
+
+| 项 | 说明 |
+|---|---|
+| 取消按钮"假停" | 前端断流后，后端 Agent 仍跑完整轮；本 Step 接受。真正中止 Agent run 涉及 Agent core 改造，留给后续 |
+| `asyncio.Queue` 无大小限制 | Agent 比前端消费快的极端情况下内存涨；本 Step 接受（实测一轮事件数 ≤ 几百） |
+| 单例 Agent + 并发请求 | 当前单例非线程安全，多 tab 同时发起 stream 会互相干扰；本 Step 单用户场景接受；Step 3 上 session 隔离后自然解决 |
+| `thinking` 体量大可能比正文还长 | 默认折叠（header 显示字数 + "展开" 按钮） |
+| 浏览器 6 个 HTTP/1.1 同域并发上限 | 本期单 tab 单流不踩；生产部署用 HTTP/2 / 反代解决 |
+
+---
 
 ### 6.4.4 Step 3 - Session 管理
 
