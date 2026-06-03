@@ -1708,7 +1708,89 @@ AgentA/                              # 项目根
 
 ### 6.4.2 Step 1 - 最小聊天回路（非流式）
 
-> 留待 Step 0 完成后展开。
+**目标**：建立"前端发消息 → 后端跑 Agent → 返回完整答案 → 前端显示"的最小闭环。一次性返回（**等几秒看到答案、不打字效果**），但**多轮对话在内存中有记忆**（同一进程不重启时）。
+
+**本 Step 不做**：
+
+| 项 | 留给 |
+|---|---|
+| 流式打字 / SSE | Step 2 |
+| Thinking / Plan / Tool 可视化 | Step 2 |
+| Session 列表 / 切换 / 持久化 | Step 3 |
+| 错误就近显示 / toast | Step 6 |
+| 暗色模式 / 设置 / 引用渲染 | Step 6 / Step 5 |
+
+**对接现有代码的策略**：
+
+- 复用 [`AgentAPI` Protocol](../src/agent/agent_api.py)（表现层 ↔ Agent core 的对外契约）—— API 层只依赖此契约，不绑定具体实现（Python / LangChain / AutoGPT）
+- **API 层 Agent 用单例**（FastAPI app 启动时建一个、跨请求复用）—— 一个浏览器开发期内对话有记忆；服务器重启 / 进程换就丢
+- 单例 Agent 用**最朴素的默认值**（`Agent(verbose=False)`），不加载 skills / rules / prompt 文件
+- Step 5（其他资源管理）再统一抽出 composition root 跟 CLI 共享配置
+
+**实现内容**：
+
+后端：
+
+- `src/api/deps.py` —— 单例 Agent 工厂（`get_agent()`）
+- `src/api/schemas/chat.py` —— `ChatRequest` / `ChatResponse` Pydantic 模型
+- `src/api/routes/chat.py` —— `POST /api/chat` 端点
+- `src/api/main.py` —— 挂载 chat router
+
+前端：
+
+- `npx shadcn@latest add input textarea scroll-area` —— 装 3 个组件
+- `src/types/chat.ts` —— `Message` / `ChatRequest` / `ChatResponse` TypeScript 类型
+- `src/api/client.ts` —— 后端 API 客户端封装（基于 `fetch`）
+- `src/components/chat/MessageList.tsx` —— 消息列表（user / assistant 区分气泡）
+- `src/components/chat/Composer.tsx` —— 输入框 + 发送按钮（`Textarea` + `Button`，Cmd/Ctrl+Enter 发送）
+- `src/App.tsx` —— 改成聊天主界面（用上面两个组件 + 自管 `messages` state）
+
+**修改 / 新增列表**：
+
+| 操作 | 文件 | 说明 |
+|---|---|---|
+| 新增 | `src/api/deps.py` | `get_agent()` 单例工厂；`@lru_cache` 或模块级变量都行 |
+| 新增 | `src/api/schemas/__init__.py` | 包标识 |
+| 新增 | `src/api/schemas/chat.py` | `ChatRequest(message: str)` / `ChatResponse(reply: str, session_id: str)` |
+| 新增 | `src/api/routes/chat.py` | `POST /api/chat`，`Depends(get_agent)` 注入，`reply = agent.run(req.message)` |
+| 修改 | `src/api/main.py` | `include_router(chat.router, prefix="/api", tags=["chat"])` |
+| 新增 | `tests/test_api_chat.py` | mock `Agent.run`，测路由 200 / 422 / 异常兜底 |
+| 新增 | `frontend/src/types/chat.ts` | TS 类型（跟后端 Pydantic 对齐） |
+| 新增 | `frontend/src/api/client.ts` | `postChat(message): Promise<ChatResponse>` |
+| 新增 | `frontend/src/components/chat/MessageList.tsx` | `<ul>` 渲染 messages；user 右对齐、assistant 左对齐；shadcn 颜色 tokens |
+| 新增 | `frontend/src/components/chat/Composer.tsx` | shadcn `<Textarea>` + `<Button>`；`Enter` 发送、`Shift+Enter` 换行；`loading` 时禁用 |
+| 新增 | `frontend/src/components/ui/{input,textarea,scroll-area}.tsx` | `npx shadcn add` 自动生成 |
+| 修改 | `frontend/src/App.tsx` | 改成聊天界面：管 `messages: Message[]` 和 `loading` state；调 `postChat` 把 user message 推进 messages、等响应后 push assistant message |
+
+**UT 策略**：
+
+| 层 | 怎么测 |
+|---|---|
+| 后端 | `tests/test_api_chat.py`：用 `monkeypatch` mock `Agent.run` 返回固定字符串，`TestClient.post("/api/chat", json={"message":"hi"})` 断言 200 + reply 字段；缺字段返 422；Agent.run 抛异常时返 500（或 fallback 字符串 —— 按 `AgentAPI` 契约 "失败时返回 'Error: <msg>' 而非抛异常"，理论上 Agent.run 不该抛，但要兜底） |
+| 前端 | 不写 UT（前端 UT 整个 iter 都不上） |
+
+**人工验收步骤**：
+
+1. 后端 + 前端两个进程都在跑（沿用 Step 0 的命令）
+2. 浏览器开 `http://localhost:5173/` —— 看到聊天界面：上方消息区（空）、下方输入框 + 发送按钮
+3. 输入 `hello`，回车发送 —— 自己的消息立刻出现在右侧（user 气泡）；输入框被禁用、显示 "thinking…" 提示
+4. **等几秒**（LLM 调用同步、非流式）—— assistant 回复整段出现在左侧（assistant 气泡）；输入框恢复可用
+5. **测多轮记忆**：再输 `我刚才说了什么？` —— agent 应该能答出 "你刚才说了 hello"（说明 chat_history 在内存里被复用）
+6. **F12 → Network**：找到一条 `POST /api/chat`，状态 200，Request Body `{"message":"..."}`，Response Body `{"reply":"...","session_id":"..."}`
+7. **测异常**：把后端 uvicorn `Ctrl+C` 杀掉，再发一条消息 —— 应该看到红字 "ERROR" 或类似（Step 6 才做精细错误展示，本 Step 红字 / 错误码即可）
+
+通过以上 7 条 = Step 1 完成。
+
+**风险点 / 已知限制**（不影响本 Step 验收）：
+
+| 项 | 说明 |
+|---|---|
+| LLM 调用很慢时浏览器看起来"假死" | 同步等待，本 Step 接受；Step 2 上 SSE 解决 |
+| `Agent.run` 是同步 + IO bound | FastAPI 会自动把同步路由扔到 thread pool 跑、不阻塞 event loop —— 写 `def chat()`（不带 `async`）即可 |
+| 服务器重启 = chat 历史全丢 | 本 Step 接受；Step 3 上 session 持久化 |
+| `system_prompt` / skills / rules 都是默认值 | 体感比 CLI 简陋（agent "傻"一些），本 Step 接受；Step 5 抽 composition root 跟 CLI 一致 |
+
+---
 
 ### 6.4.3 Step 2 - 流式输出 + Agent 状态
 
@@ -1731,5 +1813,4 @@ AgentA/                              # 项目根
 > 留待 Step 5 完成后展开。
 
 ### 6.4.8 Step 7 - 业务面板
-
 > 留待 Step 6 完成后展开。

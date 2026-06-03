@@ -46,6 +46,7 @@ langchain-openai
 langchain-anthropic
 
 # MCP (Model Context Protocol) 
+mcp
 
 # Web API
 fastapi

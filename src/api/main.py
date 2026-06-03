@@ -7,7 +7,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.api.routes import health
+from src.api.routes import chat, health
 
 app = FastAPI(
     title="AgentA Web API",
@@ -26,3 +26,4 @@ app.add_middleware(
 )
 
 app.include_router(health.router, prefix="/api", tags=["health"])
+app.include_router(chat.router, prefix="/api", tags=["chat"])
