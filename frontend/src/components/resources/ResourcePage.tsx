@@ -20,7 +20,7 @@ export function ResourcePage({ title, subtitle, toolbar, children }: ResourcePag
         {toolbar && <div className="flex items-center gap-2">{toolbar}</div>}
       </header>
       <div className="flex-1 overflow-y-auto p-6">
-        <div className="mx-auto max-w-4xl space-y-4">{children}</div>
+        <div className="mx-auto flex h-full max-w-4xl flex-col space-y-4">{children}</div>
       </div>
     </div>
   )

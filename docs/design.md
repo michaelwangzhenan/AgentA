@@ -564,6 +564,16 @@ flowchart TD
 **注入顺序**：`base system_prompt → <project_rules> → <user_context> → <active_study_plan>`。
 **覆盖约定**：用户定义高于系统默认，后注入覆盖前注入。如：AgentA 提供的默认能力（base）可被项目偏好（rules）覆盖，项目偏好可被会话偏好（memory）覆盖。
 
+**各层职责切分**：
+
+| 层 | 放什么 | 不放什么 |
+|---|---|---|
+| `SYSTEM_PROMPT` 常量 | **绝对系统指令**：工具调用协议、引用规范、untrusted 数据隔离等改了就破契约的硬约束 | 业务语义假设（KB 性质、应用场景） |
+| `.agenta/rules.md` | **业务偏好**：应用场景、KB 性质、领域术语、何时该查 KB、回答风格 | 工具协议 / 引用规范 / 安全约束（已在 `SYSTEM_PROMPT`） |
+
+- 两者**不重复**
+- rules.md 缺失时 `SYSTEM_PROMPT` 必须能独立工作（详 prompt 内 "工具策略 / Fallback" 段），由 `tests/test_system_prompt.py` 守护 fallback 文案与契约 token 不被删
+
 
 ### 3.5.3 防 prompt injection
 参考 [§3.13 防 prompt injection](#313-防-prompt-injection)。

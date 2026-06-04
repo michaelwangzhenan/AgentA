@@ -165,7 +165,7 @@ export function DocumentList({ documents, loading, onDelete }: DocumentListProps
                     type="button"
                     onClick={() => handleSort(col)}
                     className={cn(
-                      'inline-flex items-center gap-1 transition-colors hover:text-foreground',
+                      'inline-flex items-center gap-1 whitespace-nowrap transition-colors hover:text-foreground',
                       col.align === 'right' && 'justify-end',
                       active && 'text-foreground',
                     )}

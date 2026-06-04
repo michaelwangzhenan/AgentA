@@ -58,11 +58,6 @@ export function RulesView() {
     <ResourcePage
       title="项目 Rules"
       subtitle={`覆盖项目级偏好；写入到 ${path || '...'}${exists ? '' : '（文件尚未创建）'}`}
-      toolbar={
-        <Button onClick={handleSave} disabled={!dirty || saving || loading} size="sm">
-          {saving ? '保存中…' : '保存'}
-        </Button>
-      }
     >
       {loadError && (
         <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-100">
@@ -75,13 +70,18 @@ export function RulesView() {
         onChange={(e) => setText(e.target.value)}
         disabled={loading || saving}
         placeholder={loading ? '加载中…' : '在此撰写项目级 rules（Markdown）'}
-        className="min-h-[400px] w-full resize-y rounded-md border border-border bg-card p-3 font-mono text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-ring"
+        className="min-h-[400px] w-full flex-1 resize-y rounded-md border border-border bg-card p-3 font-mono text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-ring"
         spellCheck={false}
       />
 
-      <p className="text-xs text-muted-foreground">
-        提示：rules 在 Agent 启动时一次性加载，编辑后建新 session 或重启 uvicorn 才会被 LLM 看到。
-      </p>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-muted-foreground">
+          提示：rules 在 Agent 启动时一次性加载，编辑后建新 session 或重启 uvicorn 才会被 LLM 看到。
+        </p>
+        <Button onClick={handleSave} disabled={!dirty || saving || loading} size="sm">
+          {saving ? '保存中…' : '保存'}
+        </Button>
+      </div>
     </ResourcePage>
   )
 }

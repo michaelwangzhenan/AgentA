@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Pencil, Trash2 } from 'lucide-react'
+import { Pencil, Plus, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog,
   DialogContent,
@@ -25,6 +26,7 @@ import {
   deleteMemory,
   listMemories,
   patchMemory,
+  upsertMemory,
 } from '@/api/client'
 import {
   CATEGORY_LABELS,
@@ -33,6 +35,15 @@ import {
 } from '@/types/resources'
 import { ResourcePage } from '@/components/resources/ResourcePage'
 import { toast } from '@/lib/toast'
+
+// 跟后端 src/memory/user_memory.py MEMORY_CATEGORIES 对齐
+const ADD_CATEGORY_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: 'preference', label: CATEGORY_LABELS.preference },
+  { value: 'background', label: CATEGORY_LABELS.background },
+  { value: 'instruction', label: CATEGORY_LABELS.instruction },
+  { value: 'task', label: CATEGORY_LABELS.task },
+  { value: 'correction', label: CATEGORY_LABELS.correction },
+]
 
 export function MemoryView() {
   const [items, setItems] = useState<MemoryItem[]>([])
@@ -43,6 +54,13 @@ export function MemoryView() {
   const [editValue, setEditValue] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<MemoryItem | null>(null)
   const [confirmClearOpen, setConfirmClearOpen] = useState(false)
+
+  // 手动添加表单
+  const [addOpen, setAddOpen] = useState(false)
+  const [addCategory, setAddCategory] = useState<string>('preference')
+  const [addKey, setAddKey] = useState('')
+  const [addValue, setAddValue] = useState('')
+  const [adding, setAdding] = useState(false)
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -97,19 +115,56 @@ export function MemoryView() {
     }
   }
 
+  const resetAddForm = () => {
+    setAddCategory('preference')
+    setAddKey('')
+    setAddValue('')
+  }
+
+  const submitAdd = async () => {
+    const k = addKey.trim()
+    const v = addValue.trim()
+    if (!k || !v) return
+    setAdding(true)
+    try {
+      // source='manual' 跟后端 SOURCE_LABELS 对齐，标记"手工"
+      await upsertMemory(addCategory, k, v, 'manual')
+      toast.success('已添加')
+      resetAddForm()
+      setAddOpen(false)
+      await refresh()
+    } catch (e) {
+      toast.error(`添加失败：${(e as Error).message}`)
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  const canSubmitAdd = addKey.trim().length > 0 && addValue.trim().length > 0
+
   return (
     <ResourcePage
       title="用户记忆"
-      subtitle="LLM 自动学到的偏好 / 背景；下次回答会用到"
+      subtitle="LLM 自动学到的偏好 / 背景；也可手动添加。下次回答会用到"
       toolbar={
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setConfirmClearOpen(true)}
-          disabled={items.length === 0}
-        >
-          清空全部
-        </Button>
+        <>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setAddOpen(true)}
+          >
+            <Plus className="mr-1 h-4 w-4" />
+            添加记忆
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setConfirmClearOpen(true)}
+            disabled={items.length === 0}
+          >
+            清空全部
+          </Button>
+        </>
       }
     >
       {loadError && (
@@ -258,6 +313,96 @@ export function MemoryView() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog
+        open={addOpen}
+        onOpenChange={(o: boolean) => {
+          if (adding) return
+          setAddOpen(o)
+          if (!o) resetAddForm()
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>添加记忆</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <label
+                htmlFor="add-mem-category"
+                className="text-xs font-medium text-muted-foreground"
+              >
+                类别
+              </label>
+              <select
+                id="add-mem-category"
+                value={addCategory}
+                onChange={(e) => setAddCategory(e.target.value)}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring [color-scheme:light] dark:[color-scheme:dark]"
+              >
+                {ADD_CATEGORY_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}（{opt.value}）
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label
+                htmlFor="add-mem-key"
+                className="text-xs font-medium text-muted-foreground"
+              >
+                Key <span className="text-muted-foreground/70">（短标识，例如 favorite_language）</span>
+              </label>
+              <Input
+                id="add-mem-key"
+                value={addKey}
+                onChange={(e) => setAddKey(e.target.value)}
+                placeholder="favorite_language"
+                autoFocus
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label
+                htmlFor="add-mem-value"
+                className="text-xs font-medium text-muted-foreground"
+              >
+                Value <span className="text-muted-foreground/70">（具体内容；Ctrl+Enter 提交）</span>
+              </label>
+              <Textarea
+                id="add-mem-value"
+                value={addValue}
+                onChange={(e) => setAddValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault()
+                    if (canSubmitAdd && !adding) submitAdd()
+                  }
+                }}
+                placeholder="Python"
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setAddOpen(false)
+                resetAddForm()
+              }}
+              disabled={adding}
+            >
+              取消
+            </Button>
+            <Button onClick={submitAdd} disabled={!canSubmitAdd || adding}>
+              {adding ? '添加中...' : '添加'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </ResourcePage>
   )
 }

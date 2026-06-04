@@ -49,6 +49,11 @@
 }
 
 :root {
+    /* 浅色主题：让浏览器对原生表单控件（select 展开列表 / 滚动条 / checkbox / date picker）
+     * 应用浅色 UA stylesheet。.dark 选择器内会覆盖为 dark。
+     * 这是修原生 <select> 展开后下拉项在 dark 模式不可读的核心 —— Tailwind class 进不去
+     * 原生 popup，只有 CSS color-scheme 能告诉浏览器切 UA 样式。 */
+    color-scheme: light;
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
     --card: oklch(1 0 0);
@@ -84,6 +89,7 @@
 }
 
 .dark {
+    color-scheme: dark;
     --background: oklch(0.145 0 0);
     --foreground: oklch(0.985 0 0);
     --card: oklch(0.205 0 0);
