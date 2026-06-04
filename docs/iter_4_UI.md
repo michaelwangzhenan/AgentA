@@ -2495,5 +2495,139 @@ MCP（2 个）：
 
 ---
 
-### 6.4.8 Step 7 - 业务面板
-> 留待 Step 6 完成后展开。
+### 6.4.8 Step 7 - 业务面板（学习计划 / Quiz / SRS）
+
+**目标**：把 Agent 已经在跑的 3 套业务数据**只读**展示到 UI，让用户不用问 LLM 就能直接看：
+
+- **学习计划**：当前 active plan + 历史 plan 列表 + 每个 plan 的 tasks 完成进度
+- **Quiz**：历史 quiz 列表 + 每张 quiz 的题目 / 用户答案 / 批改反馈
+- **SRS**：到期 due 卡片队列 + 全部 cards 列表 + 单卡详情
+
+完成后 Sidebar 多 3 个业务入口，跟"记忆 / 规则 / Skills / MCP / 设置"并列。
+
+**本 Step 不做**：
+
+| 项 | 留给 / 不做 |
+|---|---|
+| 在 UI 新建 plan / 出 quiz / 加 SRS 卡 | 留给 chat：LLM 已有 `create_study_plan` / `create_quiz` / `add_to_srs` 工具，自然语言触发更顺 |
+| 在 UI 答 quiz / 复习 SRS（4 档评分） | 留给 chat：答题 / 复习是**多轮对话型**任务，UI 表单做不出反馈节奏 |
+| 在 UI 把 plan abandon / quiz archive | 留给 chat：低频操作；chat 让 LLM 调对应工具即可 |
+| 编辑 task status | 留给 chat：`update_study_progress` 工具已存在 |
+| 跨 plan 切 active | 留给 chat |
+
+**对接现有代码的策略**：
+
+- **LearningPlan**：复用 `LearningPlanStore.list_plans` / `get_active` / `get_plan_with_tasks`
+- **Quiz**：复用 `QuizStore.list_quiz_sets` / `get_quiz_with_questions`
+- **SRS**：复用 `SRSStore.list_cards` / `list_due` / `get_card`
+- 3 套 store 已经有 `get_shared_store()` 模块级单例 helper；API deps 直接用，避免 API 层另起 connection
+
+**API 设计**：
+
+学习计划（3 个）：
+
+| Method | Path | Response | 含义 |
+|---|---|---|---|
+| `GET` | `/api/plans` | `{plans: [PlanSummary]}` | 列全部非 abandoned plan（带 task_count / done_count）|
+| `GET` | `/api/plans/active` | `Plan \| null` | 当前 active plan（含 tasks） |
+| `GET` | `/api/plans/{plan_id}` | `Plan` | 单 plan + 全 tasks；404 不存在 |
+
+Quiz（2 个）：
+
+| Method | Path | Response | 含义 |
+|---|---|---|---|
+| `GET` | `/api/quizzes` | `{quizzes: [QuizSetSummary]}` | 列非 archived quiz_set（按时间倒序） |
+| `GET` | `/api/quizzes/{quiz_set_id}` | `QuizSet` | quiz_set + 全 questions（含 user_answer / score / feedback） |
+
+SRS（3 个）：
+
+| Method | Path | Response | 含义 |
+|---|---|---|---|
+| `GET` | `/api/srs/due` | `{cards: [Card]}` | 到期 due 队列（按 next_review_at 升序） |
+| `GET` | `/api/srs/cards` | `{cards: [Card]}` | 全 cards（非 archived） |
+| `GET` | `/api/srs/cards/{card_id}` | `Card` | 单卡详情 |
+
+**关键决策**：
+
+| 决策点 | 选择 | 理由 |
+|---|---|---|
+| 是否允许 UI 修改业务数据 | 否 | 创建 / 完成 / 评分都依赖 LLM 推理（出题、批改、SRS 间隔计算）；UI 直接调底层 store 绕过这套推理，反而打破语义 |
+| Plan 列表是否含 abandoned | 否 | 跟 `list_plans` 默认行为一致；UI 简洁 |
+| Quiz 列表是否含 archived | 否 | 同上 |
+| SRS 列表是否含 archived | 否 | 同上 |
+| Due 队列上限 | 走 store 默认（`SRS_DEFAULT_DUE_QUERY_LIMIT=20`） | 跟 CLI `/srs due` 一致 |
+| 是否在 list response 里附带 question / task 全文 | 否 | list 只返摘要；详情走 `/{id}` —— 减少首屏 payload |
+| Sidebar 业务入口顺序 | 学习计划 → Quiz → SRS | 用户学习闭环：计划 → 出题 → 复习 |
+| 业务入口放哪 | 跟资源菜单区合并 | 当前 sidebar 顶部只有 chat / KB / 资源 / 设置；业务跟资源同属"非聊天"功能，放一起；插在 MCP 和 设置 之间 |
+
+**实现内容**：
+
+后端：
+
+- `src/api/schemas/plan.py` 新建：`PlanTask` / `PlanSummary` / `Plan` / `PlanListResponse`
+- `src/api/schemas/quiz.py` 新建：`QuizQuestion` / `QuizSetSummary` / `QuizSet` / `QuizListResponse`
+- `src/api/schemas/srs.py` 新建：`SRSCard` / `SRSCardListResponse`
+- `src/api/routes/plans.py` 新建：3 个 endpoint
+- `src/api/routes/quizzes.py` 新建：2 个 endpoint
+- `src/api/routes/srs.py` 新建：3 个 endpoint
+- `src/api/deps.py` 加 `get_plan_store` / `get_quiz_store` / `get_srs_store`（用各自的 `get_shared_store()`）
+- `src/api/main.py` 注册 3 个新 router
+
+前端：
+
+- `src/types/business.ts` 新建：3 套业务的 TS 类型
+- `src/api/client.ts` 加 8 个 API 函数
+- `src/components/business/PlansView.tsx` 新建：左侧 plan list，右侧 detail（tasks 按 stage 分组）
+- `src/components/business/QuizzesView.tsx` 新建：左侧 quiz list，右侧 detail（questions 含答案对比）
+- `src/components/business/SRSView.tsx` 新建：上方 due 队列，下方全卡列表；点卡进 detail
+- `src/components/sidebar/Sidebar.tsx` 改：`ViewKind` 加 `plans` / `quizzes` / `srs`；3 个入口
+- `src/App.tsx` 改：3 个新 view 条件渲染
+
+**修改 / 新增列表**：
+
+| 操作 | 文件 |
+|---|---|
+| 新增 | `src/api/schemas/plan.py` / `quiz.py` / `srs.py` |
+| 新增 | `src/api/routes/plans.py` / `quizzes.py` / `srs.py` |
+| 修改 | `src/api/deps.py` / `src/api/main.py` |
+| 新增 | `tests/test_api_plans.py` / `test_api_quizzes.py` / `test_api_srs.py` |
+| 新增 | `frontend/src/types/business.ts` |
+| 修改 | `frontend/src/api/client.ts` |
+| 新增 | `frontend/src/components/business/PlansView.tsx` / `QuizzesView.tsx` / `SRSView.tsx` |
+| 修改 | `frontend/src/components/sidebar/Sidebar.tsx` / `src/App.tsx` |
+
+**UT 策略**：
+
+| 层 | 怎么测 |
+|---|---|
+| Plan API | 用 tmp_path 真实 SQLite + LearningPlanStore；create_plan + add_tasks 注数据；测 list / active / detail / 404 |
+| Quiz API | 用 tmp_path + QuizStore；create_quiz_set + add_questions 注数据；测 list / detail / 404 |
+| SRS API | 用 tmp_path + SRSStore；add_card 注数据；测 due 队列（含时间过滤）/ list / detail / 404 |
+| 前端 | 不写 UT；目测验收 |
+
+**人工验收步骤**：
+
+1. 启动后端 + 前端；Sidebar 资源区出现 **学习计划 / Quiz / SRS** 3 个新入口（在 MCP 和 设置 之间）
+2. 在 chat 里发一句"做一份 ML 学习计划"让 LLM 调 `create_study_plan` 工具创建 plan
+3. 切到 **学习计划** view → 左侧出现新 plan；点进去右侧显示 stages + tasks，active plan 应该高亮
+4. 在 chat 里发"考我 5 道 attention 机制的题"让 LLM 调 `create_quiz` 工具
+5. 切到 **Quiz** view → 列表出现新 quiz；点进去显示所有 question + 当前未答状态
+6. 回 chat 答题，让 LLM 调 `grade_quiz` 批改；再切回 Quiz view，应该看到 user_answer / score / feedback
+7. 在 chat 里发"把刚才错的题进 SRS"或手动 `add_to_srs`
+8. 切到 **SRS** view → 上方"到期"队列；下方全卡列表；点卡详情看 SM-2 字段
+9. `pytest -q tests/test_api_plans.py tests/test_api_quizzes.py tests/test_api_srs.py` 全过
+
+通过以上 = Step 7 完成 → **整个 iter_4_UI 收尾**。
+
+**风险点 / 已知限制**：
+
+| 项 | 说明 |
+|---|---|
+| `LearningPlanStore.get_shared_store()` 等 3 个单例 manager 复用进程内连接 | API 跟 Agent 用同一 store；多线程下 SQLite 已有 lock；OK |
+| Quiz 的 grading_summary 字段未在 API 返回 | `_row_to_quiz_set` 已含 `total_score`；前端按需展示足够 |
+| SRS 的 `next_review_at` 是 ISO 字符串 + 本地时区 | 前端不做时区转换，直接展示；跟 CLI 行为对齐 |
+| SRS 的 `source_ref` 是 int（quiz_question id 或 NULL） | schema 用 `int \| None`；前端 `number \| null`。首版误写成 str，smoke 时被 500 抓到已修 |
+| Plan 的 tasks 按 stage_idx + order_idx 排序 | API 直接信任 store 顺序；前端按 stage_idx 分组渲染 |
+| 数据为空时 UI 显示 | 各 view 提供 "暂无 X，去 chat 里问 LLM 创建" 引导文案 |
+
+---

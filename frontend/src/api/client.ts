@@ -27,6 +27,16 @@ import type {
   SkillsResponse,
 } from '@/types/resources'
 import type { AppConfig } from '@/types/config'
+import type {
+  Plan,
+  PlanListResponse,
+  PlanSummary,
+  QuizListResponse,
+  QuizSet,
+  QuizSetSummary,
+  SRSCard,
+  SRSCardListResponse,
+} from '@/types/business'
 
 // ─── 通用 helper ────────────────────────────────────────────────────────
 
@@ -283,4 +293,55 @@ export async function getConfig(): Promise<AppConfig> {
   const res = await fetch('/api/config')
   await _ensureOk(res)
   return (await res.json()) as AppConfig
+}
+
+// ─── Step 7：业务面板（plans / quizzes / srs） ─────────────────────────
+
+export async function listPlans(): Promise<PlanSummary[]> {
+  const res = await fetch('/api/plans')
+  await _ensureOk(res)
+  return ((await res.json()) as PlanListResponse).plans
+}
+
+export async function getActivePlan(): Promise<Plan | null> {
+  const res = await fetch('/api/plans/active')
+  await _ensureOk(res)
+  return (await res.json()) as Plan | null
+}
+
+export async function getPlan(planId: number): Promise<Plan> {
+  const res = await fetch(`/api/plans/${planId}`)
+  await _ensureOk(res)
+  return (await res.json()) as Plan
+}
+
+export async function listQuizzes(): Promise<QuizSetSummary[]> {
+  const res = await fetch('/api/quizzes')
+  await _ensureOk(res)
+  return ((await res.json()) as QuizListResponse).quizzes
+}
+
+export async function getQuiz(quizSetId: number): Promise<QuizSet> {
+  const res = await fetch(`/api/quizzes/${quizSetId}`)
+  await _ensureOk(res)
+  return (await res.json()) as QuizSet
+}
+
+export async function listSRSDue(limit?: number): Promise<SRSCard[]> {
+  const url = limit ? `/api/srs/due?limit=${limit}` : '/api/srs/due'
+  const res = await fetch(url)
+  await _ensureOk(res)
+  return ((await res.json()) as SRSCardListResponse).cards
+}
+
+export async function listSRSCards(): Promise<SRSCard[]> {
+  const res = await fetch('/api/srs/cards')
+  await _ensureOk(res)
+  return ((await res.json()) as SRSCardListResponse).cards
+}
+
+export async function getSRSCard(cardId: number): Promise<SRSCard> {
+  const res = await fetch(`/api/srs/cards/${cardId}`)
+  await _ensureOk(res)
+  return (await res.json()) as SRSCard
 }

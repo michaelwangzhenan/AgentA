@@ -24,9 +24,12 @@ from src.api.routes import (  # noqa: E402
     kb,
     mcp,
     memory,
+    plans,
+    quizzes,
     rules,
     sessions,
     skills,
+    srs,
 )
 
 logger = logging.getLogger(__name__)
@@ -88,3 +91,6 @@ app.include_router(rules.router, prefix="/api", tags=["rules"])
 app.include_router(skills.router, prefix="/api", tags=["skills"])
 app.include_router(mcp.router, prefix="/api", tags=["mcp"])
 app.include_router(config_route.router, prefix="/api", tags=["config"])
+app.include_router(plans.router, prefix="/api", tags=["plans"])
+app.include_router(quizzes.router, prefix="/api", tags=["quizzes"])
+app.include_router(srs.router, prefix="/api", tags=["srs"])

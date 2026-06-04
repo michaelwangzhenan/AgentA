@@ -3,11 +3,14 @@ import { useState } from 'react'
 import {
   BookOpen,
   Brain,
+  GraduationCap,
+  ListChecks,
   MessageSquare,
   MoreHorizontal,
   Pencil,
   Plug,
   Plus,
+  Repeat,
   ScrollText,
   Settings,
   Sparkles,
@@ -51,6 +54,9 @@ export type ViewKind =
   | 'rules'
   | 'skills'
   | 'mcp'
+  | 'plans'
+  | 'quizzes'
+  | 'srs'
   | 'settings'
 
 export type SidebarProps = {
@@ -162,6 +168,24 @@ export function Sidebar(props: SidebarProps) {
           onClick={() => onSwitchView('mcp')}
         />
         <ViewNavButton
+          icon={<GraduationCap className="h-4 w-4" />}
+          label="学习计划"
+          active={activeView === 'plans'}
+          onClick={() => onSwitchView('plans')}
+        />
+        <ViewNavButton
+          icon={<ListChecks className="h-4 w-4" />}
+          label="Quiz"
+          active={activeView === 'quizzes'}
+          onClick={() => onSwitchView('quizzes')}
+        />
+        <ViewNavButton
+          icon={<Repeat className="h-4 w-4" />}
+          label="SRS"
+          active={activeView === 'srs'}
+          onClick={() => onSwitchView('srs')}
+        />
+        <ViewNavButton
           icon={<Settings className="h-4 w-4" />}
           label="设置"
           active={activeView === 'settings'}
@@ -195,14 +219,12 @@ export function Sidebar(props: SidebarProps) {
                     {s.title || s.id.slice(0, 8)}
                   </span>
                   <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        className="opacity-0 transition-opacity group-hover:opacity-100 hover:bg-accent rounded p-1"
-                        onClick={(e) => e.stopPropagation()}
-                        aria-label="会话操作"
-                      >
-                        <MoreHorizontal className="h-4 w-4" />
-                      </button>
+                    <DropdownMenuTrigger
+                      className="opacity-0 transition-opacity group-hover:opacity-100 hover:bg-accent rounded p-1"
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label="会话操作"
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem onClick={() => openRename(s)}>

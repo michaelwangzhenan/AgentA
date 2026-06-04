@@ -22,14 +22,12 @@ export function ThemeToggle() {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          className="rounded-md p-1.5 hover:bg-accent"
-          title={`主题：${current.label}`}
-          aria-label="切换主题"
-        >
-          {current.icon}
-        </button>
+      <DropdownMenuTrigger
+        className="rounded-md p-1.5 hover:bg-accent"
+        title={`主题：${current.label}`}
+        aria-label="切换主题"
+      >
+        {current.icon}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         {OPTIONS.map((opt) => (

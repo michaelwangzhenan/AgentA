@@ -11,6 +11,12 @@ from src.agent.agent import Agent
 from src.agent.agent_api import AgentAPI
 from src.agent.core.mcp_manager import MCPManager, get_shared_manager
 from src.memory.chat_history import ChatHistoryStore
+from src.memory.learning_plan_store import LearningPlanStore
+from src.memory.learning_plan_store import get_shared_store as _get_shared_plan_store
+from src.memory.quiz_store import QuizStore
+from src.memory.quiz_store import get_shared_store as _get_shared_quiz_store
+from src.memory.srs_store import SRSStore
+from src.memory.srs_store import get_shared_store as _get_shared_srs_store
 from src.memory.user_memory import UserMemoryStore
 
 
@@ -47,3 +53,18 @@ def get_user_memory_store() -> UserMemoryStore | None:
 def get_mcp_manager() -> MCPManager:
     """返回进程级共享 MCPManager（在 Agent 启动时已 start_all）。"""
     return get_shared_manager()
+
+
+def get_plan_store() -> LearningPlanStore:
+    """复用 learning_plan_store 进程内共享单例（跟 LLM 工具同连接，避免 SQLite 写锁竞争）。"""
+    return _get_shared_plan_store()
+
+
+def get_quiz_store() -> QuizStore:
+    """复用 quiz_store 进程内共享单例。"""
+    return _get_shared_quiz_store()
+
+
+def get_srs_store() -> SRSStore:
+    """复用 srs_store 进程内共享单例。"""
+    return _get_shared_srs_store()
