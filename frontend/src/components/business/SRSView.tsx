@@ -83,7 +83,7 @@ export function SRSView() {
           <p className="px-3 py-2 text-sm text-muted-foreground">加载中…</p>
         ) : due.length === 0 ? (
           <p className="px-3 py-2 text-sm text-muted-foreground">
-            没有到期卡片；继续努力 🎉
+            没有到期卡片，继续保持
           </p>
         ) : (
           <ul className="space-y-2 p-3">

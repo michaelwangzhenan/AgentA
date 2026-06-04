@@ -1,7 +1,16 @@
 """依赖注入：API 层向 Agent core 拿实例的统一入口。
 
-Step 1 用最朴素的默认值实例化单例 Agent；不加载 skills / rules / 自定义 prompt。
-Step 5 会把这套配置抽出 composition root 跟 CLI 共用。
+进程级单例，分两类策略：
+
+1. **shared singleton**（plan / quiz / srs / mcp）：复用各 store 模块的
+   `get_shared_store()`，跟 LLM 工具共用同一份 connection，无写锁竞争。
+2. **独立 connection**（chat_history / user_memory）：API 层用 `lru_cache`
+   各起一份 connection，跟 Agent 内置 store 走两个连接、共用底层 DB 文件。
+   SQLite 文件级锁保证安全，多 connection 串行写不会损坏数据。
+
+两套并存的历史原因：plan / quiz / srs 的 store 早期就提供了 `get_shared_store()`
+便于 LLM 工具复用；chat_history / user_memory 没有，本期不动以减少 ripple。
+未来可统一为 shared，但代价是 Agent 构造路径也要改。
 """
 
 from functools import lru_cache

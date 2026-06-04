@@ -12,6 +12,7 @@ from src.api.schemas.memory import (
     MemoryItem,
     MemoryListResponse,
     MemoryPatchRequest,
+    MemoryPatchResponse,
     MemoryUpsertRequest,
 )
 from src.memory.user_memory import MEMORY_CATEGORIES, UserMemoryStore
@@ -48,29 +49,34 @@ def upsert_memory(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"未知 category: {req.category}；合法值：{sorted(MEMORY_CATEGORIES)}",
         )
-    store.upsert(req.category, req.key, req.value, source=req.source)
+    new_id = store.upsert(req.category, req.key, req.value, source=req.source)
+    if new_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="key 或 value 清洗后为空，未写入",
+        )
     for row in store.load_all():
-        if row["category"] == req.category and row["key"] == req.key.strip()[:30]:
+        if row["id"] == new_id:
             return MemoryItem(**row)
     raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail="upsert 后查不到对应条目（可能被 _sanitize 清洗后 key 不匹配）",
+        detail=f"upsert 成功 (id={new_id}) 但查不到该行（可能被其他进程并发删除）",
     )
 
 
-@router.patch("/{memory_id}", response_model=MemoryDeleteResponse)
+@router.patch("/{memory_id}", response_model=MemoryPatchResponse)
 def patch_memory(
     memory_id: int,
     req: MemoryPatchRequest,
     store: UserMemoryStore = Depends(_require_store),
-) -> MemoryDeleteResponse:
+) -> MemoryPatchResponse:
     updated = store.update_value(memory_id, req.value)
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"memory id={memory_id} 不存在或更新失败（可能 value 清洗后为空）",
         )
-    return MemoryDeleteResponse(deleted=True)
+    return MemoryPatchResponse(updated=True)
 
 
 @router.delete("/{memory_id}", response_model=MemoryDeleteResponse)

@@ -99,7 +99,7 @@ def test_patch_memory_ok(client: TestClient, store: UserMemoryStore) -> None:
     item_id = store.load_all()[0]["id"]
     r = client.patch(f"/api/memory/{item_id}", json={"value": "updated"})
     assert r.status_code == 200
-    assert r.json() == {"deleted": True}
+    assert r.json() == {"updated": True}
 
     items = store.load_all()
     assert items[0]["value"] == "updated"

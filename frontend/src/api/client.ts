@@ -231,14 +231,14 @@ export async function upsertMemory(
 export async function patchMemory(
   id: number,
   value: string,
-): Promise<{ deleted: boolean }> {
+): Promise<{ updated: boolean }> {
   const res = await fetch(`/api/memory/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ value }),
   })
   await _ensureOk(res)
-  return (await res.json()) as { deleted: boolean }
+  return (await res.json()) as { updated: boolean }
 }
 
 export async function deleteMemory(id: number): Promise<{ deleted: boolean }> {

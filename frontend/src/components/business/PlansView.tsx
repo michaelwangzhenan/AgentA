@@ -36,22 +36,25 @@ export function PlansView() {
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // 用函数式 setSelectedId 避免把 selectedId 放进 deps —— 否则每次切 plan 都会
+  // 让 refreshList 引用变 → useEffect 重跑 → 重复拉一遍 list 接口。
   const refreshList = useCallback(async () => {
     setLoadingList(true)
     setError(null)
     try {
       const list = await listPlans()
       setPlans(list)
-      if (selectedId === null && list.length > 0) {
+      setSelectedId((prev) => {
+        if (prev !== null) return prev
         const active = list.find((p) => p.is_active) ?? list[0]
-        setSelectedId(active.id)
-      }
+        return active?.id ?? null
+      })
     } catch (e) {
       setError((e as Error).message)
     } finally {
       setLoadingList(false)
     }
-  }, [selectedId])
+  }, [])
 
   useEffect(() => {
     refreshList()

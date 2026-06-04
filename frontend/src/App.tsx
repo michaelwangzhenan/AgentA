@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Toaster } from 'sonner'
 import { ChatView } from '@/components/chat/ChatView'
 import { KnowledgeBaseView } from '@/components/kb/KnowledgeBaseView'
@@ -50,6 +50,9 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [inFlight, setInFlight] = useState(false)
+  // 当前正在跑的 SSE 流的 AbortController；切 session / 组件卸载时主动 abort，
+  // 避免老流继续消耗后端 token + 触发 update 到已不在 messages 的 assistantId。
+  const streamCtrlRef = useRef<AbortController | null>(null)
 
   // ─── 首屏：拉 sessions，空则自动建一个 ─────────────────────────────────
   useEffect(() => {
@@ -78,6 +81,11 @@ function App() {
 
   // ─── 切 active session 时拉历史 ───────────────────────────────────────
   useEffect(() => {
+    // session 切换时主动取消上一个 session 的在跑 stream
+    if (streamCtrlRef.current) {
+      streamCtrlRef.current.abort()
+      streamCtrlRef.current = null
+    }
     if (!activeSessionId) {
       setMessages([])
       return
@@ -145,6 +153,9 @@ function App() {
 
     setMessages((prev) => [...prev, userMsg, assistantMsg])
     setInFlight(true)
+
+    const ctrl = new AbortController()
+    streamCtrlRef.current = ctrl
 
     const update = (
       updater: (m: AssistantMessage) => AssistantMessage,
@@ -264,11 +275,15 @@ function App() {
             update((m) => ({ ...m, streaming: false }))
           },
         },
-        { sessionId: activeSessionId },
+        { sessionId: activeSessionId, signal: ctrl.signal },
       )
     } catch {
-      // streamChat 抛错（fatal）时 onError 已经更新过 message
+      // streamChat 抛错（fatal / abort）时 onError 已经更新过 message
     } finally {
+      // 仅当当前 ref 还是本次的 controller 时才清空（避免清掉新发起的流）
+      if (streamCtrlRef.current === ctrl) {
+        streamCtrlRef.current = null
+      }
       setInFlight(false)
       try {
         const list = await listSessions()

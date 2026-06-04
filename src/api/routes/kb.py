@@ -19,7 +19,6 @@ from src.api.schemas.kb import (
     KBUploadResponse,
 )
 from src.rag.ingest import (
-    _content_sha1,
     _doc_id_from_relpath,
     delete_kb_document,
     ingest_all,

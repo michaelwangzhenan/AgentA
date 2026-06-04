@@ -4,8 +4,19 @@
  * - 'system' 跟随 `prefers-color-scheme` media query
  * - 持久化到 `localStorage` key `agenta-theme`
  * - 切换时给 `<html>` 加 / 减 `.dark` class（CSS 已就绪：index.css 里的 `.dark` 选择器）
+ *
+ * 用 React Context 共享 —— 否则 ThemeToggle 改主题时 App.tsx 拿到的 theme 不会
+ * 同步更新，导致 Toaster 等 root 组件不及时响应（同一 hook 调两次是两份 state）。
  */
-import { useCallback, useEffect, useState } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react'
 
 export type Theme = 'light' | 'dark' | 'system'
 
@@ -43,7 +54,14 @@ function applyClass(effective: 'light' | 'dark'): void {
   }
 }
 
-export function useTheme() {
+type ThemeContextValue = {
+  theme: Theme
+  setTheme: (next: Theme) => void
+}
+
+const ThemeContext = createContext<ThemeContextValue | null>(null)
+
+export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => readStored())
 
   const setTheme = useCallback((next: Theme) => {
@@ -55,12 +73,10 @@ export function useTheme() {
     }
   }, [])
 
-  // theme 变化时同步 class
   useEffect(() => {
     applyClass(resolveEffective(theme))
   }, [theme])
 
-  // 'system' 模式下监听系统偏好变化
   useEffect(() => {
     if (theme !== 'system') return
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
@@ -69,5 +85,19 @@ export function useTheme() {
     return () => mq.removeEventListener('change', handler)
   }, [theme])
 
-  return { theme, setTheme }
+  const value = useMemo<ThemeContextValue>(
+    () => ({ theme, setTheme }),
+    [theme, setTheme],
+  )
+
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function useTheme(): ThemeContextValue {
+  const v = useContext(ThemeContext)
+  if (!v) {
+    throw new Error('useTheme 必须放在 <ThemeProvider> 内')
+  }
+  return v
 }

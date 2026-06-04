@@ -32,5 +32,9 @@ class MemoryDeleteResponse(BaseModel):
     deleted: bool
 
 
+class MemoryPatchResponse(BaseModel):
+    updated: bool
+
+
 class MemoryClearResponse(BaseModel):
     cleared: int

@@ -285,7 +285,7 @@ class UserMemoryStore:
 
     # ── 核心 CRUD ─────────────────────────────────────────────────────────────
 
-    def upsert(self, category: str, key: str, value: str, source: str = "auto") -> None:
+    def upsert(self, category: str, key: str, value: str, source: str = "auto") -> int | None:
         """
         插入或更新一条记忆。同 (category, key) 的旧值被新值覆盖（去重）。
 
@@ -295,10 +295,14 @@ class UserMemoryStore:
             value: 具体内容（自动清洗、截断）。
             source: 写入来源，必须在 MEMORY_SOURCES 内；未知值降级为 'auto'。
                     冲突 upsert 时也会更新 source，反映"最近一次来源"。
+
+        Returns:
+            写入或更新后的记录 id；任何校验跳过（未知类别 / 清洗后为空）返回 None。
+            历史调用方丢弃返回值仍兼容（None 也是 falsy）。
         """
         if category not in MEMORY_CATEGORIES:
             logger.warning("[UserMemory] 未知类别 %r，跳过写入", category)
-            return
+            return None
         if source not in MEMORY_SOURCES:
             logger.warning("[UserMemory] 未知 source %r，降级为 'auto'", source)
             source = "auto"
@@ -306,22 +310,33 @@ class UserMemoryStore:
         clean_value = _sanitize(value)
         if not clean_key:
             logger.warning("[UserMemory] key 清洗后为空，跳过写入 [%s]", category)
-            return
+            return None
         if not clean_value:
             logger.warning("[UserMemory] value 清洗后为空，跳过写入 [%s] %s", category, key)
-            return
+            return None
         now = datetime.now().isoformat(timespec="seconds")
+        # SQLite UPSERT 触发 update 分支时 cursor.lastrowid 不返回更新行 id，
+        # 所以分两步：先查是否已存在 → 决定 update / insert
         with self._lock, self._conn:
-            self._conn.execute(
-                """INSERT INTO user_memories(category, key, value, source, created_at, accessed_at)
-                   VALUES(?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(category, key) DO UPDATE SET
-                       value = excluded.value,
-                       source = excluded.source,
-                       accessed_at = excluded.accessed_at""",
-                (category, clean_key, clean_value, source, now, now),
-            )
-        logger.info("[UserMemory] 已写入 [%s] %s (source=%s)", category, key, source)
+            existing = self._conn.execute(
+                "SELECT id FROM user_memories WHERE category = ? AND key = ?",
+                (category, clean_key),
+            ).fetchone()
+            if existing is not None:
+                self._conn.execute(
+                    "UPDATE user_memories SET value = ?, source = ?, accessed_at = ? WHERE id = ?",
+                    (clean_value, source, now, existing["id"]),
+                )
+                row_id = int(existing["id"])
+            else:
+                cursor = self._conn.execute(
+                    """INSERT INTO user_memories(category, key, value, source, created_at, accessed_at)
+                       VALUES(?, ?, ?, ?, ?, ?)""",
+                    (category, clean_key, clean_value, source, now, now),
+                )
+                row_id = int(cursor.lastrowid or 0)
+        logger.info("[UserMemory] 已写入 [%s] %s (source=%s, id=%d)", category, key, source, row_id)
+        return row_id
 
     def update_value(self, memory_id: int, new_value: str) -> bool:
         """

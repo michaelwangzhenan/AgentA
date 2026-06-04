@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -18,6 +19,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# 进程级 Agent 单例共享 session_id / event_callback 等可变属性；并发请求
+# 必须串行化进入 agent.run（含前后 set_event_callback / 设 session_id），
+# 否则后到的请求会覆盖前一个还在跑的属性，导致 user_input 写错 session 等。
+# 单用户场景几乎无感；牺牲并发换 thread-safety。
+_AGENT_LOCK = threading.Lock()
+
 
 # ─── Step 1：非流式（保留作为 fallback / 测试入口）─────────────────────────
 
@@ -26,17 +33,20 @@ def chat(req: ChatRequest, agent: AgentAPI = Depends(get_agent)) -> ChatResponse
     """单轮聊天：转发用户消息给 Agent.run、返回完整答案。
 
     同步路由（不加 async）—— FastAPI 会自动把它扔到 thread pool 跑，
-    不阻塞 event loop。
+    不阻塞 event loop。`_AGENT_LOCK` 保证并发请求按到达顺序串行化执行。
     """
-    if req.session_id:
-        agent.session_id = req.session_id
-    try:
-        reply = agent.run(req.message)
-    except Exception as exc:
-        logger.exception("[/api/chat] agent.run 抛异常")
-        raise HTTPException(status_code=500, detail=f"agent error: {exc}") from exc
+    with _AGENT_LOCK:
+        if req.session_id:
+            agent.session_id = req.session_id
+        try:
+            reply = agent.run(req.message)
+        except Exception as exc:
+            logger.exception("[/api/chat] agent.run 抛异常")
+            raise HTTPException(status_code=500, detail=f"agent error: {exc}") from exc
+        # 在锁内读 session_id，避免下一请求改 agent.session_id 后读到错值
+        session_id = agent.session_id
 
-    return ChatResponse(reply=reply, session_id=agent.session_id)
+    return ChatResponse(reply=reply, session_id=session_id)
 
 
 # ─── Step 2：SSE 流式 ────────────────────────────────────────────────────
@@ -73,9 +83,6 @@ async def chat_stream(
     if not req.message or not req.message.strip():
         raise HTTPException(status_code=422, detail="message must be non-empty")
 
-    if req.session_id:
-        agent.session_id = req.session_id
-
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
@@ -92,12 +99,21 @@ async def chat_stream(
             return
         loop.call_soon_threadsafe(queue.put_nowait, frame)
 
-    agent.set_event_callback(_on_event)
+    # 整段 agent 交互（设 session_id / 装 callback / run / 卸 callback）必须在锁内
+    # 一次完成，避免被其他并发请求穿插覆盖 agent 共享属性。
+    def _sync_run() -> None:
+        with _AGENT_LOCK:
+            if req.session_id:
+                agent.session_id = req.session_id
+            agent.set_event_callback(_on_event)
+            try:
+                agent.run(req.message)
+            finally:
+                agent.set_event_callback(None)
 
-    # Agent.run 是同步阻塞，扔 thread pool；完事用 SENTINEL 通知 generator
     async def _drive_agent() -> None:
         try:
-            await loop.run_in_executor(None, agent.run, req.message)
+            await loop.run_in_executor(None, _sync_run)
         except Exception as exc:
             logger.exception("[/api/chat/stream] agent.run 抛异常")
             await queue.put({
@@ -124,12 +140,8 @@ async def chat_stream(
                     "data": json.dumps(item, ensure_ascii=False),
                 }
         finally:
-            # 客户端断开 / 流自然结束 / 异常退出 三种情形统一兜底：
-            # 1. 解绑事件 callback（不解的话，下一轮请求来时旧 callback 还在 EventBus，
-            #    引用的是上一轮已不再活跃的 queue —— 内存泄漏 + 事件丢错地方）
-            # 2. cancel agent 驱动 task（仅取消 asyncio 包装层；executor 里同步的
-            #    Agent.run 不会真停，但本期接受，留给后续）
-            agent.set_event_callback(None)
+            # cancel 仅取消 asyncio 包装层；executor 里同步的 agent.run 不会真停，
+            # 仍持有锁直到自然结束。callback 解绑已由 _sync_run finally 兜底。
             if not run_task.done():
                 run_task.cancel()
 

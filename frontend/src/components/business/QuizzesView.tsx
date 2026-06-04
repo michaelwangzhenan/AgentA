@@ -85,21 +85,21 @@ export function QuizzesView() {
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // 用函数式 setSelectedId 避免把 selectedId 放进 deps —— 否则每次切 quiz 都会
+  // 让 refreshList 引用变 → useEffect 重跑 → 重复拉一遍 list 接口。
   const refreshList = useCallback(async () => {
     setLoadingList(true)
     setError(null)
     try {
       const items = await listQuizzes()
       setList(items)
-      if (selectedId === null && items.length > 0) {
-        setSelectedId(items[0].id)
-      }
+      setSelectedId((prev) => prev ?? items[0]?.id ?? null)
     } catch (e) {
       setError((e as Error).message)
     } finally {
       setLoadingList(false)
     }
-  }, [selectedId])
+  }, [])
 
   useEffect(() => {
     refreshList()
