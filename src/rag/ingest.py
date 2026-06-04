@@ -323,6 +323,122 @@ def ingest_all(
     )
 
 
+# ── Web UI 知识库管理辅助函数（Step 4） ─────────────────────────────────────
+
+def list_kb_documents(model: str = config.DEFAULT_EMBEDDING_ALIAS) -> list[dict]:
+    """聚合指定 collection 内所有 chunks 的 metadata，按 doc_id 分组返回文档级清单。
+
+    Args:
+        model: embedding 别名（en / zh / m3 等）
+
+    Returns:
+        list of dict，每项含 doc_id / filename / source / ext / lang / mtime / chunks / total_chars。
+        collection 不存在或为空时返回 []。
+    """
+    model_name, collection_name = config.resolve_embedding(model)
+    client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
+    try:
+        collection = client.get_collection(name=collection_name)
+    except Exception:
+        return []
+
+    data = collection.get(include=["metadatas", "documents"])
+    metadatas = data.get("metadatas") or []
+    documents = data.get("documents") or []
+
+    grouped: dict[str, dict] = {}
+    for md, doc in zip(metadatas, documents):
+        if not md:
+            continue
+        doc_id = md.get("doc_id")
+        if not doc_id:
+            continue
+        chars = len(doc) if isinstance(doc, str) else 0
+        if doc_id in grouped:
+            grouped[doc_id]["chunks"] += 1
+            grouped[doc_id]["total_chars"] += chars
+        else:
+            grouped[doc_id] = {
+                "doc_id": doc_id,
+                "source": md.get("source") or md.get("filename") or "",
+                "filename": md.get("filename") or "",
+                "ext": md.get("ext") or "",
+                "lang": md.get("lang") or "",
+                "mtime": float(md.get("mtime") or 0.0),
+                "chunks": 1,
+                "total_chars": chars,
+            }
+
+    # 按 mtime 倒序（最新上传的在前）
+    return sorted(grouped.values(), key=lambda x: x["mtime"], reverse=True)
+
+
+def delete_kb_document(
+    doc_id: str,
+    model: str = config.DEFAULT_EMBEDDING_ALIAS,
+    web_upload_dir: str | None = None,
+) -> tuple[bool, int]:
+    """删除单个文档对应的所有 chunks（Chroma + BM25 + 物理文件）。
+
+    Args:
+        doc_id:         要删的文档 ID（list_kb_documents 返回的 doc_id）
+        model:          embedding 别名
+        web_upload_dir: web 上传落盘目录；删物理文件用。None 则取 config.WEB_UPLOAD_DIR
+
+    Returns:
+        (found, chunks_removed)：
+            found 表示是否找到 doc_id；chunks_removed 是 Chroma 实际删除的块数。
+    """
+    if web_upload_dir is None:
+        web_upload_dir = config.WEB_UPLOAD_DIR
+
+    model_name, collection_name = config.resolve_embedding(model)
+    client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
+    try:
+        collection = client.get_collection(name=collection_name)
+    except Exception:
+        return False, 0
+
+    existing = collection.get(where={"doc_id": doc_id}, include=["metadatas"])
+    existing_ids = existing.get("ids") or []
+    existing_metas = existing.get("metadatas") or []
+    if not existing_ids:
+        return False, 0
+
+    # 删 Chroma chunks
+    collection.delete(ids=existing_ids)
+    chunks_removed = len(existing_ids)
+    logger.info("KB 删除文档 doc_id=%s → 移除 %d 个 chunks", doc_id, chunks_removed)
+
+    # 同步清 BM25 索引（不阻塞主流程）
+    if config.BM25_ENABLED:
+        try:
+            from src.rag.bm25_index import BM25Index, get_index_path, save_index
+
+            bm25_path = get_index_path(collection_name)
+            if bm25_path.exists():
+                bm25 = BM25Index.load_or_new(collection_name, bm25_path)
+                bm25.delete_by_doc_id(doc_id)
+                save_index(bm25, bm25_path)
+        except Exception as e:
+            logger.warning("KB 删除文档 BM25 同步失败 doc_id=%s: %s", doc_id, e)
+
+    # 删物理文件（仅清 web_uploads 目录下的；不动 data_*/ 等 git tracked 目录）
+    try:
+        source = (existing_metas[0] or {}).get("source") if existing_metas else None
+        if source:
+            web_root = Path(web_upload_dir).resolve()
+            file_path = (web_root / source).resolve()
+            # 安全检查：只删落在 web_upload_dir 内的文件，防恶意 source 跳出
+            if web_root in file_path.parents and file_path.is_file():
+                file_path.unlink()
+                logger.info("KB 删除物理文件: %s", file_path)
+    except Exception as e:
+        logger.warning("KB 删除物理文件失败 doc_id=%s: %s", doc_id, e)
+
+    return True, chunks_removed
+
+
 def _build_arg_parser() -> "argparse.ArgumentParser":
     """构造独立 CLI 入口的 argparse；与文件 docstring 中的示例保持一致。"""
     import argparse

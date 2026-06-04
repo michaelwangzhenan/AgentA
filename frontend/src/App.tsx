@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Composer } from '@/components/chat/Composer'
-import { MessageList } from '@/components/chat/MessageList'
-import { Sidebar } from '@/components/sidebar/Sidebar'
+import { ChatView } from '@/components/chat/ChatView'
+import { KnowledgeBaseView } from '@/components/kb/KnowledgeBaseView'
+import { Sidebar, type ViewKind } from '@/components/sidebar/Sidebar'
 import {
   createSession,
   deleteSession,
@@ -34,6 +34,7 @@ function newAssistantMessage(): AssistantMessage {
 }
 
 function App() {
+  const [activeView, setActiveView] = useState<ViewKind>('chat')
   const [sessions, setSessions] = useState<Session[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
@@ -105,7 +106,6 @@ function App() {
   const handleDelete = useCallback(
     async (id: string) => {
       await deleteSession(id)
-      // 列表移除；若是当前 active：切到列表第一个；列表空则自动新建
       const remaining = sessions.filter((s) => s.id !== id)
       setSessions(remaining)
       if (id === activeSessionId) {
@@ -256,10 +256,9 @@ function App() {
         { sessionId: activeSessionId },
       )
     } catch {
-      // streamChat 抛错（fatal）时 onError 已经更新过 message，这里只兜 unhandled rejection
+      // streamChat 抛错（fatal）时 onError 已经更新过 message
     } finally {
       setInFlight(false)
-      // 第一次发消息后 session 标题会从空变成首条 user 消息预览，刷下列表
       try {
         const list = await listSessions()
         setSessions(list)
@@ -274,21 +273,18 @@ function App() {
       <Sidebar
         sessions={sessions}
         activeId={activeSessionId}
+        activeView={activeView}
         onSelect={handleSelect}
         onCreate={handleCreate}
         onRename={handleRename}
         onDelete={handleDelete}
+        onSwitchView={setActiveView}
       />
-      <div className="flex h-full flex-1 flex-col">
-        <header className="border-b border-border px-6 py-3">
-          <h1 className="text-base font-semibold tracking-tight">AgentA</h1>
-          <p className="text-xs text-muted-foreground">
-            Step 3 - Session 管理
-          </p>
-        </header>
-        <MessageList messages={messages} />
-        <Composer onSend={handleSend} disabled={inFlight} />
-      </div>
+      {activeView === 'chat' ? (
+        <ChatView messages={messages} inFlight={inFlight} onSend={handleSend} />
+      ) : (
+        <KnowledgeBaseView />
+      )}
     </div>
   )
 }

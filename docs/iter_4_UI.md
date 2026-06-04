@@ -414,18 +414,7 @@ sequenceDiagram
 - **Tailwind 反常的地方：不切到 `.css` 文件写** —— 传统写 CSS 是建个 `styles.css` 文件、写 `.card { padding: 1rem; ... }` 规则。Tailwind 反过来 —— 你直接在 HTML 标签 `class` 属性里组合**预定义工具类**，构建时 Tailwind 扫描源码、把用到的类生成最终 CSS。**写法上几乎不碰 `.css` 文件，但最终产物还是 CSS**
 - **shadcn/ui = React + Tailwind 的成品组件套装** —— shadcn 每个组件源码大概长这样（简化版）：
 
-```tsx
-export function Button({ children, ...props }) {
-  return (
-    <button
-      className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-md"
-      {...props}
-    >
-      {children}
-    </button>
-  )
-}
-```
+
 
 React 那部分（`function Button` + JSX 标签 + `{...props}`）→ JS / 动态 HTML；`className=` 里那串 Tailwind 工具类 → CSS。用的时候 `<Button>确定</Button>` 一行调用，背后复杂 class 列表已经被组件吸收掉了 —— 这就是 §5.2.6 (5) 里"组件化封装解决 Tailwind class 一长串看着乱"的具体例子。
 
@@ -2060,7 +2049,132 @@ AgentA/                              # 项目根
 
 ### 6.4.5 Step 4 - 知识库 + 拖拽入库
 
-> 留待 Step 3 完成后展开。
+**目标**：用户能在 Web UI 里看到当前已入库的文档列表，**拖文件**到上传区即可入库（自动 parse / chunk / embed / upsert），不再要求开终端跑 `python tools/rag_cli.py ingest`。完成后体验对齐 Notion / Claude Project 的知识库。
+
+**本 Step 不做**：
+
+| 项 | 留给 |
+|---|---|
+| 入库进度细化（每个 chunk 实时 percent） | 后续 Step / SSE 化（同步阻塞 + 处理中 spinner 够用） |
+| 多 collection / 多 embedding 模型切换 | 后续 Step（默认走 `config.DEFAULT_EMBEDDING_ALIAS`） |
+| 清库（一键删全部） | 后续 Step（防误操作；用户可一条条删） |
+| 文档预览 / chunks 详情查看 | 后续 Step（点文档名展开看 chunks 不在本期） |
+| 引用源 hover 预览（chat 里点 sources 跳转知识库） | Step 5 |
+| 后台异步 ingest 任务队列 | 后续；本期同步阻塞 |
+| 重新索引（rebuild）按钮 | 不做（`ingest_all` 已经幂等增量，**等价于"重新上传相同文件"**） |
+
+**对接现有代码的策略**：
+
+- 复用 [`src/rag/ingest.py`](../src/rag/ingest.py) 的 `ingest_all(docs_dir, model)` —— **不开新底层函数**，落盘到子目录后调它
+- 复用 [`src/rag/parser.py`](../src/rag/parser.py) 的 `SUPPORTED_EXTENSIONS`（`.md/.txt/.html/.htm/.pdf/.docx/.pptx/.xlsx`）做服务端校验
+- 文档查询：直接 query Chroma collection 的 chunks 按 `doc_id` 聚合 —— 不另设 doc registry 表
+- 删除：`collection.delete(where={"doc_id": ...})` + 同步删 BM25 索引中该 `doc_id` 的 chunks（复用 `BM25Index.delete_by_doc_id`）+ 删 `web_uploads/` 下的物理文件
+
+**API 设计**：
+
+| Method | Path | Body | Response | 含义 |
+|---|---|---|---|---|
+| `GET` | `/api/kb/documents` | - | `{documents: [{doc_id, filename, ext, lang, chunks, total_chars, mtime}]}` | 列出当前默认 collection 的所有文档（按 doc_id 聚合 chunks） |
+| `POST` | `/api/kb/upload` | `multipart/form-data` field=`file` | `{doc_id, filename, chunks, status, message}` | 上传一个文件 + 同步 ingest（一次只传一个；前端循环传多个） |
+| `DELETE` | `/api/kb/documents/{doc_id}` | - | `{deleted: bool, chunks_removed: int}` | 删除单文档（Chroma + BM25 + 物理文件） |
+
+**关键决策**：
+
+| 决策点 | 选择 | 理由 |
+|---|---|---|
+| 文件落盘位置 | `datasets/web_uploads/<原始 filename>` | 现有 `doc_id` 算法基于 `rel_path` SHA1，必须落盘才能稳定 doc_id；独立子目录避免污染 git tracked `datasets/data_*` |
+| 默认 collection | `config.DEFAULT_EMBEDDING_ALIAS`（通常 `en` / `m3`） | 简洁；不让用户选模型 |
+| 重名上传 | 直接覆盖物理文件；ingest 走 content_sha1 幂等 | 用户可"上传同名文件刷新内容"；doc_id 不变，chunks 自动 re-embed |
+| ingest 调用 | 把上传文件存到 `web_uploads/`，调 `ingest_all(docs_dir=web_uploads_dir, model=default_alias)` | 不引新底层函数；扫描整个目录的代价就是扫一次幂等表 —— 实测 ms 级 |
+| 上传进度 | 前端"上传中 / 处理中 / 完成 / 失败"四态 spinner；不细化 percent | 后端是同步阻塞 ingest，"上传"快、"embedding"慢；细化进度涉及 SSE，本期不做 |
+| 文件大小上限 | 默认 10 MB（`WEB_MAX_UPLOAD_MB` 配置项）；超限返回 413 | 防 OOM / 单次 embed 时长爆炸 |
+| 支持的扩展名 | 跟 `SUPPORTED_EXTENSIONS` 一致 | 复用已有；服务端 + 前端 `accept` 都列上 |
+| 文档列表数据源 | Chroma collection 的 chunks metadata 聚合 | 不引新表；`source` / `filename` / `lang` / `mtime` / `doc_id` 都在 metadata 上 |
+| 删除时是否清 BM25 | **同步清** —— `BM25Index.delete_by_doc_id` + `save_index` | 不清的话 BM25 召回会出"已删的 chunk"造成检索 ghost |
+| 删除时是否删物理文件 | 同步删 `web_uploads/<filename>`（如存在） | 否则下次 ingest 又会扫到、又入库进来 |
+| 是否暴露 collection / model 选择 | 不暴露 | 简洁；多模型切换属于 Step 6 系统配置范围 |
+| 入口 | Sidebar 顶部加 "📚 知识库" 按钮 → 主区 view 切到 KB | 不引入 react-router；用 state 切 view 最简 |
+| 主区 view 切换 | App.tsx 加 `activeView: 'chat' \| 'kb'` state | 简洁；后续 Step 5/6/7 沿用这套切换 |
+| 拖拽实现 | HTML5 native drag & drop（`onDragOver` + `onDrop`），不引入 dropzone 库 | 浏览器内置；功能足够（drag highlight + 多文件循环上传）|
+| 多文件拖拽 | 前端循环串行调用 POST，逐个等返回 | 同步逐个：第 N 个失败不阻塞已成功的 N-1 个 |
+
+**实现内容**：
+
+后端：
+
+- `src/config.py` 加 `WEB_UPLOAD_DIR`（默认 `./datasets/web_uploads`）、`WEB_MAX_UPLOAD_MB`（默认 `10`）配置项（同步 `.env.example` + `.env`）
+- `src/rag/ingest.py` 加 `list_kb_documents(model) -> list[dict]` 辅助函数 —— 聚合 chunks metadata 按 doc_id 返回
+- `src/rag/ingest.py` 加 `delete_kb_document(doc_id, model) -> tuple[bool, int]` —— Chroma + BM25 + 物理文件 一并清
+- `src/api/schemas/kb.py` 新建：`KBDocument` / `KBDocumentListResponse` / `KBUploadResponse` / `KBDeleteResponse`
+- `src/api/routes/kb.py` 新建：3 个 endpoint
+- `src/api/main.py` 注册 kb router
+
+前端：
+
+- `src/types/kb.ts` 新建：`KBDocument` 类型
+- `src/api/client.ts` 加：`listKBDocuments / uploadKBFile / deleteKBDocument`
+- `src/components/sidebar/Sidebar.tsx` 改：顶部加 "📚 知识库" / "💬 聊天" 切换按钮（控制 `activeView`）；高亮当前 view
+- `src/components/kb/KnowledgeBaseView.tsx` 新建：主面板（拖拽区 + 列表 + 删除按钮 + toast）
+- `src/components/kb/DropZone.tsx` 新建：拖拽上传组件（HTML5 native）
+- `src/components/kb/DocumentList.tsx` 新建：文档列表（每行：文件名 / chunks / lang / ext / mtime / 删除 icon）
+- `src/App.tsx` 改：加 `activeView` state；条件渲染 `<ChatView>` / `<KnowledgeBaseView>`（ChatView 需要从现有 App 主区抽出来）
+
+**修改 / 新增列表**：
+
+| 操作 | 文件 | 说明 |
+|---|---|---|
+| 修改 | `src/config.py` | 加 `WEB_UPLOAD_DIR` / `WEB_MAX_UPLOAD_MB` |
+| 修改 | `.env.example` + `.env` | 三处同步（公约 §2.4） |
+| 修改 | `src/rag/ingest.py` | 加 `list_kb_documents` / `delete_kb_document` 辅助函数 |
+| 新增 | `src/api/schemas/kb.py` | Pydantic 4 个 schema |
+| 新增 | `src/api/routes/kb.py` | 3 个 endpoint |
+| 修改 | `src/api/main.py` | 注册 kb router |
+| 新增 | `tests/test_api_kb.py` | 上传 / 列表 / 删除 / 大小超限 / 扩展名拒绝 |
+| 新增 | `frontend/src/types/kb.ts` | KBDocument 类型 |
+| 修改 | `frontend/src/api/client.ts` | 加 3 个 KB API client |
+| 修改 | `frontend/src/components/sidebar/Sidebar.tsx` | 顶部加 view 切换 |
+| 新增 | `frontend/src/components/kb/KnowledgeBaseView.tsx` | KB 主面板 |
+| 新增 | `frontend/src/components/kb/DropZone.tsx` | 拖拽上传 |
+| 新增 | `frontend/src/components/kb/DocumentList.tsx` | 文档列表 |
+| 修改 | `frontend/src/App.tsx` | activeView state + ChatView 抽出 |
+| 新增 | `frontend/src/components/chat/ChatView.tsx` | 把 App.tsx 里 chat 主区抽出去（解耦） |
+
+**UT 策略**：
+
+| 层 | 怎么测 |
+|---|---|
+| 后端（API） | `tests/test_api_kb.py`：构造临时 `WEB_UPLOAD_DIR` + mock `ingest_all`（避免真跑 embedding）+ mock chroma client/collection；测 list 空 / list 含 N 个 / upload 成功 / upload 不支持的扩展名 → 415 / upload 超限 → 413 / delete 成功 / delete 不存在的 → 200 + deleted=False |
+| 后端（list/delete 辅助函数） | 单测 `list_kb_documents` / `delete_kb_document`：构造 fake collection / fake BM25Index，验证聚合 + 级联清理 |
+| 后端（ingest 真集成测试） | **不在本期 UT 跑**：embedding 太重；放 `tools/agent_eval/` 或本地手动 |
+| 前端 | 不写 UT（前端 UT 整个 iter 不上） |
+
+**人工验收步骤**：
+
+1. 启动后端 + 前端；左侧 Sidebar 顶部出现 "💬 聊天" / "📚 知识库" 两个 view 切换按钮
+2. 点 "📚 知识库" → 主区切到 KB 面板：上方是拖拽区（带"拖文件到这里 或 点击选择"），下方是文档列表（首次启动可能为空 或 列出已 ingest 的 `data_en` 文档）
+3. 拖一个 `.md` 文件到拖拽区 → 区域高亮 → 松开 → 按钮变 spinner "处理中..." → 几秒后变 ✓ + 列表出现新文档 + toast "已入库，N chunks"
+4. 同一份 `.md` 再拖一次（同名）→ 提示"内容未变化，已跳过"或后端日志 `跳过（内容未变化）`
+5. 改一下本地 `.md` 内容、再拖 → 列表对应文档的 chunks 数 / mtime 更新（content_sha1 变了，重 embed）
+6. 拖一个 `.exe` 之类不支持的文件 → 前端 toast "不支持的格式"，不发请求（或后端 415）
+7. 拖一个 >10 MB 的文件 → 后端 413 → 前端 toast "文件过大"
+8. 列表里点某文档的删除 icon → 弹 AlertDialog 确认 → 确认后该行消失 + toast "已删除，X chunks 移除"
+9. 切回 "💬 聊天" view，新建 session 问"我刚上传的 X 文档讲了什么？" → Agent 调 `search_knowledge` 工具能命中（验证上传后的内容真的进了向量库）
+10. `pytest -q tests/test_api_kb.py` 全过
+
+通过以上 9-10 条 = Step 4 完成。
+
+**风险点 / 已知限制**：
+
+| 项 | 说明 |
+|---|---|
+| 上传期间 LLM embedding 阻塞 uvicorn worker | 单用户场景接受；多并发上传请求会排队。后续可加任务队列 |
+| 默认 collection 跟 `data_*/` 共用 | 上传文档跟 git tracked 的 data 在同一个 collection 里；列表会一起显示。这是**有意为之**（用户能看到完整的知识库），但分类显示留给后续 |
+| BM25 索引同步删除依赖 `BM25_ENABLED` | 若运行环境关了 BM25，删文档只清 Chroma；下次有人开 BM25 重新 ingest 自动重建 |
+| 大文件 / PDF 处理慢 | 同步阻塞 endpoint 可能十几秒；用户看到"处理中..."loading 但没 percent。可接受 |
+| 同名文件覆盖会丢历史 | 没有版本管理；按"用户上传 = 当前最新"语义。简化代价可接受 |
+| 重启后 `web_uploads/` 仍在磁盘 | 物理文件保留是预期行为（重启 = 重 ingest 走幂等，跳过）；删 doc 时才真删 |
+
+---
 
 ### 6.4.6 Step 5 - 其他资源管理
 

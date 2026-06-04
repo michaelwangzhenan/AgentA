@@ -1,5 +1,12 @@
 import { useState } from 'react'
-import { MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react'
+import {
+  BookOpen,
+  MessageSquare,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Trash2,
+} from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -30,17 +37,30 @@ import { cn } from '@/lib/utils'
 
 import type { Session } from '@/types/session'
 
+export type ViewKind = 'chat' | 'kb'
+
 export type SidebarProps = {
   sessions: Session[]
   activeId: string | null
+  activeView: ViewKind
   onSelect: (id: string) => void
   onCreate: () => void
   onRename: (id: string, title: string) => Promise<void> | void
   onDelete: (id: string) => Promise<void> | void
+  onSwitchView: (view: ViewKind) => void
 }
 
 export function Sidebar(props: SidebarProps) {
-  const { sessions, activeId, onSelect, onCreate, onRename, onDelete } = props
+  const {
+    sessions,
+    activeId,
+    activeView,
+    onSelect,
+    onCreate,
+    onRename,
+    onDelete,
+    onSwitchView,
+  } = props
 
   const [renameTarget, setRenameTarget] = useState<Session | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -65,6 +85,17 @@ export function Sidebar(props: SidebarProps) {
     setDeleteTarget(null)
   }
 
+  const handleSelectSession = (id: string) => {
+    // 切到具体 session 时同时切回 chat view
+    if (activeView !== 'chat') onSwitchView('chat')
+    onSelect(id)
+  }
+
+  const handleCreateAndSwitch = () => {
+    if (activeView !== 'chat') onSwitchView('chat')
+    onCreate()
+  }
+
   return (
     <aside className="flex h-full w-64 flex-col border-r border-border bg-muted/30">
       <div className="border-b border-border p-3">
@@ -72,11 +103,38 @@ export function Sidebar(props: SidebarProps) {
           variant="outline"
           size="sm"
           className="w-full justify-start gap-2"
-          onClick={onCreate}
+          onClick={handleCreateAndSwitch}
         >
           <Plus className="h-4 w-4" />
           新建会话
         </Button>
+      </div>
+
+      <div className="border-b border-border px-2 py-2">
+        <button
+          className={cn(
+            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm',
+            activeView === 'chat'
+              ? 'bg-accent text-accent-foreground'
+              : 'hover:bg-accent/60',
+          )}
+          onClick={() => onSwitchView('chat')}
+        >
+          <MessageSquare className="h-4 w-4" />
+          聊天
+        </button>
+        <button
+          className={cn(
+            'mt-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm',
+            activeView === 'kb'
+              ? 'bg-accent text-accent-foreground'
+              : 'hover:bg-accent/60',
+          )}
+          onClick={() => onSwitchView('kb')}
+        >
+          <BookOpen className="h-4 w-4" />
+          知识库
+        </button>
       </div>
 
       <nav className="flex-1 overflow-y-auto p-2">
@@ -92,9 +150,11 @@ export function Sidebar(props: SidebarProps) {
                   className={cn(
                     'group flex items-center gap-1 rounded-md px-2 py-1.5 text-sm',
                     'hover:bg-accent/60 cursor-pointer',
-                    s.id === activeId && 'bg-accent text-accent-foreground',
+                    s.id === activeId &&
+                      activeView === 'chat' &&
+                      'bg-accent text-accent-foreground',
                   )}
-                  onClick={() => onSelect(s.id)}
+                  onClick={() => handleSelectSession(s.id)}
                 >
                   <span
                     className="flex-1 truncate"

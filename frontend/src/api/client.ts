@@ -9,6 +9,12 @@ import type {
   SessionListResponse,
   SessionMessagesResponse,
 } from '@/types/session'
+import type {
+  KBDeleteResponse,
+  KBDocument,
+  KBDocumentListResponse,
+  KBUploadResponse,
+} from '@/types/kb'
 
 // ─── 通用 helper ────────────────────────────────────────────────────────
 
@@ -148,4 +154,31 @@ export async function loadSessionMessages(
   const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/messages`)
   await _ensureOk(res)
   return (await res.json()) as SessionMessagesResponse
+}
+
+// ─── Step 4：Knowledge Base ────────────────────────────────────────────
+
+export async function listKBDocuments(): Promise<KBDocument[]> {
+  const res = await fetch('/api/kb/documents')
+  await _ensureOk(res)
+  return ((await res.json()) as KBDocumentListResponse).documents
+}
+
+export async function uploadKBFile(file: File): Promise<KBUploadResponse> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch('/api/kb/upload', {
+    method: 'POST',
+    body: form,
+  })
+  await _ensureOk(res)
+  return (await res.json()) as KBUploadResponse
+}
+
+export async function deleteKBDocument(docId: string): Promise<KBDeleteResponse> {
+  const res = await fetch(`/api/kb/documents/${encodeURIComponent(docId)}`, {
+    method: 'DELETE',
+  })
+  await _ensureOk(res)
+  return (await res.json()) as KBDeleteResponse
 }

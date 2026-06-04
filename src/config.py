@@ -173,6 +173,12 @@ CHROMA_COLLECTION: str = DEFAULT_COLLECTION
 # 私有文档目录（默认 ./datasets/data_en；中文资料放 ./datasets/data_zh，按需通过 .env 切换）
 DOCS_DIR: str = os.getenv("DOCS_DIR", "./datasets/data_en")
 
+# Web UI 拖拽上传的落盘目录（独立子目录避免污染 git tracked 的 data_*）
+WEB_UPLOAD_DIR: str = os.getenv("WEB_UPLOAD_DIR", "./datasets/web_uploads")
+
+# Web UI 单次上传文件大小上限（MB），超限返回 413
+WEB_MAX_UPLOAD_MB: int = int(os.getenv("WEB_MAX_UPLOAD_MB", "10"))
+
 # RAG 检索返回的最大文档片段数
 # Iter-2 默认从 5 提升到 8：枚举/对比类问题 5 条往往不够；当前 LLM 上下文 8K~32K 富裕。
 RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "8"))
