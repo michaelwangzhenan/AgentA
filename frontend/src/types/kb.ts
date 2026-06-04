@@ -6,7 +6,8 @@ export type KBDocument = {
   source: string
   ext: string
   lang: string
-  mtime: number
+  mtime: number       // 文件修改时间 (unix timestamp)
+  ingested_at: number // 入库时间 (unix timestamp)；老数据为 0
   chunks: number
   total_chars: number
 }
@@ -26,4 +27,10 @@ export type KBUploadResponse = {
 export type KBDeleteResponse = {
   deleted: boolean
   chunks_removed: number
+}
+
+export type KBClearAllResponse = {
+  docs_removed: number
+  chunks_removed: number
+  files_removed: number
 }

@@ -62,13 +62,13 @@ def test_list_sessions_after_create(client: TestClient) -> None:
 # ─── POST /api/sessions ──────────────────────────────────────────────────
 
 
-def test_create_session_without_title_fallbacks_to_id_prefix(client: TestClient) -> None:
+def test_create_session_without_title_fallbacks_to_new_chat(client: TestClient) -> None:
     r = client.post("/api/sessions", json={})
     assert r.status_code == 200
     body = r.json()
     assert len(body["id"]) > 0
-    # 无 title 时回退到 id 前 8 位（_row_to_session_info 行为）
-    assert body["title"] == body["id"][:8]
+    # 无 title 时显示层兜底为 "New Chat"（首条 user 消息进来时由 append() 回填真实标题）
+    assert body["title"] == "New Chat"
     assert body["msg_count"] == 0
 
 

@@ -10,6 +10,7 @@ import type {
   SessionMessagesResponse,
 } from '@/types/session'
 import type {
+  KBClearAllResponse,
   KBDeleteResponse,
   KBDocument,
   KBDocumentListResponse,
@@ -84,6 +85,7 @@ export type StreamHandlers = {
 }
 
 class FatalStreamError extends Error {}
+class StreamAbortedError extends Error {}
 
 export async function streamChat(
   message: string,
@@ -91,47 +93,64 @@ export async function streamChat(
   options: { sessionId?: string; signal?: AbortSignal } = {},
 ): Promise<void> {
   const { sessionId, signal } = options
-  await fetchEventSource('/api/chat/stream', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      message,
-      ...(sessionId ? { session_id: sessionId } : {}),
-    } satisfies ChatRequest),
-    signal,
-    openWhenHidden: true,
-    async onopen(response) {
-      const ct = response.headers.get('content-type') ?? ''
-      if (response.ok && ct.includes('text/event-stream')) {
-        return
-      }
-      let detail = `HTTP ${response.status}`
-      try {
-        const data = (await response.json()) as { detail?: string }
-        if (data?.detail) detail = `${detail}: ${data.detail}`
-      } catch {
-        // 响应不是 JSON
-      }
-      throw new FatalStreamError(detail)
-    },
-    onmessage(ev) {
-      if (!ev.data) return
-      try {
-        const event = JSON.parse(ev.data) as AgentStreamEvent
-        handlers.onEvent(event)
-      } catch (e) {
-        console.error('[streamChat] SSE frame parse error', ev.data, e)
-      }
-    },
-    onerror(err) {
-      const e = err instanceof Error ? err : new Error(String(err))
-      handlers.onError?.(e)
-      throw e
-    },
-    onclose() {
-      handlers.onClose?.()
-    },
-  })
+  try {
+    await fetchEventSource('/api/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message,
+        ...(sessionId ? { session_id: sessionId } : {}),
+      } satisfies ChatRequest),
+      signal,
+      openWhenHidden: true,
+      // `@microsoft/fetch-event-source` 对外部 signal 的内部 dispose 在 React/strict 模式
+      // 下不总能立刻关闭底层 fetch（参见 Azure/fetch-event-source #24 / #46 / #84）。
+      // 业界推荐做法：在 onopen / onmessage 入口主动检查 signal.aborted，主动 throw
+      // 一个 abort 错误，借库的 onerror rethrow 机制走"立刻关闭+不重试"路径。
+      async onopen(response) {
+        if (signal?.aborted) throw new StreamAbortedError('aborted')
+        const ct = response.headers.get('content-type') ?? ''
+        if (response.ok && ct.includes('text/event-stream')) {
+          return
+        }
+        let detail = `HTTP ${response.status}`
+        try {
+          const data = (await response.json()) as { detail?: string }
+          if (data?.detail) detail = `${detail}: ${data.detail}`
+        } catch {
+          // 响应不是 JSON
+        }
+        throw new FatalStreamError(detail)
+      },
+      onmessage(ev) {
+        if (signal?.aborted) throw new StreamAbortedError('aborted')
+        if (!ev.data) return
+        try {
+          const event = JSON.parse(ev.data) as AgentStreamEvent
+          handlers.onEvent(event)
+        } catch (e) {
+          console.error('[streamChat] SSE frame parse error', ev.data, e)
+        }
+      },
+      onerror(err) {
+        // 主动 abort 抛出的：静默关闭，不调用 onError（避免在 UI 上显示"连接错误"）
+        if (err instanceof StreamAbortedError || signal?.aborted) {
+          throw err
+        }
+        const e = err instanceof Error ? err : new Error(String(err))
+        handlers.onError?.(e)
+        throw e
+      },
+      onclose() {
+        handlers.onClose?.()
+      },
+    })
+  } catch (err) {
+    // 主动 abort 路径：吞掉，让调用方按正常 resolve 处理
+    if (err instanceof StreamAbortedError) return
+    if (signal?.aborted) return
+    throw err
+  }
 }
 
 // ─── Step 3：Session 管理 ──────────────────────────────────────────────
@@ -203,6 +222,12 @@ export async function deleteKBDocument(docId: string): Promise<KBDeleteResponse>
   })
   await _ensureOk(res)
   return (await res.json()) as KBDeleteResponse
+}
+
+export async function clearAllKBDocuments(): Promise<KBClearAllResponse> {
+  const res = await fetch('/api/kb/documents', { method: 'DELETE' })
+  await _ensureOk(res)
+  return (await res.json()) as KBClearAllResponse
 }
 
 // ─── Step 5：User Memory / Rules / Skills / MCP ───────────────────────

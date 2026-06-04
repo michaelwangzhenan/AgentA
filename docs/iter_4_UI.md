@@ -1583,7 +1583,7 @@ AgentA/                              # 项目根
 │       ├── components/
 │       │   ├── ui/                  # shadcn/ui 组件（CLI 复制进来）
 │       │   ├── chat/                # 聊天主区（MessageList / Composer / ...）
-│       │   ├── sidebar/             # 左侧栏（Recents / 资源菜单 / ...）
+│       │   ├── sidebar/             # 左侧栏（资源菜单 / 会话列表 / ...）
 │       │   └── panel/               # 右侧 detail panel
 │       ├── pages/                   # 顶级页面（按 React Router 组织）
 │       ├── hooks/                   # 自定义 hooks（useChatStream / useSession / ...）
@@ -1629,18 +1629,19 @@ AgentA/                              # 项目根
 
 ## 6.4 分步实现
 
-按"**先架子、后填肉**"拆 7 个 Step。每个 Step 一个里程碑、独立可验收。
+按"**先架子、后填肉**"拆 8 个 Step。每个 Step 一个里程碑、独立可验收。
 
 | Step | 主题 | 里程碑（看得到的效果） |
 |---|---|---|
 | **Step 0** | 项目骨架 | 后端 `/api/health` + 前端空页 + Vite proxy 跑通 |
 | **Step 1** | 最小聊天回路（非流式） | 输入框发消息、Agent 返回完整答案（一次性） |
 | **Step 2** | 流式输出 + Agent 状态 | SSE 流式打字 + Thinking / Plan / Tool 折叠块 |
-| **Step 3** | Session 管理 | 左侧栏 Recents、新建 / 切换 / 改名 / 删除、刷新不丢 |
+| **Step 3** | Session 管理 | 左侧栏会话列表、新建 / 切换 / 改名 / 删除、刷新不丢 |
 | **Step 4** | 知识库 + 拖拽入库 | 拖文件 → 进度 → 入库；文档列表 / 删除 |
 | **Step 5** | 其他资源管理 | rules / memory / skills / mcp 4 类 CRUD |
 | **Step 6** | 系统配置 + 主题 + 反馈 + 调试 | LLM 参数面板 + 暗色模式 + toast / error / loading + 日志查看 |
 | **Step 7** | 业务面板 | 学习计划 / Quiz / SRS |
+| **Step 8** | 总体验收 | 端到端跑通全功能 + UT 全量回归 |
 
 每个 Step 用同一份模板：① 目标 ② 实现内容 ③ 修改 / 新增列表（表格） ④ UT 策略 ⑤ 人工验收步骤。
 
@@ -1777,7 +1778,7 @@ AgentA/                              # 项目根
 | LLM 调用很慢时浏览器看起来"假死" | 同步等待，本 Step 接受；Step 2 上 SSE 解决 |
 | `Agent.run` 是同步 + IO bound | FastAPI 会自动把同步路由扔到 thread pool 跑、不阻塞 event loop —— 写 `def chat()`（不带 `async`）即可 |
 | 服务器重启 = chat 历史全丢 | 本 Step 接受；Step 3 上 session 持久化 |
-| `system_prompt` / skills / rules 都是默认值 | 体感比 CLI 简陋（agent "傻"一些），本 Step 接受；Step 5 抽 composition root 跟 CLI 一致 |
+| `system_prompt` / skills / rules 都是默认值 | 体感比 CLI 简陋（agent "傻"一些），本 Step 接受。**实际后续 Step 5 没做 composition root 抽取**：Agent 实例化路径跟 CLI 仍是两份代码，只是各自正常加载 rules / skills / memory（行为基本一致），属于代码重复 backlog，不阻塞功能 |
 
 ---
 
@@ -1901,9 +1902,9 @@ AgentA/                              # 项目根
 
 | 项 | 说明 |
 |---|---|
-| 取消按钮"假停" | 前端断流后，后端 Agent 仍跑完整轮；本 Step 接受。真正中止 Agent run 涉及 Agent core 改造，留给后续 |
+| 取消按钮"假停" | 后端 Agent 仍跑完整轮（真正中止涉及 Agent core 改造，未做）。**Step 7 review 时补了前端主动 abort**（`App.tsx` 用 `AbortController`，session 切换时断流），前端体验改善；后端单轮跑完后才释放锁，资源占用接受 |
 | `asyncio.Queue` 无大小限制 | Agent 比前端消费快的极端情况下内存涨；本 Step 接受（实测一轮事件数 ≤ 几百） |
-| 单例 Agent + 并发请求 | 当前单例非线程安全，多 tab 同时发起 stream 会互相干扰；本 Step 单用户场景接受；Step 3 上 session 隔离后自然解决 |
+| ~~单例 Agent + 并发请求~~ **（Step 7 review 已修）** | 原文档以为"Step 3 session 隔离后自然解决"——**错的**，Step 3 不解决。Step 7 review 时在 `src/api/routes/chat.py` 加 `_AGENT_LOCK = threading.Lock()` 串行化 `agent.run` + `set_event_callback`，并发请求按到达顺序排队执行，不再覆盖 `session_id`。**单用户工具 scope 下牺牲并发换 thread-safety 可接受**；多用户场景需要换 per-request Agent 实例 |
 | `thinking` 体量大可能比正文还长 | 默认折叠（header 显示字数 + "展开" 按钮） |
 | 浏览器 6 个 HTTP/1.1 同域并发上限 | 本期单 tab 单流不踩；生产部署用 HTTP/2 / 反代解决 |
 | **`token_chunk` 颗粒度依赖 provider，不是统一逐 token** | 实测 3 家行为差异巨大：**kimi** 真 token 级（约 200 chunks）/ **qwen** 半流式大块（约 7 chunks）/ **glm** 几乎非流式（2 chunks）。详 [knowlege.md §10](./knowlege.md#10-llm-streaming--tool-call-行为差异)。AgentA 不做客户端均匀化（无意义且增加假打字延迟）—— 流式打字体验依赖 provider 实际能力 |
@@ -1913,7 +1914,7 @@ AgentA/                              # 项目根
 
 ### 6.4.4 Step 3 - Session 管理
 
-**目标**：左侧栏显示所有历史会话，支持新建 / 切换 / 重命名 / 删除；刷新页面或重启后端历史不丢。完成后体验对齐 ChatGPT / Claude Web 的左侧 Recents 列表。
+**目标**：左侧栏显示所有历史会话，支持新建 / 切换 / 重命名 / 删除；刷新页面或重启后端历史不丢。完成后体验对齐 ChatGPT / Claude Web 的左侧 Recents 列表（带可折叠标签，折叠状态 `localStorage` 持久化）。
 
 **本 Step 不做**：
 
@@ -2032,7 +2033,7 @@ AgentA/                              # 项目根
 5. hover 任意 session → 出现 `⋯` → 点 **重命名** → 弹 Dialog 改成"测试会话" → 列表立刻更新
 6. hover 任意 session → 点 **删除** → 弹确认 → 确认后列表移除；若删的是当前 active 自动切到列表第一个
 7. **关浏览器**重新打开 / **重启 uvicorn** 后重开 → session 列表还在、消息不丢
-8. 删除所有 session 后，前端**自动新建一个** session（永远保持至少一个 active）
+8. 逐个删完所有 session（每条从 ⋯ 菜单单删，没有"清空"按钮）后，删到 0 条时前端**自动新建一个**空 session（永远保持至少一个 active）
 9. `pytest -q tests/test_api_sessions.py tests/test_chat_history_rename.py` 全过
 
 通过以上 8-9 条 = Step 3 完成。
@@ -2041,7 +2042,7 @@ AgentA/                              # 项目根
 
 | 项 | 说明 |
 |---|---|
-| 多 tab 并发的 session_id 互相覆盖 | 单例 Agent 的 `session_id` 字段非线程安全；多 tab 同时发 stream 会互相覆盖。Step 2 已列出此风险，Step 3 不解决。单用户场景实际不踩 |
+| ~~多 tab 并发的 session_id 互相覆盖~~ **（Step 7 review 已修）** | Step 3 当时确实没解决（原列为已知限制）。Step 7 review 时在 chat route 加 `threading.Lock` 串行化，已彻底闭合，详见 [Step 2 风险点](#643-step-2---流式输出--agent-状态) |
 | 重命名复用 `first_user_msg` 列 | 改名后看不到原始首条预览（但聊天历史里有原文）。简化代价可接受 |
 | session 创建未发消息 | 标题是 `id 前 8 位`，不友好。后续 Step 可加"LLM 自动起标题"或允许新建时手动命名 |
 
@@ -2245,7 +2246,7 @@ MCP（2 个）：
 | Rules 写入是否热加载 | 不热加载 | `load_project_rules` 设计是启动一次；Web UI 写完 toast 提示 "重启或新 session 生效"，符合 rules_loader 既有约束 |
 | Skills 是否允许 UI add / delete | 不允许 | Skill 是 git tracked 的文件，UI 编辑 frontmatter / body 收益低；用户用编辑器改文件，重启进程即可 reload |
 | MCP servers 是否允许 UI add / delete | 不允许 | Server config 在 `.agenta/mcp.json` + 启动 lifecycle 复杂；现阶段只读够用 |
-| 资源菜单区放哪 | Sidebar `[+ 新建会话]` + view 切换块 下方，sessions 列表 上方 | 跟需求文档 §4.2 布局对齐：资源菜单在 Recents 列表上方 |
+| 资源菜单区放哪 | Sidebar `[+ 新建会话]` + view 切换块 下方，sessions 列表 上方 | 跟需求文档 §4.2 布局对齐：资源菜单在会话列表上方 |
 | 4 套资源的入口形态 | 4 个固定 icon-text 行（不可折叠） | 简洁；后续 Step 加更多资源时再考虑分组 |
 | Memory category 标签 | 用现有 `CATEGORY_LABELS` 翻译 | 比 raw category id（如 `pref_style`）更友好 |
 | 选中某资源时主区切换 | `activeView: 'chat' \| 'kb' \| 'memory' \| 'rules' \| 'skills' \| 'mcp'` | 6 种 view，沿用 Step 4 的 view 切换模式 |
@@ -2334,6 +2335,8 @@ MCP（2 个）：
 |---|---|---|
 | `USER_MEMORY_ENABLED` 等 env var 在 uvicorn 进程里永远拿默认值 | `src/api/main.py` 没 `load_dotenv`；CLI 入口 `main.py` 有；Step 1~4 因为 KB 走 `ingest.py`（里面有 load_dotenv）侥幸没暴露 | `src/api/main.py` 顶部加 `load_dotenv(override=True)`，必须在 `import src.config` 之前 |
 | MCP server 在 uvicorn 进程里**从未被启动** | `_bootstrap_mcp()` 只在 CLI `main.py` 启动时调；uvicorn 启动时没有等价 hook | 复制 `_bootstrap_mcp` 逻辑到 `src/api/main.py` 的 FastAPI `lifespan` async context manager |
+| `UserMemoryStore.upsert` 返回值无法定位新插入条目 | 原签名返回 `None`；API 路由 `upsert_memory` 不得不复制 store 的 key 清洗逻辑去反查刚插入的条目，紧耦合 | `upsert` 改成显式 SELECT-then-UPDATE/INSERT 路径并返回 `id: int \| None`；API 路由直接用返回值查回创建后的条目 |
+| `patch_memory` 路由复用了 `MemoryDeleteResponse` | 历史遗留，名字误导（patch 返回的不是删除信息） | 新增 `MemoryPatchResponse(updated: bool)`，路由 / 前端 / UT 三处同步修正 |
 
 ---
 
@@ -2345,7 +2348,7 @@ MCP（2 个）：
 - 用户能切换暗色 / 浅色 / 跟系统主题
 - 全局统一 toast 反馈系统，把 Step 4 / Step 5 各自抽的 toast 模板归一
 
-完成后 Sidebar 多 1 个"设置"入口；右上角有主题切换按钮；所有"操作反馈"统一走 sonner toast。
+完成后 Sidebar 多 1 个"设置"入口；Sidebar 底部右侧有主题切换按钮；所有"操作反馈"统一走 sonner toast。
 
 **本 Step 不做**：
 
@@ -2452,7 +2455,7 @@ MCP（2 个）：
 - `src/api/client.ts` 加 `getConfig()`
 - `src/lib/toast.ts` 新建：sonner 的轻封装，统一 `success / error / info` API
 - `src/lib/theme.ts` 新建：theme state hook + localStorage + apply class
-- `src/components/settings/ThemeToggle.tsx` 新建：右上角按钮（3 态切换）
+- `src/components/settings/ThemeToggle.tsx` 新建：Sidebar 底部右侧按钮（3 态切换）
 - `src/components/settings/SettingsView.tsx` 新建：只读分组展示
 - `src/components/sidebar/Sidebar.tsx` 改：加 ⚙️ 设置 入口，`ViewKind` 加 `settings`
 - `src/App.tsx` 改：根挂 `<Toaster />`；初始化 theme；条件渲染 SettingsView
@@ -2474,7 +2477,7 @@ MCP（2 个）：
 1. 启动后端 + 前端
 2. Sidebar 底部应该有"⚙️ 设置"入口
 3. 点击"⚙️ 设置" → 主区显示 LLM / RAG / Memory / Rules / MCP / Security / Web / Log 8 个分组；每组展示当前值；**确认看不到任何 API key**
-4. 右上角主题切换按钮（图标 Sun / Moon / Monitor）→ 点一次切到 dark；点第二次切到 light；点第三次切到 system
+4. Sidebar 底部右侧主题切换按钮（图标 Sun / Moon / Monitor）→ 点一次切到 dark；点第二次切到 light；点第三次切到 system
 5. 在 dark 模式下逐个 View 切一遍（chat / KB / memory / rules / skills / mcp / settings），UI 全部正确显示成深色
 6. 刷新浏览器 → 主题选择保留
 7. 上传一个文档到 KB → 右下角弹 sonner toast（不再是 Step 4 自抽的 box）
@@ -2492,6 +2495,7 @@ MCP（2 个）：
 | sonner Toaster 渲染层级跟 shadcn Dialog 冲突 | 实测：sonner z-index 高于 dialog backdrop，二者并存 ok；如有问题加 `position="top-right"` 错位 |
 | 后端 `available_providers` 字段从 `PROVIDER_CONFIGS.keys()` 拿 | 顺序非确定（dict 在 Python 3.7+ 保插入序）；前端按字母重排避免 UI 抖动 |
 | `force_temperature` 可能是 `None` | TS 类型用 `number \| null`；显示成"—" |
+| ~~`useTheme` 跨组件状态不同步~~ **（Step 7 review 已修）** | 首版 `useTheme` 用普通 hook 模式，`App.tsx` 跟 `ThemeToggle.tsx` 各持一份状态：切主题后 Toaster（在 App 渲染）颜色不跟随，需刷新页面。Step 7 review 改用 React Context（`src/lib/theme.tsx` 暴露 `ThemeProvider` + `useTheme`），`main.tsx` 顶层包一层 Provider，全应用共享主题状态 |
 
 ---
 
@@ -2631,3 +2635,189 @@ SRS（3 个）：
 | 数据为空时 UI 显示 | 各 view 提供 "暂无 X，去 chat 里问 LLM 创建" 引导文案 |
 
 ---
+
+### 6.4.9 Step 8 - 总体验收
+
+**目标**：把 Step 0~7 的能力按一条**端到端用户旅程**串起来跑通。后续 Step 覆盖前面 Step 的所有效果（流式聊天必然覆盖非流式、session 管理必然覆盖单轮聊天……），因此**只要 Step 8 全过 = Step 0~7 全过**，不再重复每个 Step 自己的细分验收。
+
+**前置准备**：
+
+1. `.venv` 已建好、`requirements.txt` 装齐：`.\.venv\Scripts\pip install -r requirements.txt`
+2. `frontend/node_modules` 已装好：`cd frontend && npm install`
+3. `.env` 至少配好 1 个 LLM provider 的 API key（kimi / qwen 任一即可，glm 因 [Step 2 风险点](#643-step-2---流式输出--agent-状态) `make_plan` 死循环不建议作为主测 provider）
+4. 当前目录在项目根（`AgentA/`）下，PowerShell 5.1+ 
+
+#### 启停工具 `tools\ui.ps1`
+
+为了避免每次手动开两个终端 + 记忆 uvicorn / vite 命令，封装了一个 PowerShell 启停工具：
+
+| 命令 | 作用 |
+|---|---|
+| `.\tools\ui.ps1 start` | 后台启动 uvicorn (`:8000`) + vite (`:5173`)；自动写 `.run/<name>.pid`、`logs/<name>.log` |
+| `.\tools\ui.ps1 stop` | 一起停；用 `taskkill /T /F` 杀整个进程树（避免 npm/node、uvicorn reloader/worker 留孤儿） |
+| `.\tools\ui.ps1 stop uvicorn` / `stop vite` | 只停一个（用于"只重启后端 / 只重启前端"场景） |
+| `.\tools\ui.ps1 status` | 表格列出两个服务的 status / PID / 端口 / URL |
+| `.\tools\ui.ps1 logs uvicorn` / `logs vite` | `tail -f` 对应日志；Ctrl+C 只退出查看，服务继续跑 |
+| `.\tools\ui.ps1 help` | 帮助（不带参数也是这个） |
+
+工具内置幂等检测：PID 文件存在 + 进程还在 / 或端口已被占用，则 `start` 跳过 + 警告，不会重复启起 2 份。
+
+---
+
+#### A. 后端 UT 全量回归
+
+```powershell
+.\.venv\Scripts\python -m pytest -q
+```
+
+预期：全过（默认 deselect `integration` / `langchain` / `autogpt` / `extended_providers` markers，约 1100+ case，跑约 30s 内）。
+
+如果只想跑 web API 相关：
+
+```powershell
+.\.venv\Scripts\python -m pytest -q tests/test_api_*.py
+```
+
+---
+
+#### B. 前端构建检查
+
+```powershell
+cd frontend
+npx tsc --noEmit          # 类型检查，应零错
+npx eslint . --max-warnings 0  # lint，应零 error 零 warning（详见 `frontend/eslint.config.js` 的规则说明）
+npm run build             # vite build，应 5s 内出 dist/（warning 提示 chunk > 500KB 可忽略）
+cd ..
+```
+
+---
+
+#### C. 端到端冒烟
+
+**1) 启动服务**
+
+```powershell
+.\tools\ui.ps1 start
+.\tools\ui.ps1 status
+```
+
+预期：`uvicorn` 和 `vite` 两行都是 `RUNNING`、列出 PID、URL（`http://localhost:8000/docs` + `http://localhost:5173/`）。
+
+如果 status 显示某个 `stopped` 或 start 报失败：
+
+```powershell
+.\tools\ui.ps1 logs uvicorn   # 看后端启动日志
+.\tools\ui.ps1 logs vite      # 看前端启动日志
+```
+
+排错后再 `.\tools\ui.ps1 stop` + `start` 重试。
+
+**2) 后端健康检查**（覆盖 Step 0）
+
+浏览器开 `http://localhost:8000/docs` → 应看到 Swagger UI，列出 `/api/health` / `/api/chat` / `/api/chat/stream` / `/api/sessions` / `/api/kb/*` / `/api/memory` / `/api/rules` / `/api/skills` / `/api/mcp` / `/api/config` / `/api/plans` / `/api/quizzes` / `/api/srs` 等所有路由。
+
+点 `GET /api/health` → `Try it out` → `Execute` → 200 + `{"ok": true, "version": "..."}`。
+
+**3) 前端首屏**（覆盖 Step 0 / Step 3 / Step 5 / Step 6 / Step 7）
+
+浏览器开 `http://localhost:5173/` → 应看到：
+
+- 左侧 Sidebar 自上而下：
+  - 顶部"新建会话"按钮
+  - 资源菜单区（聊天 / 知识库 / 记忆 / 规则 / Skills / MCP / 学习计划 / Quiz / SRS / 设置 共 10 个入口）
+  - "Recents" 标签 + 会话列表（点标签可折叠/展开，chevron 跟着旋转；折叠状态写 localStorage 持久化）
+  - 底部右侧：主题切换按钮（Sun / Moon / Monitor 三态）
+- 主区：当前 session 的聊天界面（消息区空 + 输入框）
+
+**4) 流式聊天 + 多轮记忆 + Plan / Tool 可视化**（覆盖 Step 1 + Step 2）
+
+- 在输入框发 `用 3 句话讲一下牛顿三定律` → 正文 token 逐字浮现（不是等 5 秒整段出）
+- F12 → Network → 找到 `POST /api/chat/stream` → 状态 200、Type `eventsource`、EventStream 标签里能看到一串 `token_chunk` + 最后 `final_answer`
+- 再发 `我刚才问的是什么？` → assistant 应答出 "牛顿三定律"（说明 chat_history 复用）
+- 发 `帮我设计一份 4 周的 Rust 入门学习计划` → 正文上方先出 Plan checklist（每步从 ⏳ 翻 ✓）、可能伴随 `make_plan` / `create_study_plan` 工具调用卡片
+
+**5) Session 管理 + 持久化 + SSE 断流**（覆盖 Step 3 + Step 7 review fix #9）
+
+- 点"新建会话" → list 顶部多一个 session（标题前 8 位 uuid）、自动切到它
+- **关键测**：在新 session 里发一句长回答的问题（如"详细讲讲深度学习的发展史"）；token 流到一半时**立刻点回上一个 session** → 旧 SSE 应该被前端主动 abort（Network 看到 `EventStream` 列变成 `(canceled)`）；切回来不会看到混乱的中间 token
+- hover session → 弹 `⋯` → 重命名为"测试会话" → 列表立刻更新
+- hover session → 删除 → 确认 Dialog → 该 session 从列表消失
+- 逐个删完所有 session（每条单删，没有"清空"按钮）→ 删到 0 条时前端 `handleDelete` 兜底自动 `createSession()` 建一个新空 session（默认显示标题为 "New Chat"，首条 user 消息一来就被覆盖为该消息摘要），保持至少 1 个 active
+- 点 "Recents" 标签 → 会话列表折叠（chevron 从朝下转到朝右）；再点一次 → 展开；刷新浏览器后折叠状态保留（localStorage 持久化）
+- **重启后端**：`.\tools\ui.ps1 stop uvicorn` → `.\tools\ui.ps1 start uvicorn` → 浏览器刷新 → session 列表 / 消息历史全部还在
+
+**6) 知识库 拖拽入库 + 列表 + 删除 + Agent 检索**（覆盖 Step 4）
+
+- 点 `知识库` view → 主区切到 KB 面板
+- 拖一个 `.md` 文件到拖拽区 → 高亮 → 松开 → spinner → toast "已入库，N chunks"、列表新增一行
+- 同名文件再拖一次 → toast 提示"内容未变化，已跳过"（content_sha1 去重）
+- 拖一个 `.exe` → toast "不支持的格式"，不发请求
+- 列表里删一个文档 → AlertDialog 确认 → 行消失 + toast "已删除"
+- 切回聊天，新 session 问"我刚上传的 X 文档讲了什么？" → assistant 应该能调 `search_knowledge` 工具命中
+
+**7) 资源管理（Memory / Rules / Skills / MCP）**（覆盖 Step 5）
+
+- 点 `记忆` → 列表显示当前 user_memory；点 ✏️ 改一条 value → 保存 → toast + 列表更新；点 🗑️ → 确认 → 行消失
+- 点 `规则` → textarea 显示 `.agenta/rules.md` 内容 → 改内容 → 保存 → toast "已保存，新 session 生效"
+- 点 `Skills` → 列表显示 `.agenta/skills/` 扫到的 skills（loaded + failed 分组）
+- 点 `MCP` → 列表显示 servers 状态（connected / failed）+ tool_count；下方"工具清单"展示合流后的所有 tool
+
+**8) 主题切换 + 全局 Toast 同步**（覆盖 Step 6 + Step 7 review fix #2）
+
+- Sidebar 底部右侧主题按钮点一次 → dark；二次 → light；三次 → system
+- **关键测**：切换主题时，**正在显示中的 toast 颜色应该跟着翻转**（不再需要刷新页面，验证 review #2 ThemeProvider Context 修复）
+- 在 dark 模式下逐个 view 切一遍（聊天 / KB / 记忆 / 规则 / Skills / MCP / 学习计划 / Quiz / SRS / 设置）→ 全部深色显示正确
+- 刷新浏览器 → 主题保留
+
+**9) 设置面板（只读）**（覆盖 Step 6）
+
+- 点 `设置` → 主区显示 LLM / RAG / Memory / Rules / MCP / Security / Web / Log 8 个分组
+- **关键测**：确认看不到任何完整 API key（被脱敏成 `***`）
+
+**10) 业务面板（学习计划 / Quiz / SRS）**（覆盖 Step 7）
+
+- 回 chat 发 `做一份机器学习入门 4 周学习计划` → 让 LLM 调 `create_study_plan` 创建 plan
+- 切 `学习计划` → 左侧列出 plan；点进右侧显示 stages + tasks，active plan 高亮
+- chat 发 `考我 5 道 attention 机制的题` → 让 LLM 调 `create_quiz`
+- 切 `Quiz` → 列表出现新 quiz；点进显示 questions + 未答状态
+- chat 答题 → `grade_quiz` 批改 → 切回 Quiz view → 看到 user_answer / score / feedback
+- chat 发 `把刚才错的题加进 SRS` → 切 `SRS` → 上方"到期"队列 / 下方全卡列表都能看到新卡
+
+**11) 并发请求 thread-safety**（覆盖 Step 7 review fix #1）
+
+- **关键测**：开两个浏览器 tab，同时分别问不同的问题（同时按回车）→ 两边都应该按提交顺序得到正确答案，**不会出现答案串到对方 session 的情况**（验证 `_AGENT_LOCK` 串行化修复）
+
+**12) 重启 / 持久化总验**
+
+```powershell
+.\tools\ui.ps1 stop
+.\tools\ui.ps1 start
+```
+
+刷新浏览器 → 上面建立的 session / KB 文档 / memory / plan / quiz / SRS 卡片**全部还在**（持久化 store + sqlite_db + chroma_db 工作正常）。
+
+**13) 干净停服**
+
+```powershell
+.\tools\ui.ps1 stop
+.\tools\ui.ps1 status
+```
+
+预期：两个服务都 `stopped`、`.run/*.pid` 已清。
+
+---
+
+#### D. Step 7 review 后的 10 项 fix
+
+| Fix | 验收点 |
+|---|---|
+| #1 `_AGENT_LOCK` 串行化 | C.11 两 tab 并发问答不串台 |
+| #2 ThemeProvider Context | C.8 切主题时 toast 颜色跟随 |
+| #3 PlansView/QuizzesView refreshList 优化 | C.10 切 plan / quiz 点击不闪 + Network 不重复拉列表 |
+| #4 deps.py docstring 更新 | 仅文档；走读 `src/api/deps.py` |
+| #5 user_memory.upsert 返回 id | C.7 memory 编辑保存后立刻看到（不再依赖 key 反查） |
+| #6 MemoryPatchResponse 新增 | UT 已覆盖（`tests/test_api_memory.py`） |
+| #7 SSE AbortController | C.5 session 切换时旧流被 cancel |
+| #8 kb.py 删 dead import | 仅静态检查，B 步骤 tsc/eslint/build 覆盖 |
+| #9 SRSView 移除 emoji | C.10 SRS view 空状态文案"没有到期卡片，继续保持" |
+| #10 asChild 警告修复 | F12 Console 无 `<button> cannot contain a nested <button>` / `React does not recognize the asChild prop` 警告 |

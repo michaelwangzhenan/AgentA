@@ -11,7 +11,8 @@ class KBDocument(BaseModel):
     source: str = Field("", description="相对 docs_dir / web_upload_dir 的路径")
     ext: str = Field("", description="扩展名，例如 .md / .pdf")
     lang: str = Field("", description="语种判断（zh / en / mixed）")
-    mtime: float = Field(0.0, description="文件修改时间（unix timestamp）；用于排序")
+    mtime: float = Field(0.0, description="文件修改时间（unix timestamp）；来自磁盘 stat")
+    ingested_at: float = Field(0.0, description="入库时间（unix timestamp）；老数据为 0")
     chunks: int = Field(0, description="切分后入库的 chunk 数")
     total_chars: int = Field(0, description="所有 chunks 文本总字符数")
 
@@ -33,3 +34,11 @@ class KBUploadResponse(BaseModel):
 class KBDeleteResponse(BaseModel):
     deleted: bool = Field(..., description="是否实际找到并删除了 doc_id")
     chunks_removed: int = Field(0, description="Chroma 中移除的 chunk 数")
+
+
+class KBClearAllResponse(BaseModel):
+    """DELETE /api/kb/documents（清空整个 KB）返回值"""
+
+    docs_removed: int = Field(0, description="删除的文档数")
+    chunks_removed: int = Field(0, description="Chroma 中移除的 chunk 总数")
+    files_removed: int = Field(0, description="web_uploads 目录中物理删除的文件数")

@@ -127,12 +127,19 @@ class ChatHistoryStore:
         with self._conn:
             # 若 session 不存在，插入 session 记录
             existing = self._conn.execute(
-                "SELECT 1 FROM sessions WHERE session_id = ?", (session_id,)
+                "SELECT first_user_msg FROM sessions WHERE session_id = ?",
+                (session_id,),
             ).fetchone()
-            if not existing:
+            if existing is None:
                 self._conn.execute(
                     "INSERT INTO sessions(session_id, created_at, first_user_msg) VALUES(?,?,?)",
                     (session_id, now, content[:_FIRST_MSG_PREVIEW_LEN] if role == "user" else ""),
+                )
+            elif role == "user" and not existing["first_user_msg"]:
+                # session 由 create_empty_session 预建（标题为空），首条 user 消息时回填标题
+                self._conn.execute(
+                    "UPDATE sessions SET first_user_msg = ? WHERE session_id = ?",
+                    (content[:_FIRST_MSG_PREVIEW_LEN], session_id),
                 )
 
             # 追加消息

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Upload } from 'lucide-react'
+import { Loader2, Upload } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 // 跟后端 SUPPORTED_EXTENSIONS 对齐（src/rag/parser.py）
@@ -57,9 +57,13 @@ export function DropZone({ onFiles, disabled = false }: DropZoneProps) {
       role="button"
       tabIndex={0}
     >
-      <Upload className="h-8 w-8 text-muted-foreground" />
+      {disabled ? (
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      ) : (
+        <Upload className="h-8 w-8 text-muted-foreground" />
+      )}
       <p className="text-sm font-medium">
-        {disabled ? '处理中...' : '拖文件到这里 或 点击选择'}
+        {disabled ? '处理中，请勿关闭页面...' : '拖文件到这里 或 点击选择'}
       </p>
       <p className="text-xs text-muted-foreground">
         支持 {ACCEPT_EXTENSIONS.join(' / ')}（单文件 ≤ 10 MB）

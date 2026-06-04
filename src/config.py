@@ -179,6 +179,10 @@ WEB_UPLOAD_DIR: str = os.getenv("WEB_UPLOAD_DIR", "./datasets/web_uploads")
 # Web UI 单次上传文件大小上限（MB），超限返回 413
 WEB_MAX_UPLOAD_MB: int = int(os.getenv("WEB_MAX_UPLOAD_MB", "10"))
 
+# 单文件 ingest 超时（秒）；超时返回 504，避免 deadlock / 大文件 parse 拖死后端
+# 注意：超时只让 client 解套，后台 thread 仍会跑完（同步代码无法真取消）
+WEB_INGEST_TIMEOUT_SEC: int = int(os.getenv("WEB_INGEST_TIMEOUT_SEC", "60"))
+
 # RAG 检索返回的最大文档片段数
 # Iter-2 默认从 5 提升到 8：枚举/对比类问题 5 条往往不够；当前 LLM 上下文 8K~32K 富裕。
 RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "8"))

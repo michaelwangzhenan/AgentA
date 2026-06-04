@@ -13,11 +13,120 @@ from collections.abc import Callable
 from typing import Any
 
 import json
+import re
 
 import httpx
 import openai
 
 import src.config as config
+
+
+# ── Function name sanitize adapter ────────────────────────────────────────────
+#
+# OpenAI 兼容协议规定 tool/function name 必须匹配 `^[a-zA-Z0-9_-]+$`。
+# 历史 / 当前数据源里两类违规：
+#   1. MCP namespaced tool 用 `.` 做 server/tool 分隔（如 `filesystem.read_file`）
+#   2. 历史 messages 里早期写入的 tool_calls 偶有 `name=""`（早期 bug 残留）
+#
+# 策略：发给 LLM 前 sanitize（`.` → `__`、其他非法字符 → `_`、空 name 整条 tool_call
+# 丢弃），LLM 返回 tool_calls 后 reverse（`__` → `.`），让 agent 派发层（`tools.py`
+# 的 `if "." in name` 判 MCP）以及 `mcp_manager.call_tool` 完全不感知本层翻译。
+
+_VALID_FN_NAME = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+def _sanitize_function_name(raw: str) -> str:
+    """把任意字符串转成符合 LLM function name 规则的形式。
+
+    规则（与 `_restore_function_name` 互为逆，前提是原始名不含 `__`）：
+      - `.` → `__`（用双下划线保证可逆，普通 tool 名不会自然出现 `__`）
+      - 其他非法字符 → `_`
+      - 首字符非字母 → 加 `t_` 前缀（OpenAI 要求字母开头）
+    """
+    s = raw.replace(".", "__")
+    s = re.sub(r"[^a-zA-Z0-9_-]", "_", s)
+    if s and not s[0].isalpha():
+        s = "t_" + s
+    return s
+
+
+def _restore_function_name(sanitized: str) -> str:
+    """LLM 返回 tool_calls.function.name 时反向还原（`__` → `.`）。"""
+    return sanitized.replace("__", ".")
+
+
+def _sanitize_messages_for_llm(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """加固历史 messages：丢弃空 name 的 tool_call + 修正非法 function name。
+
+    返回**新** list（不改原 messages），跟 agent 内部状态隔离。
+    """
+    skipped_ids: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for msg in messages:
+        role = msg.get("role")
+        # tool response：若 tool_call_id 对应已被丢弃的 tool_call，本条也丢
+        if role == "tool" and msg.get("tool_call_id") in skipped_ids:
+            continue
+
+        tcs = msg.get("tool_calls")
+        if not tcs:
+            out.append(msg)
+            continue
+
+        new_tcs: list[dict[str, Any]] = []
+        for tc in tcs:
+            fn = tc.get("function") or {}
+            name = fn.get("name") or ""
+            if not name:
+                # 空名 tool_call：整条丢，记下 id 让对应 tool response 也丢
+                tc_id = tc.get("id") or ""
+                if tc_id:
+                    skipped_ids.add(tc_id)
+                continue
+            if not _VALID_FN_NAME.match(name):
+                new_fn = {**fn, "name": _sanitize_function_name(name)}
+                tc = {**tc, "function": new_fn}
+            new_tcs.append(tc)
+
+        new_msg = dict(msg)
+        if new_tcs:
+            new_msg["tool_calls"] = new_tcs
+        else:
+            # 整条 assistant message 只有空/非法 tool_call；保留 content（若有），
+            # 否则整条丢（不带 content 也不带 tool_calls 的 assistant 没意义）
+            new_msg.pop("tool_calls", None)
+            if not (new_msg.get("content") or "").strip():
+                continue
+        out.append(new_msg)
+    return out
+
+
+def _sanitize_tools_for_llm(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """sanitize 注册 tools 里的 function.name（同上规则）。"""
+    out: list[dict[str, Any]] = []
+    for t in tools:
+        fn = t.get("function") or {}
+        name = fn.get("name") or ""
+        if not name:
+            continue
+        if not _VALID_FN_NAME.match(name):
+            t = {**t, "function": {**fn, "name": _sanitize_function_name(name)}}
+        out.append(t)
+    return out
+
+
+def _restore_tool_call_names(response: Any) -> None:
+    """LLM response 里 tool_calls.function.name 反向还原（in-place 修改 SimpleNamespace）。"""
+    try:
+        for choice in getattr(response, "choices", []) or []:
+            tcs = getattr(getattr(choice, "message", None), "tool_calls", None) or []
+            for tc in tcs:
+                fn = getattr(tc, "function", None)
+                if fn is not None and getattr(fn, "name", None):
+                    fn.name = _restore_function_name(fn.name)
+    except Exception:
+        # 防御：异常 SDK 结构不应破坏主链路，最差情况就是 name 不还原
+        pass
 
 
 def _openai_call(
@@ -69,6 +178,12 @@ def chat(
     if config.ACTIVE_PROVIDER == "claude":
         return _chat_claude(messages, tools, temperature, on_token_chunk)
 
+    # 历史 messages / MCP tools 可能含非法 function name（`.` 分隔、空名等）
+    # 在发给 LLM 前 sanitize，返回时由 _restore_tool_call_names 反向还原
+    messages = _sanitize_messages_for_llm(messages)
+    if tools:
+        tools = _sanitize_tools_for_llm(tools)
+
     provider_config = config.get_active_config()
 
     # 个别模型对 temperature 有硬约束（如 kimi-k2.6 强制要求 = 1，非 1 直接 400），
@@ -97,17 +212,20 @@ def chat(
         # 流式响应里把 usage 放到最后一个 chunk，否则 prompt_tokens / completion_tokens
         # 都拿不到（kimi / qwen 等 OpenAI 兼容 provider 默认不推 usage）
         kwargs["stream_options"] = {"include_usage": True}
-        return _openai_call(
+        response = _openai_call(
             provider_config,
             need_proxy,
             lambda client: _run_openai_stream(client, kwargs, on_token_chunk),
         )
+    else:
+        response = _openai_call(
+            provider_config,
+            need_proxy,
+            lambda client: client.chat.completions.create(**kwargs),
+        )
 
-    return _openai_call(
-        provider_config,
-        need_proxy,
-        lambda client: client.chat.completions.create(**kwargs),
-    )
+    _restore_tool_call_names(response)
+    return response
 
 
 def _run_openai_stream(

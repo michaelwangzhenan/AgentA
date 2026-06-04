@@ -407,6 +407,24 @@ class TestListSessions:
         sessions = store.list_sessions()
         assert "我的第一个问题" in sessions[0]["first_user_msg"]
 
+    def test_first_user_msg_backfilled_when_session_prebuilt(
+        self, store: ChatHistoryStore
+    ) -> None:
+        """create_empty_session 预建空标题 → 首条 user 消息回填标题（回归测试）。"""
+        store.create_empty_session("prebuilt", title="")
+        store.append("prebuilt", {"role": "user", "content": "首条问题内容"})
+        sessions = store.list_sessions(query="prebuilt")
+        assert sessions[0]["first_user_msg"].startswith("首条问题内容")
+
+    def test_first_user_msg_not_overwritten_after_set(
+        self, store: ChatHistoryStore
+    ) -> None:
+        """已有标题的 session 不被后续 user 消息覆盖。"""
+        store.create_empty_session("withtitle", title="手动标题")
+        store.append("withtitle", {"role": "user", "content": "消息内容不应覆盖标题"})
+        sessions = store.list_sessions(query="withtitle")
+        assert sessions[0]["first_user_msg"] == "手动标题"
+
 
 class TestListSessionsSearch:
     """测试 list_sessions(query, limit) 过滤行为。"""

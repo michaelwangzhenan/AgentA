@@ -30,6 +30,7 @@ for _key in ("HF_ENDPOINT", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE"):
 
 import hashlib
 import logging
+import time
 from pathlib import Path
 
 import chromadb
@@ -159,6 +160,168 @@ def _open_collection(client, model_name: str, collection_name: str):
     )
 
 
+def _ingest_one_file(
+    file_path: Path,
+    docs_path: Path,
+    collection,
+    collection_name: str,
+) -> dict:
+    """处理单个文件入库；返回 {doc_id, chunks, status}。
+
+    status:
+      - 'ingested'          : 解析 + 分块 + upsert 成功
+      - 'skipped_unchanged' : content_sha1 未变，跳过 parse 后续阶段
+      - 'empty'             : 解析或分块结果为空
+
+    被 `ingest_all`（批量）和 `ingest_one`（单文件公开入口）共用。
+    """
+    try:
+        rel_path = file_path.resolve().relative_to(docs_path).as_posix()
+    except ValueError:
+        rel_path = file_path.name
+    doc_id = _doc_id_from_relpath(rel_path)
+
+    logger.info("Parse 解析: %s", rel_path)
+    text = parse_file(file_path)
+
+    if not text.strip():
+        logger.warning("  跳过（内容为空）: %s", rel_path)
+        return {"doc_id": doc_id, "chunks": 0, "status": "empty"}
+
+    content_hash = _content_sha1(text)
+
+    # 幂等检测：若该 doc_id 已存在且 content_sha1 未变 → 跳过 reembed
+    existing = collection.get(
+        where={"doc_id": doc_id},
+        include=["metadatas"],
+    )
+    existing_ids = existing.get("ids") or []
+    existing_metas = existing.get("metadatas") or []
+    if existing_ids and existing_metas:
+        prev_hash = existing_metas[0].get("content_sha1")
+        if prev_hash == content_hash:
+            logger.info("  跳过（内容未变化）: %s → %d 块", rel_path, len(existing_ids))
+            return {"doc_id": doc_id, "chunks": len(existing_ids), "status": "skipped_unchanged"}
+        # 内容变了：先删旧 chunks
+        collection.delete(ids=existing_ids)
+        logger.info("  清除旧数据: %s → 删除 %d 条", rel_path, len(existing_ids))
+
+    structured = split_structured(text, config.CHUNK_SIZE, config.CHUNK_OVERLAP)
+    if not structured:
+        logger.warning("  跳过（分块结果为空）: %s", rel_path)
+        return {"doc_id": doc_id, "chunks": 0, "status": "empty"}
+
+    try:
+        mtime = file_path.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    lang = _detect_lang(text)
+    ext = file_path.suffix.lower()
+    ingested_at = time.time()  # 整个文件的所有 chunks 共享一个入库时间
+
+    ids: list[str] = [_make_chunk_id(doc_id, i) for i in range(len(structured))]
+    documents: list[str] = [c.text for c in structured]
+    metadatas: list[dict] = []
+    for i, c in enumerate(structured):
+        # ChromaDB metadata 不接受 None，缺失字段直接不写键
+        md: dict = {
+            "doc_id": doc_id,
+            "source": rel_path,            # 完整相对路径（含子目录），不再用 filename 做去重键
+            "filename": file_path.name,    # 兼容老字段，仅作展示
+            "ext": ext,
+            "lang": lang,
+            "mtime": mtime,
+            "ingested_at": ingested_at,
+            "content_sha1": content_hash,
+            "chunk_index": i,
+            "chunk_total": len(structured),
+            "line_start": int(c.line_start or 0),
+            "line_end": int(c.line_end or 0),
+        }
+        if c.heading_path:
+            # heading_path 用 " > " 拼接，便于在 LLM 工具结果里直接展示给用户
+            md["heading_path"] = " > ".join(c.heading_path)
+        if c.page_no is not None:
+            md["page_no"] = int(c.page_no)
+        metadatas.append(md)
+
+    collection.upsert(
+        ids=ids,
+        documents=documents,
+        metadatas=metadatas,  # type: ignore[arg-type]
+    )
+
+    # 同步写入 BM25 倒排索引（如启用）；与 Chroma 共享 ids 保证融合时可对齐
+    if config.BM25_ENABLED:
+        try:
+            from src.rag.bm25_index import (
+                BM25Index,
+                get_index_path,
+                save_index,
+            )
+
+            bm25_path = get_index_path(collection_name)
+            bm25 = BM25Index.load_or_new(collection_name, bm25_path)
+            # 替换该 doc_id 下所有旧 chunk（先删后写）
+            bm25.delete_by_doc_id(doc_id)
+            bm25.upsert(ids=ids, documents=documents, metadatas=metadatas)
+            save_index(bm25, bm25_path)
+            logger.info("  BM25 索引已更新: %s → %d 块", rel_path, len(documents))
+        except Exception as e:  # 失败不影响 dense 入库主流程
+            logger.warning("  BM25 索引更新失败（已跳过）: %s — %s", rel_path, e)
+
+    page_info = (
+        f", pages={sum(1 for c in structured if c.page_no is not None)}"
+        if any(c.page_no is not None for c in structured)
+        else ""
+    )
+    heading_info = (
+        f", headings={sum(1 for c in structured if c.heading_path)}"
+        if any(c.heading_path for c in structured)
+        else ""
+    )
+    logger.info(
+        "  入库: %s → %d 块 (lang=%s%s%s)",
+        rel_path, len(documents), lang, page_info, heading_info,
+    )
+    return {"doc_id": doc_id, "chunks": len(documents), "status": "ingested"}
+
+
+def ingest_one(
+    file_path: str | Path,
+    docs_root: str | Path | None = None,
+    model: str = config.DEFAULT_EMBEDDING_ALIAS,
+) -> dict:
+    """单文件入库入口（Web 拖拽上传专用，不扫整个目录）。
+
+    与 `ingest_all` 的关键差异：只处理传入的这一个文件，不会去 re-parse 同目录下
+    其他文件。避免目录里有大文件时拖一个小文件也要全目录扫一遍的性能问题。
+
+    Args:
+        file_path: 待入库文件绝对/相对路径。
+        docs_root: 用于计算 rel_path（doc_id 派生自 rel_path）。None 则用文件所在目录。
+        model: embedding 别名（en / zh / m3）。
+
+    Returns:
+        dict: {doc_id, chunks, status}，status ∈ ingested / skipped_unchanged / empty
+    """
+    fp = Path(file_path).resolve()
+    if not fp.exists():
+        raise FileNotFoundError(f"文件不存在: {fp}")
+    if fp.suffix.lower() not in SUPPORTED_EXTENSIONS:
+        raise ValueError(f"不支持的格式: {fp.suffix}")
+
+    docs_path = Path(docs_root).resolve() if docs_root else fp.parent
+
+    model_name, collection_name = config.resolve_embedding(model)
+    logger.info("Embedding 模型: %s  →  collection: %s (space=%s)",
+                model_name, collection_name, _HNSW_SPACE)
+
+    client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
+    collection = _open_collection(client, model_name, collection_name)
+    return _ingest_one_file(fp, docs_path, collection, collection_name)
+
+
 def ingest_all(
     docs_dir: str = config.DOCS_DIR,
     model: str = config.DEFAULT_EMBEDDING_ALIAS,
@@ -173,6 +336,8 @@ def ingest_all(
     Args:
         docs_dir: 文档目录，默认 config.DOCS_DIR。
         model: embedding 别名（en / zh / m3）
+
+    Web 单文件上传请用 `ingest_one`，不要用此函数（避免扫整个目录 re-parse 大文件）。
     """
     model_name, collection_name = config.resolve_embedding(model)
 
@@ -202,118 +367,11 @@ def ingest_all(
     skipped_unchanged = 0
     for file_path in all_files:
         try:
-            try:
-                rel_path = file_path.resolve().relative_to(docs_path).as_posix()
-            except ValueError:
-                rel_path = file_path.name
-            doc_id = _doc_id_from_relpath(rel_path)
-
-            logger.info("Parse 解析: %s", rel_path)
-            text = parse_file(file_path)
-
-            if not text.strip():
-                logger.warning("  跳过（内容为空）: %s", rel_path)
-                continue
-
-            content_hash = _content_sha1(text)
-
-            # 幂等检测：若该 doc_id 已存在且 content_sha1 未变 → 跳过 reembed
-            existing = collection.get(
-                where={"doc_id": doc_id},
-                include=["metadatas"],
-            )
-            existing_ids = existing.get("ids") or []
-            existing_metas = existing.get("metadatas") or []
-            if existing_ids and existing_metas:
-                prev_hash = existing_metas[0].get("content_sha1")
-                if prev_hash == content_hash:
-                    logger.info("  跳过（内容未变化）: %s → %d 块", rel_path, len(existing_ids))
-                    skipped_unchanged += 1
-                    continue
-                # 内容变了：先删旧 chunks
-                collection.delete(ids=existing_ids)
-                logger.info("  清除旧数据: %s → 删除 %d 条", rel_path, len(existing_ids))
-
-            # Split 分块
-            structured = split_structured(text, config.CHUNK_SIZE, config.CHUNK_OVERLAP)
-            if not structured:
-                logger.warning("  跳过（分块结果为空）: %s", rel_path)
-                continue
-
-            try:
-                mtime = file_path.stat().st_mtime
-            except OSError:
-                mtime = 0.0
-            lang = _detect_lang(text)
-            ext = file_path.suffix.lower()
-
-            # Dense 索引
-            ids: list[str] = [_make_chunk_id(doc_id, i) for i in range(len(structured))]
-            documents: list[str] = [c.text for c in structured]
-            metadatas: list[dict] = []
-            for i, c in enumerate(structured):
-                # ChromaDB metadata 不接受 None，缺失字段直接不写键
-                md: dict = {
-                    "doc_id": doc_id,
-                    "source": rel_path,            # 完整相对路径（含子目录），不再用 filename 做去重键
-                    "filename": file_path.name,    # 兼容老字段，仅作展示
-                    "ext": ext,
-                    "lang": lang,
-                    "mtime": mtime,
-                    "content_sha1": content_hash,
-                    "chunk_index": i,
-                    "chunk_total": len(structured),
-                    "line_start": int(c.line_start or 0),
-                    "line_end": int(c.line_end or 0),
-                }
-                if c.heading_path:
-                    # heading_path 用 " > " 拼接，便于在 LLM 工具结果里直接展示给用户
-                    md["heading_path"] = " > ".join(c.heading_path)
-                if c.page_no is not None:
-                    md["page_no"] = int(c.page_no)
-                metadatas.append(md)
-
-            collection.upsert(
-                ids=ids,
-                documents=documents,
-                metadatas=metadatas,  # type: ignore[arg-type]
-            )
-
-            # 同步写入 BM25 倒排索引（如启用）；与 Chroma 共享 ids 保证融合时可对齐
-            if config.BM25_ENABLED:
-                try:
-                    from src.rag.bm25_index import (
-                        BM25Index,
-                        get_index_path,
-                        save_index,
-                    )
-
-                    bm25_path = get_index_path(collection_name)
-                    bm25 = BM25Index.load_or_new(collection_name, bm25_path)
-                    # 替换该 doc_id 下所有旧 chunk（先删后写）
-                    bm25.delete_by_doc_id(doc_id)
-                    bm25.upsert(ids=ids, documents=documents, metadatas=metadatas)
-                    save_index(bm25, bm25_path)
-                    logger.info("  BM25 索引已更新: %s → %d 块", rel_path, len(documents))
-                except Exception as e:  # 失败不影响 dense 入库主流程
-                    logger.warning("  BM25 索引更新失败（已跳过）: %s — %s", rel_path, e)
-
-            page_info = (
-                f", pages={sum(1 for c in structured if c.page_no is not None)}"
-                if any(c.page_no is not None for c in structured)
-                else ""
-            )
-            heading_info = (
-                f", headings={sum(1 for c in structured if c.heading_path)}"
-                if any(c.heading_path for c in structured)
-                else ""
-            )
-            logger.info(
-                "  入库: %s → %d 块 (lang=%s%s%s)",
-                rel_path, len(documents), lang, page_info, heading_info,
-            )
-            total_chunks += len(documents)
-
+            result = _ingest_one_file(file_path, docs_path, collection, collection_name)
+            if result["status"] == "ingested":
+                total_chunks += result["chunks"]
+            elif result["status"] == "skipped_unchanged":
+                skipped_unchanged += 1
         except Exception as e:
             logger.error("  失败: %s — %s", file_path.name, e)
 
@@ -332,8 +390,9 @@ def list_kb_documents(model: str = config.DEFAULT_EMBEDDING_ALIAS) -> list[dict]
         model: embedding 别名（en / zh / m3 等）
 
     Returns:
-        list of dict，每项含 doc_id / filename / source / ext / lang / mtime / chunks / total_chars。
-        collection 不存在或为空时返回 []。
+        list of dict，每项含 doc_id / filename / source / ext / lang / mtime /
+        ingested_at / chunks / total_chars。collection 不存在或为空时返回 []。
+        老数据缺 ingested_at 时返回 0.0（前端显示 "-"，重传后更新）。
     """
     model_name, collection_name = config.resolve_embedding(model)
     client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
@@ -365,12 +424,13 @@ def list_kb_documents(model: str = config.DEFAULT_EMBEDDING_ALIAS) -> list[dict]
                 "ext": md.get("ext") or "",
                 "lang": md.get("lang") or "",
                 "mtime": float(md.get("mtime") or 0.0),
+                "ingested_at": float(md.get("ingested_at") or 0.0),
                 "chunks": 1,
                 "total_chars": chars,
             }
 
-    # 按 mtime 倒序（最新上传的在前）
-    return sorted(grouped.values(), key=lambda x: x["mtime"], reverse=True)
+    # 按 ingested_at 倒序（最近入库的在前）；缺失值（老数据）排在最后
+    return sorted(grouped.values(), key=lambda x: x["ingested_at"], reverse=True)
 
 
 def delete_kb_document(
@@ -437,6 +497,82 @@ def delete_kb_document(
         logger.warning("KB 删除物理文件失败 doc_id=%s: %s", doc_id, e)
 
     return True, chunks_removed
+
+
+def delete_all_kb_documents(
+    model: str = config.DEFAULT_EMBEDDING_ALIAS,
+    web_upload_dir: str | None = None,
+) -> dict:
+    """清空整个 KB（Chroma collection + BM25 索引 + web_uploads 物理文件）。
+
+    与 `delete_kb_document` 的语义一致（chunks + BM25 + 物理文件三处一起清），
+    只是范围扩到整个 collection。仅删除 web_uploads 目录内文件，不动 data_*/ 等
+    git tracked 目录。
+
+    Args:
+        model:          embedding 别名
+        web_upload_dir: web 上传落盘目录；None 则取 config.WEB_UPLOAD_DIR
+
+    Returns:
+        dict: {docs_removed, chunks_removed, files_removed}
+              （都是统计量；任一子步骤失败会记 warning 但不中断后续清理）
+    """
+    if web_upload_dir is None:
+        web_upload_dir = config.WEB_UPLOAD_DIR
+
+    _, collection_name = config.resolve_embedding(model)
+    client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
+
+    docs_removed = 0
+    chunks_removed = 0
+    files_removed = 0
+
+    # 1. 统计 + 删 Chroma collection（一次性 drop 比逐 doc 删快）
+    try:
+        collection = client.get_collection(name=collection_name)
+        chunks_removed = collection.count()
+        # 用 list_kb_documents 的逻辑数 doc_id 个数（统计用，不影响删除）
+        docs_removed = len(list_kb_documents(model=model))
+        client.delete_collection(name=collection_name)
+        logger.info(
+            "KB 清空 collection=%s → 移除 %d 个文档 / %d 个 chunks",
+            collection_name, docs_removed, chunks_removed,
+        )
+    except Exception as e:
+        logger.warning("KB 清空 Chroma collection 失败（已忽略继续）: %s", e)
+
+    # 2. 删 BM25 索引文件
+    if config.BM25_ENABLED:
+        try:
+            from src.rag.bm25_index import get_index_path
+
+            bm25_path = get_index_path(collection_name)
+            if bm25_path.exists():
+                bm25_path.unlink()
+                logger.info("KB 清空 BM25 索引: %s", bm25_path)
+        except Exception as e:
+            logger.warning("KB 清空 BM25 索引失败: %s", e)
+
+    # 3. 清 web_uploads 目录内所有支持格式的文件（保留目录本身和子目录）
+    try:
+        web_root = Path(web_upload_dir).resolve()
+        if web_root.is_dir():
+            for fp in web_root.iterdir():
+                if fp.is_file() and fp.suffix.lower() in SUPPORTED_EXTENSIONS:
+                    try:
+                        fp.unlink()
+                        files_removed += 1
+                    except Exception as e:
+                        logger.warning("KB 清空物理文件失败 %s: %s", fp, e)
+            logger.info("KB 清空物理文件: %d 个", files_removed)
+    except Exception as e:
+        logger.warning("KB 清空 web_uploads 目录失败: %s", e)
+
+    return {
+        "docs_removed": docs_removed,
+        "chunks_removed": chunks_removed,
+        "files_removed": files_removed,
+    }
 
 
 def _build_arg_parser() -> "argparse.ArgumentParser":

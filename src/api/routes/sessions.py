@@ -24,11 +24,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+_DEFAULT_SESSION_TITLE = "New Chat"
+
+
 def _row_to_session_info(row: dict[str, Any]) -> SessionInfo:
-    """ChatHistoryStore.list_sessions 行 → SessionInfo（统一 title 兜底）"""
+    """ChatHistoryStore.list_sessions 行 → SessionInfo（空标题统一显示为 "New Chat"）"""
     sid: str = row["session_id"]
     raw_title: str = row.get("first_user_msg") or ""
-    title = raw_title or sid[:8]
+    title = raw_title or _DEFAULT_SESSION_TITLE
     return SessionInfo(
         id=sid,
         title=title,

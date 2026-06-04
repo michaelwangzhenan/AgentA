@@ -2,8 +2,7 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Loader2 } from 'lucide-react'
 import { ThinkingBlock } from './ThinkingBlock'
-import { PlanBlock } from './PlanBlock'
-import { ToolBlock } from './ToolBlock'
+import { WorkBlock } from './WorkBlock'
 import { cn } from '@/lib/utils'
 import type { AssistantMessage, Message } from '@/types/chat'
 
@@ -93,11 +92,11 @@ function AssistantBubble({ message }: { message: AssistantMessage }) {
           <ThinkingBlock text={message.thinking} streaming={message.streaming} />
         ) : null}
 
-        {message.plan ? <PlanBlock steps={message.plan} /> : null}
-
-        {message.toolCalls.map((call) => (
-          <ToolBlock key={call.call_id} call={call} />
-        ))}
+        <WorkBlock
+          plan={message.plan}
+          toolCalls={message.toolCalls}
+          hasContent={!!message.content}
+        />
 
         {message.content ? (
           <div className="rounded-2xl bg-muted px-4 py-2 text-sm text-foreground break-words">

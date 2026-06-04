@@ -3,6 +3,7 @@ import { useState } from 'react'
 import {
   BookOpen,
   Brain,
+  ChevronDown,
   GraduationCap,
   ListChecks,
   MessageSquare,
@@ -47,6 +48,8 @@ import { cn } from '@/lib/utils'
 
 import type { Session } from '@/types/session'
 
+const RECENTS_COLLAPSED_KEY = 'agenta:sidebar:recentsCollapsed'
+
 export type ViewKind =
   | 'chat'
   | 'kb'
@@ -85,6 +88,25 @@ export function Sidebar(props: SidebarProps) {
   const [renameTarget, setRenameTarget] = useState<Session | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null)
+  const [recentsCollapsed, setRecentsCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(RECENTS_COLLAPSED_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+
+  const toggleRecents = () => {
+    setRecentsCollapsed((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem(RECENTS_COLLAPSED_KEY, next ? '1' : '0')
+      } catch {
+        // 隐私模式下 localStorage 可能不可用，忽略
+      }
+      return next
+    })
+  }
 
   const openRename = (s: Session) => {
     setRenameValue(s.title)
@@ -193,59 +215,78 @@ export function Sidebar(props: SidebarProps) {
         />
       </div>
 
-      <nav className="flex-1 overflow-y-auto p-2">
-        {sessions.length === 0 ? (
-          <p className="px-2 py-4 text-center text-xs text-muted-foreground">
-            暂无会话
-          </p>
-        ) : (
-          <ul className="space-y-1">
-            {sessions.map((s) => (
-              <li key={s.id}>
-                <div
-                  className={cn(
-                    'group flex items-center gap-1 rounded-md px-2 py-1.5 text-sm',
-                    'hover:bg-accent/60 cursor-pointer',
-                    s.id === activeId &&
-                      activeView === 'chat' &&
-                      'bg-accent text-accent-foreground',
-                  )}
-                  onClick={() => handleSelectSession(s.id)}
-                >
-                  <span
-                    className="flex-1 truncate"
-                    title={s.title || s.id}
-                  >
-                    {s.title || s.id.slice(0, 8)}
-                  </span>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      className="opacity-0 transition-opacity group-hover:opacity-100 hover:bg-accent rounded p-1"
-                      onClick={(e) => e.stopPropagation()}
-                      aria-label="会话操作"
+      <div className="flex min-h-0 flex-1 flex-col">
+        <button
+          type="button"
+          onClick={toggleRecents}
+          className="flex w-full items-center justify-between px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
+          aria-expanded={!recentsCollapsed}
+          aria-controls="recents-list"
+        >
+          <span>Recents</span>
+          <ChevronDown
+            className={cn(
+              'h-3.5 w-3.5 transition-transform',
+              recentsCollapsed && '-rotate-90',
+            )}
+          />
+        </button>
+        {!recentsCollapsed && (
+          <nav id="recents-list" className="flex-1 overflow-y-auto px-2 pb-2">
+            {sessions.length === 0 ? (
+              <p className="px-2 py-4 text-center text-xs text-muted-foreground">
+                暂无会话
+              </p>
+            ) : (
+              <ul className="space-y-1">
+                {sessions.map((s) => (
+                  <li key={s.id}>
+                    <div
+                      className={cn(
+                        'group flex items-center gap-1 rounded-md px-2 py-1.5 text-sm',
+                        'hover:bg-accent/60 cursor-pointer',
+                        s.id === activeId &&
+                          activeView === 'chat' &&
+                          'bg-accent text-accent-foreground',
+                      )}
+                      onClick={() => handleSelectSession(s.id)}
                     >
-                      <MoreHorizontal className="h-4 w-4" />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => openRename(s)}>
-                        <Pencil className="mr-2 h-4 w-4" />
-                        重命名
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        className="text-destructive focus:text-destructive"
-                        onClick={() => setDeleteTarget(s)}
+                      <span
+                        className="flex-1 truncate"
+                        title={s.title || 'New Chat'}
                       >
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        删除
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </li>
-            ))}
-          </ul>
+                        {s.title || 'New Chat'}
+                      </span>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          className="opacity-0 transition-opacity group-hover:opacity-100 hover:bg-accent rounded p-1"
+                          onClick={(e) => e.stopPropagation()}
+                          aria-label="会话操作"
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => openRename(s)}>
+                            <Pencil className="mr-2 h-4 w-4" />
+                            重命名
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="text-destructive focus:text-destructive"
+                            onClick={() => setDeleteTarget(s)}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            删除
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </nav>
         )}
-      </nav>
+      </div>
 
       <div className="flex items-center justify-end border-t border-border px-3 py-2">
         <ThemeToggle />
@@ -280,16 +321,29 @@ export function Sidebar(props: SidebarProps) {
         </DialogContent>
       </Dialog>
 
-      {/* 删除确认 AlertDialog */}
+      {/* 删除确认 AlertDialog —— 回车默认触发"删除" */}
       <AlertDialog
         open={deleteTarget !== null}
         onOpenChange={(o: boolean) => !o && setDeleteTarget(null)}
       >
-        <AlertDialogContent>
+        <AlertDialogContent
+          onKeyDown={(e) => {
+            if (
+              e.key === 'Enter' &&
+              !e.shiftKey &&
+              !e.ctrlKey &&
+              !e.metaKey &&
+              !e.altKey
+            ) {
+              e.preventDefault()
+              confirmDelete()
+            }
+          }}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle>删除会话？</AlertDialogTitle>
             <AlertDialogDescription>
-              即将删除 "{deleteTarget?.title || deleteTarget?.id.slice(0, 8)}"
+              即将删除 "{deleteTarget?.title || 'New Chat'}"
               及其所有消息记录，不可恢复。
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -298,6 +352,7 @@ export function Sidebar(props: SidebarProps) {
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={confirmDelete}
+              autoFocus
             >
               删除
             </AlertDialogAction>

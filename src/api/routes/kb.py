@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -13,15 +14,16 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 
 import src.config as config
 from src.api.schemas.kb import (
+    KBClearAllResponse,
     KBDeleteResponse,
     KBDocument,
     KBDocumentListResponse,
     KBUploadResponse,
 )
 from src.rag.ingest import (
-    _doc_id_from_relpath,
+    delete_all_kb_documents,
     delete_kb_document,
-    ingest_all,
+    ingest_one,
     list_kb_documents,
 )
 from src.rag.parser import SUPPORTED_EXTENSIONS
@@ -40,6 +42,7 @@ def _md_to_kbdoc(md: dict) -> KBDocument:
         ext=md.get("ext", ""),
         lang=md.get("lang", ""),
         mtime=float(md.get("mtime", 0.0)),
+        ingested_at=float(md.get("ingested_at", 0.0)),
         chunks=int(md.get("chunks", 0)),
         total_chars=int(md.get("total_chars", 0)),
     )
@@ -92,23 +95,42 @@ async def upload_document(file: UploadFile = File(...)) -> KBUploadResponse:
     target_path.write_bytes(content)
     logger.info("[KB] 文件落盘: %s (%d bytes)", target_path, len(content))
 
-    # 预先算 doc_id + content_sha1，方便上层判断 "是否跳过未变"
-    rel_path = safe_name
-    doc_id = _doc_id_from_relpath(rel_path)
-
-    # 调用 ingest_all 扫描整个 web_uploads 目录（幂等：其他文件 content_sha1 没变会跳过）
+    # 单文件入库：只处理这一个文件，不扫整个 web_uploads 目录
+    # （旧版用 ingest_all 会 re-parse 同目录所有文件，目录里若有大 PDF/docx 会拖慢小文件上传）
+    # 用 to_thread 让同步 ingest 跑在 thread pool，避免阻塞 event loop；
+    # 用 wait_for 设超时，超时返回 504 让前端解套（注意：后台 thread 仍会跑完，
+    # 同步代码无法真正取消 —— 超时仅为"客户端别等"，主要价值是防止 deadlock 拖垮整个后端）
     try:
-        ingest_all(docs_dir=str(upload_root), model=config.DEFAULT_EMBEDDING_ALIAS)
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                ingest_one,
+                file_path=target_path,
+                docs_root=upload_root,
+                model=config.DEFAULT_EMBEDDING_ALIAS,
+            ),
+            timeout=config.WEB_INGEST_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError as exc:
+        logger.error(
+            "[KB] ingest 超时 (%ds): %s — 后台 thread 仍在跑，但 client 不再等待",
+            config.WEB_INGEST_TIMEOUT_SEC, safe_name,
+        )
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                f"入库超时（{config.WEB_INGEST_TIMEOUT_SEC}s 内未完成）。"
+                "可能是文件过大或后端繁忙；可稍后重传，或调大 WEB_INGEST_TIMEOUT_SEC"
+            ),
+        ) from exc
     except Exception as exc:
         logger.exception("[KB] ingest 失败: %s", safe_name)
         raise HTTPException(status_code=500, detail=f"ingest error: {exc}") from exc
 
-    # 重新查 chunks 数 + 判断跳过/新增
-    docs = list_kb_documents(model=config.DEFAULT_EMBEDDING_ALIAS)
-    this_doc = next((d for d in docs if d["doc_id"] == doc_id), None)
+    status = result["status"]
+    chunks = result["chunks"]
+    doc_id = result["doc_id"]
 
-    if this_doc is None:
-        # ingest 后还查不到：parse 阶段产出空 → ingest_all 跳过了
+    if status == "empty":
         return KBUploadResponse(
             doc_id=doc_id,
             filename=safe_name,
@@ -117,12 +139,17 @@ async def upload_document(file: UploadFile = File(...)) -> KBUploadResponse:
             message="解析失败或内容为空，未入库",
         )
 
+    skipped = status == "skipped_unchanged"
     return KBUploadResponse(
         doc_id=doc_id,
         filename=safe_name,
-        chunks=this_doc["chunks"],
-        skipped_unchanged=False,  # ingest_all 内部决定；这里前端不区分（chunks 数对得上就行）
-        message=f"已入库 {this_doc['chunks']} 个 chunks",
+        chunks=chunks,
+        skipped_unchanged=skipped,
+        message=(
+            f"内容未变化，跳过重新 embedding（{chunks} chunks）"
+            if skipped
+            else f"已入库 {chunks} 个 chunks"
+        ),
     )
 
 
@@ -137,3 +164,17 @@ def delete_document(doc_id: str) -> KBDeleteResponse:
         model=config.DEFAULT_EMBEDDING_ALIAS,
     )
     return KBDeleteResponse(deleted=found, chunks_removed=chunks_removed)
+
+
+@router.delete("/kb/documents", response_model=KBClearAllResponse)
+def clear_all_documents() -> KBClearAllResponse:
+    """清空整个 KB（Chroma collection + BM25 + web_uploads 物理文件）。
+
+    破坏性操作；前端应在调用前做二次确认。幂等：空 KB 调用返回全 0。
+    """
+    result = delete_all_kb_documents(model=config.DEFAULT_EMBEDDING_ALIAS)
+    return KBClearAllResponse(
+        docs_removed=result["docs_removed"],
+        chunks_removed=result["chunks_removed"],
+        files_removed=result["files_removed"],
+    )
