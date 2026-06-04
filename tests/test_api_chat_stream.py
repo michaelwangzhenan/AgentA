@@ -171,6 +171,26 @@ def test_stream_empty_message_returns_422():
     assert r.status_code == 422
 
 
+def test_stream_with_session_id_switches_agent_session():
+    """带 session_id 时，路由先把 agent.session_id 改成请求里的值再 run。"""
+    fake = FakeAgent(events_to_emit=[
+        AgentEvent(type="final_answer", payload={"text": "ok", "usage": None}),
+    ])
+    fake.session_id = "default-uuid"
+    app.dependency_overrides[get_agent] = lambda: fake
+
+    with client.stream(
+        "POST",
+        "/api/chat/stream",
+        json={"message": "hi", "session_id": "target-uuid"},
+    ) as r:
+        # consume body 以触发 generator 执行
+        for _ in r.iter_text():
+            pass
+
+    assert fake.session_id == "target-uuid"
+
+
 def test_stream_sanitizes_namedtuple_payload():
     """final_answer.payload 的 usage 可能是 TokenUsage NamedTuple；
     确认 sanitize 后变成 dict 而不是 JSON 里的 list。"""

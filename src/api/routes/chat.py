@@ -28,6 +28,8 @@ def chat(req: ChatRequest, agent: AgentAPI = Depends(get_agent)) -> ChatResponse
     同步路由（不加 async）—— FastAPI 会自动把它扔到 thread pool 跑，
     不阻塞 event loop。
     """
+    if req.session_id:
+        agent.session_id = req.session_id
     try:
         reply = agent.run(req.message)
     except Exception as exc:
@@ -70,6 +72,9 @@ async def chat_stream(
     """
     if not req.message or not req.message.strip():
         raise HTTPException(status_code=422, detail="message must be non-empty")
+
+    if req.session_id:
+        agent.session_id = req.session_id
 
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()

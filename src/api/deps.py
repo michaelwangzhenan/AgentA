@@ -8,6 +8,7 @@ from functools import lru_cache
 
 from src.agent.agent import Agent
 from src.agent.agent_api import AgentAPI
+from src.memory.chat_history import ChatHistoryStore
 
 
 @lru_cache(maxsize=1)
@@ -18,3 +19,12 @@ def get_agent() -> AgentAPI:
     返回 `AgentAPI` 契约类型，调用方不绑定具体实现。
     """
     return Agent(verbose=False)
+
+
+@lru_cache(maxsize=1)
+def get_chat_history() -> ChatHistoryStore:
+    """返回进程级单例 ChatHistoryStore（API 层独立 connection，与 Agent 共用底层 DB 文件）。
+
+    SQLite 在文件级锁下天然支持多 connection 串行写。
+    """
+    return ChatHistoryStore()

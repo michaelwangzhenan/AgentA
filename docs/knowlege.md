@@ -1067,7 +1067,79 @@ flowchart TB
 ---
 
 
-# 10. 附录1. 缩写
+# 10. LLM Streaming + Tool Call 行为差异
+
+OpenAI 兼容协议下，不同 provider 在 "streaming + tool_call 混合输出" 场景的实际行为**差异巨大**。AgentA 的 Agent 永远带 `tools` 调 LLM（active_tools 始终非空，含 `make_plan` / `search_knowledge` 等），所以这块跟用户在 Web UI 上看到的"打字流式感"直接相关。
+
+## 10.1 各 provider 真流式行为实测
+
+实测方式：直接用 OpenAI client 强制 `stream=True` + `tools=[make_plan]` 调一次，统计 chunk 数 + 检查累加结果。
+
+| Provider | streaming 风格 | chunk 数（典型 query） | 用户感官 |
+|---|---|---|---|
+| **kimi** | 真 token 级 | ~200 个 | 逐字浮现，最像"AI 在打字" |
+| **qwen** | 半流式（大块） | ~7 个 | 每秒大段大段冒出 |
+| **glm** | 几乎非流式 | 2 个（首 chunk 就 `finish_reason=tool_calls`） | 等几秒整段出 |
+| **deepseek / openai / claude / grok / minimax** | 未实测（推测符合 OpenAI 标准，行为接近 kimi 或 qwen） | - | - |
+
+## 10.2 OpenAI streaming + tool_call protocol 的三种风格
+
+3 家都符合 OpenAI streaming protocol，只是把 `tool_call.delta` 拆得粒度不同。`_run_openai_stream` 的累加逻辑（首个非空 `name` 累加 + `arguments` 字符串累加）能正确处理这三种：
+
+```
+kimi (真 token 级):
+  chunk#001  tc[name='make_plan' args='']            ← 首 chunk 给 name + 空 args
+  chunk#002  tc[name=None       args='{"']           ← 后续 name=None，args 逐 token
+  chunk#003  tc[name=None       args='steps']
+  ...                                                  ← 共 ~200 chunks
+  chunk#203  finish=tool_calls
+
+qwen (大块):
+  chunk#001  tc[name='make_plan' args='']
+  chunk#002  tc[name=None       args='{"steps": ']
+  chunk#003  tc[name=None       args='\n["...一整段...", ...]')  ← 一次给整段
+  chunk#004  tc[name=None       args='}']
+  chunk#006  finish=tool_calls
+
+glm (几乎非流式):
+  chunk#001  finish=tool_calls  tc[name='make_plan' args='{"steps": [...全部内容...]}']
+  chunk#002  finish=tool_calls  usage(...)
+```
+
+**结论**：用户期望的 "ChatGPT 那种逐字打字" 只在 kimi 等真 token 流的 provider 上能看到。这是 **provider 端的能力**，AgentA 客户端没法强行补齐（人为切片 + delay 假打字毫无意义、反而增加延迟）。
+
+## 10.3 历史曾经的误判
+
+`src/llm/provider.py` 的早期 commit 注释里写过 "qwen 在 streaming + tool_call 同时输出时，所有 `tool_call.function.name` 字段一律为 None" —— 几个月后实测**已不复现**（首 chunk 含完整 name）。教训：
+
+- 旧 commit 注释里的 provider quirk 描述**有保鲜期**，几个月就可能过时
+- 改 streaming 相关代码必须以**当前实测**为准，不能凭旧 comment 拍
+
+## 10.4 已知 backlog: GLM + 计划类 query 触发 plan 自适应死循环
+
+跟 streaming **无关**的另一个问题（容易跟 streaming 混淆，单列说清楚）：
+
+- **症状**：用 glm 问 "制定一个 X 学习计划" 类 query，LLM 反复调 `make_plan` 想 refine，直到 Agent 的 8 轮工具调用上限被强制中断
+- **后端日志特征**：`[Agent] 工具调用已达上限 8 轮（含 plan 自适应），强制生成最终回答`
+- **UI 表现**：聊天区出现多次 `make_plan(steps=[...])` 文字（不是 ToolBlock 卡片，是 LLM content 字段输出的"伪 tool 描述"）
+- **根因方向**：LLM 决策层 + plan 自适应交互行为，**不是** streaming layer 的累加 bug
+- **临时绕过**：切 kimi / qwen / 别的 provider 不复现
+- **状态**：独立 backlog 待修，详查 `src/agent/tools.py` 的 `_tool_make_plan` 和 Agent loop 的 plan 自适应触发逻辑
+
+## 10.5 chat_history token 容量隐性增长
+
+跟"流式打字感"无关，但跟"为什么 LLM 响应越来越慢" 高度相关：
+
+`HistoryManager.load_truncated` 按 `max_history_turns`（默认 20 轮）截断，**没有 token 上限**。单轮 `search_knowledge` tool 返回的 RAG 上下文可能 3-8k tokens：
+
+- ✅ 不爆 context（主流 LLM 128k context window 远高于 20 × 几千）
+- ⚠️ 单次 prompt 累计到 20-60k tokens：TTFT 增加、prompt token 成本累计、长上下文里 LLM 翻找信息能力变差
+- 治本方向（独立 task）：加 `MAX_HISTORY_TOKENS` 上限、缩 RAG tool 返回到摘要、超 N 轮做 summarize
+
+---
+
+
+# 11. 附录1. 缩写
 | 缩写 | 全称 | 含义 |
 |---|---|---|
 | **KB** | Knowledge Base | 知识库（向量库 + 关键词索引）|

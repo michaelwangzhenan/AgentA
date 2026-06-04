@@ -1917,12 +1917,146 @@ AgentA/                              # 项目根
 | 单例 Agent + 并发请求 | 当前单例非线程安全，多 tab 同时发起 stream 会互相干扰；本 Step 单用户场景接受；Step 3 上 session 隔离后自然解决 |
 | `thinking` 体量大可能比正文还长 | 默认折叠（header 显示字数 + "展开" 按钮） |
 | 浏览器 6 个 HTTP/1.1 同域并发上限 | 本期单 tab 单流不踩；生产部署用 HTTP/2 / 反代解决 |
+| **`token_chunk` 颗粒度依赖 provider，不是统一逐 token** | 实测 3 家行为差异巨大：**kimi** 真 token 级（约 200 chunks）/ **qwen** 半流式大块（约 7 chunks）/ **glm** 几乎非流式（2 chunks）。详 [knowlege.md §10](./knowlege.md#10-llm-streaming--tool-call-行为差异)。AgentA 不做客户端均匀化（无意义且增加假打字延迟）—— 流式打字体验依赖 provider 实际能力 |
+| **GLM + 计划类 query 触发 plan 自适应死循环**（已知 backlog） | 用 glm 问"制定一个 X 学习计划"类 query，LLM 反复调 `make_plan` refine 直到 8 轮上限。表现：UI 看到 `make_plan(steps=[...])` 像伪文本 + 后端日志 `工具调用已达上限 8 轮`。**跟 streaming 无关**（LLM 决策层问题）；切 kimi / qwen 不复现。独立 task 跟进 |
 
 ---
 
 ### 6.4.4 Step 3 - Session 管理
 
-> 留待 Step 2 完成后展开。
+**目标**：左侧栏显示所有历史会话，支持新建 / 切换 / 重命名 / 删除；刷新页面或重启后端历史不丢。完成后体验对齐 ChatGPT / Claude Web 的左侧 Recents 列表。
+
+**本 Step 不做**：
+
+| 项 | 留给 |
+|---|---|
+| 多 tab 并发的 session_id 互相覆盖问题 | 接受为已知风险（Step 2 已列出），单用户场景实际不踩 |
+| 文件夹 / 标签 / 收藏 等高级组织 | 无计划 |
+| LLM 自动起标题 | 暂不做（默认显示 `first_user_msg` 预览或 `id 前 8 位`） |
+| 跨设备同步 | 无计划 |
+| 软删除 / 撤销 | 暂不做（DELETE 直接级联清掉 messages + sessions 两表） |
+| Citation / 引用 | Step 5 |
+
+**对接现有代码的策略**：
+
+- 复用 [`ChatHistoryStore`](../src/memory/chat_history.py) —— 已有 `list_sessions / load / delete_session / append`，只补一个 `rename_session(session_id, title) -> bool`
+- `Agent.session_id` 是 mutable 字段，每次 `Agent.run()` 内重新构造 `HistoryManager / MemoryManager`（[agent.py:413+](../src/agent/agent.py)），改单例 Agent 的 session_id 不破坏不变量
+- session 标题字段复用 `sessions.first_user_msg` 列（不动 schema）—— 这个字段承担"自动从首条用户消息生成预览" + "用户手动改名"双语义；改名后用户看不到原始预览，但聊天历史里有原文，不损失信息
+- API 路径按本文档 §5.1.10 / §6.2 既有规划：`GET/POST/PATCH/DELETE /api/sessions` + `GET /api/sessions/{id}/messages`
+
+**API 设计**：
+
+| Method | Path | Request Body | Response | 含义 |
+|---|---|---|---|---|
+| `GET` | `/api/sessions` | - | `{sessions: [{id, title, created_at, msg_count}]}` | 全量列表，按 `created_at` 倒序 |
+| `POST` | `/api/sessions` | `{title?: str}` | `{id, title, created_at, msg_count: 0}` | 新建空 session（后端 `uuid.uuid4()` 生成 id） |
+| `PATCH` | `/api/sessions/{id}` | `{title: str}` | `{id, title, ...}` | 重命名 |
+| `DELETE` | `/api/sessions/{id}` | - | `{deleted: bool}` | 硬删 |
+| `GET` | `/api/sessions/{id}/messages` | - | `{messages: [{role, content, tool_calls?, tool_call_id?}, ...]}` | 拉某 session 完整历史（OpenAI messages 格式，含 tool 调用） |
+| `POST` | `/api/chat/stream` | `{message, session_id}` | SSE | **修改**：加 `session_id` 字段；服务端 `agent.session_id = req.session_id` 后再 `agent.run` |
+
+**关键决策**：
+
+| 决策点 | 选择 | 理由 |
+|---|---|---|
+| session_id 在哪生成 | 后端 `uuid.uuid4()`，`POST /api/sessions` 返回 | 单源真理；防客户端冲突 |
+| "新建会话"按钮行为 | 前端点击 → `POST /api/sessions` 立刻创建空 session → 切换到新 id | 跟 ChatGPT / Claude Web 一致；列表立刻看到新 session |
+| 标题字段 | 复用 `sessions.first_user_msg`（不动 schema） | 简洁 > 全面；语义略偏可接受 |
+| Session 切换怎么传 | 请求 body 加 `session_id`；服务端按需覆盖 `agent.session_id` | stateless；Agent 内每次 `run()` 都 fresh 构造 history/memory manager |
+| 删除策略 | 硬删（级联清 messages + sessions） | 简洁；用户预期"删了就是删了"，软删 + 回收站属于 Step 6 / 后续 |
+| 第一次启动无 session 时 | 前端首屏 `GET /api/sessions`，空则立刻 `POST` 新建一个 | 用户进来就能直接发消息 |
+| Delete 时若删的是当前 active | 前端自动切到列表第一个；列表空则再创建一个 | 永远保证 active session 存在 |
+| 重命名 UI | shadcn `Dialog` + 输入框 + 确定/取消 | 复用 shadcn 风格；轻于 inline edit |
+| 列表项菜单 | hover 显示 `⋯` 按钮 → shadcn `DropdownMenu`（重命名 / 删除） | 节省屏幕宽度；ChatGPT 同款 |
+| 列表项标题 | 优先 `first_user_msg`（首 60 字截断），fallback `session_id 前 8 位` | 首次新建未发消息时 `id 前 8 位` 也比"未命名"易识别 |
+
+**实现内容**：
+
+后端：
+
+- `src/memory/chat_history.py` 加 `rename_session(session_id, title) -> bool` 方法（UPDATE `sessions.first_user_msg`；返回是否找到记录）
+- `src/api/schemas/session.py` 新建：`SessionInfo` / `SessionCreateRequest` / `SessionRenameRequest` / `SessionListResponse` / `SessionMessagesResponse`
+- `src/api/routes/sessions.py` 新建：5 个 endpoint，全部 thin handler 转 `ChatHistoryStore`
+- `src/api/main.py` 注册 sessions router
+- `src/api/schemas/chat.py` `ChatRequest` 加 `session_id: str | None = None`（None 时不动 `agent.session_id`，保兼容）
+- `src/api/routes/chat.py` `/api/chat/stream` & `/api/chat` 都加 `if req.session_id: agent.session_id = req.session_id` 一行
+- `src/api/deps.py` 加 `get_chat_history() -> ChatHistoryStore` 单例依赖（用 `lru_cache`，跟 `get_agent` 共用 `Agent._chat_history` 实例—— 同一 SQLite 文件就行）
+
+前端：
+
+- `npx shadcn@latest add dialog dropdown-menu`
+- `src/types/session.ts` 新建：`Session` 类型
+- `src/api/client.ts` 加：`listSessions / createSession / renameSession / deleteSession / loadSessionMessages`
+- `src/components/sidebar/Sidebar.tsx` 新建：左侧栏容器（含"新建会话"按钮 + `SessionList`）
+- `src/components/sidebar/SessionList.tsx` 新建：列表（active 高亮 + hover `⋯` 菜单）
+- `src/components/sidebar/SessionItem.tsx` 新建：单条 list item（标题 + 菜单触发器）
+- `src/components/sidebar/RenameDialog.tsx` 新建：shadcn Dialog 包输入框
+- `src/components/sidebar/DeleteConfirm.tsx` 新建：shadcn AlertDialog 确认（也用 `npx shadcn@latest add alert-dialog`）
+- `src/App.tsx` 改：
+  - 首屏拉 session list；空则 `createSession` 自动建一个
+  - 维护 `activeSessionId` state
+  - 切换 session 时调 `loadSessionMessages` 拉历史 + 替换 `messages` state
+  - `streamChat` 调用时带 `session_id: activeSessionId`
+- 主布局：原 `App.tsx` 单列改成左右分栏（左 Sidebar 固定 ~260px，右 chat 区 flex-1）
+
+**修改 / 新增列表**：
+
+| 操作 | 文件 | 说明 |
+|---|---|---|
+| 修改 | `src/memory/chat_history.py` | 加 `rename_session` 方法 |
+| 新增 | `src/api/schemas/session.py` | Pydantic 5 个 schema |
+| 新增 | `src/api/routes/sessions.py` | 5 个 endpoint |
+| 修改 | `src/api/main.py` | 注册 sessions router |
+| 修改 | `src/api/schemas/chat.py` | `ChatRequest` 加 `session_id: str \| None = None` |
+| 修改 | `src/api/routes/chat.py` | `/api/chat` + `/api/chat/stream` 都加按需切 session_id 逻辑 |
+| 修改 | `src/api/deps.py` | 加 `get_chat_history` 依赖 |
+| 新增 | `tests/test_api_sessions.py` | 5 endpoint × 各种场景 UT |
+| 新增 | `tests/test_chat_history_rename.py` | `rename_session` 单独 UT（也可合并进 `test_chat_history.py` 如果存在） |
+| 修改 | `frontend/package.json` | 加 shadcn 依赖（自动） |
+| 新增 | `frontend/src/components/ui/dialog.tsx` | shadcn 生成 |
+| 新增 | `frontend/src/components/ui/dropdown-menu.tsx` | shadcn 生成 |
+| 新增 | `frontend/src/components/ui/alert-dialog.tsx` | shadcn 生成 |
+| 新增 | `frontend/src/types/session.ts` | Session 类型 |
+| 修改 | `frontend/src/api/client.ts` | 加 5 个 API client function |
+| 新增 | `frontend/src/components/sidebar/Sidebar.tsx` | 左侧栏容器 |
+| 新增 | `frontend/src/components/sidebar/SessionList.tsx` | 列表 |
+| 新增 | `frontend/src/components/sidebar/SessionItem.tsx` | 单条 item |
+| 新增 | `frontend/src/components/sidebar/RenameDialog.tsx` | 重命名 dialog |
+| 新增 | `frontend/src/components/sidebar/DeleteConfirm.tsx` | 删除确认 |
+| 修改 | `frontend/src/App.tsx` | 左右分栏 + activeSessionId 状态 + 切换拉历史 |
+
+**UT 策略**：
+
+| 层 | 怎么测 |
+|---|---|
+| 后端 (`test_api_sessions.py`) | 用 `TestClient` + 临时 `ChatHistoryStore`（tmp_path SQLite）：列表空 / 创建 / 列表非空 / 重命名 / 重命名不存在的 / 删除 / 删除不存在的 / 拉某 session messages / messages 空 |
+| 后端（chat_history） | `rename_session` 单独 1-2 个 UT（更新成功 / session 不存在返回 False） |
+| 后端 | `/api/chat/stream` 带 session_id 时切换正确（mock Agent，验证 `agent.session_id` 被设置） |
+| 前端 | 不写 UT（前端 UT 整个 iter 不上） |
+
+**人工验收步骤**：
+
+1. 后端 + 前端两进程都在跑；首屏左侧栏出现 **1 个空 session**（自动创建），右侧聊天区空
+2. 发条消息（如"你好"）→ 等响应完成；left list 上该 session 标题变成 `你好`（首条消息预览）
+3. 点 **"新建会话"** 按钮 → list 顶部多一个 session（标题为 id 前 8 位），自动切换到它；右侧聊天区清空
+4. 在新 session 里发"再问个问题" → 该 session 标题变成 `再问个问题`；切回老 session → 历史 `你好` + AI 回复都还在
+5. hover 任意 session → 出现 `⋯` → 点 **重命名** → 弹 Dialog 改成"测试会话" → 列表立刻更新
+6. hover 任意 session → 点 **删除** → 弹确认 → 确认后列表移除；若删的是当前 active 自动切到列表第一个
+7. **关浏览器**重新打开 / **重启 uvicorn** 后重开 → session 列表还在、消息不丢
+8. 删除所有 session 后，前端**自动新建一个** session（永远保持至少一个 active）
+9. `pytest -q tests/test_api_sessions.py tests/test_chat_history_rename.py` 全过
+
+通过以上 8-9 条 = Step 3 完成。
+
+**风险点 / 已知限制**：
+
+| 项 | 说明 |
+|---|---|
+| 多 tab 并发的 session_id 互相覆盖 | 单例 Agent 的 `session_id` 字段非线程安全；多 tab 同时发 stream 会互相覆盖。Step 2 已列出此风险，Step 3 不解决。单用户场景实际不踩 |
+| 重命名复用 `first_user_msg` 列 | 改名后看不到原始首条预览（但聊天历史里有原文）。简化代价可接受 |
+| session 创建未发消息 | 标题是 `id 前 8 位`，不友好。后续 Step 可加"LLM 自动起标题"或允许新建时手动命名 |
+
+---
 
 ### 6.4.5 Step 4 - 知识库 + 拖拽入库
 

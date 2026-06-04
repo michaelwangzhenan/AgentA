@@ -60,3 +60,28 @@ def test_chat_agent_exception_returns_500():
     assert r.status_code == 500
     assert "agent error" in r.json()["detail"]
     assert "LLM provider down" in r.json()["detail"]
+
+
+def test_chat_with_session_id_switches_agent_session():
+    """带 session_id 时，路由先把 agent.session_id 改成请求里的值再 run。"""
+    mock = _mock_agent("ok")
+    mock.session_id = "default-uuid"
+    app.dependency_overrides[get_agent] = lambda: mock
+
+    r = client.post("/api/chat", json={"message": "hi", "session_id": "target-uuid"})
+
+    assert r.status_code == 200
+    assert mock.session_id == "target-uuid"
+    assert r.json()["session_id"] == "target-uuid"
+
+
+def test_chat_without_session_id_keeps_agent_default():
+    """不传 session_id 时不动 agent.session_id（保留 Step 2 兼容行为）。"""
+    mock = _mock_agent("ok")
+    mock.session_id = "default-uuid"
+    app.dependency_overrides[get_agent] = lambda: mock
+
+    r = client.post("/api/chat", json={"message": "hi"})
+
+    assert r.status_code == 200
+    assert mock.session_id == "default-uuid"

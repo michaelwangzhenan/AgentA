@@ -2,6 +2,7 @@ export type Role = 'user' | 'assistant'
 
 export type ChatRequest = {
   message: string
+  session_id?: string
 }
 
 export type ChatResponse = {

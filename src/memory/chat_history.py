@@ -206,6 +206,48 @@ class ChatHistoryStore:
             )
         logger.info("已清空 session: %s", session_id)
 
+    def rename_session(self, session_id: str, title: str) -> bool:
+        """
+        重命名 session（复用 `first_user_msg` 列存用户手动标题）。
+
+        Args:
+            session_id: 要改名的会话 ID。
+            title:      新标题，会按 `_FIRST_MSG_PREVIEW_LEN` 截断。
+
+        Returns:
+            True 表示找到并改名；False 表示 session 不存在。
+        """
+        with self._conn:
+            cur = self._conn.execute(
+                "UPDATE sessions SET first_user_msg = ? WHERE session_id = ?",
+                (title[:_FIRST_MSG_PREVIEW_LEN], session_id),
+            )
+        ok = cur.rowcount > 0
+        if ok:
+            logger.info("已重命名 session %s -> %r", session_id, title[:_FIRST_MSG_PREVIEW_LEN])
+        else:
+            logger.info("rename_session: session 不存在，跳过: %s", session_id)
+        return ok
+
+    def create_empty_session(self, session_id: str, title: str = "") -> bool:
+        """
+        显式创建空 session（不写任何 message 也立即出现在列表里）。
+
+        Args:
+            session_id: 会话 ID。
+            title:      初始标题（默认空字符串，前端展示时 fallback 到 `session_id 前 8 位`）。
+
+        Returns:
+            True 表示新创建；False 表示 session 已存在（幂等，未改动）。
+        """
+        now = datetime.now().isoformat(timespec="seconds")
+        with self._conn:
+            cur = self._conn.execute(
+                "INSERT OR IGNORE INTO sessions(session_id, created_at, first_user_msg) VALUES(?,?,?)",
+                (session_id, now, title[:_FIRST_MSG_PREVIEW_LEN]),
+            )
+        return cur.rowcount > 0
+
     def delete_session(self, session_id: str) -> bool:
         """
         删除指定 session 的所有消息记录及元数据。

@@ -1,7 +1,15 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Composer } from '@/components/chat/Composer'
 import { MessageList } from '@/components/chat/MessageList'
-import { streamChat } from '@/api/client'
+import { Sidebar } from '@/components/sidebar/Sidebar'
+import {
+  createSession,
+  deleteSession,
+  listSessions,
+  loadSessionMessages,
+  renameSession,
+  streamChat,
+} from '@/api/client'
 import type {
   AssistantMessage,
   Message,
@@ -9,6 +17,8 @@ import type {
   ToolCallState,
   UserMessage,
 } from '@/types/chat'
+import type { Session } from '@/types/session'
+import { backendMessagesToFrontend } from '@/types/session'
 
 function newAssistantMessage(): AssistantMessage {
   return {
@@ -24,10 +34,96 @@ function newAssistantMessage(): AssistantMessage {
 }
 
 function App() {
+  const [sessions, setSessions] = useState<Session[]>([])
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [inFlight, setInFlight] = useState(false)
 
+  // ─── 首屏：拉 sessions，空则自动建一个 ─────────────────────────────────
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const list = await listSessions()
+        if (cancelled) return
+        if (list.length === 0) {
+          const created = await createSession()
+          if (cancelled) return
+          setSessions([created])
+          setActiveSessionId(created.id)
+        } else {
+          setSessions(list)
+          setActiveSessionId(list[0].id)
+        }
+      } catch (e) {
+        console.error('[App] 初始化 sessions 失败', e)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // ─── 切 active session 时拉历史 ───────────────────────────────────────
+  useEffect(() => {
+    if (!activeSessionId) {
+      setMessages([])
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const resp = await loadSessionMessages(activeSessionId)
+        if (cancelled) return
+        setMessages(backendMessagesToFrontend(resp.messages))
+      } catch (e) {
+        console.error('[App] 拉 session messages 失败', e)
+        if (!cancelled) setMessages([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [activeSessionId])
+
+  // ─── Sidebar 回调 ─────────────────────────────────────────────────────
+  const handleSelect = useCallback((id: string) => {
+    setActiveSessionId(id)
+  }, [])
+
+  const handleCreate = useCallback(async () => {
+    const created = await createSession()
+    setSessions((prev) => [created, ...prev])
+    setActiveSessionId(created.id)
+  }, [])
+
+  const handleRename = useCallback(async (id: string, title: string) => {
+    const updated = await renameSession(id, title)
+    setSessions((prev) => prev.map((s) => (s.id === id ? updated : s)))
+  }, [])
+
+  const handleDelete = useCallback(
+    async (id: string) => {
+      await deleteSession(id)
+      // 列表移除；若是当前 active：切到列表第一个；列表空则自动新建
+      const remaining = sessions.filter((s) => s.id !== id)
+      setSessions(remaining)
+      if (id === activeSessionId) {
+        if (remaining.length > 0) {
+          setActiveSessionId(remaining[0].id)
+        } else {
+          const created = await createSession()
+          setSessions([created])
+          setActiveSessionId(created.id)
+        }
+      }
+    },
+    [sessions, activeSessionId],
+  )
+
+  // ─── 发消息（流式）────────────────────────────────────────────────────
   const handleSend = async (text: string) => {
+    if (!activeSessionId) return
     const userMsg: UserMessage = {
       id: crypto.randomUUID(),
       role: 'user',
@@ -50,128 +146,149 @@ function App() {
     }
 
     try {
-      await streamChat(text, {
-        onEvent(ev) {
-          switch (ev.type) {
-            case 'thinking_chunk':
-              update((m) => ({
-                ...m,
-                thinking: m.thinking + ev.payload.text,
-              }))
-              break
-            case 'token_chunk':
-              update((m) => ({ ...m, content: m.content + ev.payload.text }))
-              break
-            case 'tool_call_start':
-              update((m) => ({
-                ...m,
-                toolCalls: [
-                  ...m.toolCalls,
-                  {
-                    call_id: ev.payload.call_id,
-                    name: ev.payload.name,
-                    args: ev.payload.args,
-                    status: 'running',
-                  },
-                ],
-              }))
-              break
-            case 'tool_call_end':
-              update((m) => ({
-                ...m,
-                toolCalls: m.toolCalls.map((c) =>
-                  c.call_id === ev.payload.call_id
-                    ? {
-                        ...c,
-                        status: (ev.payload.status as ToolCallState['status']) ?? 'ok',
-                        preview: ev.payload.preview,
-                      }
-                    : c,
-                ),
-              }))
-              break
-            case 'plan_created':
-              update((m) => ({
-                ...m,
-                plan: ev.payload.steps.map((s) => ({
-                  id: s.id,
-                  text: s.text,
-                  status: 'pending' as PlanStepStatus,
-                })),
-              }))
-              break
-            case 'plan_step_start':
-              update((m) => ({
-                ...m,
-                plan:
-                  m.plan?.map((s) =>
-                    s.id === ev.payload.step_id
-                      ? { ...s, status: 'running' as PlanStepStatus }
-                      : s,
-                  ) ?? null,
-              }))
-              break
-            case 'plan_step_end':
-              update((m) => ({
-                ...m,
-                plan:
-                  m.plan?.map((s) =>
-                    s.id === ev.payload.step_id
+      await streamChat(
+        text,
+        {
+          onEvent(ev) {
+            switch (ev.type) {
+              case 'thinking_chunk':
+                update((m) => ({
+                  ...m,
+                  thinking: m.thinking + ev.payload.text,
+                }))
+                break
+              case 'token_chunk':
+                update((m) => ({ ...m, content: m.content + ev.payload.text }))
+                break
+              case 'tool_call_start':
+                update((m) => ({
+                  ...m,
+                  toolCalls: [
+                    ...m.toolCalls,
+                    {
+                      call_id: ev.payload.call_id,
+                      name: ev.payload.name,
+                      args: ev.payload.args,
+                      status: 'running',
+                    },
+                  ],
+                }))
+                break
+              case 'tool_call_end':
+                update((m) => ({
+                  ...m,
+                  toolCalls: m.toolCalls.map((c) =>
+                    c.call_id === ev.payload.call_id
                       ? {
-                          ...s,
-                          status:
-                            (ev.payload.status as PlanStepStatus) ?? 'success',
-                          note: ev.payload.note,
+                          ...c,
+                          status: (ev.payload.status as ToolCallState['status']) ?? 'ok',
+                          preview: ev.payload.preview,
                         }
-                      : s,
-                  ) ?? null,
-              }))
-              break
-            case 'final_answer':
-              update((m) => ({
-                ...m,
-                content: m.content || ev.payload.text,
-                streaming: false,
-              }))
-              break
-            case 'error':
-              update((m) => ({
-                ...m,
-                error: ev.payload.message,
-              }))
-              break
-            case 'info':
-              break
-          }
+                      : c,
+                  ),
+                }))
+                break
+              case 'plan_created':
+                update((m) => ({
+                  ...m,
+                  plan: ev.payload.steps.map((s) => ({
+                    id: s.id,
+                    text: s.text,
+                    status: 'pending' as PlanStepStatus,
+                  })),
+                }))
+                break
+              case 'plan_step_start':
+                update((m) => ({
+                  ...m,
+                  plan:
+                    m.plan?.map((s) =>
+                      s.id === ev.payload.step_id
+                        ? { ...s, status: 'running' as PlanStepStatus }
+                        : s,
+                    ) ?? null,
+                }))
+                break
+              case 'plan_step_end':
+                update((m) => ({
+                  ...m,
+                  plan:
+                    m.plan?.map((s) =>
+                      s.id === ev.payload.step_id
+                        ? {
+                            ...s,
+                            status:
+                              (ev.payload.status as PlanStepStatus) ?? 'success',
+                            note: ev.payload.note,
+                          }
+                        : s,
+                    ) ?? null,
+                }))
+                break
+              case 'final_answer':
+                update((m) => ({
+                  ...m,
+                  content: m.content || ev.payload.text,
+                  streaming: false,
+                }))
+                break
+              case 'error':
+                update((m) => ({
+                  ...m,
+                  error: ev.payload.message,
+                }))
+                break
+              case 'info':
+                break
+            }
+          },
+          onError(err) {
+            update((m) => ({
+              ...m,
+              error: m.error ?? `连接错误：${err.message}`,
+              streaming: false,
+            }))
+          },
+          onClose() {
+            update((m) => ({ ...m, streaming: false }))
+          },
         },
-        onError(err) {
-          update((m) => ({
-            ...m,
-            error: m.error ?? `连接错误：${err.message}`,
-            streaming: false,
-          }))
-        },
-        onClose() {
-          update((m) => ({ ...m, streaming: false }))
-        },
-      })
+        { sessionId: activeSessionId },
+      )
     } catch {
       // streamChat 抛错（fatal）时 onError 已经更新过 message，这里只兜 unhandled rejection
     } finally {
       setInFlight(false)
+      // 第一次发消息后 session 标题会从空变成首条 user 消息预览，刷下列表
+      try {
+        const list = await listSessions()
+        setSessions(list)
+      } catch (e) {
+        console.error('[App] 发送后刷 sessions 失败', e)
+      }
     }
   }
 
   return (
-    <div className="flex h-screen flex-col bg-background">
-      <header className="border-b border-border px-6 py-3">
-        <h1 className="text-base font-semibold tracking-tight">AgentA</h1>
-        <p className="text-xs text-muted-foreground">
-          Step 2 - 流式输出 + Agent 状态
-        </p>
-      </header>
-      <MessageList messages={messages} />
-      <Composer onSend={handleSend} disabled={inFlight} />
+    <div className="flex h-screen bg-background">
+      <Sidebar
+        sessions={sessions}
+        activeId={activeSessionId}
+        onSelect={handleSelect}
+        onCreate={handleCreate}
+        onRename={handleRename}
+        onDelete={handleDelete}
+      />
+      <div className="flex h-full flex-1 flex-col">
+        <header className="border-b border-border px-6 py-3">
+          <h1 className="text-base font-semibold tracking-tight">AgentA</h1>
+          <p className="text-xs text-muted-foreground">
+            Step 3 - Session 管理
+          </p>
+        </header>
+        <MessageList messages={messages} />
+        <Composer onSend={handleSend} disabled={inFlight} />
+      </div>
     </div>
   )
 }
