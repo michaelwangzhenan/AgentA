@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AlertCircle, CheckCircle2 } from 'lucide-react'
 
 import {
   deleteKBDocument,
@@ -9,19 +8,13 @@ import {
 import type { KBDocument } from '@/types/kb'
 import { DropZone } from '@/components/kb/DropZone'
 import { DocumentList } from '@/components/kb/DocumentList'
-
-type Toast = {
-  id: number
-  kind: 'success' | 'error'
-  message: string
-}
+import { toast } from '@/lib/toast'
 
 export function KnowledgeBaseView() {
   const [documents, setDocuments] = useState<KBDocument[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [uploadStatus, setUploadStatus] = useState<string>('')
-  const [toasts, setToasts] = useState<Toast[]>([])
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -30,7 +23,7 @@ export function KnowledgeBaseView() {
       setDocuments(docs)
     } catch (e) {
       console.error('[KB] 拉列表失败', e)
-      pushToast('error', `拉取列表失败: ${(e as Error).message}`)
+      toast.error(`拉取列表失败: ${(e as Error).message}`)
     } finally {
       setLoading(false)
     }
@@ -39,14 +32,6 @@ export function KnowledgeBaseView() {
   useEffect(() => {
     refresh()
   }, [refresh])
-
-  const pushToast = (kind: Toast['kind'], message: string) => {
-    const id = Date.now() + Math.random()
-    setToasts((prev) => [...prev, { id, kind, message }])
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id))
-    }, 4000)
-  }
 
   const handleFiles = useCallback(
     async (files: File[]) => {
@@ -60,15 +45,14 @@ export function KnowledgeBaseView() {
           try {
             const resp = await uploadKBFile(file)
             okCount++
-            pushToast(
-              'success',
-              resp.chunks > 0
-                ? `已入库 ${file.name}：${resp.chunks} chunks`
-                : `${file.name}：${resp.message || '已跳过'}`,
-            )
+            if (resp.chunks > 0) {
+              toast.success(`已入库 ${file.name}：${resp.chunks} chunks`)
+            } else {
+              toast.info(`${file.name}：${resp.message || '已跳过'}`)
+            }
           } catch (e) {
             failCount++
-            pushToast('error', `${file.name}：${(e as Error).message}`)
+            toast.error(`${file.name}：${(e as Error).message}`)
           }
         }
       } finally {
@@ -85,13 +69,13 @@ export function KnowledgeBaseView() {
       try {
         const resp = await deleteKBDocument(docId)
         if (resp.deleted) {
-          pushToast('success', `已删除，移除 ${resp.chunks_removed} chunks`)
+          toast.success(`已删除，移除 ${resp.chunks_removed} chunks`)
         } else {
-          pushToast('error', '文档不存在')
+          toast.error('文档不存在')
         }
         await refresh()
       } catch (e) {
-        pushToast('error', `删除失败：${(e as Error).message}`)
+        toast.error(`删除失败：${(e as Error).message}`)
       }
     },
     [refresh],
@@ -127,28 +111,6 @@ export function KnowledgeBaseView() {
             />
           </div>
         </div>
-      </div>
-
-      {/* toast 区（右下角） */}
-      <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col gap-2">
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            className={
-              'pointer-events-auto flex items-start gap-2 rounded-md border px-3 py-2 text-sm shadow-md ' +
-              (t.kind === 'success'
-                ? 'border-green-200 bg-green-50 text-green-900 dark:border-green-900 dark:bg-green-950 dark:text-green-100'
-                : 'border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-100')
-            }
-          >
-            {t.kind === 'success' ? (
-              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-            ) : (
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            )}
-            <span>{t.message}</span>
-          </div>
-        ))}
       </div>
     </div>
   )

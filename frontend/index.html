@@ -5,6 +5,17 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AgentA</title>
+    <script>
+      // 提前 apply dark class，避免 React 渲染后才切换造成的"白屏闪一下"
+      (function () {
+        try {
+          var t = localStorage.getItem('agenta-theme') || 'system';
+          var dark = t === 'dark' || (t === 'system' &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (dark) document.documentElement.classList.add('dark');
+        } catch (e) { /* localStorage 不可用：默认浅色 */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

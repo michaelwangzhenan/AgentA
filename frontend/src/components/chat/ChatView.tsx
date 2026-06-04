@@ -13,7 +13,7 @@ export function ChatView({ messages, inFlight, onSend }: ChatViewProps) {
     <div className="flex h-full flex-1 flex-col">
       <header className="border-b border-border px-6 py-3">
         <h1 className="text-base font-semibold tracking-tight">AgentA</h1>
-        <p className="text-xs text-muted-foreground">Step 3 - Session 管理</p>
+        <p className="text-xs text-muted-foreground">基于 RAG + Agent 的学习助手</p>
       </header>
       <MessageList messages={messages} />
       <Composer onSend={onSend} disabled={inFlight} />

@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Toaster } from 'sonner'
 import { ChatView } from '@/components/chat/ChatView'
 import { KnowledgeBaseView } from '@/components/kb/KnowledgeBaseView'
 import { MCPView } from '@/components/resources/MCPView'
 import { MemoryView } from '@/components/resources/MemoryView'
 import { RulesView } from '@/components/resources/RulesView'
 import { SkillsView } from '@/components/resources/SkillsView'
+import { SettingsView } from '@/components/settings/SettingsView'
 import { Sidebar, type ViewKind } from '@/components/sidebar/Sidebar'
+import { useTheme } from '@/lib/theme'
 import {
   createSession,
   deleteSession,
@@ -38,6 +41,7 @@ function newAssistantMessage(): AssistantMessage {
 }
 
 function App() {
+  const { theme } = useTheme()
   const [activeView, setActiveView] = useState<ViewKind>('chat')
   const [sessions, setSessions] = useState<Session[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
@@ -292,6 +296,12 @@ function App() {
       {activeView === 'rules' && <RulesView />}
       {activeView === 'skills' && <SkillsView />}
       {activeView === 'mcp' && <MCPView />}
+      {activeView === 'settings' && <SettingsView />}
+      <Toaster
+        position="bottom-right"
+        richColors
+        theme={theme === 'system' ? undefined : theme}
+      />
     </div>
   )
 }

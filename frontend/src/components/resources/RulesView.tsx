@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AlertCircle, CheckCircle2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { readRules, writeRules } from '@/api/client'
 import { ResourcePage } from '@/components/resources/ResourcePage'
+import { toast } from '@/lib/toast'
 
 export function RulesView() {
   const [text, setText] = useState('')
@@ -12,13 +12,11 @@ export function RulesView() {
   const [exists, setExists] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [notice, setNotice] = useState<
-    { kind: 'success' | 'error'; message: string } | null
-  >(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     setLoading(true)
-    setNotice(null)
+    setLoadError(null)
     try {
       const resp = await readRules()
       setText(resp.text)
@@ -26,7 +24,7 @@ export function RulesView() {
       setPath(resp.path)
       setExists(resp.exists)
     } catch (e) {
-      setNotice({ kind: 'error', message: (e as Error).message })
+      setLoadError((e as Error).message)
     } finally {
       setLoading(false)
     }
@@ -40,19 +38,17 @@ export function RulesView() {
 
   const handleSave = async () => {
     setSaving(true)
-    setNotice(null)
     try {
       const resp = await writeRules(text)
       setOriginalText(text)
       setExists(true)
-      setNotice({
-        kind: 'success',
-        message: `已保存 ${resp.length} 字符；${
+      toast.success(
+        `已保存 ${resp.length} 字符；${
           resp.restart_required ? '重启 uvicorn 或新建 session 后生效' : '已生效'
         }`,
-      })
+      )
     } catch (e) {
-      setNotice({ kind: 'error', message: `保存失败：${(e as Error).message}` })
+      toast.error(`保存失败：${(e as Error).message}`)
     } finally {
       setSaving(false)
     }
@@ -68,21 +64,9 @@ export function RulesView() {
         </Button>
       }
     >
-      {notice && (
-        <div
-          className={
-            'flex items-start gap-2 rounded-md border px-3 py-2 text-sm ' +
-            (notice.kind === 'success'
-              ? 'border-green-200 bg-green-50 text-green-900 dark:border-green-900 dark:bg-green-950 dark:text-green-100'
-              : 'border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-100')
-          }
-        >
-          {notice.kind === 'success' ? (
-            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-          ) : (
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          )}
-          <span>{notice.message}</span>
+      {loadError && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-100">
+          {loadError}
         </div>
       )}
 

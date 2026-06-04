@@ -32,11 +32,12 @@ import {
   type MemoryItem,
 } from '@/types/resources'
 import { ResourcePage } from '@/components/resources/ResourcePage'
+import { toast } from '@/lib/toast'
 
 export function MemoryView() {
   const [items, setItems] = useState<MemoryItem[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const [editTarget, setEditTarget] = useState<MemoryItem | null>(null)
   const [editValue, setEditValue] = useState('')
@@ -45,11 +46,11 @@ export function MemoryView() {
 
   const refresh = useCallback(async () => {
     setLoading(true)
-    setError(null)
+    setLoadError(null)
     try {
       setItems(await listMemories())
     } catch (e) {
-      setError((e as Error).message)
+      setLoadError((e as Error).message)
     } finally {
       setLoading(false)
     }
@@ -66,9 +67,10 @@ export function MemoryView() {
     try {
       await patchMemory(editTarget.id, v)
       setEditTarget(null)
+      toast.success('已更新')
       await refresh()
     } catch (e) {
-      setError(`更新失败：${(e as Error).message}`)
+      toast.error(`更新失败：${(e as Error).message}`)
     }
   }
 
@@ -77,19 +79,21 @@ export function MemoryView() {
     try {
       await deleteMemory(deleteTarget.id)
       setDeleteTarget(null)
+      toast.success('已删除')
       await refresh()
     } catch (e) {
-      setError(`删除失败：${(e as Error).message}`)
+      toast.error(`删除失败：${(e as Error).message}`)
     }
   }
 
   const confirmClear = async () => {
     try {
-      await clearMemories()
+      const resp = await clearMemories()
       setConfirmClearOpen(false)
+      toast.success(`已清空 ${resp.cleared} 条`)
       await refresh()
     } catch (e) {
-      setError(`清空失败：${(e as Error).message}`)
+      toast.error(`清空失败：${(e as Error).message}`)
     }
   }
 
@@ -108,9 +112,9 @@ export function MemoryView() {
         </Button>
       }
     >
-      {error && (
+      {loadError && (
         <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-100">
-          {error}
+          {loadError}
         </div>
       )}
 

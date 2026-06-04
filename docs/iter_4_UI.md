@@ -2337,9 +2337,163 @@ MCP（2 个）：
 
 ---
 
-### 6.4.7 Step 6 - 系统配置 + 主题 + 反馈 + 调试
+### 6.4.7 Step 6 - 系统配置 + 主题 + 反馈
 
-> 留待 Step 5 完成后展开。
+**目标**：把"运行时的整体状态可见性"和"前端用户体验细节"补齐：
+
+- 用户能看到当前 Agent 在用哪个 LLM provider / model、RAG 参数、各 feature flag（**只读**）
+- 用户能切换暗色 / 浅色 / 跟系统主题
+- 全局统一 toast 反馈系统，把 Step 4 / Step 5 各自抽的 toast 模板归一
+
+完成后 Sidebar 多 1 个"设置"入口；右上角有主题切换按钮；所有"操作反馈"统一走 sonner toast。
+
+**本 Step 不做**：
+
+| 项 | 留给 / 不做 |
+|---|---|
+| **LLM 参数 runtime 编辑**（在 UI 改 provider / temperature / max_tokens） | 不做：要清 `get_agent` lru_cache + 写 `.env` + 处理在跑 session 的 race。改 `.env` + 重启 uvicorn 更可靠 |
+| **日志查看**（前端实时 tail `logs/agenta.log`） | 不做：开发者向功能；需要第二条 SSE 流 + tail 滚动 / 暂停 / 过滤；用 `Get-Content -Wait` / `tail -f` 替代 |
+| **错误 Boundary**（React 整页崩溃后的 fallback UI） | 不做：Step 1~5 没出过整页崩；遇到再加 |
+| **API key 在 UI 显示**（即使脱敏） | 不做：直接不返回，避免任何泄漏路径 |
+| **配置写入端点**（PUT /api/config） | 不做：跟 LLM 参数 runtime 编辑一起留给后续；只读视图 |
+
+**对接现有代码的策略**：
+
+- **后端**：新加 `GET /api/config` 直接从 `src.config` 模块拿 scalar，按分组打包；`api_key` 一律剔除
+- **前端主题**：用 Tailwind 自带 `dark:` class variant + `class` 模式；CSS 已存在的 `.dark` 选择器都会自动 work，**无须改任何 view 组件**
+- **前端 toast**：装 [sonner](https://sonner.emilkowal.ski/)（shadcn 推荐的 toast 库），抽 `lib/toast.ts` 提供 `toast.success / toast.error` helper；改 KB/Memory/Rules 用 sonner 替代各自 inline notice
+
+**API 设计**：
+
+| Method | Path | Body | Response | 含义 |
+|---|---|---|---|---|
+| `GET` | `/api/config` | - | 见下 | 只读：分组的当前配置摘要 |
+
+返回结构（JSON）：
+
+```json
+{
+  "llm": {
+    "active_provider": "kimi",
+    "model": "kimi-k2.5",
+    "force_temperature": 0.6,
+    "thinking_enabled": false,
+    "thinking_budget": 8000,
+    "available_providers": ["kimi", "qwen", "glm", "deepseek", "openai", ...]
+  },
+  "rag": {
+    "top_k": 8,
+    "k_per_source": 3,
+    "active_embeddings": ["en", "zh"],
+    "default_embedding": "en",
+    "reranker_enabled": true,
+    "reranker_model": "BAAI/bge-reranker-base",
+    "query_rewrite_enabled": true,
+    "ocr_fallback_enabled": true,
+    "chunk_size": 600,
+    "chunk_overlap": 100
+  },
+  "memory": {
+    "enabled": true,
+    "auto_extract": false,
+    "max_chars": 1500
+  },
+  "rules": {
+    "enabled": true,
+    "file": ".agenta/rules.md",
+    "max_chars": 4000
+  },
+  "mcp": {
+    "enabled": true,
+    "config_file": ".agenta/mcp/config.json",
+    "connect_timeout_sec": 10,
+    "call_timeout_sec": 30
+  },
+  "security": {
+    "mode": "normal",
+    "plan_permission_mode": false
+  },
+  "web": {
+    "upload_dir": "./datasets/web_uploads",
+    "max_upload_mb": 10
+  },
+  "log": {
+    "level": "INFO"
+  }
+}
+```
+
+**关键决策**：
+
+| 决策点 | 选择 | 理由 |
+|---|---|---|
+| 配置是否允许 UI 编辑 | 否 | 改 `.env` 重启更可靠；UI 写文件 + 清 cache 复杂度高 |
+| API key 是否返回（脱敏后） | 不返回 | 即使脱敏（`sk-...xxx`）也是泄漏路径；用户自己看 `.env` 即可 |
+| 主题用什么实现 | Tailwind `class` + 加 `.dark` class 到 `<html>` | shadcn 默认机制；现有所有组件 already 用 `dark:` variant 写好 |
+| 主题存哪 | `localStorage` key `agenta-theme` | 不上后端；纯前端偏好 |
+| 主题选项 | `light` / `dark` / `system` | `system` 用 `prefers-color-scheme` media query；默认 `system` |
+| Toast 库 | sonner | shadcn 官方推荐；体积小（10KB）；支持 promise + dismiss + position |
+| Toast 在哪挂载 | App.tsx 根；`<Toaster />` 一次 | 全局生效；视图组件直接 import `toast` 用 |
+| KB / Memory / Rules 是否重构 | 重构 | KB 自抽的 toast 数组、Memory / Rules 自抽的 inline notice 都改成 sonner；统一交互体验 |
+| 设置入口放哪 | Sidebar 资源菜单区底部 | 跟"记忆 / 规则 / Skills / MCP"并列；"⚙️ 设置"图标 |
+
+**实现内容**：
+
+后端：
+
+- `src/api/schemas/config.py` 新建：嵌套 Pydantic 模型（按上面 JSON 分组）
+- `src/api/routes/config.py` 新建：1 个 endpoint `GET /api/config`，逻辑直接拼 `src.config` 模块常量
+- `src/api/main.py` 注册 config router
+
+前端：
+
+- `package.json` 加 `sonner`
+- `src/types/config.ts` 新建：跟后端 schema 同构的 TS 类型
+- `src/api/client.ts` 加 `getConfig()`
+- `src/lib/toast.ts` 新建：sonner 的轻封装，统一 `success / error / info` API
+- `src/lib/theme.ts` 新建：theme state hook + localStorage + apply class
+- `src/components/settings/ThemeToggle.tsx` 新建：右上角按钮（3 态切换）
+- `src/components/settings/SettingsView.tsx` 新建：只读分组展示
+- `src/components/sidebar/Sidebar.tsx` 改：加 ⚙️ 设置 入口，`ViewKind` 加 `settings`
+- `src/App.tsx` 改：根挂 `<Toaster />`；初始化 theme；条件渲染 SettingsView
+- `src/components/chat/ChatView.tsx` 改：顶部加 ThemeToggle（或放 Sidebar 底部，按视觉决定）
+- `src/components/kb/KnowledgeBaseView.tsx` 改：删自抽 toast 数组，改 `toast.success / toast.error`
+- `src/components/resources/MemoryView.tsx` 改：error inline notice 改 toast（保留 loading / empty 内联文案）
+- `src/components/resources/RulesView.tsx` 改：success / error notice 改 toast
+
+**UT 策略**：
+
+| 层 | 怎么测 |
+|---|---|
+| `GET /api/config` | 测返回结构对齐（用 monkeypatch 改几个 config 常量后看 response 反映）；测 API key 字段**不出现**在响应里 |
+| 主题 hook | 不写 UT；前端目测验收 |
+| toast | 不写 UT；前端目测验收 |
+
+**人工验收步骤**：
+
+1. 启动后端 + 前端
+2. Sidebar 底部应该有"⚙️ 设置"入口
+3. 点击"⚙️ 设置" → 主区显示 LLM / RAG / Memory / Rules / MCP / Security / Web / Log 8 个分组；每组展示当前值；**确认看不到任何 API key**
+4. 右上角主题切换按钮（图标 Sun / Moon / Monitor）→ 点一次切到 dark；点第二次切到 light；点第三次切到 system
+5. 在 dark 模式下逐个 View 切一遍（chat / KB / memory / rules / skills / mcp / settings），UI 全部正确显示成深色
+6. 刷新浏览器 → 主题选择保留
+7. 上传一个文档到 KB → 右下角弹 sonner toast（不再是 Step 4 自抽的 box）
+8. 在 Memory view 改一条 value 保存 → toast 而不是 inline notice
+9. 在 Rules view 改 rules 保存 → toast 提示"已保存，重启 uvicorn 或新 session 生效"
+10. `pytest -q tests/test_api_config.py` 全过
+
+通过以上 = Step 6 完成。
+
+**风险点 / 已知限制**：
+
+| 项 | 说明 |
+|---|---|
+| 主题在第一帧可能闪烁 | `useEffect` 内才 apply class；为减闪烁，在 `index.html` 加 inline script 提前 apply。可选优化 |
+| sonner Toaster 渲染层级跟 shadcn Dialog 冲突 | 实测：sonner z-index 高于 dialog backdrop，二者并存 ok；如有问题加 `position="top-right"` 错位 |
+| 后端 `available_providers` 字段从 `PROVIDER_CONFIGS.keys()` 拿 | 顺序非确定（dict 在 Python 3.7+ 保插入序）；前端按字母重排避免 UI 抖动 |
+| `force_temperature` 可能是 `None` | TS 类型用 `number \| null`；显示成"—" |
+
+---
 
 ### 6.4.8 Step 7 - 业务面板
 > 留待 Step 6 完成后展开。

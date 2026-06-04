@@ -26,6 +26,7 @@ import type {
   RulesWriteResponse,
   SkillsResponse,
 } from '@/types/resources'
+import type { AppConfig } from '@/types/config'
 
 // ─── 通用 helper ────────────────────────────────────────────────────────
 
@@ -274,4 +275,12 @@ export async function listMCPTools(): Promise<MCPTool[]> {
   const res = await fetch('/api/mcp/tools')
   await _ensureOk(res)
   return ((await res.json()) as MCPToolListResponse).tools
+}
+
+// ─── Step 6：System Config ─────────────────────────────────────────────
+
+export async function getConfig(): Promise<AppConfig> {
+  const res = await fetch('/api/config')
+  await _ensureOk(res)
+  return (await res.json()) as AppConfig
 }

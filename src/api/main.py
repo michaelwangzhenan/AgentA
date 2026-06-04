@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 import src.config as _cfg  # noqa: E402
 from src.api.routes import (  # noqa: E402
     chat,
+    config as config_route,
     health,
     kb,
     mcp,
@@ -86,3 +87,4 @@ app.include_router(memory.router, prefix="/api", tags=["memory"])
 app.include_router(rules.router, prefix="/api", tags=["rules"])
 app.include_router(skills.router, prefix="/api", tags=["skills"])
 app.include_router(mcp.router, prefix="/api", tags=["mcp"])
+app.include_router(config_route.router, prefix="/api", tags=["config"])

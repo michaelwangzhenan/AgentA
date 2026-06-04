@@ -9,6 +9,7 @@ import {
   Plug,
   Plus,
   ScrollText,
+  Settings,
   Sparkles,
   Trash2,
 } from 'lucide-react'
@@ -38,6 +39,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { ThemeToggle } from '@/components/settings/ThemeToggle'
 import { cn } from '@/lib/utils'
 
 import type { Session } from '@/types/session'
@@ -49,6 +51,7 @@ export type ViewKind =
   | 'rules'
   | 'skills'
   | 'mcp'
+  | 'settings'
 
 export type SidebarProps = {
   sessions: Session[]
@@ -158,6 +161,12 @@ export function Sidebar(props: SidebarProps) {
           active={activeView === 'mcp'}
           onClick={() => onSwitchView('mcp')}
         />
+        <ViewNavButton
+          icon={<Settings className="h-4 w-4" />}
+          label="设置"
+          active={activeView === 'settings'}
+          onClick={() => onSwitchView('settings')}
+        />
       </div>
 
       <nav className="flex-1 overflow-y-auto p-2">
@@ -215,6 +224,10 @@ export function Sidebar(props: SidebarProps) {
           </ul>
         )}
       </nav>
+
+      <div className="flex items-center justify-end border-t border-border px-3 py-2">
+        <ThemeToggle />
+      </div>
 
       {/* 重命名 Dialog */}
       <Dialog
