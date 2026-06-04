@@ -1,0 +1,88 @@
+"""User Memory 管理端点（list / upsert / patch / delete / clear）。
+
+UserMemoryStore 内部已有 threading.Lock，多 connection 在 SQLite 文件锁下并发安全。
+"""
+
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from src.api.deps import get_user_memory_store
+from src.api.schemas.memory import (
+    MemoryClearResponse,
+    MemoryDeleteResponse,
+    MemoryItem,
+    MemoryListResponse,
+    MemoryPatchRequest,
+    MemoryUpsertRequest,
+)
+from src.memory.user_memory import MEMORY_CATEGORIES, UserMemoryStore
+
+router = APIRouter(prefix="/memory", tags=["memory"])
+
+
+def _require_store(
+    store: UserMemoryStore | None = Depends(get_user_memory_store),
+) -> UserMemoryStore:
+    if store is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="USER_MEMORY_ENABLED=false；请在 .env 启用后重启 uvicorn",
+        )
+    return store
+
+
+@router.get("", response_model=MemoryListResponse)
+def list_memories(
+    store: UserMemoryStore = Depends(_require_store),
+) -> MemoryListResponse:
+    rows = store.load_all()
+    return MemoryListResponse(memories=[MemoryItem(**row) for row in rows])
+
+
+@router.post("", response_model=MemoryItem)
+def upsert_memory(
+    req: MemoryUpsertRequest,
+    store: UserMemoryStore = Depends(_require_store),
+) -> MemoryItem:
+    if req.category not in MEMORY_CATEGORIES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"未知 category: {req.category}；合法值：{sorted(MEMORY_CATEGORIES)}",
+        )
+    store.upsert(req.category, req.key, req.value, source=req.source)
+    for row in store.load_all():
+        if row["category"] == req.category and row["key"] == req.key.strip()[:30]:
+            return MemoryItem(**row)
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="upsert 后查不到对应条目（可能被 _sanitize 清洗后 key 不匹配）",
+    )
+
+
+@router.patch("/{memory_id}", response_model=MemoryDeleteResponse)
+def patch_memory(
+    memory_id: int,
+    req: MemoryPatchRequest,
+    store: UserMemoryStore = Depends(_require_store),
+) -> MemoryDeleteResponse:
+    updated = store.update_value(memory_id, req.value)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"memory id={memory_id} 不存在或更新失败（可能 value 清洗后为空）",
+        )
+    return MemoryDeleteResponse(deleted=True)
+
+
+@router.delete("/{memory_id}", response_model=MemoryDeleteResponse)
+def delete_memory(
+    memory_id: int,
+    store: UserMemoryStore = Depends(_require_store),
+) -> MemoryDeleteResponse:
+    return MemoryDeleteResponse(deleted=store.delete(memory_id))
+
+
+@router.delete("", response_model=MemoryClearResponse)
+def clear_memories(
+    store: UserMemoryStore = Depends(_require_store),
+) -> MemoryClearResponse:
+    return MemoryClearResponse(cleared=store.clear())

@@ -1,10 +1,15 @@
+import type { ReactNode } from 'react'
 import { useState } from 'react'
 import {
   BookOpen,
+  Brain,
   MessageSquare,
   MoreHorizontal,
   Pencil,
+  Plug,
   Plus,
+  ScrollText,
+  Sparkles,
   Trash2,
 } from 'lucide-react'
 
@@ -37,7 +42,13 @@ import { cn } from '@/lib/utils'
 
 import type { Session } from '@/types/session'
 
-export type ViewKind = 'chat' | 'kb'
+export type ViewKind =
+  | 'chat'
+  | 'kb'
+  | 'memory'
+  | 'rules'
+  | 'skills'
+  | 'mcp'
 
 export type SidebarProps = {
   sessions: Session[]
@@ -111,30 +122,42 @@ export function Sidebar(props: SidebarProps) {
       </div>
 
       <div className="border-b border-border px-2 py-2">
-        <button
-          className={cn(
-            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm',
-            activeView === 'chat'
-              ? 'bg-accent text-accent-foreground'
-              : 'hover:bg-accent/60',
-          )}
+        <ViewNavButton
+          icon={<MessageSquare className="h-4 w-4" />}
+          label="聊天"
+          active={activeView === 'chat'}
           onClick={() => onSwitchView('chat')}
-        >
-          <MessageSquare className="h-4 w-4" />
-          聊天
-        </button>
-        <button
-          className={cn(
-            'mt-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm',
-            activeView === 'kb'
-              ? 'bg-accent text-accent-foreground'
-              : 'hover:bg-accent/60',
-          )}
+        />
+        <ViewNavButton
+          icon={<BookOpen className="h-4 w-4" />}
+          label="知识库"
+          active={activeView === 'kb'}
           onClick={() => onSwitchView('kb')}
-        >
-          <BookOpen className="h-4 w-4" />
-          知识库
-        </button>
+        />
+        <ViewNavButton
+          icon={<Brain className="h-4 w-4" />}
+          label="记忆"
+          active={activeView === 'memory'}
+          onClick={() => onSwitchView('memory')}
+        />
+        <ViewNavButton
+          icon={<ScrollText className="h-4 w-4" />}
+          label="规则"
+          active={activeView === 'rules'}
+          onClick={() => onSwitchView('rules')}
+        />
+        <ViewNavButton
+          icon={<Sparkles className="h-4 w-4" />}
+          label="Skills"
+          active={activeView === 'skills'}
+          onClick={() => onSwitchView('skills')}
+        />
+        <ViewNavButton
+          icon={<Plug className="h-4 w-4" />}
+          label="MCP"
+          active={activeView === 'mcp'}
+          onClick={() => onSwitchView('mcp')}
+        />
       </div>
 
       <nav className="flex-1 overflow-y-auto p-2">
@@ -247,5 +270,27 @@ export function Sidebar(props: SidebarProps) {
         </AlertDialogContent>
       </AlertDialog>
     </aside>
+  )
+}
+
+type ViewNavButtonProps = {
+  icon: ReactNode
+  label: string
+  active: boolean
+  onClick: () => void
+}
+
+function ViewNavButton({ icon, label, active, onClick }: ViewNavButtonProps) {
+  return (
+    <button
+      className={cn(
+        'mt-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm first:mt-0',
+        active ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/60',
+      )}
+      onClick={onClick}
+    >
+      {icon}
+      {label}
+    </button>
   )
 }

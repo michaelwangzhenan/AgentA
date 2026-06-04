@@ -15,6 +15,17 @@ import type {
   KBDocumentListResponse,
   KBUploadResponse,
 } from '@/types/kb'
+import type {
+  MCPServer,
+  MCPServerListResponse,
+  MCPTool,
+  MCPToolListResponse,
+  MemoryItem,
+  MemoryListResponse,
+  RulesReadResponse,
+  RulesWriteResponse,
+  SkillsResponse,
+} from '@/types/resources'
 
 // ─── 通用 helper ────────────────────────────────────────────────────────
 
@@ -181,4 +192,86 @@ export async function deleteKBDocument(docId: string): Promise<KBDeleteResponse>
   })
   await _ensureOk(res)
   return (await res.json()) as KBDeleteResponse
+}
+
+// ─── Step 5：User Memory / Rules / Skills / MCP ───────────────────────
+
+export async function listMemories(): Promise<MemoryItem[]> {
+  const res = await fetch('/api/memory')
+  await _ensureOk(res)
+  return ((await res.json()) as MemoryListResponse).memories
+}
+
+export async function upsertMemory(
+  category: string,
+  key: string,
+  value: string,
+  source: string = 'manual',
+): Promise<MemoryItem> {
+  const res = await fetch('/api/memory', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ category, key, value, source }),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as MemoryItem
+}
+
+export async function patchMemory(
+  id: number,
+  value: string,
+): Promise<{ deleted: boolean }> {
+  const res = await fetch(`/api/memory/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ value }),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as { deleted: boolean }
+}
+
+export async function deleteMemory(id: number): Promise<{ deleted: boolean }> {
+  const res = await fetch(`/api/memory/${id}`, { method: 'DELETE' })
+  await _ensureOk(res)
+  return (await res.json()) as { deleted: boolean }
+}
+
+export async function clearMemories(): Promise<{ cleared: number }> {
+  const res = await fetch('/api/memory', { method: 'DELETE' })
+  await _ensureOk(res)
+  return (await res.json()) as { cleared: number }
+}
+
+export async function readRules(): Promise<RulesReadResponse> {
+  const res = await fetch('/api/rules')
+  await _ensureOk(res)
+  return (await res.json()) as RulesReadResponse
+}
+
+export async function writeRules(text: string): Promise<RulesWriteResponse> {
+  const res = await fetch('/api/rules', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as RulesWriteResponse
+}
+
+export async function listSkills(): Promise<SkillsResponse> {
+  const res = await fetch('/api/skills')
+  await _ensureOk(res)
+  return (await res.json()) as SkillsResponse
+}
+
+export async function listMCPServers(): Promise<MCPServer[]> {
+  const res = await fetch('/api/mcp/servers')
+  await _ensureOk(res)
+  return ((await res.json()) as MCPServerListResponse).servers
+}
+
+export async function listMCPTools(): Promise<MCPTool[]> {
+  const res = await fetch('/api/mcp/tools')
+  await _ensureOk(res)
+  return ((await res.json()) as MCPToolListResponse).tools
 }

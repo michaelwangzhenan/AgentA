@@ -2176,9 +2176,166 @@ AgentA/                              # 项目根
 
 ---
 
-### 6.4.6 Step 5 - 其他资源管理
+### 6.4.6 Step 5 - 其他资源管理（Memory / Rules / Skills / MCP）
 
-> 留待 Step 4 完成后展开。
+**目标**：把 Agent 的 4 类"非会话型资源"暴露到 UI 上，让用户不用开 CLI 也能：
+
+- 看 / 改 / 删 LLM 自动学到的**用户记忆**（`UserMemoryStore`）
+- 看 / 改**项目级 rules**（`.agenta/rules.md`）
+- 看当前加载的 **Skills** 清单 + 失败原因
+- 看 **MCP server** 健康状态 + 暴露的工具列表
+
+完成后 Sidebar 多出一个**资源菜单区**，跟 "聊天" / "知识库" 并列。
+
+**本 Step 不做**：
+
+| 项 | 留给 / 不做 |
+|---|---|
+| Skills 在 UI 里编辑 / 启停 | 不做：用户实际改 `.agenta/skills/*/SKILL.md` 文件更直接；UI 编辑 markdown frontmatter 收益不高 |
+| MCP server 在 UI 里增删 / 重启 | 不做：MCP server config 在 `.agenta/mcp.json`，重启 uvicorn 即生效；UI reload 涉及 manager lifecycle 改造 |
+| Memory 手动新增条目 | 不做：手动新增基本没价值（自然语言对话自动提取就行）；只暴露 list / update value / delete / clear |
+| Rules 改完热加载 | 不做：`load_project_rules` 进程内只读一次；Web UI 改完提示 "下次新 session 生效" |
+| 跨 session 的 memory 可见性 | 不做：memory 本来就跨 session 共享（这是 design.md §5.3 的设计） |
+| Memory 按类别筛选 / 搜索 | 不做：当前总量小（数十条级），先全列；筛选留给后续 |
+
+**对接现有代码的策略**：
+
+- **Memory**：复用 [`UserMemoryStore`](../src/memory/user_memory.py) 的 `load_all` / `update_value` / `delete` / `clear` / `upsert`，零改动
+- **Rules**：复用 [`load_project_rules`](../src/agent/core/rules_loader.py) 读；写直接 `path.write_text(...)`（路径取 `config.USER_RULES_FILE`）
+- **Skills**：复用 [`scan_skills`](../src/cli/skill_loader.py) 的 `ScanResult.loaded / failed`；返回 dataclass → dict
+- **MCP**：复用 [`MCPManager.status`](../src/agent/core/mcp_manager.py) + `list_tools`；从 `get_agent()` 拿到 manager（Agent 实例持有引用）
+
+**API 设计**：
+
+Memory（5 个）：
+
+| Method | Path | Body | Response | 含义 |
+|---|---|---|---|---|
+| `GET` | `/api/memory` | - | `{memories: [{id, category, key, value, source, created_at, accessed_at}]}` | 全量 list |
+| `POST` | `/api/memory` | `{category, key, value, source?}` | `SAME as item` | upsert（手动添加 / 修改 key 入口）|
+| `PATCH` | `/api/memory/{id}` | `{value}` | `{updated: bool}` | 只改 value（保留 category/key/source）|
+| `DELETE` | `/api/memory/{id}` | - | `{deleted: bool}` | 删单条 |
+| `DELETE` | `/api/memory` | - | `{cleared: int}` | 清空全部（需前端确认）|
+
+Rules（2 个）：
+
+| Method | Path | Body | Response | 含义 |
+|---|---|---|---|---|
+| `GET` | `/api/rules` | - | `{text: str, path: str, exists: bool}` | 读 `.agenta/rules.md`；不存在 → text="" + exists=False |
+| `PUT` | `/api/rules` | `{text: str}` | `{path, length, restart_required: true}` | 写文件；提醒重启或新 session 生效 |
+
+Skills（1 个）：
+
+| Method | Path | Body | Response | 含义 |
+|---|---|---|---|---|
+| `GET` | `/api/skills` | - | `{loaded: [{name, description, location}], failed: [{path, reason}]}` | 只读：当前 `.agenta/skills/` 扫描结果 |
+
+MCP（2 个）：
+
+| Method | Path | Body | Response | 含义 |
+|---|---|---|---|---|
+| `GET` | `/api/mcp/servers` | - | `{servers: [{name, status, tool_count, error, command}]}` | server 列表 + 健康状态 |
+| `GET` | `/api/mcp/tools` | - | `{tools: [{name, description, inputSchema, server}]}` | 所有已连接 server 合流的工具清单 |
+
+**关键决策**：
+
+| 决策点 | 选择 | 理由 |
+|---|---|---|
+| Memory 是否允许新增 | 允许（POST upsert） | UI 偶尔想"手动加一条偏好"；upsert 内部已限制 category 必须在 `MEMORY_CATEGORIES`，安全 |
+| Rules 写入是否热加载 | 不热加载 | `load_project_rules` 设计是启动一次；Web UI 写完 toast 提示 "重启或新 session 生效"，符合 rules_loader 既有约束 |
+| Skills 是否允许 UI add / delete | 不允许 | Skill 是 git tracked 的文件，UI 编辑 frontmatter / body 收益低；用户用编辑器改文件，重启进程即可 reload |
+| MCP servers 是否允许 UI add / delete | 不允许 | Server config 在 `.agenta/mcp.json` + 启动 lifecycle 复杂；现阶段只读够用 |
+| 资源菜单区放哪 | Sidebar `[+ 新建会话]` + view 切换块 下方，sessions 列表 上方 | 跟需求文档 §4.2 布局对齐：资源菜单在 Recents 列表上方 |
+| 4 套资源的入口形态 | 4 个固定 icon-text 行（不可折叠） | 简洁；后续 Step 加更多资源时再考虑分组 |
+| Memory category 标签 | 用现有 `CATEGORY_LABELS` 翻译 | 比 raw category id（如 `pref_style`）更友好 |
+| 选中某资源时主区切换 | `activeView: 'chat' \| 'kb' \| 'memory' \| 'rules' \| 'skills' \| 'mcp'` | 6 种 view，沿用 Step 4 的 view 切换模式 |
+| 4 个 panel 用统一容器壳 | 都用 `<ResourcePage title="..." subtitle="...">` 包一层 | 视觉一致；少重复代码 |
+
+**实现内容**：
+
+后端：
+
+- `src/api/schemas/memory.py` 新建：Pydantic 4 个 schema
+- `src/api/schemas/rules.py` 新建：2 个 schema
+- `src/api/schemas/skills.py` 新建：3 个 schema（`SkillItem` / `SkillFailure` / `SkillsResponse`）
+- `src/api/schemas/mcp.py` 新建：3 个 schema（`MCPServer` / `MCPTool` / 两个 list response）
+- `src/api/routes/memory.py` 新建：5 个 endpoint
+- `src/api/routes/rules.py` 新建：2 个 endpoint
+- `src/api/routes/skills.py` 新建：1 个 endpoint
+- `src/api/routes/mcp.py` 新建：2 个 endpoint
+- `src/api/deps.py` 加 `get_user_memory_store` 依赖（从 Agent 拿 `_user_memory` 字段引用）
+- `src/api/main.py` 注册 4 个新 router
+
+前端：
+
+- `src/types/resources.ts` 新建：Memory / Rules / Skills / MCP 共用类型
+- `src/api/client.ts` 加：4 套资源对应的 client function
+- `src/components/sidebar/Sidebar.tsx` 改：加资源菜单区（4 个固定行）+ `activeView` 扩展为 6 种
+- `src/components/resources/ResourcePage.tsx` 新建：统一容器壳
+- `src/components/resources/MemoryView.tsx` 新建：列表 + 编辑 value Dialog + 删除 / 清空
+- `src/components/resources/RulesView.tsx` 新建：textarea + 保存按钮 + 重启提示
+- `src/components/resources/SkillsView.tsx` 新建：loaded 列表 + failed 列表
+- `src/components/resources/MCPView.tsx` 新建：servers 列表 + 各 server 工具数 + 全工具列表
+- `src/App.tsx` 改：`activeView` 类型扩展 + 6 种 view 条件渲染
+
+**修改 / 新增列表**：
+
+| 操作 | 文件 |
+|---|---|
+| 新增 | `src/api/schemas/memory.py` / `rules.py` / `skills.py` / `mcp.py` |
+| 新增 | `src/api/routes/memory.py` / `rules.py` / `skills.py` / `mcp.py` |
+| 修改 | `src/api/deps.py` / `src/api/main.py` |
+| 新增 | `tests/test_api_memory.py` / `test_api_rules.py` / `test_api_skills.py` / `test_api_mcp.py` |
+| 新增 | `frontend/src/types/resources.ts` |
+| 修改 | `frontend/src/api/client.ts` |
+| 修改 | `frontend/src/components/sidebar/Sidebar.tsx` |
+| 新增 | `frontend/src/components/resources/ResourcePage.tsx` |
+| 新增 | `frontend/src/components/resources/MemoryView.tsx` |
+| 新增 | `frontend/src/components/resources/RulesView.tsx` |
+| 新增 | `frontend/src/components/resources/SkillsView.tsx` |
+| 新增 | `frontend/src/components/resources/MCPView.tsx` |
+| 修改 | `frontend/src/App.tsx` |
+
+**UT 策略**：
+
+| 层 | 怎么测 |
+|---|---|
+| 后端 Memory | mock `UserMemoryStore` 或用 tmp_path 真实例；测 list / upsert / patch / delete / clear / 404 不存在 |
+| 后端 Rules | 用 tmp_path + monkeypatch `USER_RULES_FILE`；测 read 不存在 / read 已有 / write 创建 / write 覆盖 |
+| 后端 Skills | 用 tmp_path 构造 SKILL.md 文件结构，monkeypatch `DEFAULT_SKILLS_DIR`；测 loaded / failed 分类 |
+| 后端 MCP | mock `MCPManager.status` / `list_tools` 返回固定数据；测 list servers / list tools |
+| 前端 | 不写 UT |
+
+**人工验收步骤**：
+
+1. 启动后端 + 前端；Sidebar 中间出现 4 个资源入口（记忆 / 规则 / Skills / MCP），跟"聊天" / "知识库"并列
+2. 点 **记忆** → 主区列表显示当前所有 user_memory（之前 LLM 自动提取的应该有几十条）；hover 一行点 ✏️ → Dialog 改 value → 保存后列表更新；点 🗑️ → 确认 → 该行消失
+3. 点 **规则** → textarea 显示 `.agenta/rules.md` 内容（若文件不存在则空）；改完点保存 → toast "已保存，新 session 生效"；切回聊天问一句新 session 应该按新 rules 行为
+4. 点 **Skills** → 列表显示 `.agenta/skills/` 下扫到的 skills（loaded 部分含 name / description / location）+ failed 部分（reason）
+5. 点 **MCP** → 列表显示 `.agenta/mcp.json` 里配置的 servers + 状态（connected / failed / connecting）+ tool_count + 错误信息；下方"工具清单"展示所有合流后的 tool
+6. 切回聊天 → 在 chat session 里发"我喜欢什么颜色？" → LLM 应该能引用 memory 给答案
+7. `pytest -q tests/test_api_memory.py tests/test_api_rules.py tests/test_api_skills.py tests/test_api_mcp.py` 全过
+
+通过以上 6-7 条 = Step 5 完成。
+
+**风险点 / 已知限制**：
+
+| 项 | 说明 |
+|---|---|
+| Memory upsert 后 Agent 不立刻看到新条目 | Agent `MemoryManager.build_system_prompt` 在每次 `run` 开头重新加载 memory，所以**实际上立刻看到**。无风险 |
+| Rules 写完不热加载 | `load_project_rules` 进程内只读一次。新 session 会重新走 `Agent.__init__` → 应能加载（取决于 `get_agent` 是 lru_cache 单例 → **实际上需要重启 uvicorn**）。UI toast 明示 |
+| Skills 失败列表的 reason 是英文 prefix | 直接展示 `read_failed: xxx` / `yaml_parse_error: xxx`，用户可自行 google；不做翻译 |
+| MCP server 实时状态可能 stale | `status` 返回的是 `_handles` 里的内存快照；server 在 web UI 查询瞬间挂了不会即时反映。下次发请求会重试时更新 |
+| 多用户场景 memory 是全局共享 | 设计上 AgentA 是单用户工具；多用户隔离不在本期 scope |
+
+**顺手 fix 的 pre-existing 问题**（Step 5 暴露 + 修复）：
+
+| 问题 | 根因 | 修复 |
+|---|---|---|
+| `USER_MEMORY_ENABLED` 等 env var 在 uvicorn 进程里永远拿默认值 | `src/api/main.py` 没 `load_dotenv`；CLI 入口 `main.py` 有；Step 1~4 因为 KB 走 `ingest.py`（里面有 load_dotenv）侥幸没暴露 | `src/api/main.py` 顶部加 `load_dotenv(override=True)`，必须在 `import src.config` 之前 |
+| MCP server 在 uvicorn 进程里**从未被启动** | `_bootstrap_mcp()` 只在 CLI `main.py` 启动时调；uvicorn 启动时没有等价 hook | 复制 `_bootstrap_mcp` 逻辑到 `src/api/main.py` 的 FastAPI `lifespan` async context manager |
+
+---
 
 ### 6.4.7 Step 6 - 系统配置 + 主题 + 反馈 + 调试
 

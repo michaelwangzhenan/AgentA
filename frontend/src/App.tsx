@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ChatView } from '@/components/chat/ChatView'
 import { KnowledgeBaseView } from '@/components/kb/KnowledgeBaseView'
+import { MCPView } from '@/components/resources/MCPView'
+import { MemoryView } from '@/components/resources/MemoryView'
+import { RulesView } from '@/components/resources/RulesView'
+import { SkillsView } from '@/components/resources/SkillsView'
 import { Sidebar, type ViewKind } from '@/components/sidebar/Sidebar'
 import {
   createSession,
@@ -280,11 +284,14 @@ function App() {
         onDelete={handleDelete}
         onSwitchView={setActiveView}
       />
-      {activeView === 'chat' ? (
+      {activeView === 'chat' && (
         <ChatView messages={messages} inFlight={inFlight} onSend={handleSend} />
-      ) : (
-        <KnowledgeBaseView />
       )}
+      {activeView === 'kb' && <KnowledgeBaseView />}
+      {activeView === 'memory' && <MemoryView />}
+      {activeView === 'rules' && <RulesView />}
+      {activeView === 'skills' && <SkillsView />}
+      {activeView === 'mcp' && <MCPView />}
     </div>
   )
 }
