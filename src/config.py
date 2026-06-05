@@ -354,7 +354,7 @@ USER_RULES_FILE: str = os.getenv("USER_RULES_FILE", ".agenta/rules.md")
 USER_RULES_MAX_CHARS: int = int(os.getenv("USER_RULES_MAX_CHARS", "4000"))
 
 # Skills 禁用列表文件路径（相对项目根；文件不存在视作"未禁用任何 skill"）
-SKILLS_DISABLED_FILE: str = os.getenv("SKILLS_DISABLED_FILE", ".agenta/skills_disabled.json")
+SKILLS_DISABLED_FILE: str = os.getenv("SKILLS_DISABLED_FILE", ".agenta/skills/disabled.json")
 
 
 def get_active_config() -> ProviderConfig:

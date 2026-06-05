@@ -8,7 +8,7 @@ Skills 发现与解析模块
 
 禁用状态走"状态分离"模式（对齐业内 Cursor / Claude.ai 做法）：SKILL.md 本身
 保持纯净（仅 name / description / allowed-tools 等开放标准字段），是否启用记在
-独立的 `.agenta/skills_disabled.json` 文件里。这样 SKILL.md 可跨 agent 复用。
+独立的 `.agenta/skills/disabled.json` 文件里。这样 SKILL.md 可跨 agent 复用。
 """
 
 import html
@@ -34,7 +34,7 @@ DEFAULT_SKILLS_DIR = Path(".agenta/skills")
 
 # disabled 状态文件 fallback：实际默认从 config.SKILLS_DISABLED_FILE 读（可 .env 覆盖）
 # 此处保留为兜底常量，配合 UT 不依赖 .env 注入时仍能工作
-DEFAULT_DISABLED_FILE = Path(".agenta/skills_disabled.json")
+DEFAULT_DISABLED_FILE = Path(".agenta/skills/disabled.json")
 
 # 合法 skill name 正则：与 LLM tool name 命名规则对齐（avoid OpenAI tool naming error）
 SKILL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -227,7 +227,7 @@ def scan_skills(
     Args:
         skills_dir: 不传 → 用 `DEFAULT_SKILLS_DIR`（约定路径 `.agenta/skills`）。
         max_depth: 最大递归深度。
-        disabled_file: 不传 → 用 `DEFAULT_DISABLED_FILE`（`.agenta/skills_disabled.json`）。
+        disabled_file: 不传 → 用 `DEFAULT_DISABLED_FILE`（`.agenta/skills/disabled.json`）。
 
     返回 ScanResult(loaded, disabled, failed)：
       - loaded：{name: SkillInfo}，启用的 + 解析成功的

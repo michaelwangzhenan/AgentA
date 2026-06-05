@@ -40,6 +40,10 @@ logs/
 # UI dev server 后台 PID + .cmd 包装器（tools/ui.ps1 自动生成）
 .run/
 
+# ── Skills/MCP disabled 列表 ───────────────────────────────────
+.agenta/skills/disabled.json
+.agenta/mcp/disabled.json
+
 # ── Python 运行时 ──────────────────────────────────────────────
 __pycache__/
 # .pyc / .pyo / .pyd

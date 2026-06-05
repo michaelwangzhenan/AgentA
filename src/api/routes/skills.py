@@ -8,7 +8,7 @@
 | PUT    | /api/skills/{name}       | 更新 skill（description + body + frontmatter_extra；name 不可改，走 rename）|
 | POST   | /api/skills/{name}/rename| 改名（目录改 + frontmatter name 同步 + disabled list 迁移）|
 | DELETE | /api/skills/{name}       | 删除 skill 目录 + reload |
-| POST   | /api/skills/{name}/toggle| 启用 / 禁用（仅修改 .agenta/skills_disabled.json）|
+| POST   | /api/skills/{name}/toggle| 启用 / 禁用（仅修改 .agenta/skills/disabled.json）|
 """
 
 import logging

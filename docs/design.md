@@ -652,7 +652,7 @@ LLM "造引用"是已知风险（写 `[7]` 但实际只有 `[3]`，或编造不�
 | frontmatter 必填 | `description`（用于 catalog）；`name` 缺失则回退用目录名 |
 | frontmatter 其他字段 | name / description 之外的字段（如 agentskills.io 标准 `allowed-tools` / `model`）→ **passthrough 保留**：解析时收集到 `frontmatter_extra`，写回时原样输出，不丢失（runtime 当前不强制 `allowed-tools`，仅做元数据保留） |
 | 异常处理 | skill load失败由 CLI / WebUI 显式回显 |
-| 启用 / 禁用 | 走"状态分离"模式：状态存独立文件 `.agenta/skills_disabled.json`（详 §3.7.3），SKILL.md 保持纯净 |
+| 启用 / 禁用 | 走"状态分离"模式：状态存独立文件 `.agenta/skills/disabled.json`（详 §3.7.3），SKILL.md 保持纯净 |
 | 改名 | 通过 `POST /api/skills/{name}/rename` 强一致改名：移动目录 + 同步 frontmatter `name:` 字段 + 迁移 disabled list 状态；目录名永远 == frontmatter `name` |
 | Web UI 管理 | 完整 CRUD + 改名 + toggle 启停 + 一键 reload + 搜索 / 排序 / 批量启停；编辑器用 CodeMirror 6 提供 markdown 高亮 + Edit/Split/Preview 三态预览。详 [iter_4_UI.md §5 API 总览](./iter_4_UI.md) |
 
@@ -687,7 +687,7 @@ Skills 规范定义的**渐进披露（progressive disclosure）**有三层：ca
 
 | 项 | 约定 |
 |---|---|
-| 文件路径 | `.agenta/skills_disabled.json`（可由 `SKILLS_DISABLED_FILE` 环境变量覆盖）|
+| 文件路径 | `.agenta/skills/disabled.json`（可由 `SKILLS_DISABLED_FILE` 环境变量覆盖）|
 | 文件格式 | JSON 字符串数组，name 排序写入，例：`["skill_a", "skill_b"]` |
 | 是否进 git | **进 git**（个人项目自己用，团队偏好可共享）；个人临时禁用不想入 git 自己加 `.gitignore` |
 | 写入语义 | **原子写**：tempfile + rename，防多 tab 并发交错 |

@@ -606,11 +606,11 @@ Skills（6 个）：
 | `PUT`  | `/api/skills/{name}` | `{description, body, frontmatter_extra?}` | `SkillItem` | 更新 SKILL.md（name 不可改，走 rename）。`frontmatter_extra=null` 保留磁盘原值；`{}` 清空；非空 dict 整体替换 |
 | `POST` | `/api/skills/{name}/rename` | `{new_name}` | `SkillItem` | 改名：移动目录 + 同步 frontmatter `name:` 字段 + 迁移 disabled list 状态 |
 | `DELETE` | `/api/skills/{name}` | - | 204 | 递归删除 `.agenta/skills/{name}/` 整个目录 |
-| `POST` | `/api/skills/{name}/toggle` | `{enabled: bool}` | `{name, enabled}` | 启用 / 禁用（写 `.agenta/skills_disabled.json`，SKILL.md 不动）|
+| `POST` | `/api/skills/{name}/toggle` | `{enabled: bool}` | `{name, enabled}` | 启用 / 禁用（写 `.agenta/skills/disabled.json`，SKILL.md 不动）|
 
 CRUD / toggle 后会自动 `cache_clear()` Agent 单例，**下一轮新对话立即生效**；当前对话因 system prompt 已下发不可撤回。
 
-**禁用状态持久化**（详 design.md §3.5.5）：走"状态分离"模式 —— 禁用名单存独立的 `.agenta/skills_disabled.json`（JSON 数组），原子写（temp + rename）防并发交错，启动 scan 时自动清理已被删除的孤儿条目。SKILL.md 本身保持纯净（仅 name / description / 标准字段），可跨 agent 移植到 Claude.ai / VS Code / Cursor。
+**禁用状态持久化**（详 design.md §3.5.5）：走"状态分离"模式 —— 禁用名单存独立的 `.agenta/skills/disabled.json`（JSON 数组），原子写（temp + rename）防并发交错，启动 scan 时自动清理已被删除的孤儿条目。SKILL.md 本身保持纯净（仅 name / description / 标准字段），可跨 agent 移植到 Claude.ai / VS Code / Cursor。
 
 MCP（8 个）：
 

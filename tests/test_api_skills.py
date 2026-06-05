@@ -375,7 +375,7 @@ class TestToggleSkill:
 
 
 class TestDisabledPersistence:
-    """skills_disabled.json 文件读写 + 孤儿自愈"""
+    """skills/disabled.json 文件读写 + 孤儿自愈"""
 
     def test_disabled_file_atomic_write(
         self, tmp_path: Path
