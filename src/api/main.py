@@ -17,6 +17,13 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
 import src.config as _cfg  # noqa: E402
+from src.api import config_overrides as _config_overrides  # noqa: E402
+
+# 加载 .agenta/config_overrides.json，覆盖 _cfg 模块属性。
+# 必须在 _bootstrap_mcp / 路由首次读 _cfg 之前 —— 这里是 import-time，
+# uvicorn 启动 lifespan 时已经生效。
+_config_overrides.apply_overrides()
+
 from src.api.routes import (  # noqa: E402
     chat,
     config as config_route,

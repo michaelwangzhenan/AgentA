@@ -1,74 +1,86 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Search } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { getConfig } from '@/api/client'
+import { Input } from '@/components/ui/input'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { ResourcePage } from '@/components/resources/ResourcePage'
-import type { AppConfig } from '@/types/config'
+import { ConfigField } from '@/components/settings/ConfigField'
+import { getConfig, patchConfig, reloadConfig, resetConfig } from '@/api/client'
+import type { ConfigGroupView, ConfigItemView } from '@/types/config'
+import { cn } from '@/lib/utils'
+import { toast } from '@/lib/toast'
 
-type Row = { label: string; value: React.ReactNode }
-
-function fmt(v: unknown): React.ReactNode {
-  if (v === null || v === undefined) return <span className="text-muted-foreground">—</span>
-  if (typeof v === 'boolean') {
-    return (
-      <span
-        className={
-          'inline-block rounded px-1.5 py-0.5 text-[10px] ' +
-          (v
-            ? 'bg-green-50 text-green-900 dark:bg-green-950 dark:text-green-100'
-            : 'bg-muted text-muted-foreground')
-        }
-      >
-        {v ? 'true' : 'false'}
-      </span>
-    )
-  }
-  if (Array.isArray(v)) {
-    if (v.length === 0) return <span className="text-muted-foreground">[]</span>
-    return (
-      <span className="flex flex-wrap gap-1">
-        {v.map((it) => (
-          <span
-            key={String(it)}
-            className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]"
-          >
-            {String(it)}
-          </span>
-        ))}
-      </span>
-    )
-  }
-  return <span className="font-mono text-xs">{String(v)}</span>
+type LocalEdit = {
+  value: unknown
+  error: string | null
+  saving: boolean
 }
 
-function Section({ title, rows }: { title: string; rows: Row[] }) {
-  return (
-    <div className="rounded-lg border border-border bg-card">
-      <div className="border-b border-border px-3 py-2 text-sm font-medium">{title}</div>
-      <dl className="divide-y divide-border">
-        {rows.map((r) => (
-          <div key={r.label} className="flex items-start gap-3 px-3 py-2 text-sm">
-            <dt className="w-44 shrink-0 text-muted-foreground">{r.label}</dt>
-            <dd className="min-w-0 flex-1 break-all">{r.value}</dd>
-          </div>
-        ))}
-      </dl>
-    </div>
-  )
+// 自动保存延时：text / number 输入用 debounce 避免每按一键都 PATCH；
+// switch / select / radio / checkbox 是离散动作，立即触发。
+const DEBOUNCE_MS = 600
+
+function isInstantType(t: ConfigItemView['type']): boolean {
+  return t === 'bool' || t === 'enum_str' || t === 'multi_enum_str'
 }
 
 export function SettingsView() {
-  const [cfg, setCfg] = useState<AppConfig | null>(null)
+  const [groups, setGroups] = useState<ConfigGroupView[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [edits, setEdits] = useState<Record<string, LocalEdit>>({})
+  const [activeGroup, setActiveGroup] = useState<string | null>(null)
+  const [pendingDanger, setPendingDanger] = useState<{ key: string; value: unknown } | null>(null)
+
+  // 延时保存定时器（每个 key 独立，新 change 来了清旧再排）
+  const saveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout> | undefined>>({})
+  // 最新 groups 的引用，让 commitSave 拿到最新 item.side_effect_hint 等
+  const groupsRef = useRef<ConfigGroupView[]>(groups)
+  useEffect(() => {
+    groupsRef.current = groups
+  }, [groups])
 
   const refresh = useCallback(async () => {
     setLoading(true)
-    setError(null)
+    setLoadError(null)
     try {
-      setCfg(await getConfig())
+      const res = await getConfig()
+      setGroups(res.groups)
+      setActiveGroup((prev) => prev ?? res.groups[0]?.name ?? null)
     } catch (e) {
-      setError((e as Error).message)
+      setLoadError((e as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const handleReload = useCallback(async () => {
+    setLoading(true)
+    setLoadError(null)
+    try {
+      const res = await reloadConfig()
+      setGroups(res.config.groups)
+      setActiveGroup((prev) => prev ?? res.config.groups[0]?.name ?? null)
+      const n = res.changed_keys.length
+      if (n === 0) {
+        toast.success('overrides 文件已是最新，无变化')
+      } else {
+        toast.success(`已从文件同步 ${n} 项配置：${res.changed_keys.join(', ')}`)
+      }
+    } catch (e) {
+      setLoadError((e as Error).message)
+      toast.error((e as Error).message)
     } finally {
       setLoading(false)
     }
@@ -78,97 +90,365 @@ export function SettingsView() {
     refresh()
   }, [refresh])
 
+  // 卸载时清掉所有 pending 定时器，避免内存泄漏 + 切走 view 又触发保存
+  useEffect(() => {
+    const timers = saveTimersRef.current
+    return () => {
+      for (const t of Object.values(timers)) {
+        if (t) clearTimeout(t)
+      }
+    }
+  }, [])
+
+  const inflightCount = Object.values(edits).filter((e) => e.saving).length
+
+  // 有保存在飞 / 有 debounce 排队时，离开页面给浏览器原生警告
+  const hasPendingWork = inflightCount > 0 || Object.keys(saveTimersRef.current).length > 0
+  useEffect(() => {
+    if (!hasPendingWork) return
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [hasPendingWork])
+
+  // ─── 单项操作 ─────────────────────────────────────────────────────
+
+  const cancelPendingSave = (key: string) => {
+    const existing = saveTimersRef.current[key]
+    if (existing) {
+      clearTimeout(existing)
+      saveTimersRef.current[key] = undefined
+    }
+  }
+
+  const scheduleSave = (item: ConfigItemView, value: unknown) => {
+    cancelPendingSave(item.key)
+    const fire = () => {
+      saveTimersRef.current[item.key] = undefined
+      void commitSave(item.key, value)
+    }
+    if (isInstantType(item.type)) {
+      fire()
+    } else {
+      saveTimersRef.current[item.key] = setTimeout(fire, DEBOUNCE_MS)
+    }
+  }
+
+  const setLocalValue = (item: ConfigItemView, value: unknown) => {
+    // 改回原值 → 取消 pending、清掉 edit
+    if (deepEqual(value, item.value)) {
+      cancelPendingSave(item.key)
+      setEdits((prev) => {
+        const next = { ...prev }
+        delete next[item.key]
+        return next
+      })
+      return
+    }
+
+    setEdits((prev) => ({
+      ...prev,
+      [item.key]: { value, error: null, saving: prev[item.key]?.saving ?? false },
+    }))
+
+    // 危险项：先弹二次确认 Dialog，确认后才保存
+    if (item.danger) {
+      cancelPendingSave(item.key)
+      setPendingDanger({ key: item.key, value })
+      return
+    }
+
+    scheduleSave(item, value)
+  }
+
+  const commitSave = async (key: string, value: unknown) => {
+    setEdits((prev) => ({
+      ...prev,
+      [key]: { value, error: null, saving: true },
+    }))
+    try {
+      const updated = await patchConfig(key, value)
+      setGroups((prev) =>
+        prev.map((g) => ({
+          ...g,
+          items: g.items.map((it) => (it.key === key ? updated : it)),
+        })),
+      )
+      setEdits((prev) => {
+        const next = { ...prev }
+        delete next[key]
+        return next
+      })
+      // 副作用 hint 已 inline 显示在行内，不再 toast，避免每次拨动 Switch 都弹
+    } catch (e) {
+      setEdits((prev) => ({
+        ...prev,
+        [key]: { value, saving: false, error: (e as Error).message },
+      }))
+      toast.error((e as Error).message)
+    }
+  }
+
+  // 危险项 Dialog: 取消时把 local edit 也回滚（让 UI 控件视觉态回到原值）
+  const cancelDanger = () => {
+    if (pendingDanger) {
+      setEdits((prev) => {
+        const next = { ...prev }
+        delete next[pendingDanger.key]
+        return next
+      })
+    }
+    setPendingDanger(null)
+  }
+
+  const confirmDanger = async () => {
+    if (!pendingDanger) return
+    const { key, value } = pendingDanger
+    setPendingDanger(null)
+    await commitSave(key, value)
+  }
+
+  const resetItem = async (item: ConfigItemView) => {
+    try {
+      const updated = await resetConfig(item.key)
+      setGroups((prev) =>
+        prev.map((g) => ({
+          ...g,
+          items: g.items.map((it) => (it.key === item.key ? updated : it)),
+        })),
+      )
+      toast.success(`${item.brief} 已重置`)
+    } catch (e) {
+      toast.error((e as Error).message)
+    }
+  }
+
+  // ─── 搜索过滤 ─────────────────────────────────────────────────────
+  // 无搜索：只显示当前 activeGroup；有搜索：跨所有组展示命中项（VSCode 设置面板风格）
+  const searching = search.trim().length > 0
+  const visibleGroups = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) {
+      const g = groups.find((it) => it.name === activeGroup)
+      return g ? [g] : []
+    }
+    return groups
+      .map((g) => ({
+        ...g,
+        items: g.items.filter((it) => {
+          return (
+            it.key.toLowerCase().includes(q) ||
+            it.brief.toLowerCase().includes(q) ||
+            it.detail.toLowerCase().includes(q)
+          )
+        }),
+      }))
+      .filter((g) => g.items.length > 0)
+  }, [groups, search, activeGroup])
+
+  // 各组在搜索状态下的命中数（仅命中数 > 0 的组在左导航上显示徽章）
+  const groupMatchCounts = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return {} as Record<string, number>
+    const counts: Record<string, number> = {}
+    for (const g of groups) {
+      counts[g.name] = g.items.filter(
+        (it) =>
+          it.key.toLowerCase().includes(q) ||
+          it.brief.toLowerCase().includes(q) ||
+          it.detail.toLowerCase().includes(q),
+      ).length
+    }
+    return counts
+  }, [groups, search])
+
+  // 各组的 inflight 保存项数（左导航徽章；用 inflight 而不是单纯 edits，
+  // 因为 edits 里也含已经保存失败留下来的 error 状态项）
+  const groupSavingCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const [key, ed] of Object.entries(edits)) {
+      if (!ed.saving) continue
+      const item = findItem(groups, key)
+      if (!item) continue
+      counts[item.group] = (counts[item.group] ?? 0) + 1
+    }
+    return counts
+  }, [edits, groups])
+
   return (
     <ResourcePage
-      title="系统配置"
-      subtitle="当前运行时配置摘要（只读；修改请编辑 .env 后重启 uvicorn）"
+      title="设置"
+      subtitle="改完立即生效；持久化到 .agenta/config_overrides.json，下次启动仍生效"
       toolbar={
-        <Button onClick={refresh} size="sm" variant="outline" disabled={loading}>
-          刷新
-        </Button>
+        <>
+          {inflightCount > 0 && (
+            <span className="text-xs text-muted-foreground">{inflightCount} 项保存中…</span>
+          )}
+          <Button
+            onClick={handleReload}
+            size="sm"
+            variant="outline"
+            disabled={loading}
+            title="把磁盘上 .agenta/config_overrides.json 的内容拉回内存（用于手动改完文件后同步）"
+          >
+            从文件重载
+          </Button>
+          <Button onClick={refresh} size="sm" variant="outline" disabled={loading}>
+            刷新
+          </Button>
+        </>
       }
     >
-      {error && (
+      {loadError && (
         <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-100">
-          {error}
+          {loadError}
         </div>
       )}
-      {loading && !cfg && (
+
+      {/* 搜索 */}
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="按 key / 名称 / 描述搜索…"
+          className="pl-7"
+        />
+      </div>
+
+      {loading && groups.length === 0 && (
         <p className="text-sm text-muted-foreground">加载中…</p>
       )}
-      {cfg && (
-        <>
-          <Section
-            title="LLM"
-            rows={[
-              { label: 'active_provider', value: fmt(cfg.llm.active_provider) },
-              { label: 'model', value: fmt(cfg.llm.model) },
-              { label: 'force_temperature', value: fmt(cfg.llm.force_temperature) },
-              { label: 'thinking_enabled', value: fmt(cfg.llm.thinking_enabled) },
-              { label: 'thinking_budget', value: fmt(cfg.llm.thinking_budget) },
-              { label: 'available_providers', value: fmt(cfg.llm.available_providers) },
-            ]}
-          />
-          <Section
-            title="RAG"
-            rows={[
-              { label: 'top_k', value: fmt(cfg.rag.top_k) },
-              { label: 'k_per_source', value: fmt(cfg.rag.k_per_source) },
-              { label: 'active_embeddings', value: fmt(cfg.rag.active_embeddings) },
-              { label: 'default_embedding', value: fmt(cfg.rag.default_embedding) },
-              { label: 'reranker_enabled', value: fmt(cfg.rag.reranker_enabled) },
-              { label: 'reranker_model', value: fmt(cfg.rag.reranker_model) },
-              { label: 'query_rewrite_enabled', value: fmt(cfg.rag.query_rewrite_enabled) },
-              { label: 'ocr_fallback_enabled', value: fmt(cfg.rag.ocr_fallback_enabled) },
-              { label: 'chunk_size', value: fmt(cfg.rag.chunk_size) },
-              { label: 'chunk_overlap', value: fmt(cfg.rag.chunk_overlap) },
-            ]}
-          />
-          <Section
-            title="Memory"
-            rows={[
-              { label: 'enabled', value: fmt(cfg.memory.enabled) },
-              { label: 'auto_extract', value: fmt(cfg.memory.auto_extract) },
-              { label: 'max_chars', value: fmt(cfg.memory.max_chars) },
-            ]}
-          />
-          <Section
-            title="Rules"
-            rows={[
-              { label: 'enabled', value: fmt(cfg.rules.enabled) },
-              { label: 'file', value: fmt(cfg.rules.file) },
-              { label: 'max_chars', value: fmt(cfg.rules.max_chars) },
-            ]}
-          />
-          <Section
-            title="MCP"
-            rows={[
-              { label: 'enabled', value: fmt(cfg.mcp.enabled) },
-              { label: 'config_file', value: fmt(cfg.mcp.config_file) },
-              { label: 'connect_timeout_sec', value: fmt(cfg.mcp.connect_timeout_sec) },
-              { label: 'call_timeout_sec', value: fmt(cfg.mcp.call_timeout_sec) },
-            ]}
-          />
-          <Section
-            title="Security"
-            rows={[
-              { label: 'mode', value: fmt(cfg.security.mode) },
-              { label: 'plan_permission_mode', value: fmt(cfg.security.plan_permission_mode) },
-            ]}
-          />
-          <Section
-            title="Web"
-            rows={[
-              { label: 'upload_dir', value: fmt(cfg.web.upload_dir) },
-              { label: 'max_upload_mb', value: fmt(cfg.web.max_upload_mb) },
-            ]}
-          />
-          <Section
-            title="Log"
-            rows={[{ label: 'level', value: fmt(cfg.log.level) }]}
-          />
-        </>
+
+      {/* 左导航 + 右内容 */}
+      {!loading && groups.length > 0 && (
+        <div className="flex flex-1 gap-4 min-h-0">
+          {/* 左侧分组导航 */}
+          <nav className="sticky top-0 w-36 shrink-0 self-start">
+            <ul className="space-y-0.5">
+              {groups.map((g) => {
+                const matchCount = groupMatchCounts[g.name]
+                const savingN = groupSavingCounts[g.name]
+                const isActive = !searching && activeGroup === g.name
+                const dimmed = searching && (matchCount ?? 0) === 0
+                return (
+                  <li key={g.name}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveGroup(g.name)
+                        // 用户点导航时清掉搜索，回到单组视图
+                        if (searching) setSearch('')
+                      }}
+                      className={cn(
+                        'flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm transition-colors',
+                        isActive
+                          ? 'bg-muted font-medium text-foreground'
+                          : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+                        dimmed && 'opacity-50',
+                      )}
+                    >
+                      <span>{g.label}</span>
+                      <span className="flex items-center gap-1">
+                        {savingN ? (
+                          <span className="rounded bg-primary/15 px-1 text-[10px] text-primary">
+                            {savingN}
+                          </span>
+                        ) : null}
+                        {searching && (matchCount ?? 0) > 0 ? (
+                          <span className="rounded bg-primary/15 px-1 text-[10px] text-primary">
+                            {matchCount}
+                          </span>
+                        ) : null}
+                      </span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          </nav>
+
+          {/* 右侧内容 */}
+          <div className="min-w-0 flex-1 space-y-4">
+            {visibleGroups.length === 0 && searching && (
+              <p className="text-sm text-muted-foreground">没有匹配的配置项</p>
+            )}
+
+            {visibleGroups.map((g) => (
+              <section key={g.name} className="space-y-2">
+                {/* 仅搜索状态下展示组标题（多组并存）；非搜索是单组视图，标题冗余 */}
+                {searching && (
+                  <h2 className="border-b border-border pb-1 text-sm font-semibold tracking-tight">
+                    {g.label}
+                  </h2>
+                )}
+                <div className="space-y-2">
+                  {g.items.map((item) => {
+                    const edit = edits[item.key]
+                    return (
+                      <ConfigField
+                        key={item.key}
+                        item={item}
+                        localValue={edit?.value}
+                        error={edit?.error ?? null}
+                        saving={edit?.saving}
+                        onChange={(v) => setLocalValue(item, v)}
+                        onReset={() => resetItem(item)}
+                      />
+                    )
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+        </div>
       )}
+
+      {/* 危险项二次确认 */}
+      <AlertDialog
+        open={pendingDanger !== null}
+        onOpenChange={(open) => {
+          // 关闭 = 取消（无论点 X 还是 ESC）：回滚 local edit
+          if (!open) cancelDanger()
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认修改敏感配置</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDanger
+                ? `${pendingDanger.key} 是敏感配置，改动会立即影响安全相关行为。是否继续？`
+                : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={cancelDanger}>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDanger}>确认修改</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </ResourcePage>
   )
+}
+
+// ─── helpers ──────────────────────────────────────────────────────
+
+function findItem(groups: ConfigGroupView[], key: string): ConfigItemView | undefined {
+  for (const g of groups) {
+    const m = g.items.find((it) => it.key === key)
+    if (m) return m
+  }
+  return undefined
+}
+
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false
+    return a.every((v, i) => deepEqual(v, b[i]))
+  }
+  return false
 }

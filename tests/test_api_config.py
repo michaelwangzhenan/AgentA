@@ -1,76 +1,93 @@
-"""GET /api/config 只读视图 UT。
+"""/api/config 编辑面板端点 UT。
 
-主要覆盖：
-1. 返回结构对齐 ConfigResponse
-2. monkeypatch 改 src.config 常量后 response 反映
-3. **响应里不出现任何 API key 字段**
+覆盖：
+1. GET 返回新 shape（groups + items + metadata + source）
+2. GET 不出现任何 API key 字段或值
+3. PATCH 改 bool / int / enum / multi_enum 各 1 项 → 立即生效 + 持久化
+4. PATCH 校验失败：未知 key / 类型错 / 范围越界 / 非法 enum
+5. DELETE reset 单项：override 文件清掉 + _cfg 恢复 initial
+6. LOG_LEVEL hook 触发：root logger 真切到新 level
+7. overrides.json 持久化文件落盘 + 跨 client 重建仍生效
 """
 
 from __future__ import annotations
 
 import json
+import logging
+from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 import src.config as _cfg
+from src.api import config_overrides
+from src.api.config_meta import REGISTRY
 from src.api.main import app
 
 
 @pytest.fixture
-def client() -> TestClient:
-    return TestClient(app)
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    """每个测试用独立的 overrides 文件 + 自动还原 _cfg / _initial_values 状态。
+
+    注意 `_initial_values` 是模块级缓存：它在第一次 `apply_overrides()` 时定格为
+    "_cfg 在真实 overrides 文件应用之前的值"，而我们 monkey-patch OVERRIDES_PATH 后再
+    跑 reload，会把这些 key "回滚" 到那个旧 initial → 在测试视角下属于伪变化。
+
+    所以这里同时 snapshot 当前 _initial_values + _snapshot_taken，并把 initial 重新
+    定格在 "本次测试启动时的 _cfg 状态"，保证 reload 行为对 UT 是确定的。
+    """
+    overrides_path = tmp_path / "config_overrides.json"
+    monkeypatch.setattr(config_overrides, "OVERRIDES_PATH", overrides_path)
+
+    cfg_snapshot: dict[str, object] = {item.key: getattr(_cfg, item.key, None) for item in REGISTRY}
+    initial_snapshot = dict(config_overrides._initial_values)
+    snapshot_taken_orig = config_overrides._snapshot_taken
+
+    # 把 initial 重定格到当前 _cfg：让 reload(空文件) 等价于 "no-op"
+    config_overrides._initial_values.clear()
+    for item in REGISTRY:
+        if item.editable:
+            config_overrides._initial_values[item.key] = getattr(_cfg, item.key, None)
+    config_overrides._snapshot_taken = True
+
+    try:
+        yield TestClient(app)
+    finally:
+        for k, v in cfg_snapshot.items():
+            setattr(_cfg, k, v)
+        config_overrides._initial_values.clear()
+        config_overrides._initial_values.update(initial_snapshot)
+        config_overrides._snapshot_taken = snapshot_taken_orig
 
 
-def test_config_returns_all_groups(client: TestClient) -> None:
-    r = client.get("/api/config")
-    assert r.status_code == 200
-    body = r.json()
-    expected_keys = {
-        "llm",
-        "rag",
-        "memory",
-        "rules",
-        "mcp",
-        "security",
-        "web",
-        "log",
-    }
-    assert set(body.keys()) == expected_keys
+# ─── GET ──────────────────────────────────────────────────────────────────
 
-
-def test_config_reflects_active_provider(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(_cfg, "ACTIVE_PROVIDER", "qwen")
-    r = client.get("/api/config")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["llm"]["active_provider"] == "qwen"
-    assert body["llm"]["model"] == _cfg.PROVIDER_CONFIGS["qwen"].model
-
-
-def test_config_available_providers_sorted(client: TestClient) -> None:
+def test_get_returns_groups_with_items(client: TestClient) -> None:
     body = client.get("/api/config").json()
-    providers = body["llm"]["available_providers"]
-    assert providers == sorted(providers)
-    assert "kimi" in providers
+    assert "groups" in body
+    group_names = {g["name"] for g in body["groups"]}
+    assert {"llm", "rag", "memory", "rules", "mcp", "security", "web", "log"} <= group_names
+
+    # 每组至少 1 项；每项含完整 metadata
+    for group in body["groups"]:
+        assert group["items"], f"组 {group['name']} 应至少有 1 项"
+        for it in group["items"]:
+            for required in ("key", "type", "value", "default", "source", "brief", "detail", "editable"):
+                assert required in it, f"{it.get('key')} 缺字段 {required}"
+            assert it["source"] in ("default", "override")
 
 
-def test_config_reflects_rag_flags(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(_cfg, "RAG_TOP_K", 42)
-    monkeypatch.setattr(_cfg, "RERANKER_ENABLED", False)
+def test_get_active_provider_options_match_registry(client: TestClient) -> None:
     body = client.get("/api/config").json()
-    assert body["rag"]["top_k"] == 42
-    assert body["rag"]["reranker_enabled"] is False
+    llm = next(g for g in body["groups"] if g["name"] == "llm")
+    provider = next(it for it in llm["items"] if it["key"] == "ACTIVE_PROVIDER")
+    assert provider["type"] == "enum_str"
+    assert provider["options"] == sorted(_cfg.PROVIDER_CONFIGS.keys())
 
 
-def test_config_no_api_keys_in_response(client: TestClient) -> None:
-    """响应里不能出现任何 API key 字段或值（即使脱敏后也不允许）。"""
+def test_get_no_api_keys_in_response(client: TestClient) -> None:
+    """响应里不能出现任何 API key 字段或值。"""
     body = client.get("/api/config").json()
     text = json.dumps(body, ensure_ascii=False).lower()
 
@@ -87,21 +104,215 @@ def test_config_no_api_keys_in_response(client: TestClient) -> None:
         "serpapi_api_key",
     ]
     for k in forbidden_keys:
-        assert k not in text, f"响应里不应包含 {k!r}：{text}"
+        assert k not in text, f"响应不应包含 {k!r}"
 
     for provider_name, provider_cfg in _cfg.PROVIDER_CONFIGS.items():
-        # 跳过 ollama 这种本地占位 key（key 值跟 provider 名重名，不是真 key）
         if provider_cfg.api_key and len(provider_cfg.api_key) > 10:
             assert provider_cfg.api_key not in text, (
-                f"{provider_name} 的真实 api_key 泄漏到了响应里"
+                f"{provider_name} 真实 api_key 泄漏到响应里"
             )
 
 
-def test_config_force_temperature_can_be_null(
+def test_get_value_reflects_runtime_setattr(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """deepseek / glm 等 provider 的 force_temperature=None，response 应该是 null。"""
-    monkeypatch.setattr(_cfg, "ACTIVE_PROVIDER", "deepseek")
+    monkeypatch.setattr(_cfg, "RAG_TOP_K", 42)
     body = client.get("/api/config").json()
-    assert body["llm"]["force_temperature"] is None
+    rag = next(g for g in body["groups"] if g["name"] == "rag")
+    top_k = next(it for it in rag["items"] if it["key"] == "RAG_TOP_K")
+    assert top_k["value"] == 42
+
+
+# ─── PATCH 成功路径 ───────────────────────────────────────────────────────
+
+def test_patch_bool_takes_effect_immediately(client: TestClient) -> None:
+    r = client.patch("/api/config/RERANKER_ENABLED", json={"value": False})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["item"]["value"] is False
+    assert body["item"]["source"] == "override"
+    assert _cfg.RERANKER_ENABLED is False
+
+
+def test_patch_int_within_range(client: TestClient) -> None:
+    r = client.patch("/api/config/RAG_TOP_K", json={"value": 12})
+    assert r.status_code == 200
+    assert r.json()["item"]["value"] == 12
+    assert _cfg.RAG_TOP_K == 12
+
+
+def test_patch_enum_str(client: TestClient) -> None:
+    r = client.patch("/api/config/SECURITY_MODE", json={"value": "strict"})
+    assert r.status_code == 200
+    assert r.json()["item"]["value"] == "strict"
+    assert _cfg.SECURITY_MODE == "strict"
+
+
+def test_patch_multi_enum_str(client: TestClient) -> None:
+    r = client.patch(
+        "/api/config/RAG_ACTIVE_EMBEDDINGS",
+        json={"value": ["en", "m3"]},
+    )
+    assert r.status_code == 200
+    assert r.json()["item"]["value"] == ["en", "m3"]
+    assert _cfg.RAG_ACTIVE_EMBEDDINGS == ["en", "m3"]
+
+
+def test_patch_persists_to_overrides_file(client: TestClient) -> None:
+    client.patch("/api/config/RAG_TOP_K", json={"value": 7})
+    data = json.loads(config_overrides.OVERRIDES_PATH.read_text(encoding="utf-8"))
+    assert data["RAG_TOP_K"] == 7
+
+
+def test_patch_survives_client_recreate(client: TestClient) -> None:
+    """模拟 uvicorn 重启：PATCH 改完后 apply_overrides 仍能恢复值。"""
+    client.patch("/api/config/RAG_TOP_K", json={"value": 19})
+    # 把 _cfg 重置回 initial，模拟新进程；apply_overrides 应再次覆盖
+    _cfg.RAG_TOP_K = config_overrides.get_initial_value("RAG_TOP_K")
+    config_overrides.apply_overrides()
+    assert _cfg.RAG_TOP_K == 19
+
+
+# ─── PATCH 校验失败路径 ──────────────────────────────────────────────────
+
+def test_patch_unknown_key_404(client: TestClient) -> None:
+    r = client.patch("/api/config/NOT_A_REAL_KEY", json={"value": 1})
+    assert r.status_code == 404
+
+
+def test_patch_type_mismatch_400(client: TestClient) -> None:
+    r = client.patch("/api/config/RAG_TOP_K", json={"value": "twelve"})
+    assert r.status_code == 400
+
+
+def test_patch_out_of_range_400(client: TestClient) -> None:
+    r = client.patch("/api/config/RAG_TOP_K", json={"value": 9999})
+    assert r.status_code == 400
+    r2 = client.patch("/api/config/RAG_TOP_K", json={"value": 0})
+    assert r2.status_code == 400
+
+
+def test_patch_invalid_enum_400(client: TestClient) -> None:
+    r = client.patch("/api/config/SECURITY_MODE", json={"value": "yolo"})
+    assert r.status_code == 400
+
+
+def test_patch_invalid_multi_enum_400(client: TestClient) -> None:
+    r = client.patch(
+        "/api/config/RAG_ACTIVE_EMBEDDINGS",
+        json={"value": ["en", "wat"]},
+    )
+    assert r.status_code == 400
+
+
+# ─── DELETE / reset ───────────────────────────────────────────────────────
+
+def test_delete_resets_to_initial(client: TestClient) -> None:
+    initial = config_overrides.get_initial_value("RAG_TOP_K")
+    client.patch("/api/config/RAG_TOP_K", json={"value": 11})
+    assert _cfg.RAG_TOP_K == 11
+
+    r = client.delete("/api/config/RAG_TOP_K")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["item"]["value"] == initial
+    assert body["item"]["source"] == "default"
+    assert _cfg.RAG_TOP_K == initial
+
+    # overrides 文件里也应已删 key
+    if config_overrides.OVERRIDES_PATH.exists():
+        data = json.loads(config_overrides.OVERRIDES_PATH.read_text(encoding="utf-8"))
+        assert "RAG_TOP_K" not in data
+
+
+def test_delete_unknown_key_404(client: TestClient) -> None:
+    r = client.delete("/api/config/NOT_A_REAL_KEY")
+    assert r.status_code == 404
+
+
+# ─── 副作用 hook ──────────────────────────────────────────────────────────
+
+def test_log_level_hook_applies_to_root_logger(client: TestClient) -> None:
+    original = logging.getLogger().level
+    try:
+        client.patch("/api/config/LOG_LEVEL", json={"value": "WARNING"})
+        assert logging.getLogger().level == logging.WARNING
+
+        client.patch("/api/config/LOG_LEVEL", json={"value": "DEBUG"})
+        assert logging.getLogger().level == logging.DEBUG
+    finally:
+        logging.getLogger().setLevel(original)
+
+
+# ─── reload from file ────────────────────────────────────────────────────
+
+def test_reload_picks_up_manual_file_edits(client: TestClient) -> None:
+    """手动改 overrides 文件 → POST /reload → _cfg 同步到磁盘最新值。"""
+    initial = config_overrides.get_initial_value("RAG_TOP_K")
+    assert _cfg.RAG_TOP_K == initial
+
+    # 模拟用户在编辑器里手写文件
+    config_overrides.OVERRIDES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    config_overrides.OVERRIDES_PATH.write_text(
+        json.dumps({"RAG_TOP_K": 23}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    # 还没 reload 之前 _cfg 仍是旧值
+    assert _cfg.RAG_TOP_K == initial
+
+    r = client.post("/api/config/reload")
+    assert r.status_code == 200
+    body = r.json()
+    assert "RAG_TOP_K" in body["changed_keys"]
+    assert _cfg.RAG_TOP_K == 23
+
+    # 同一份响应里返回的 config 也应是最新值 + source=override
+    rag = next(g for g in body["config"]["groups"] if g["name"] == "rag")
+    top_k = next(it for it in rag["items"] if it["key"] == "RAG_TOP_K")
+    assert top_k["value"] == 23
+    assert top_k["source"] == "override"
+
+
+def test_reload_reverts_when_key_removed_from_file(client: TestClient) -> None:
+    """文件里删掉某 key → reload → _cfg 恢复到 initial 值。"""
+    initial = config_overrides.get_initial_value("RAG_TOP_K")
+    client.patch("/api/config/RAG_TOP_K", json={"value": 31})
+    assert _cfg.RAG_TOP_K == 31
+
+    # 用户把 overrides 文件清空（或手动删掉这个 key）
+    config_overrides.OVERRIDES_PATH.write_text("{}", encoding="utf-8")
+
+    r = client.post("/api/config/reload")
+    assert r.status_code == 200
+    assert "RAG_TOP_K" in r.json()["changed_keys"]
+    assert _cfg.RAG_TOP_K == initial
+
+
+def test_reload_no_change_returns_empty_changed_keys(client: TestClient) -> None:
+    r = client.post("/api/config/reload")
+    assert r.status_code == 200
+    assert r.json()["changed_keys"] == []
+
+
+def test_reload_triggers_log_level_hook(client: TestClient) -> None:
+    """文件里手改 LOG_LEVEL → reload → 真切到新 level（验证 hook 被触发）。"""
+    original = logging.getLogger().level
+    try:
+        config_overrides.OVERRIDES_PATH.parent.mkdir(parents=True, exist_ok=True)
+        config_overrides.OVERRIDES_PATH.write_text(
+            json.dumps({"LOG_LEVEL": "WARNING"}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        client.post("/api/config/reload")
+        assert logging.getLogger().level == logging.WARNING
+    finally:
+        logging.getLogger().setLevel(original)
+
+
+# ─── registry self-check ─────────────────────────────────────────────────
+
+def test_registry_keys_all_exist_on_cfg() -> None:
+    """registry 里每个 key 都必须是 src.config 真实属性，否则 GET / PATCH 会摸空。"""
+    missing = [item.key for item in REGISTRY if not hasattr(_cfg, item.key)]
+    assert not missing, f"registry 引用了不存在的 _cfg 属性: {missing}"

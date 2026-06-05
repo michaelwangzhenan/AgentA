@@ -44,6 +44,9 @@ logs/
 .agenta/skills/disabled.json
 .agenta/mcp/disabled.json
 
+# ── 配置 UI runtime override（个人本地修改，不进 git）──────────
+.agenta/config_overrides.json
+
 # ── Python 运行时 ──────────────────────────────────────────────
 __pycache__/
 # .pyc / .pyo / .pyd

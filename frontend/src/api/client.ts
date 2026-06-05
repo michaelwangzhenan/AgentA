@@ -39,7 +39,12 @@ import type {
   SkillUpdateRequest,
   SkillsResponse,
 } from '@/types/resources'
-import type { AppConfig } from '@/types/config'
+import type {
+  ConfigItemResponse,
+  ConfigItemView,
+  ConfigReloadResponse,
+  ConfigResponse,
+} from '@/types/config'
 import type {
   Plan,
   PlanListResponse,
@@ -450,10 +455,37 @@ export async function reloadMCPServers(): Promise<MCPReloadResponse> {
 
 // ─── Step 6：System Config ─────────────────────────────────────────────
 
-export async function getConfig(): Promise<AppConfig> {
+export async function getConfig(): Promise<ConfigResponse> {
   const res = await fetch('/api/config')
   await _ensureOk(res)
-  return (await res.json()) as AppConfig
+  return (await res.json()) as ConfigResponse
+}
+
+export async function patchConfig(
+  key: string,
+  value: unknown,
+): Promise<ConfigItemView> {
+  const res = await fetch(`/api/config/${encodeURIComponent(key)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ value }),
+  })
+  await _ensureOk(res)
+  return ((await res.json()) as ConfigItemResponse).item
+}
+
+export async function resetConfig(key: string): Promise<ConfigItemView> {
+  const res = await fetch(`/api/config/${encodeURIComponent(key)}`, {
+    method: 'DELETE',
+  })
+  await _ensureOk(res)
+  return ((await res.json()) as ConfigItemResponse).item
+}
+
+export async function reloadConfig(): Promise<ConfigReloadResponse> {
+  const res = await fetch('/api/config/reload', { method: 'POST' })
+  await _ensureOk(res)
+  return (await res.json()) as ConfigReloadResponse
 }
 
 // ─── Step 7：业务面板（plans / quizzes / srs） ─────────────────────────

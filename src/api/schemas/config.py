@@ -1,72 +1,52 @@
-"""Config 只读视图模型。
+"""Config 编辑面板请求 / 响应 schema。
 
-只暴露 scalar / list / 简单 dict；**严禁包含 API key**。
+新形态（替换原只读视图）：
+- ConfigResponse：分组列表，每组含若干 ConfigItemView
+- ConfigItemView：单项的 metadata + 当前值 + 来源标识
+- ConfigPatchRequest：单项写入请求
+- ConfigItemResponse：写入 / reset 后返回单项的最新视图
 """
+
+from typing import Any
 
 from pydantic import BaseModel
 
 
-class LLMConfig(BaseModel):
-    active_provider: str
-    model: str
-    force_temperature: float | None
-    thinking_enabled: bool
-    thinking_budget: int
-    available_providers: list[str]
+class ConfigItemView(BaseModel):
+    key: str
+    group: str
+    type: str
+    value: Any
+    default: Any
+    source: str  # "default" | "override"
+    brief: str
+    detail: str
+    options: list[str] | None = None
+    min: float | None = None
+    max: float | None = None
+    side_effect_hint: str | None = None
+    danger: bool = False
+    editable: bool = True
 
 
-class RAGConfig(BaseModel):
-    top_k: int
-    k_per_source: int
-    active_embeddings: list[str]
-    default_embedding: str
-    reranker_enabled: bool
-    reranker_model: str
-    query_rewrite_enabled: bool
-    ocr_fallback_enabled: bool
-    chunk_size: int
-    chunk_overlap: int
-
-
-class MemoryConfig(BaseModel):
-    enabled: bool
-    auto_extract: bool
-    max_chars: int
-
-
-class RulesConfig(BaseModel):
-    enabled: bool
-    file: str
-    max_chars: int
-
-
-class MCPConfig(BaseModel):
-    enabled: bool
-    config_file: str
-    connect_timeout_sec: int
-    call_timeout_sec: int
-
-
-class SecurityConfig(BaseModel):
-    mode: str
-    plan_permission_mode: bool
-
-
-class WebConfig(BaseModel):
-    upload_dir: str
-    max_upload_mb: int
-
-
-class LogConfig(BaseModel):
-    level: str
+class ConfigGroupView(BaseModel):
+    name: str
+    label: str
+    items: list[ConfigItemView]
 
 
 class ConfigResponse(BaseModel):
-    llm: LLMConfig
-    rag: RAGConfig
-    memory: MemoryConfig
-    rules: RulesConfig
-    mcp: MCPConfig
-    security: SecurityConfig
-    web: WebConfig
-    log: LogConfig
+    groups: list[ConfigGroupView]
+
+
+class ConfigPatchRequest(BaseModel):
+    value: Any
+
+
+class ConfigItemResponse(BaseModel):
+    item: ConfigItemView
+
+
+class ConfigReloadResponse(BaseModel):
+    changed_keys: list[str]
+    config: ConfigResponse
