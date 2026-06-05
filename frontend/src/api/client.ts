@@ -214,6 +214,23 @@ export async function loadSessionMessages(
   return (await res.json()) as SessionMessagesResponse
 }
 
+/** 从第 userMessageIndex（0 基）条 user 消息起截断（编辑重发 / 重新生成前置步骤）。 */
+export async function truncateSession(
+  id: string,
+  userMessageIndex: number,
+): Promise<{ deleted: number }> {
+  const res = await fetch(
+    `/api/sessions/${encodeURIComponent(id)}/truncate`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_message_index: userMessageIndex }),
+    },
+  )
+  await _ensureOk(res)
+  return (await res.json()) as { deleted: number }
+}
+
 // ─── Step 4：Knowledge Base ────────────────────────────────────────────
 
 export async function listKBDocuments(): Promise<KBDocument[]> {

@@ -24,6 +24,29 @@ def _on_log_level_changed(_old: Any, new: Any) -> None:
         logger.warning("[config] 应用 LOG_LEVEL 失败: %s", e)
 
 
+def _on_thinking_changed(_old: Any, _new: Any) -> None:
+    """THINKING_* 改后同步到 agent 单例的 thinking_cfg。
+
+    agent 在 `__init__` 时一次性 from_config 快照 thinking_cfg，之后不再读 `_cfg`；
+    若不同步，UI 改的档位对运行中的 agent 无效。这里只在 agent 已构造时 mutate
+    其 thinking_cfg（dataclass，可变）；未构造则跳过——下次构造会自然读到新值。
+    """
+    try:
+        from src.api.deps import get_agent
+        if get_agent.cache_info().currsize == 0:
+            return
+        cfg = get_agent().thinking_cfg
+        cfg.enabled = _cfg.THINKING_ENABLED
+        cfg.budget = _cfg.THINKING_BUDGET
+        cfg.adaptive = _cfg.THINKING_ADAPTIVE
+        logger.info(
+            "[config] thinking 同步到 agent：enabled=%s budget=%d adaptive=%s",
+            cfg.enabled, cfg.budget, cfg.adaptive,
+        )
+    except Exception as e:
+        logger.warning("[config] 同步 thinking 到 agent 失败: %s", e)
+
+
 def _on_mcp_changed(_old: Any, _new: Any) -> None:
     """MCP_ENABLED / MCP_CONFIG_FILE 改后重载 MCP manager。"""
     try:
@@ -45,6 +68,9 @@ _HOOKS: dict[str, Callable[[Any, Any], None]] = {
     "LOG_LEVEL": _on_log_level_changed,
     "MCP_ENABLED": _on_mcp_changed,
     "MCP_CONFIG_FILE": _on_mcp_changed,
+    "THINKING_ENABLED": _on_thinking_changed,
+    "THINKING_BUDGET": _on_thinking_changed,
+    "THINKING_ADAPTIVE": _on_thinking_changed,
 }
 
 

@@ -1,83 +1,202 @@
-import ReactMarkdown, { type Components } from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import { Loader2 } from 'lucide-react'
+import { useState } from 'react'
+import {
+  Copy,
+  Pencil,
+  RotateCcw,
+  RefreshCw,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+} from 'lucide-react'
+import { toast } from 'sonner'
 import { ThinkingBlock } from './ThinkingBlock'
-import { WorkBlock } from './WorkBlock'
-import { cn } from '@/lib/utils'
+import { PlanBlock } from './PlanBlock'
+import { ToolBlock } from './ToolBlock'
+import { Markdown } from './Markdown'
+import { parseSources } from './sources'
+import { SourcesPanel } from './SourcesPanel'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import type { AssistantMessage, Message } from '@/types/chat'
 
-// 自定义 markdown 元素样式：不装 @tailwindcss/typography 插件，直接用 Tailwind class
-// 覆盖各 HTML 元素，体积更小、可控性更强
-const MD_COMPONENTS: Components = {
-  p: ({ node: _node, ...props }) => <p className="my-2 leading-relaxed" {...props} />,
-  h1: ({ node: _node, ...props }) => <h1 className="mt-3 mb-2 text-lg font-semibold" {...props} />,
-  h2: ({ node: _node, ...props }) => <h2 className="mt-3 mb-2 text-base font-semibold" {...props} />,
-  h3: ({ node: _node, ...props }) => <h3 className="mt-2 mb-1 text-base font-medium" {...props} />,
-  ul: ({ node: _node, ...props }) => <ul className="my-2 list-disc space-y-1 pl-5" {...props} />,
-  ol: ({ node: _node, ...props }) => <ol className="my-2 list-decimal space-y-1 pl-5" {...props} />,
-  li: ({ node: _node, ...props }) => <li className="leading-relaxed" {...props} />,
-  a: ({ node: _node, ...props }) => (
-    <a className="text-blue-600 underline hover:no-underline" target="_blank" rel="noreferrer" {...props} />
-  ),
-  code: ({ node: _node, className, children, ...props }) => {
-    const isBlock = className?.startsWith('language-')
-    if (isBlock) {
-      return (
-        <code className={cn('block', className)} {...props}>
-          {children}
-        </code>
-      )
-    }
-    return (
-      <code className="rounded bg-background px-1 py-0.5 font-mono text-[0.85em]" {...props}>
-        {children}
-      </code>
-    )
-  },
-  pre: ({ node: _node, ...props }) => (
-    <pre className="my-2 overflow-x-auto rounded bg-background p-2 text-sm leading-relaxed" {...props} />
-  ),
-  table: ({ node: _node, ...props }) => (
-    <div className="my-2 overflow-x-auto">
-      <table className="min-w-full border-collapse text-sm" {...props} />
-    </div>
-  ),
-  thead: ({ node: _node, ...props }) => <thead className="bg-background/60" {...props} />,
-  th: ({ node: _node, ...props }) => (
-    <th className="border border-border px-2 py-1 text-left font-medium" {...props} />
-  ),
-  td: ({ node: _node, ...props }) => (
-    <td className="border border-border px-2 py-1 align-top" {...props} />
-  ),
-  blockquote: ({ node: _node, ...props }) => (
-    <blockquote className="my-2 border-l-2 border-border pl-3 text-muted-foreground" {...props} />
-  ),
-  hr: ({ node: _node, ...props }) => <hr className="my-3 border-border" {...props} />,
+export type BubbleCallbacks = {
+  inFlight: boolean
+  onRegenerate: (assistantId: string) => void
+  onEditResend: (userId: string, newText: string) => void
+  onResendUser: (userId: string) => void
+  onSwitchVersion: (assistantId: string, index: number) => void
 }
 
-export function MessageBubble({ message }: { message: Message }) {
-  if (message.role === 'user') {
-    return <UserBubble content={message.content} />
+function formatTime(ms?: number): string {
+  if (!ms) return ''
+  const d = new Date(ms)
+  const today = new Date()
+  const sameDay =
+    d.getFullYear() === today.getFullYear() &&
+    d.getMonth() === today.getMonth() &&
+    d.getDate() === today.getDate()
+  if (sameDay) {
+    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
   }
-  return <AssistantBubble message={message} />
+  return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
 }
 
-function UserBubble({ content }: { content: string }) {
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    toast.success('已复制')
+  } catch {
+    toast.error('复制失败')
+  }
+}
+
+export function MessageBubble({
+  message,
+  cb,
+}: {
+  message: Message
+  cb: BubbleCallbacks
+}) {
+  if (message.role === 'user') {
+    return <UserBubble message={message} cb={cb} />
+  }
+  return <AssistantBubble message={message} cb={cb} />
+}
+
+// ─── 用户气泡 ──────────────────────────────────────────────────────────────
+
+function UserBubble({
+  message,
+  cb,
+}: {
+  message: Extract<Message, { role: 'user' }>
+  cb: BubbleCallbacks
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(message.content)
+  const [confirm, setConfirm] = useState<null | { text: string }>(null)
+
+  const startEdit = () => {
+    setDraft(message.content)
+    setEditing(true)
+  }
+
+  if (editing) {
+    return (
+      <div className="flex justify-end">
+        <div className="w-full max-w-[80%]">
+          <Textarea
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            className="min-h-20 resize-none"
+          />
+          <div className="mt-1.5 flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
+              取消
+            </Button>
+            <Button
+              size="sm"
+              disabled={!draft.trim()}
+              onClick={() => {
+                setEditing(false)
+                setConfirm({ text: draft.trim() })
+              }}
+            >
+              保存并重发
+            </Button>
+          </div>
+        </div>
+        <ResendConfirm
+          open={!!confirm}
+          onOpenChange={(o) => !o && setConfirm(null)}
+          onConfirm={() => {
+            if (confirm) cb.onEditResend(message.id, confirm.text)
+            setConfirm(null)
+          }}
+        />
+      </div>
+    )
+  }
+
   return (
-    <div className="flex justify-end">
-      <div
-        className={cn(
-          'max-w-[80%] rounded-2xl bg-primary px-4 py-2 text-sm',
-          'break-words whitespace-pre-wrap text-primary-foreground',
-        )}
-      >
-        {content}
+    <div className="group flex flex-col items-end gap-1">
+      <div className="max-w-[80%] rounded-2xl bg-primary px-4 py-2 text-sm break-words whitespace-pre-wrap text-primary-foreground">
+        {message.content}
+      </div>
+      <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+        <span className="mr-1 text-[11px] text-muted-foreground">
+          {formatTime(message.createdAt)}
+        </span>
+        <IconBtn
+          label="重发"
+          disabled={cb.inFlight}
+          onClick={() => cb.onResendUser(message.id)}
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+        </IconBtn>
+        <IconBtn label="编辑" onClick={startEdit}>
+          <Pencil className="h-3.5 w-3.5" />
+        </IconBtn>
+        <IconBtn label="复制" onClick={() => copyText(message.content)}>
+          <Copy className="h-3.5 w-3.5" />
+        </IconBtn>
       </div>
     </div>
   )
 }
 
-function AssistantBubble({ message }: { message: AssistantMessage }) {
+function ResendConfirm({
+  open,
+  onOpenChange,
+  onConfirm,
+}: {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  onConfirm: () => void
+}) {
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>重发这条消息？</AlertDialogTitle>
+          <AlertDialogDescription>
+            这会丢弃此条消息之后的所有回答和后续对话，且不可撤销。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>取消</AlertDialogCancel>
+          <AlertDialogAction onClick={onConfirm}>确认重发</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
+// ─── 助手气泡 ──────────────────────────────────────────────────────────────
+
+function AssistantBubble({
+  message,
+  cb,
+}: {
+  message: AssistantMessage
+  cb: BubbleCallbacks
+}) {
+  const { body, sources } = parseSources(message.content)
+  const versions = message.versions
+  const showVersions = !!versions && versions.length > 1
+  const vIndex = message.versionIndex ?? (versions ? versions.length - 1 : 0)
+
   const hasAny =
     message.thinking ||
     message.plan ||
@@ -86,36 +205,51 @@ function AssistantBubble({ message }: { message: AssistantMessage }) {
     message.error
 
   return (
-    <div className="flex justify-start">
-      <div className="max-w-[85%] space-y-1">
+    <div className="group flex flex-col items-start gap-1">
+      <div className="w-full max-w-[85%] space-y-1">
         {message.thinking ? (
-          <ThinkingBlock text={message.thinking} streaming={message.streaming} />
+          <ThinkingBlock
+            text={message.thinking}
+            thinkingMs={message.thinkingMs}
+            streaming={message.streaming}
+          />
         ) : null}
 
-        <WorkBlock
-          plan={message.plan}
-          toolCalls={message.toolCalls}
-          hasContent={!!message.content}
-        />
+        {message.plan && message.plan.length > 0 ? (
+          <PlanBlock steps={message.plan} />
+        ) : null}
 
-        {message.content ? (
-          <div className="rounded-2xl bg-muted px-4 py-2 text-base text-foreground break-words">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
-              {message.content}
-            </ReactMarkdown>
+        {message.toolCalls.map((call) => (
+          <ToolBlock key={call.call_id} call={call} />
+        ))}
+
+        {body ? (
+          <div className="rounded-2xl bg-muted px-4 py-2 text-[15px] text-foreground break-words">
+            <Markdown>{body}</Markdown>
+            {message.streaming ? <StreamingCursor /> : null}
           </div>
         ) : null}
 
-        {message.streaming && !message.content ? (
+        {message.streaming && !body ? (
           <div className="flex items-center gap-2 rounded-2xl bg-muted px-4 py-2 text-sm text-muted-foreground">
             <Loader2 className="h-3 w-3 animate-spin" />
-            <span>thinking…</span>
+            <span>生成中…</span>
           </div>
         ) : null}
 
+        <SourcesPanel sources={sources} />
+
         {message.error ? (
-          <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            {message.error}
+          <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            <div>{message.error}</div>
+            <Button
+              variant="outline"
+              size="xs"
+              disabled={cb.inFlight}
+              onClick={() => cb.onRegenerate(message.id)}
+            >
+              <RotateCcw className="h-3 w-3" /> 重试
+            </Button>
           </div>
         ) : null}
 
@@ -125,6 +259,80 @@ function AssistantBubble({ message }: { message: AssistantMessage }) {
           </div>
         ) : null}
       </div>
+
+      {/* 元数据底栏占位 [§3]：模型 / 耗时 / token 待 token 统计接口接入 */}
+
+      {/* hover 操作行（多版本时即便当前版本无正文也要保留，否则切到空版本后切不回来）*/}
+      {!message.streaming && (message.content || message.error || showVersions) ? (
+        <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+          <IconBtn label="复制" onClick={() => copyText(body)}>
+            <Copy className="h-3.5 w-3.5" />
+          </IconBtn>
+          <IconBtn
+            label="重新生成"
+            disabled={cb.inFlight}
+            onClick={() => cb.onRegenerate(message.id)}
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+          </IconBtn>
+          {showVersions ? (
+            <div className="ml-1 flex items-center gap-0.5 text-[11px] text-muted-foreground">
+              <button
+                type="button"
+                className="rounded p-0.5 hover:bg-foreground/10 disabled:opacity-40"
+                disabled={vIndex <= 0}
+                onClick={() => cb.onSwitchVersion(message.id, vIndex - 1)}
+                aria-label="上一个版本"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </button>
+              <span className="tabular-nums">
+                {vIndex + 1}/{versions!.length}
+              </span>
+              <button
+                type="button"
+                className="rounded p-0.5 hover:bg-foreground/10 disabled:opacity-40"
+                disabled={vIndex >= versions!.length - 1}
+                onClick={() => cb.onSwitchVersion(message.id, vIndex + 1)}
+                aria-label="下一个版本"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
+  )
+}
+
+function StreamingCursor() {
+  return (
+    <span className="ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 animate-pulse bg-foreground/70 align-middle" />
+  )
+}
+
+function IconBtn({
+  label,
+  onClick,
+  disabled,
+  children,
+}: {
+  label: string
+  onClick: () => void
+  disabled?: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground disabled:opacity-40"
+    >
+      {children}
+    </button>
   )
 }

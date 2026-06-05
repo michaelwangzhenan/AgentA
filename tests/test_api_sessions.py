@@ -166,7 +166,84 @@ def test_get_messages_nonexistent_session_returns_empty(client: TestClient) -> N
     assert r.json() == {"messages": []}
 
 
+# ─── POST /api/sessions/{id}/truncate ────────────────────────────────────
+
+
+def _seed_turns(store: ChatHistoryStore, sid: str, n: int) -> None:
+    """写 n 轮对话：u0,a0,u1,a1,...（共 2n 行）"""
+    for i in range(n):
+        store.append(sid, {"role": "user", "content": f"q{i}"})
+        store.append(sid, {"role": "assistant", "content": f"a{i}"})
+
+
+def test_truncate_drops_from_user_message_and_after(
+    client: TestClient, store: ChatHistoryStore
+) -> None:
+    sid = client.post("/api/sessions").json()["id"]
+    _seed_turns(store, sid, 3)  # u0 a0 u1 a1 u2 a2
+
+    r = client.post(f"/api/sessions/{sid}/truncate", json={"user_message_index": 1})
+    assert r.status_code == 200
+    assert r.json() == {"deleted": 4}  # u1 a1 u2 a2
+
+    msgs = client.get(f"/api/sessions/{sid}/messages").json()["messages"]
+    assert [m["content"] for m in msgs] == ["q0", "a0"]
+
+
+def test_truncate_first_user_message_clears_all_messages(
+    client: TestClient, store: ChatHistoryStore
+) -> None:
+    sid = client.post("/api/sessions").json()["id"]
+    _seed_turns(store, sid, 2)  # 4 行
+
+    r = client.post(f"/api/sessions/{sid}/truncate", json={"user_message_index": 0})
+    assert r.json() == {"deleted": 4}
+    assert client.get(f"/api/sessions/{sid}/messages").json()["messages"] == []
+
+
+def test_truncate_out_of_range_index_deletes_nothing(
+    client: TestClient, store: ChatHistoryStore
+) -> None:
+    sid = client.post("/api/sessions").json()["id"]
+    _seed_turns(store, sid, 1)  # u0 a0
+
+    r = client.post(f"/api/sessions/{sid}/truncate", json={"user_message_index": 5})
+    assert r.json() == {"deleted": 0}
+    assert len(client.get(f"/api/sessions/{sid}/messages").json()["messages"]) == 2
+
+
+def test_truncate_negative_index_returns_422(client: TestClient) -> None:
+    sid = client.post("/api/sessions").json()["id"]
+    r = client.post(f"/api/sessions/{sid}/truncate", json={"user_message_index": -1})
+    assert r.status_code == 422  # 请求模型 ge=0 校验
+
+
 # ─── ChatHistoryStore 方法本身（被上面的端点测覆盖，这里再直接测细节）──
+
+
+def test_store_truncate_positions_by_user_ordinal_with_interleaved_rows(
+    store: ChatHistoryStore,
+) -> None:
+    """中间夹多条 assistant 行，仍按 user 序号（而非行序号）定位截断点。"""
+    sid = "s-trunc"
+    store.create_empty_session(sid)
+    store.append(sid, {"role": "user", "content": "u0"})
+    store.append(sid, {"role": "assistant", "content": "a0a"})
+    store.append(sid, {"role": "assistant", "content": "a0b"})
+    store.append(sid, {"role": "user", "content": "u1"})
+    store.append(sid, {"role": "assistant", "content": "a1"})
+
+    deleted = store.truncate_from_user_message(sid, 1)
+    assert deleted == 2  # u1 + a1
+    assert [m["content"] for m in store.load(sid)] == ["u0", "a0a", "a0b"]
+
+
+def test_store_truncate_negative_index_noop(store: ChatHistoryStore) -> None:
+    sid = "s-neg"
+    store.create_empty_session(sid)
+    store.append(sid, {"role": "user", "content": "u0"})
+    assert store.truncate_from_user_message(sid, -1) == 0
+    assert len(store.load(sid)) == 1
 
 
 def test_store_rename_returns_false_when_not_exist(store: ChatHistoryStore) -> None:

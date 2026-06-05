@@ -3,3 +3,4 @@ CnP:性能优化
 skill os
 ！！search_knwoledge 特别慢
 API 可配置
+多用户支持

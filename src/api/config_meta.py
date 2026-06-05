@@ -299,6 +299,14 @@ REGISTRY: list[ConfigItem] = [
         detail="logger 输出级别，立即生效。",
         options=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
     ),
+    # ─── UI ───────────────────────────────────────────────────────────────
+    ConfigItem(
+        key="USER_DISPLAY_NAME",
+        group="ui",
+        type=ItemType.STRING,
+        brief="显示用户名",
+        detail="聊天空状态欢迎语「下午好，<名字>」里显示的名字；多用户支持前用固定值。",
+    ),
 ]
 
 
@@ -311,6 +319,7 @@ GROUP_LABELS: dict[str, str] = {
     "security": "Security",
     "web": "Web",
     "log": "Log",
+    "ui": "界面",
 }
 
 

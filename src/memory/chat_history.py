@@ -197,6 +197,42 @@ class ChatHistoryStore:
 
         return [self._row_to_message(row) for row in reversed(rows)]
 
+    def truncate_from_user_message(self, session_id: str, user_index: int) -> int:
+        """删除从第 `user_index`（0 基）条 user 消息起（含）之后的全部消息。
+
+        用于"编辑重发 / 重新生成"：丢弃某条用户消息及其后的所有回答与轮次，
+        让调用方随后用 `agent.run()` 重新追加（run 会自己再写一遍 user 消息）。
+
+        按 user 角色的序号定位、再按行 id 截断，因此 tool / assistant 等中间行
+        多少都不影响定位的准确性。
+
+        Args:
+            session_id: 会话 ID。
+            user_index: 第几条 user 消息（0 基）。越界（无对应 user 消息）则不删。
+
+        Returns:
+            实际删除的消息行数。
+        """
+        rows = self._conn.execute(
+            """SELECT id FROM messages
+               WHERE session_id = ? AND role = 'user'
+               ORDER BY id ASC""",
+            (session_id,),
+        ).fetchall()
+        if user_index < 0 or user_index >= len(rows):
+            return 0
+        cutoff_id = rows[user_index]["id"]
+        with self._conn:
+            cur = self._conn.execute(
+                "DELETE FROM messages WHERE session_id = ? AND id >= ?",
+                (session_id, cutoff_id),
+            )
+        logger.info(
+            "已截断 session %s：从第 %d 条 user 消息起删除 %d 行",
+            session_id, user_index, cur.rowcount,
+        )
+        return cur.rowcount
+
     def clear(self, session_id: str) -> None:
         """
         清空指定 session 的所有消息记录（同时删除 session 元数据）。

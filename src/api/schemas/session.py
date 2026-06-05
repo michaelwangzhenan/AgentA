@@ -37,3 +37,15 @@ class SessionMessagesResponse(BaseModel):
         ...,
         description="OpenAI messages 格式（含 tool_calls / tool_call_id 等可选字段）",
     )
+
+
+class SessionTruncateRequest(BaseModel):
+    """编辑重发 / 重新生成：从第 user_message_index 条 user 消息起截断"""
+
+    user_message_index: int = Field(
+        ..., ge=0, description="第几条 user 消息（0 基），从它起（含）删除后续全部消息"
+    )
+
+
+class SessionTruncateResponse(BaseModel):
+    deleted: int = Field(..., description="实际删除的消息行数")

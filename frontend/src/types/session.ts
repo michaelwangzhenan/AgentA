@@ -75,6 +75,7 @@ export function backendMessagesToFrontend(
           role: 'assistant',
           content: '',
           thinking: '',
+          thinkingMs: null,
           plan: null,
           toolCalls: [],
           error: null,

@@ -405,7 +405,7 @@ def _wrap_anthropic_response(response: Any) -> Any:
 # ── Extended Thinking ────────────────────────────────────────────────────────
 
 # Adaptive Thinking 三档 budget（tokens）
-_BUDGET_LOW: int = 1_500     # 简单事实、短问（< 25 字符）
+_BUDGET_LOW: int = 2_048     # 简单事实、短问（< 25 字符）；与前端低档位 LEVEL_BUDGET.low 对齐
 _BUDGET_MEDIUM: int = 8_000  # 分析、解释、对比（默认档）
 _BUDGET_HIGH: int = 32_000   # 架构、规划、多步骤深度推理
 

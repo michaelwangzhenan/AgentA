@@ -356,6 +356,9 @@ USER_RULES_MAX_CHARS: int = int(os.getenv("USER_RULES_MAX_CHARS", "4000"))
 # Skills 禁用列表文件路径（相对项目根；文件不存在视作"未禁用任何 skill"）
 SKILLS_DISABLED_FILE: str = os.getenv("SKILLS_DISABLED_FILE", ".agenta/skills/disabled.json")
 
+# 聊天界面显示的用户名（空状态欢迎语「下午好，<名字>」；多用户支持前用固定值）
+USER_DISPLAY_NAME: str = os.getenv("USER_DISPLAY_NAME", "Michael")
+
 
 def get_active_config() -> ProviderConfig:
     """获取当前激活的 Provider 配置，若不存在则抛出异常。"""

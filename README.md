@@ -217,7 +217,16 @@ cp .env.example .env
 
 参考 [5.3 模型下载](#53-模型下载)。
 
-### 3.4 启动 AgentA
+### 3.4 准备 MCP server（可选）
+
+如开启 MCP（`MCP_ENABLED=true`），挂载两个默认 server: fetch和 filesystem，需准备好运行环境。否则启动时这两个 server 会连接失败（agent 仍能正常跑）。
+
+| server | 类型 | 能力 | 准备方式 |
+|---|---|---|---|
+| **fetch** | Python | 抓网页 → markdown | `pip install -r requirements.txt` 已含 `mcp-server-fetch`，无需额外操作 |
+| **filesystem** | Node | 读 / 写 / 列工作区文件 | 需先装 [Node.js](https://nodejs.org)（含 `npx`）；装好后**手动先跑一次，**预下载该包（`npx -y @modelcontextprotocol/server-filesystem`） |
+
+### 3.5 启动 AgentA
 
 首次使用先入库（详见 [5.1 RAG 入库](#51-rag-入库)）：
 

@@ -45,8 +45,11 @@ langchain
 langchain-openai
 langchain-anthropic
 
-# MCP (Model Context Protocol) 
+# MCP (Model Context Protocol)
+# Python MCP SDK
 mcp
+# Python MCP server
+mcp-server-fetch
 
 # Web API
 fastapi

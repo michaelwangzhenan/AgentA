@@ -82,21 +82,38 @@ export type ToolCallState = {
   preview?: string
 }
 
+/** 一次生成结果的快照；regenerate 多次后用于 ‹N/M› 切换（仅前端内存，不持久化） */
+export type AssistantVersion = {
+  content: string
+  thinking: string
+  thinkingMs: number | null
+  plan: PlanStep[] | null
+  toolCalls: ToolCallState[]
+  error: string | null
+}
+
 export type AssistantMessage = {
   id: string
   role: 'assistant'
   content: string
   thinking: string
+  /** reasoning 累计耗时（ms）；null 表示本轮没有 thinking */
+  thinkingMs: number | null
   plan: PlanStep[] | null
   toolCalls: ToolCallState[]
   error: string | null
   streaming: boolean
+  createdAt?: number
+  /** regenerate 产生的历史版本快照（含当前）；缺省 / 长度<2 时不显示切换器 */
+  versions?: AssistantVersion[]
+  versionIndex?: number
 }
 
 export type UserMessage = {
   id: string
   role: 'user'
   content: string
+  createdAt?: number
 }
 
 export type Message = UserMessage | AssistantMessage

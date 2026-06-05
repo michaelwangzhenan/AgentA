@@ -16,6 +16,8 @@ from src.api.schemas.session import (
     SessionListResponse,
     SessionMessagesResponse,
     SessionRenameRequest,
+    SessionTruncateRequest,
+    SessionTruncateResponse,
 )
 from src.memory.chat_history import ChatHistoryStore
 
@@ -89,6 +91,23 @@ def delete_session(
 ) -> SessionDeleteResponse:
     """硬删 session（级联清 messages + sessions 表）；幂等：不存在返回 deleted=False。"""
     return SessionDeleteResponse(deleted=store.delete_session(session_id))
+
+
+@router.post(
+    "/sessions/{session_id}/truncate",
+    response_model=SessionTruncateResponse,
+)
+def truncate_session(
+    session_id: str,
+    req: SessionTruncateRequest,
+    store: ChatHistoryStore = Depends(get_chat_history),
+) -> SessionTruncateResponse:
+    """从第 N 条 user 消息起截断 session（编辑重发 / 重新生成的前置步骤）。
+
+    截断后调用方再发 `POST /api/chat/stream`，Agent.run 会重新追加用户消息 + 新回答。
+    """
+    deleted = store.truncate_from_user_message(session_id, req.user_message_index)
+    return SessionTruncateResponse(deleted=deleted)
 
 
 @router.get(
