@@ -17,6 +17,9 @@ MCPManager —— MCP client 生命周期管理（Phase 3.3）
 
 API 表面（同步）：
 - `start_all(specs)`：按 ServerSpec 列表启动 server，最长等 `MCP_CONNECT_TIMEOUT_SEC`
+- `start_one(spec)`：启动单个 server（已在 _handles 里则跳过）；用于 UI 新建 / toggle on
+- `stop_one(name)`：停止单个 server（设 close event；不删 _handles）；用于 UI 删除 / toggle off
+- `reload(specs, disabled_names)`：按差异 diff 启停 server，已存在但 spec 改了的先 stop 再 start
 - `list_tools()`：返回所有 connected server 的 tool 合流（带 namespace 前缀）
 - `call_tool(name, args, timeout)`：name 须含 `<server>.` 前缀；返回字符串（CallToolResult
   内 TextContent 拼接），失败抛 `MCPCallError`
@@ -109,6 +112,94 @@ class MCPManager:
             "[MCPManager] 启动完成：%d connected / %d failed / %d total",
             connected, failed, len(self._handles),
         )
+
+    def start_one(self, spec: ServerSpec) -> None:
+        """启动单个 server，最长等 `MCP_CONNECT_TIMEOUT_SEC + 1s`。
+
+        若同名 handle 已存在且非 closed/failed → 跳过（idempotent）；否则用新 spec
+        覆盖旧 handle。本方法用于 UI 新建 / toggle on / 编辑后实时拉起。
+
+        多次 start_all 已设过 `_started` 也无碍：本路径不走 start_all 的批量分支。
+        """
+        self._ensure_loop_running()
+        assert self._loop is not None
+
+        existing = self._handles.get(spec.name)
+        if existing is not None and existing.status in ("connecting", "connected"):
+            logger.debug("[MCPManager] server %r 已在运行，跳过 start_one", spec.name)
+            return
+
+        try:
+            fut = asyncio.run_coroutine_threadsafe(self._start_one(spec), self._loop)
+            fut.result(timeout=_cfg.MCP_CONNECT_TIMEOUT_SEC + 5)
+        except FutureTimeoutError:
+            logger.warning("[MCPManager] start_one %r 总体超时", spec.name)
+        except Exception as exc:
+            logger.warning("[MCPManager] start_one %r 异常：%s", spec.name, exc)
+
+    def stop_one(self, name: str) -> None:
+        """停止单个 server：触发其 close event 让 _serve 协程退出，回收 handle。
+
+        非阻塞等待固定 5s；超时仅 log warning（task 已 cancel，loop 关闭时会兜底回收）。
+        多次调用安全；server 不存在直接 no-op。
+        """
+        if self._loop is None:
+            return
+        handle = self._handles.get(name)
+        if handle is None:
+            return
+
+        try:
+            fut = asyncio.run_coroutine_threadsafe(
+                self._stop_one_coro(handle), self._loop
+            )
+            fut.result(timeout=5)
+        except FutureTimeoutError:
+            logger.warning("[MCPManager] stop_one %r 超时，强行取消 task", name)
+        except Exception as exc:
+            logger.warning("[MCPManager] stop_one %r 异常：%s", name, exc)
+        finally:
+            # 用户期望"删了就没了"，从 _handles 移除避免列表残留 closed 项
+            self._handles.pop(name, None)
+
+    def reload(
+        self,
+        specs: list[ServerSpec],
+        disabled_names: set[str] | None = None,
+    ) -> None:
+        """按 diff 把当前运行集合切换到目标集合（启用且 spec 一致的 idempotent）。
+
+        Args:
+            specs: 目标 spec 列表（已 env 展开；通常来自 `mcp_config.list_specs()`）
+            disabled_names: 禁用 name 集合；这些 server 不会被启动（即便在 specs 里）
+
+        差异处理：
+        - 应启用但当前未跑 → start_one
+        - 应启用且当前在跑但 spec 改了 → stop_one + start_one
+        - 不该启用但当前在跑 → stop_one
+        - 一致 → 不动
+        """
+        disabled = disabled_names or set()
+        target_map: dict[str, ServerSpec] = {
+            s.name: s for s in specs if s.name not in disabled
+        }
+        current_names = set(self._handles.keys())
+
+        # 1. 不该启用 / 已删 → stop
+        for name in sorted(current_names - set(target_map.keys())):
+            self.stop_one(name)
+
+        # 2. 应启用 → start 或重启（spec 变了的 stop+start）
+        for name in sorted(target_map.keys()):
+            new_spec = target_map[name]
+            existing = self._handles.get(name)
+            if existing is None or existing.status in ("failed", "closed"):
+                self.start_one(new_spec)
+            elif existing.spec != new_spec:
+                logger.info("[MCPManager] server %r spec 变化，重启", name)
+                self.stop_one(name)
+                self.start_one(new_spec)
+            # else: 一致且在跑 → 跳过
 
     def list_tools(self) -> list[dict[str, Any]]:
         """合流所有 connected server 的 tool 清单，每条带 `<server>.` 前缀。
@@ -319,6 +410,22 @@ class MCPManager:
             handle.status = "failed"
             handle.error = "connect timeout（未等到 initialize 完成）"
             logger.warning("[MCPManager] server %r 等就绪超时", spec.name)
+
+    async def _stop_one_coro(self, handle: _ServerHandle) -> None:
+        """触发单个 handle 关闭事件，等 server task 收尾。"""
+        if handle._close_event is not None:
+            handle._close_event.set()
+        task = handle._task
+        if task is not None and not task.done():
+            try:
+                await asyncio.wait_for(task, timeout=5)
+            except asyncio.TimeoutError:
+                logger.warning("[MCPManager] stop_one_coro 等 task 超时，强行取消")
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
 
     async def _shutdown_coro(self) -> None:
         """触发所有 handle 关闭事件，等 server task 收尾。"""

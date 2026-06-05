@@ -429,3 +429,75 @@ class TestSingleton:
         reset_shared_manager_for_tests()
         b = get_shared_manager()
         assert a is not b
+
+
+class TestStartOneStopOneReload:
+    """单 server 启停 / reload diff —— UI 实时生效路径"""
+
+    def test_start_one_then_stop_one(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        sess = FakeSession(tools=[FakeTool("t")])
+        _install_patches(monkeypatch, {"fs": sess})
+
+        mgr = MCPManager()
+        try:
+            mgr.start_one(ServerSpec(name="fs", command="fs"))
+            st = {row["name"]: row for row in mgr.status()}
+            assert st["fs"]["status"] == "connected"
+
+            mgr.stop_one("fs")
+            assert "fs" not in {row["name"] for row in mgr.status()}
+        finally:
+            mgr.shutdown()
+
+    def test_start_one_idempotent(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        sess = FakeSession(tools=[FakeTool("t")])
+        _install_patches(monkeypatch, {"fs": sess})
+
+        mgr = MCPManager()
+        try:
+            spec = ServerSpec(name="fs", command="fs")
+            mgr.start_one(spec)
+            mgr.start_one(spec)  # 第二次跳过，不会重复 initialize
+            assert sess.initialize_calls == 1
+        finally:
+            mgr.shutdown()
+
+    def test_stop_one_unknown_is_noop(self) -> None:
+        mgr = MCPManager()
+        try:
+            mgr.stop_one("ghost")  # 不抛
+        finally:
+            mgr.shutdown()
+
+    def test_reload_starts_new_and_stops_removed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        a = FakeSession(tools=[FakeTool("ta")])
+        b = FakeSession(tools=[FakeTool("tb")])
+        _install_patches(monkeypatch, {"a": a, "b": b})
+
+        mgr = MCPManager()
+        try:
+            mgr.start_all([ServerSpec(name="a", command="a")])
+            assert {row["name"] for row in mgr.status()} == {"a"}
+
+            mgr.reload([ServerSpec(name="b", command="b")], disabled_names=set())
+            names = {row["name"] for row in mgr.status()}
+            assert names == {"b"}
+        finally:
+            mgr.shutdown()
+
+    def test_reload_skips_disabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        sess = FakeSession(tools=[FakeTool("t")])
+        _install_patches(monkeypatch, {"fs": sess})
+
+        mgr = MCPManager()
+        try:
+            mgr.reload(
+                [ServerSpec(name="fs", command="fs")],
+                disabled_names={"fs"},
+            )
+            assert mgr.status() == []
+            assert sess.initialize_calls == 0
+        finally:
+            mgr.shutdown()

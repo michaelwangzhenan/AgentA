@@ -21,7 +21,20 @@ from pathlib import Path
 import pytest
 
 import src.config as _cfg
-from src.agent.core.mcp_config import ServerSpec, load_mcp_config
+from src.agent.core.mcp_config import (
+    MCPConfigError,
+    ServerSpec,
+    add_server,
+    cleanup_disabled_orphans,
+    delete_server,
+    list_specs,
+    load_mcp_config,
+    read_disabled_list,
+    rename_server,
+    toggle_server,
+    update_server,
+    write_disabled_list,
+)
 
 
 def _write_config(tmp_path: Path, content: str | dict) -> Path:
@@ -188,3 +201,144 @@ class TestExplicitFileOverride:
         result = load_mcp_config(root=tmp_path, file="my_mcp.json")
         assert result is not None
         assert [s.name for s in result] == ["x"]
+
+
+# ── CRUD 用例：UI 编辑路径 ─────────────────────────────────────────────────────
+
+
+def _disabled_path(tmp_path: Path) -> Path:
+    return tmp_path / ".agenta" / "mcp" / "disabled.json"
+
+
+class TestAddServer:
+    def test_add_creates_file_and_returns_spec(self, tmp_path: Path) -> None:
+        spec = add_server(
+            "fs",
+            "npx",
+            args=["-y", "filesystem"],
+            env={"K": "V"},
+            root=tmp_path,
+        )
+        assert spec == ServerSpec(name="fs", command="npx", args=["-y", "filesystem"], env={"K": "V"})
+        cfg = json.loads((tmp_path / ".agenta/mcp/config.json").read_text())
+        assert cfg["servers"]["fs"]["command"] == "npx"
+        assert cfg["servers"]["fs"]["args"] == ["-y", "filesystem"]
+        assert cfg["servers"]["fs"]["env"] == {"K": "V"}
+
+    def test_add_rejects_invalid_name(self, tmp_path: Path) -> None:
+        with pytest.raises(MCPConfigError) as ei:
+            add_server("bad.name", "echo", root=tmp_path)
+        assert ei.value.code == "invalid_name"
+
+    def test_add_rejects_duplicate(self, tmp_path: Path) -> None:
+        add_server("fs", "echo", root=tmp_path)
+        with pytest.raises(MCPConfigError) as ei:
+            add_server("fs", "echo", root=tmp_path)
+        assert ei.value.code == "already_exists"
+
+    def test_add_rejects_empty_command(self, tmp_path: Path) -> None:
+        with pytest.raises(MCPConfigError) as ei:
+            add_server("fs", "", root=tmp_path)
+        assert ei.value.code == "invalid_field"
+
+
+class TestUpdateServer:
+    def test_update_replaces_fields(self, tmp_path: Path) -> None:
+        add_server("fs", "old", args=["a"], env={"X": "1"}, root=tmp_path)
+        spec = update_server("fs", "new", args=["b"], env={}, root=tmp_path)
+        assert spec.command == "new"
+        assert spec.args == ["b"]
+        assert spec.env == {}
+        cfg = json.loads((tmp_path / ".agenta/mcp/config.json").read_text())
+        assert cfg["servers"]["fs"]["args"] == ["b"]
+
+    def test_update_404(self, tmp_path: Path) -> None:
+        with pytest.raises(MCPConfigError) as ei:
+            update_server("ghost", "echo", root=tmp_path)
+        assert ei.value.code == "not_found"
+
+
+class TestDeleteServer:
+    def test_delete_removes_entry(self, tmp_path: Path) -> None:
+        add_server("a", "x", root=tmp_path)
+        add_server("b", "y", root=tmp_path)
+        delete_server("a", root=tmp_path)
+        cfg = json.loads((tmp_path / ".agenta/mcp/config.json").read_text())
+        assert list(cfg["servers"].keys()) == ["b"]
+
+    def test_delete_404(self, tmp_path: Path) -> None:
+        with pytest.raises(MCPConfigError) as ei:
+            delete_server("ghost", root=tmp_path)
+        assert ei.value.code == "not_found"
+
+
+class TestRenameServer:
+    def test_rename_updates_key(self, tmp_path: Path) -> None:
+        add_server("old", "echo", args=["x"], root=tmp_path)
+        spec = rename_server("old", "neo", root=tmp_path, disabled_file=_disabled_path(tmp_path))
+        assert spec.name == "neo"
+        cfg = json.loads((tmp_path / ".agenta/mcp/config.json").read_text())
+        assert "old" not in cfg["servers"]
+        assert cfg["servers"]["neo"]["command"] == "echo"
+
+    def test_rename_migrates_disabled_status(self, tmp_path: Path) -> None:
+        add_server("old", "echo", root=tmp_path)
+        disabled_file = _disabled_path(tmp_path)
+        write_disabled_list({"old"}, disabled_file)
+        rename_server("old", "neo", root=tmp_path, disabled_file=disabled_file)
+        assert read_disabled_list(disabled_file) == {"neo"}
+
+    def test_rename_409_when_target_exists(self, tmp_path: Path) -> None:
+        add_server("a", "x", root=tmp_path)
+        add_server("b", "y", root=tmp_path)
+        with pytest.raises(MCPConfigError) as ei:
+            rename_server("a", "b", root=tmp_path, disabled_file=_disabled_path(tmp_path))
+        assert ei.value.code == "already_exists"
+
+    def test_rename_same_name_is_noop(self, tmp_path: Path) -> None:
+        add_server("a", "x", root=tmp_path)
+        spec = rename_server("a", "a", root=tmp_path, disabled_file=_disabled_path(tmp_path))
+        assert spec.name == "a"
+
+
+class TestToggleServer:
+    def test_toggle_writes_disabled_list(self, tmp_path: Path) -> None:
+        df = _disabled_path(tmp_path)
+        toggle_server("fs", False, valid_names={"fs"}, disabled_file=df)
+        assert read_disabled_list(df) == {"fs"}
+        toggle_server("fs", True, valid_names={"fs"}, disabled_file=df)
+        assert read_disabled_list(df) == set()
+
+    def test_toggle_404_when_not_in_valid(self, tmp_path: Path) -> None:
+        with pytest.raises(MCPConfigError) as ei:
+            toggle_server("ghost", False, valid_names={"fs"}, disabled_file=_disabled_path(tmp_path))
+        assert ei.value.code == "not_found"
+
+
+class TestEnvVarPassthroughInRawConfig:
+    """raw 配置读写保留 ${VAR} 字面量；只有运行时 ServerSpec 才展开。"""
+
+    def test_raw_preserves_literal(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MY_PATH", "/tmp/x")
+        add_server("fs", "npx", args=["${MY_PATH}"], env={"P": "${MY_PATH}"}, root=tmp_path)
+        cfg = json.loads((tmp_path / ".agenta/mcp/config.json").read_text())
+        # raw JSON 必须保留 ${MY_PATH} 字面量，便于 UI 编辑后仍可见原始变量名
+        assert cfg["servers"]["fs"]["args"] == ["${MY_PATH}"]
+        assert cfg["servers"]["fs"]["env"] == {"P": "${MY_PATH}"}
+
+    def test_list_specs_returns_expanded(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MY_PATH", "/tmp/x")
+        add_server("fs", "${MY_PATH}/bin", args=["${MY_PATH}"], root=tmp_path)
+        specs = list_specs(root=tmp_path)
+        assert specs[0].command == "/tmp/x/bin"
+        assert specs[0].args == ["/tmp/x"]
+
+
+class TestCleanupOrphans:
+    def test_cleanup_removes_orphan_names(self, tmp_path: Path) -> None:
+        add_server("alive", "x", root=tmp_path)
+        df = _disabled_path(tmp_path)
+        write_disabled_list({"alive", "ghost"}, df)
+        orphans = cleanup_disabled_orphans(root=tmp_path, disabled_file=df)
+        assert orphans == {"ghost"}
+        assert read_disabled_list(df) == {"alive"}

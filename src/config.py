@@ -413,6 +413,9 @@ MCP_ENABLED: bool = os.getenv("MCP_ENABLED", "true").lower() == "true"
 # MCP server 配置文件路径（相对项目根；文件不存在静默跳过）
 MCP_CONFIG_FILE: str = os.getenv("MCP_CONFIG_FILE", ".agenta/mcp/config.json")
 
+# MCP server 禁用列表文件路径（JSON 数组；文件不存在视作"未禁用任何 server"）
+MCP_DISABLED_FILE: str = os.getenv("MCP_DISABLED_FILE", ".agenta/mcp/disabled.json")
+
 # server 启动 + initialize 握手单步超时（秒，整数）
 MCP_CONNECT_TIMEOUT_SEC: int = int(os.getenv("MCP_CONNECT_TIMEOUT_SEC", "10"))
 

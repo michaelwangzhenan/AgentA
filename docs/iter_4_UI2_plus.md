@@ -1,14 +1,25 @@
-[done]清理 KB
-[done]清理 prompt
+check 需求定义
 
 
-my logo
+配置优化：
 
-页面切换LLM
-回答窗口下的几个按钮
 
-！！search_knwoledge 特别慢
+
+chat页面优化：
+    字体颜色
+    回答窗口下的几个按钮
+    LLM切换
+    上传文件
+    think模式
+    plan 和 工具的展示
+
+token 统计
+
+
+业务优化
+
 
 皮肤/主题切换
+    my logo
 
 多用户支持

@@ -78,9 +78,12 @@ export type SkillToggleResponse = {
 export type MCPServer = {
   name: string
   status: string
+  enabled: boolean
   tool_count: number
   error: string | null
   command: string
+  args: string[]
+  env: Record<string, string>
 }
 
 export type MCPServerListResponse = {
@@ -96,6 +99,39 @@ export type MCPTool = {
 
 export type MCPToolListResponse = {
   tools: MCPTool[]
+}
+
+export type MCPServerCreateRequest = {
+  name: string
+  command: string
+  args: string[]
+  env: Record<string, string>
+}
+
+export type MCPServerUpdateRequest = {
+  command: string
+  args: string[]
+  env: Record<string, string>
+}
+
+export type MCPServerRenameRequest = {
+  new_name: string
+}
+
+export type MCPServerToggleRequest = {
+  enabled: boolean
+}
+
+export type MCPServerToggleResponse = {
+  name: string
+  enabled: boolean
+}
+
+export type MCPReloadResponse = {
+  total: number
+  enabled: number
+  connected: number
+  failed: number
 }
 
 // memory 类别中文 label（跟后端 src/memory/user_memory.py CATEGORY_LABELS 对齐）

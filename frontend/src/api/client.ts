@@ -17,8 +17,14 @@ import type {
   KBUploadResponse,
 } from '@/types/kb'
 import type {
+  MCPReloadResponse,
   MCPServer,
+  MCPServerCreateRequest,
   MCPServerListResponse,
+  MCPServerRenameRequest,
+  MCPServerToggleRequest,
+  MCPServerToggleResponse,
+  MCPServerUpdateRequest,
   MCPTool,
   MCPToolListResponse,
   MemoryItem,
@@ -370,6 +376,76 @@ export async function listMCPTools(): Promise<MCPTool[]> {
   const res = await fetch('/api/mcp/tools')
   await _ensureOk(res)
   return ((await res.json()) as MCPToolListResponse).tools
+}
+
+export async function createMCPServer(
+  req: MCPServerCreateRequest,
+): Promise<MCPServer> {
+  const res = await fetch('/api/mcp/servers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as MCPServer
+}
+
+export async function updateMCPServer(
+  name: string,
+  req: MCPServerUpdateRequest,
+): Promise<MCPServer> {
+  const res = await fetch(`/api/mcp/servers/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as MCPServer
+}
+
+export async function deleteMCPServer(name: string): Promise<void> {
+  const res = await fetch(`/api/mcp/servers/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  })
+  await _ensureOk(res)
+}
+
+export async function renameMCPServer(
+  name: string,
+  req: MCPServerRenameRequest,
+): Promise<MCPServer> {
+  const res = await fetch(
+    `/api/mcp/servers/${encodeURIComponent(name)}/rename`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    },
+  )
+  await _ensureOk(res)
+  return (await res.json()) as MCPServer
+}
+
+export async function toggleMCPServer(
+  name: string,
+  req: MCPServerToggleRequest,
+): Promise<MCPServerToggleResponse> {
+  const res = await fetch(
+    `/api/mcp/servers/${encodeURIComponent(name)}/toggle`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    },
+  )
+  await _ensureOk(res)
+  return (await res.json()) as MCPServerToggleResponse
+}
+
+export async function reloadMCPServers(): Promise<MCPReloadResponse> {
+  const res = await fetch('/api/mcp/reload', { method: 'POST' })
+  await _ensureOk(res)
+  return (await res.json()) as MCPReloadResponse
 }
 
 // ─── Step 6：System Config ─────────────────────────────────────────────

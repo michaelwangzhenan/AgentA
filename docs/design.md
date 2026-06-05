@@ -1409,6 +1409,29 @@ sequenceDiagram
 | `servers.<name>.args` | string[] | 可选 | 命令行参数，缺省为 `[]` |
 | `servers.<name>.env` | object | 可选 | 注入 server 子进程的环境变量；value 内 `${VAR}` 从进程 env 展开，缺失保留原样 |
 
+**启停状态分离**：是否启用某 server 不写在 `config.json` 内，而是存独立的
+`.agenta/mcp/disabled.json`（JSON 字符串数组，原子写）。`config.json` 保持纯净，
+可跨客户端移植到 Cursor / Claude Desktop / VS Code Copilot；启用 / 禁用是 AgentA 本地状态。
+
+### 3.14.4 Web UI 管理
+
+UI 通过 `/api/mcp/*` 端点对 server 做 CRUD（详 iter_4_UI.md §6.4.6 API 表）：
+
+| 操作 | 文件影响 | 运行时影响 |
+|---|---|---|
+| 新建 / 编辑 / 删除 | 写 `config.json` | `MCPManager.start_one` / `stop_one` 立即作用到子进程，不重启 uvicorn |
+| 改名 | `config.json` key 改写 + `disabled.json` 状态迁移 | 旧 name `stop_one` + 新 name `start_one`（除非禁用） |
+| 启用 / 禁用 | 仅写 `disabled.json` | toggle on → `start_one`；toggle off → `stop_one` |
+| 重新加载 | 重读 `config.json` + `disabled.json` | `MCPManager.reload(specs, disabled)` 按差异 diff 启停（新增拉起 / 移除关闭 / spec 改动重启） |
+
+`MCPManager` 在 `start_all` 之外暴露三个新公共方法：
+
+| 方法 | 语义 | idempotent |
+|---|---|---|
+| `start_one(spec)` | 启动单 server，最长等 `MCP_CONNECT_TIMEOUT_SEC + 1s`；同名 handle 已 connecting/connected 则跳过 | ✅ |
+| `stop_one(name)` | 触发该 server 的 close event 让 _serve 协程退出，回收 handle；非阻塞等 5s | ✅（不存在直接 no-op） |
+| `reload(specs, disabled)` | 按 diff 把当前运行集合切换到目标集合：spec 一致跳过，spec 改动 stop+start，新增 start，缺失 stop | ✅ |
+
 
 ## 3.15 Agent 代码
 
@@ -1432,8 +1455,8 @@ sequenceDiagram
 | `src/agent/core/srs_scheduler.py` | SM-2 公式纯函数（4 档 → ease / interval / repetitions / lapses，详 [§3.11.2](#3112-sm-2-算法核心)） | `schedule_review(card, rating)` |
 | `src/agent/core/harness_manager.py` | Q1 测验批改自检 + R1 RAG 召回过滤；复用 `judge_with_llm`（详 [§3.12](#312-harness-自检)） | `HarnessManager.review_grading()` · `filter_chunks()` |
 | `src/agent/core/rules_loader.py` | 项目 `.agenta/rules.md` 加载 + `<project_rules>` block 拼接（详 [§3.5](#35-prompt-管理)） | `load_project_rules()` · `build_rules_block()` |
-| `src/agent/core/mcp_config.py` | MCP servers 配置解析（含 `${VAR}` env 展开，详 [§3.14.3](#3143-配置文件)） | `load_mcp_config()` |
-| `src/agent/core/mcp_manager.py` | MCP server 子进程生命周期 + tool 发现 / 调用（asyncio loop 跑在后台线程） | `MCPManager.start_all()` · `list_tools()` · `call_tool()` |
+| `src/agent/core/mcp_config.py` | MCP servers 配置解析 + UI 编辑路径的 CRUD 辅助 + disabled 列表管理（详 [§3.14.3](#3143-配置文件) / [§3.14.4](#3144-web-ui-管理)） | `load_mcp_config()` · `add_server()` · `update_server()` · `delete_server()` · `rename_server()` · `toggle_server()` |
+| `src/agent/core/mcp_manager.py` | MCP server 子进程生命周期 + tool 发现 / 调用（asyncio loop 跑在后台线程） | `MCPManager.start_all()` · `start_one()` · `stop_one()` · `reload()` · `list_tools()` · `call_tool()` |
 | `src/agent/core/url_guard.py` | SSRF 防护：私网 / 链路本地 / 保留段 IP 拦截 | `is_url_safe(url)` |
 | `src/agent/core/security_filter.py` | Prompt-injection 启发式清洗 + tool 白名单 + `<untrusted_*>` 包装 | `wrap_untrusted()` · `scrub_injection()` · `is_tool_allowed()` |
 | `tools/agent_eval/` | Agent 端到端评估（plan / quiz / srs / memory / harness / security / mcp / perf） | 各子目录 `eval_*.py`（详 [§3.13](#313-评估方法)） |
