@@ -10,9 +10,9 @@ import type { AssistantMessage, Message } from '@/types/chat'
 // 覆盖各 HTML 元素，体积更小、可控性更强
 const MD_COMPONENTS: Components = {
   p: ({ node: _node, ...props }) => <p className="my-2 leading-relaxed" {...props} />,
-  h1: ({ node: _node, ...props }) => <h1 className="mt-3 mb-2 text-base font-semibold" {...props} />,
-  h2: ({ node: _node, ...props }) => <h2 className="mt-3 mb-2 text-sm font-semibold" {...props} />,
-  h3: ({ node: _node, ...props }) => <h3 className="mt-2 mb-1 text-sm font-medium" {...props} />,
+  h1: ({ node: _node, ...props }) => <h1 className="mt-3 mb-2 text-lg font-semibold" {...props} />,
+  h2: ({ node: _node, ...props }) => <h2 className="mt-3 mb-2 text-base font-semibold" {...props} />,
+  h3: ({ node: _node, ...props }) => <h3 className="mt-2 mb-1 text-base font-medium" {...props} />,
   ul: ({ node: _node, ...props }) => <ul className="my-2 list-disc space-y-1 pl-5" {...props} />,
   ol: ({ node: _node, ...props }) => <ol className="my-2 list-decimal space-y-1 pl-5" {...props} />,
   li: ({ node: _node, ...props }) => <li className="leading-relaxed" {...props} />,
@@ -35,11 +35,11 @@ const MD_COMPONENTS: Components = {
     )
   },
   pre: ({ node: _node, ...props }) => (
-    <pre className="my-2 overflow-x-auto rounded bg-background p-2 text-xs leading-relaxed" {...props} />
+    <pre className="my-2 overflow-x-auto rounded bg-background p-2 text-sm leading-relaxed" {...props} />
   ),
   table: ({ node: _node, ...props }) => (
     <div className="my-2 overflow-x-auto">
-      <table className="min-w-full border-collapse text-xs" {...props} />
+      <table className="min-w-full border-collapse text-sm" {...props} />
     </div>
   ),
   thead: ({ node: _node, ...props }) => <thead className="bg-background/60" {...props} />,
@@ -99,7 +99,7 @@ function AssistantBubble({ message }: { message: AssistantMessage }) {
         />
 
         {message.content ? (
-          <div className="rounded-2xl bg-muted px-4 py-2 text-sm text-foreground break-words">
+          <div className="rounded-2xl bg-muted px-4 py-2 text-base text-foreground break-words">
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
               {message.content}
             </ReactMarkdown>

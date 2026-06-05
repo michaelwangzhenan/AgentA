@@ -25,6 +25,12 @@ import type {
   MemoryListResponse,
   RulesReadResponse,
   RulesWriteResponse,
+  SkillCreateRequest,
+  SkillItem,
+  SkillRenameRequest,
+  SkillReloadResponse,
+  SkillToggleResponse,
+  SkillUpdateRequest,
   SkillsResponse,
 } from '@/types/resources'
 import type { AppConfig } from '@/types/config'
@@ -298,6 +304,60 @@ export async function listSkills(): Promise<SkillsResponse> {
   const res = await fetch('/api/skills')
   await _ensureOk(res)
   return (await res.json()) as SkillsResponse
+}
+
+export async function reloadSkills(): Promise<SkillReloadResponse> {
+  const res = await fetch('/api/skills/reload', { method: 'POST' })
+  await _ensureOk(res)
+  return (await res.json()) as SkillReloadResponse
+}
+
+export async function createSkill(req: SkillCreateRequest): Promise<SkillItem> {
+  const res = await fetch('/api/skills', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as SkillItem
+}
+
+export async function updateSkill(name: string, req: SkillUpdateRequest): Promise<SkillItem> {
+  const res = await fetch(`/api/skills/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as SkillItem
+}
+
+export async function deleteSkill(name: string): Promise<void> {
+  const res = await fetch(`/api/skills/${encodeURIComponent(name)}`, { method: 'DELETE' })
+  await _ensureOk(res)
+}
+
+export async function renameSkill(
+  name: string,
+  req: SkillRenameRequest,
+): Promise<SkillItem> {
+  const res = await fetch(`/api/skills/${encodeURIComponent(name)}/rename`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as SkillItem
+}
+
+export async function toggleSkill(name: string, enabled: boolean): Promise<SkillToggleResponse> {
+  const res = await fetch(`/api/skills/${encodeURIComponent(name)}/toggle`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as SkillToggleResponse
 }
 
 export async function listMCPServers(): Promise<MCPServer[]> {

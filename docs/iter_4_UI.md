@@ -2225,11 +2225,21 @@ Rules（2 个）：
 | `GET` | `/api/rules` | - | `{text: str, path: str, exists: bool}` | 读 `.agenta/rules.md`；不存在 → text="" + exists=False |
 | `PUT` | `/api/rules` | `{text: str}` | `{path, length, restart_required: true}` | 写文件；提醒重启或新 session 生效 |
 
-Skills（1 个）：
+Skills（6 个）：
 
 | Method | Path | Body | Response | 含义 |
 |---|---|---|---|---|
-| `GET` | `/api/skills` | - | `{loaded: [{name, description, location}], failed: [{path, reason}]}` | 只读：当前 `.agenta/skills/` 扫描结果 |
+| `GET` | `/api/skills` | - | `{loaded: [{name, description, location, body, frontmatter_extra}], disabled: [...], failed: [{path, reason}]}` | 扫描结果含 body + disabled 数组 + frontmatter passthrough 字段 |
+| `POST` | `/api/skills/reload` | - | `{loaded_count, disabled_count, failed_count}` | 重新扫盘 + 清 Agent 单例缓存（免重启 uvicorn）|
+| `POST` | `/api/skills` | `{name, description, body, frontmatter_extra?}` | `SkillItem` (201) | 新建 skill：创建 `.agenta/skills/{name}/SKILL.md` |
+| `PUT`  | `/api/skills/{name}` | `{description, body, frontmatter_extra?}` | `SkillItem` | 更新 SKILL.md（name 不可改，走 rename）。`frontmatter_extra=null` 保留磁盘原值；`{}` 清空；非空 dict 整体替换 |
+| `POST` | `/api/skills/{name}/rename` | `{new_name}` | `SkillItem` | 改名：移动目录 + 同步 frontmatter `name:` 字段 + 迁移 disabled list 状态 |
+| `DELETE` | `/api/skills/{name}` | - | 204 | 递归删除 `.agenta/skills/{name}/` 整个目录 |
+| `POST` | `/api/skills/{name}/toggle` | `{enabled: bool}` | `{name, enabled}` | 启用 / 禁用（写 `.agenta/skills_disabled.json`，SKILL.md 不动）|
+
+CRUD / toggle 后会自动 `cache_clear()` Agent 单例，**下一轮新对话立即生效**；当前对话因 system prompt 已下发不可撤回。
+
+**禁用状态持久化**（详 design.md §3.5.5）：走"状态分离"模式 —— 禁用名单存独立的 `.agenta/skills_disabled.json`（JSON 数组），原子写（temp + rename）防并发交错，启动 scan 时自动清理已被删除的孤儿条目。SKILL.md 本身保持纯净（仅 name / description / 标准字段），可跨 agent 移植到 Claude.ai / VS Code / Cursor。
 
 MCP（2 个）：
 
@@ -2244,7 +2254,7 @@ MCP（2 个）：
 |---|---|---|
 | Memory 是否允许新增 | 允许（POST upsert） | UI 偶尔想"手动加一条偏好"；upsert 内部已限制 category 必须在 `MEMORY_CATEGORIES`，安全 |
 | Rules 写入是否热加载 | 不热加载 | `load_project_rules` 设计是启动一次；Web UI 写完 toast 提示 "重启或新 session 生效"，符合 rules_loader 既有约束 |
-| Skills 是否允许 UI add / delete | 不允许 | Skill 是 git tracked 的文件，UI 编辑 frontmatter / body 收益低；用户用编辑器改文件，重启进程即可 reload |
+| Skills UI 是只读还是完整 CRUD | **完整 CRUD + 改名 + 启停 toggle + 一键 reload + 搜索 / 排序 / 批量启停**（对齐 Claude.ai / Cursor / VS Code Copilot 业内主流）| 早期只读版要"切到 IDE 改文件再重启 uvicorn"体验断裂；做完 CRUD 后 web UI 是完整闭环。disabled 状态用独立 JSON 持久化（SKILL.md 保持纯净）；编辑器用 CodeMirror 6 提供 markdown 语法高亮 + 三态预览（Edit / Split / Preview）|
 | MCP servers 是否允许 UI add / delete | 不允许 | Server config 在 `.agenta/mcp.json` + 启动 lifecycle 复杂；现阶段只读够用 |
 | 资源菜单区放哪 | Sidebar `[+ 新建会话]` + view 切换块 下方，sessions 列表 上方 | 跟需求文档 §4.2 布局对齐：资源菜单在会话列表上方 |
 | 4 套资源的入口形态 | 4 个固定 icon-text 行（不可折叠） | 简洁；后续 Step 加更多资源时再考虑分组 |
@@ -2757,10 +2767,42 @@ cd ..
 
 **7) 资源管理（Memory / Rules / Skills / MCP）**（覆盖 Step 5）
 
-- 点 `记忆` → 列表显示当前 user_memory；点 ✏️ 改一条 value → 保存 → toast + 列表更新；点 🗑️ → 确认 → 行消失
-- 点 `规则` → textarea 显示 `.agenta/rules.md` 内容 → 改内容 → 保存 → toast "已保存，新 session 生效"
-- 点 `Skills` → 列表显示 `.agenta/skills/` 扫到的 skills（loaded + failed 分组）
-- 点 `MCP` → 列表显示 servers 状态（connected / failed）+ tool_count；下方"工具清单"展示合流后的所有 tool
+**记忆**（点 `记忆`）：
+
+- 列表每行显示 category 中文标签（偏好 / 背景 / 指令 / 任务 / 纠错）+ source 标签（自动 / 请记住 / 手工）+ key + value + 创建时间
+- hover 行 → 右侧浮出 ✏️ 编辑 / 🗑️ 删除按钮
+- 点 ✏️ → 弹 Dialog（key 只读、value 可改）→ 改完 Enter / 保存 → toast + 列表更新
+- 点 🗑️ → AlertDialog 确认 → 行消失 + toast "已删除"
+- 点顶部 `+ 添加记忆` → 弹 Dialog：选 category（默认偏好）→ 输入 key（如 `favorite_language`）→ 输入 value（如 `Python`，支持多行；Ctrl+Enter 提交）→ 添加 → 列表新增一行，source 标 "手工"
+- 点顶部 `清空全部` → AlertDialog 二次确认（显示当前条数）→ 清空 → toast "已清空 N 条"
+
+**规则**（点 `规则`）：
+
+- textarea 显示 `.agenta/rules.md` 内容（撑满主区高度，不再写死 400px）
+- 改内容 → 编辑框下方的"保存"按钮可点 → 保存 → toast "已保存，新 session 生效"
+
+**Skills**（点 `Skills`）：
+
+- 默认看到「**已启用 (N)**」区块（绿色 ✓ 图标）+「**已禁用 (M)**」区块（仅当有禁用项时出现，灰色暂停图标）+「**加载失败**」区块（仅当有 failed 项，琥珀色 ⚠ 图标）
+- 「已启用」标题**同行右侧**有 4 个工具按钮：搜索框（按 name / description 模糊匹配）/ 名称 A→Z 切换（再点变 Z→A）/ `+ 新建 Skill` / `重新加载`（带刷新图标）
+- 行左侧自上而下：Switch toggle（绿底=启用 / 灰底=禁用）/ 展开折叠箭头 / name + description + location 路径
+- 行尾 ✏️ 编辑、🗑️ 删除
+- **toggle**：点一下绿色 Switch → 灰色 → toast "X 已禁用，新对话生效" → 该行从「已启用」搬到「已禁用」区
+- **展开看 body**：点行任意位置（除按钮外）→ 下方按 Markdown 渲染显示 SKILL.md body（不是裸 pre 文本，列表 / 标题 / code 都有样式）
+- **编辑**：点 ✏️ → 行内展开编辑表单：
+  - 顶部行：「编辑：&lt;name&gt;」+ 取消 / 保存按钮（**底部同行也有一份**，长 body 时不用滚回顶部）
+  - name 输入框（改了显示 "（修改将触发改名）" 黄字提示，保存时会调 `POST /api/skills/{old}/rename`）
+  - description 输入框
+  - body 区：右上 `Edit | Split | Preview` 三态切换（默认 Split）；CodeMirror 6 提供 markdown 语法高亮（dark 模式自动 oneDark）；Split 模式左编辑右实时预览
+- **新建**：点 `+ 新建 Skill` → 弹**接近全屏的对话框**（最大 1400×900）→ name + description 在顶部一行 → body 编辑器**撑满中间剩余高度** → body 已预填中文骨架（"何时使用 / 步骤 / 注意事项"）→ 创建后立即出现在「已启用」区
+- **改名**：编辑现有 skill → 改 name 字段 → 保存 → 磁盘上 `.agenta/skills/{old}/` 整目录搬到 `{new}/`，`scripts/` 等子文件一起搬，frontmatter `name:` 字段同步更新；若该 skill 原本被禁用，改名后仍在「已禁用」区（状态迁移）
+- **删除**：点 🗑️ → AlertDialog 确认 → `.agenta/skills/{name}/` 整目录消失
+- **重新加载**：手工编辑 `.agenta/skills/foo/SKILL.md` 或 `.agenta/skills_disabled.json` 后 → 点重新加载 → toast 报告"X 个加载，Y 个禁用，Z 个失败"
+- **frontmatter passthrough**：手工在 SKILL.md 里加 `allowed-tools: [tool_a]` 等非标准字段 → UI 改 description / body 保存 → 磁盘上 `allowed-tools` 字段仍在（不丢失）
+
+**MCP**（点 `MCP`）：
+
+- 列表显示 servers 状态（connected / failed）+ tool_count；下方"工具清单"展示合流后的所有 tool
 
 **8) 主题切换 + 全局 Toast 同步**（覆盖 Step 6 + Step 7 review fix #2）
 

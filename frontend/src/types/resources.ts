@@ -30,6 +30,9 @@ export type SkillItem = {
   name: string
   description: string
   location: string
+  body: string
+  // name / description 之外的 frontmatter 字段（agentskills.io allowed-tools 等），passthrough 保留
+  frontmatter_extra: Record<string, unknown>
 }
 
 export type SkillFailure = {
@@ -39,7 +42,37 @@ export type SkillFailure = {
 
 export type SkillsResponse = {
   loaded: SkillItem[]
+  disabled: SkillItem[]
   failed: SkillFailure[]
+}
+
+export type SkillReloadResponse = {
+  loaded_count: number
+  disabled_count: number
+  failed_count: number
+}
+
+export type SkillCreateRequest = {
+  name: string
+  description: string
+  body: string
+  frontmatter_extra?: Record<string, unknown>
+}
+
+export type SkillUpdateRequest = {
+  description: string
+  body: string
+  // null/undefined = 保留磁盘原有 extra；{} = 清空；非空 dict = 整体替换
+  frontmatter_extra?: Record<string, unknown> | null
+}
+
+export type SkillRenameRequest = {
+  new_name: string
+}
+
+export type SkillToggleResponse = {
+  name: string
+  enabled: boolean
 }
 
 export type MCPServer = {

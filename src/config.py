@@ -353,6 +353,9 @@ USER_RULES_FILE: str = os.getenv("USER_RULES_FILE", ".agenta/rules.md")
 # 注入字符上限，超出截断（防止占用过多 context）
 USER_RULES_MAX_CHARS: int = int(os.getenv("USER_RULES_MAX_CHARS", "4000"))
 
+# Skills 禁用列表文件路径（相对项目根；文件不存在视作"未禁用任何 skill"）
+SKILLS_DISABLED_FILE: str = os.getenv("SKILLS_DISABLED_FILE", ".agenta/skills_disabled.json")
+
 
 def get_active_config() -> ProviderConfig:
     """获取当前激活的 Provider 配置，若不存在则抛出异常。"""

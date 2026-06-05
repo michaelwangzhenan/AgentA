@@ -648,9 +648,13 @@ LLM "造引用"是已知风险（写 `[7]` 但实际只有 `[3]`，或编造不�
 | 项 | 约定 |
 |---|---|
 | 目录路径 |  `.agenta/skills/<name>/SKILL.md` |
-| 加载时机 | 启动时扫描；`/reload-skills` 可热更新|
+| 加载时机 | 启动时扫描；CLI `/reload-skills` 或 Web `POST /api/skills/reload` 热更新 |
 | frontmatter 必填 | `description`（用于 catalog）；`name` 缺失则回退用目录名 |
+| frontmatter 其他字段 | name / description 之外的字段（如 agentskills.io 标准 `allowed-tools` / `model`）→ **passthrough 保留**：解析时收集到 `frontmatter_extra`，写回时原样输出，不丢失（runtime 当前不强制 `allowed-tools`，仅做元数据保留） |
 | 异常处理 | skill load失败由 CLI / WebUI 显式回显 |
+| 启用 / 禁用 | 走"状态分离"模式：状态存独立文件 `.agenta/skills_disabled.json`（详 §3.7.3），SKILL.md 保持纯净 |
+| 改名 | 通过 `POST /api/skills/{name}/rename` 强一致改名：移动目录 + 同步 frontmatter `name:` 字段 + 迁移 disabled list 状态；目录名永远 == frontmatter `name` |
+| Web UI 管理 | 完整 CRUD + 改名 + toggle 启停 + 一键 reload + 搜索 / 排序 / 批量启停；编辑器用 CodeMirror 6 提供 markdown 高亮 + Edit/Split/Preview 三态预览。详 [iter_4_UI.md §5 API 总览](./iter_4_UI.md) |
 
 ### 3.7.2 渐进披露
 
@@ -676,6 +680,22 @@ Skills 规范定义的**渐进披露（progressive disclosure）**有三层：ca
     A->>L: messages + body
     L-->>A: 按 skill 指令执行的回答
 ```
+
+### 3.7.3 启用 / 禁用状态持久化
+
+业内"agent-instructions"类配置普遍采用**状态分离**模式（Cursor 用户本地偏好 / Claude.ai 云端 DB）：skill 定义跟启用状态分两层存。AgentA 也走这条路 —— SKILL.md 保持纯净（仅 name / description / 标准字段），禁用名单存独立文件。
+
+| 项 | 约定 |
+|---|---|
+| 文件路径 | `.agenta/skills_disabled.json`（可由 `SKILLS_DISABLED_FILE` 环境变量覆盖）|
+| 文件格式 | JSON 字符串数组，name 排序写入，例：`["skill_a", "skill_b"]` |
+| 是否进 git | **进 git**（个人项目自己用，团队偏好可共享）；个人临时禁用不想入 git 自己加 `.gitignore` |
+| 写入语义 | **原子写**：tempfile + rename，防多 tab 并发交错 |
+| 启动行为 | scan 时把 disabled 名单里的 skill 分流到 `ScanResult.disabled`；**不进 `## Skills` catalog 也不暴露 `load_skill` 工具**，但 UI 仍能看到 + toggle 回 enabled |
+| **孤儿自愈** | scan 时若 disabled 名单里某 name 在磁盘已不存在 → 自动从文件移除（写回） |
+| 立即生效范围 | toggle 后 `cache_clear()` Agent 单例，**下一轮新对话立即生效**；当前 session 因 system prompt 已下发 LLM 不可撤回 |
+
+**为什么不把 `enabled` 字段塞进 SKILL.md frontmatter**：跟 Claude.ai / Cursor / VS Code Copilot 业内主流做法对齐，让 SKILL.md 保持纯净，符合 [agentskills.io](https://agentskills.io) 开放标准 → SKILL.md 可跨工具复用，团队协作 git push 时不会"我帮你决定哪个 skill 启用"。
 
 ## 3.8 Plan-Execute
 

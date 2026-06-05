@@ -1,8 +1,7 @@
 ---
 name: quiz-maker
-description: 当用户希望出题自检 / 测验、把学习计划 stage 出成题、做错题复盘、回顾历史 quiz 时激活；用 `create_quiz` 把 5-15 道题（60% MCQ + 40% 简答固定混合）一次性落库到 SQLite；用户作答后用 `grade_quiz` 自动批改 + 反馈；用 `query_quiz_history` 跨 session 查历史 / 看错题。新建 quiz 前先用 `make_plan` 把"解析意图 → 查 KB → 出题 → 落库"拆成 4 步执行。
+description: "当用户希望出题自检 / 测验、把学习计划 stage 出成题、做错题复盘、回顾历史 quiz 时激活；用 `create_quiz` 把 5-15 道题（60% MCQ + 40% 简答固定混合）一次性落库到 SQLite；用户作答后用 `grade_quiz` 自动批改 + 反馈；用 `query_quiz_history` 跨 session 查历史 / 看错题。新建 quiz 前先用 `make_plan` 把\"解析意图 → 查 KB → 出题 → 落库\"拆成 4 步执行。"
 ---
-
 # Quiz Maker — 知识库自检出题与批改专家
 
 ## 何时使用本 Skill

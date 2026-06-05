@@ -34,9 +34,16 @@ def get_agent() -> AgentAPI:
     """返回进程级单例 Agent。
 
     用 `lru_cache(maxsize=1)` 实现"首次调用时构造、之后复用"的语义。
+    构造时扫一次 `.agenta/skills/` 注入 Agent，让 LLM 能看到 `## Skills` catalog
+    并可调 `load_skill` 工具。Web UI 通过 `POST /api/skills/reload` 调
+    `get_agent.cache_clear()` 强制重建实例以读到磁盘新内容（trade-off：会重新打开
+    sub-store 连接，但下一轮对话立即看到新 catalog）。
+
     返回 `AgentAPI` 契约类型，调用方不绑定具体实现。
     """
-    return Agent(verbose=False)
+    from src.cli.skill_loader import scan_skills
+    skills_map = scan_skills().loaded
+    return Agent(verbose=False, skills=skills_map or None)
 
 
 @lru_cache(maxsize=1)
