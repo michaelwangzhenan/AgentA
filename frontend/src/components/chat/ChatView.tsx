@@ -15,6 +15,10 @@ export type ChatViewProps = {
   onEditResend: (userId: string, newText: string) => void
   onResendUser: (userId: string) => void
   onSwitchVersion: (assistantId: string, index: number) => void
+  // 嵌入到「学而时习」侧栏时隐藏自带 header（外层已有标题栏）
+  hideHeader?: boolean
+  // 嵌入窄面板时让气泡占满宽度
+  compact?: boolean
 }
 
 export function ChatView({
@@ -27,10 +31,13 @@ export function ChatView({
   onEditResend,
   onResendUser,
   onSwitchVersion,
+  hideHeader = false,
+  compact = false,
 }: ChatViewProps) {
   const composerRef = useRef<ComposerHandle>(null)
   const cb: BubbleCallbacks = {
     inFlight,
+    compact,
     onRegenerate,
     onEditResend,
     onResendUser,
@@ -49,10 +56,12 @@ export function ChatView({
 
   return (
     <div className="flex h-full flex-1 flex-col">
-      <header className="border-b border-border px-6 py-3">
-        <h1 className="text-base font-semibold tracking-tight">AgentA</h1>
-        <p className="text-xs text-muted-foreground">基于 RAG + Agent 的学习助手</p>
-      </header>
+      {!hideHeader && (
+        <header className="border-b border-border px-6 py-3">
+          <h1 className="text-base font-semibold tracking-tight">AgentA</h1>
+          <p className="text-xs text-muted-foreground">基于 RAG + Agent 的学习助手</p>
+        </header>
+      )}
 
       {messages.length === 0 ? (
         // 空状态：欢迎屏 + 居中 composer

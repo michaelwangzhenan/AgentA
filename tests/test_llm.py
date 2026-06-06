@@ -122,11 +122,13 @@ class TestAllProviders:
     """遍历全部厂商 / 模型的测试"""
 
     def test_all_providers_registered(self) -> None:
-        """PROVIDER_CONFIGS 应包含全部 9 个厂商"""
+        """PROVIDER_CONFIGS 应包含全部 10 个厂商"""
         expected = {"kimi", "openai", "deepseek", "grok", "ollama", "claude",
-                    "qwen", "minimax", "glm"}
+                    "qwen", "minimax", "glm", "gemini"}
         actual = set(config.PROVIDER_CONFIGS.keys())
-        assert expected == actual, f"缺少厂商: {expected - actual}"
+        assert expected == actual, (
+            f"缺少厂商: {expected - actual}；多出厂商: {actual - expected}"
+        )
 
     def test_every_model_points_to_known_provider(self) -> None:
         """每个模型的 provider 都必须在 PROVIDER_CONFIGS 中。"""

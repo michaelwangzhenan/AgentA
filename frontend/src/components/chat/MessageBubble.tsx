@@ -30,10 +30,13 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { fileBadge } from '@/lib/attachments'
+import { cn } from '@/lib/utils'
 import type { AssistantMessage, Message, MessageAttachment } from '@/types/chat'
 
 export type BubbleCallbacks = {
   inFlight: boolean
+  // 嵌入窄面板（学而时习侧栏）时让气泡占满宽度，避免右侧留白
+  compact?: boolean
   onRegenerate: (assistantId: string) => void
   onEditResend: (userId: string, newText: string) => void
   onResendUser: (userId: string) => void
@@ -138,7 +141,10 @@ function UserBubble({
     <div className="group flex flex-col items-end gap-1">
       {attachments.length > 0 ? <AttachmentCards items={attachments} /> : null}
       {message.content ? (
-        <div className="max-w-[80%] rounded-2xl bg-primary px-4 py-2 text-sm break-words whitespace-pre-wrap text-primary-foreground">
+        <div className={cn(
+          'rounded-2xl bg-primary px-4 py-2 text-sm break-words whitespace-pre-wrap text-primary-foreground',
+          cb.compact ? 'max-w-[92%]' : 'max-w-[80%]',
+        )}>
           {message.content}
         </div>
       ) : null}
@@ -249,7 +255,7 @@ function AssistantBubble({
 
   return (
     <div className="group flex flex-col items-start gap-1">
-      <div className="w-full max-w-[85%] space-y-1">
+      <div className={cn('w-full space-y-1', cb.compact ? 'max-w-full' : 'max-w-[85%]')}>
         {message.plan && message.plan.length > 0 ? (
           <PlanBlock steps={message.plan} />
         ) : null}

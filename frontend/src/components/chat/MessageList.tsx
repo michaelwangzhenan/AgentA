@@ -60,7 +60,7 @@ export function MessageList({ messages, cb }: Props) {
         onScroll={onScroll}
         className="h-full overflow-y-auto px-4 py-6"
       >
-        <div className="mx-auto max-w-3xl space-y-4">
+        <div className="mx-auto max-w-4xl space-y-4">
           {messages.map((m, i) => {
             const prev = messages[i - 1]
             const showSep =

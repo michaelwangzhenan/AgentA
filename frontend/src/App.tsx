@@ -135,7 +135,22 @@ function App() {
       {activeView === 'rules' && <RulesView />}
       {activeView === 'skills' && <SkillsView />}
       {activeView === 'mcp' && <MCPView />}
-      {activeView === 'mastery' && <MasteryView />}
+      {activeView === 'mastery' && (
+        <MasteryView
+          sessionId={activeSessionId}
+          sessions={sessions}
+          messages={messages}
+          inFlight={inFlight}
+          onSelectSession={handleSelect}
+          onCreateSession={handleCreate}
+          onSend={send}
+          onStop={stop}
+          onRegenerate={regenerate}
+          onEditResend={editResend}
+          onResendUser={resendUser}
+          onSwitchVersion={switchVersion}
+        />
+      )}
       {activeView === 'settings' && <SettingsView />}
       <Toaster
         position="bottom-right"

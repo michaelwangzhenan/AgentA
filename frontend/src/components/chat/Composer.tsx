@@ -412,7 +412,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             {/* 模型选择：厂商 → 具体模型 两级菜单 */}
             <DropdownMenu>
               <DropdownMenuTrigger
-                className="flex h-8 items-center gap-1 rounded-md px-2 text-lg text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                className="flex h-8 items-center gap-1 rounded-md px-2 text-sm text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
                 disabled={settings.loading}
               >
                 {settings.activeModelLabel || '模型'}
