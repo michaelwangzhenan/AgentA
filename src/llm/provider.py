@@ -245,6 +245,7 @@ def _run_openai_stream(
     content_parts: list[str] = []
     reasoning_parts: list[str] = []
     tool_calls_map: dict[int, dict[str, Any]] = {}
+    last_tc_idx = 0  # index 缺失时（Gemini 兼容层）记住上一个 tool_call 槽位
     prompt_tokens = completion_tokens = 0
 
     stream = client.chat.completions.create(**kwargs)
@@ -272,6 +273,15 @@ def _run_openai_stream(
         if getattr(delta, "tool_calls", None):
             for tc_delta in delta.tool_calls:
                 idx = tc_delta.index
+                # 部分 OpenAI 兼容层（如 Gemini）流式不给 per-call index：每个带 id 的
+                # chunk 即一个完整调用，纯 arguments 续传挂到上一个槽位。否则多个并行调用
+                # 会因 index 都为 None 而塌成一个（name/arguments 被拼接成垃圾）。
+                if idx is None:
+                    if tc_delta.id or not tool_calls_map:
+                        idx = len(tool_calls_map)
+                        last_tc_idx = idx
+                    else:
+                        idx = last_tc_idx
                 if idx not in tool_calls_map:
                     tool_calls_map[idx] = {
                         "id": tc_delta.id or "",

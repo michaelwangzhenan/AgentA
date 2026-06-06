@@ -27,6 +27,7 @@ class ConfigItemView(BaseModel):
     side_effect_hint: str | None = None
     danger: bool = False
     editable: bool = True
+    hidden: bool = False  # true 时前端设置面板不渲染（仍可经 API 读写）
 
 
 class ConfigGroupView(BaseModel):
@@ -57,6 +58,7 @@ class ModelOption(BaseModel):
     id: str          # model id，也是 ACTIVE_MODEL 取值
     label: str
     thinking: bool   # 该模型是否支持 Extended Thinking
+    tier: str = ""   # 能力/价位档位（min / low / medium / high / max；空 = 不显示徽章）
 
 
 class ProviderModels(BaseModel):

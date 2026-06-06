@@ -43,6 +43,9 @@ class ConfigItem:
     side_effect_hint: str | None = None
     danger: bool = False
     editable: bool = True
+    # 仍参与 /api/config 读写（聊天页 Composer 通过本接口切模型 / 推理档位），
+    # 但不在设置面板渲染 —— 避免与聊天页控件重复
+    hidden: bool = False
     options_provider: Callable[[], list[str]] | None = None
 
     def resolve_options(self) -> list[str] | None:
@@ -56,12 +59,21 @@ class ConfigItem:
 REGISTRY: list[ConfigItem] = [
     # ─── LLM ──────────────────────────────────────────────────────────────
     ConfigItem(
+        key="LLM_PROXY",
+        group="llm",
+        type=ItemType.STRING,
+        brief="HTTP 代理",
+        detail="仅对国外 provider（openai / grok / claude / gemini）生效；国内 provider 始终直连。留空则不走代理（电脑已有 VPN 时留空即可）。格式：http://host:port",
+    ),
+    # 以下 3 项由聊天页 Composer 通过 /api/config 读写，hidden 不在设置面板重复展示
+    ConfigItem(
         key="ACTIVE_MODEL",
         group="llm",
         type=ItemType.ENUM_STR,
         brief="LLM 模型",
         detail="当前激活的模型（厂商从模型反推）；切换后下一次调用立即生效，无需重启。",
         options_provider=lambda: sorted(_cfg.MODEL_CONFIGS.keys()),
+        hidden=True,
     ),
     ConfigItem(
         key="THINKING_ENABLED",
@@ -69,6 +81,7 @@ REGISTRY: list[ConfigItem] = [
         type=ItemType.BOOL,
         brief="Extended Thinking",
         detail="开启后让模型先 reasoning 再答；支持 Claude / qwen / kimi / deepseek / glm / minimax，其他 provider 静默降级。",
+        hidden=True,
     ),
     ConfigItem(
         key="THINKING_BUDGET",
@@ -78,6 +91,7 @@ REGISTRY: list[ConfigItem] = [
         detail="thinking 阶段最多用多少 tokens（仅 Claude / qwen 消费此值，其余忽略）。简单 1024~3000；复杂 8000~16000；Agent 32000+。",
         min=512,
         max=64000,
+        hidden=True,
     ),
     # ─── RAG ──────────────────────────────────────────────────────────────
     ConfigItem(

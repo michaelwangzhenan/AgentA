@@ -64,6 +64,30 @@ const THINKING_LABELS: Record<ThinkingLevel, string> = {
   high: '高',
 }
 
+// 能力/价位档位徽章样式（对齐后端 ModelConfig.tier）
+const TIER_META: Record<string, { label: string; className: string }> = {
+  min: { label: 'min', className: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400' },
+  low: { label: 'low', className: 'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300' },
+  medium: { label: 'medium', className: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' },
+  high: { label: 'high', className: 'bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300' },
+  max: { label: 'max', className: 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300' },
+}
+
+function TierBadge({ tier }: { tier?: string }) {
+  const meta = tier ? TIER_META[tier] : undefined
+  if (!meta) return null
+  return (
+    <span
+      className={cn(
+        'ml-2 rounded px-1.5 py-0.5 text-[10px] font-medium leading-none',
+        meta.className,
+      )}
+    >
+      {meta.label}
+    </span>
+  )
+}
+
 type Attachment = {
   id: string
   file: File
@@ -402,11 +426,23 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                         value={settings.activeModel}
                         onValueChange={(v) => void settings.setModel(v)}
                       >
-                        {p.models.map((m) => (
-                          <DropdownMenuRadioItem key={m.id} value={m.id}>
-                            {m.label}
-                          </DropdownMenuRadioItem>
-                        ))}
+                        {p.models.map((m) => {
+                          const isFree = m.label.includes('(free)')
+                          return (
+                            <DropdownMenuRadioItem key={m.id} value={m.id}>
+                              <span className="flex flex-1 items-center justify-between">
+                                <span
+                                  className={cn(
+                                    isFree && 'font-bold text-green-600 dark:text-green-400',
+                                  )}
+                                >
+                                  {m.label}
+                                </span>
+                                <TierBadge tier={m.tier} />
+                              </span>
+                            </DropdownMenuRadioItem>
+                          )
+                        })}
                       </DropdownMenuRadioGroup>
                     </DropdownMenuSubContent>
                   </DropdownMenuSub>

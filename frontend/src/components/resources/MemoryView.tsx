@@ -146,26 +146,6 @@ export function MemoryView() {
     <ResourcePage
       title="用户记忆"
       subtitle="LLM 自动学到的偏好 / 背景；也可手动添加。下次回答会用到"
-      toolbar={
-        <>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setAddOpen(true)}
-          >
-            <Plus className="mr-1 h-4 w-4" />
-            添加记忆
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setConfirmClearOpen(true)}
-            disabled={items.length === 0}
-          >
-            清空全部
-          </Button>
-        </>
-      }
     >
       {loadError && (
         <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-100">
@@ -175,13 +155,28 @@ export function MemoryView() {
 
       {loading ? (
         <p className="text-sm text-muted-foreground">加载中…</p>
-      ) : items.length === 0 ? (
-        <p className="text-sm text-muted-foreground">暂无记忆条目</p>
       ) : (
         <div className="rounded-lg border border-border bg-card">
-          <div className="border-b border-border px-3 py-2 text-sm font-medium">
-            共 {items.length} 条
+          <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+            <span className="text-sm font-medium">共 {items.length} 条</span>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
+                <Plus className="mr-1 h-4 w-4" />
+                添加记忆
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirmClearOpen(true)}
+                disabled={items.length === 0}
+              >
+                清空全部
+              </Button>
+            </div>
           </div>
+          {items.length === 0 ? (
+            <p className="px-3 py-6 text-sm text-muted-foreground">暂无记忆条目</p>
+          ) : (
           <ul className="divide-y divide-border">
             {items.map((it) => (
               <li key={it.id} className="group flex items-start gap-3 px-3 py-2">
@@ -228,6 +223,7 @@ export function MemoryView() {
               </li>
             ))}
           </ul>
+          )}
         </div>
       )}
 

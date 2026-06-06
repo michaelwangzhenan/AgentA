@@ -53,6 +53,7 @@ def _build_view(item: ConfigItem) -> ConfigItemView:
         side_effect_hint=item.side_effect_hint,
         danger=item.danger,
         editable=item.editable,
+        hidden=item.hidden,
     )
 
 
@@ -62,7 +63,12 @@ def list_models() -> ModelsResponse:
     by_provider: dict[str, list[ModelOption]] = {}
     for mid, m in _cfg.MODEL_CONFIGS.items():
         by_provider.setdefault(m.provider, []).append(
-            ModelOption(id=mid, label=m.label or mid, thinking=m.thinking is not None)
+            ModelOption(
+                id=mid,
+                label=m.label or mid,
+                thinking=m.thinking is not None,
+                tier=m.tier,
+            )
         )
     providers = [
         ProviderModels(

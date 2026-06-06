@@ -394,6 +394,16 @@ class Agent:
             payload={"message": "agent.run.start", "session_id": self.session_id},
         ))
 
+        # 部分模型（如 Gemini 3.x 经 OpenAI 兼容层）无法多轮回传 thought_signature，
+        # 带 tools 会在第二轮 400。这类模型整轮不传 tools，降级为纯聊天而不是报错。
+        try:
+            _, _active_model_cfg = _cfg.get_active_model()
+            model_supports_tools = _active_model_cfg.supports_tools
+        except Exception:
+            model_supports_tools = True
+        if not model_supports_tools:
+            logger.warning("[Agent] 当前模型不支持工具调用，本轮降级为纯聊天（不启用 tools）")
+
         for iteration in range(1, MAX_HARD_CAP_ROUNDS + 1):
             # Phase 2.1 — 每轮按 active plan 步数重算 tool/total 上限（无 plan 退化为 baseline）
             eff_tool_max, eff_total_max = self._compute_effective_caps(messages)
@@ -404,9 +414,13 @@ class Agent:
                 iteration, len(messages), eff_tool_max, eff_total_max,
             )
 
-            # 工具轮次达上限时，去掉 tools 参数，让 LLM 强制生成文本回答
-            active_tools = get_tools(self._skill_bodies) if tool_rounds < eff_tool_max else None
-            if active_tools is None:
+            # 工具轮次达上限（或模型不支持工具）时，去掉 tools 参数，让 LLM 强制生成文本回答
+            active_tools = (
+                get_tools(self._skill_bodies)
+                if (model_supports_tools and tool_rounds < eff_tool_max)
+                else None
+            )
+            if active_tools is None and model_supports_tools:
                 logger.warning("[Agent] 工具调用已达上限 %d 轮（含 plan 自适应），强制生成最终回答", eff_tool_max)
 
             # 调用 LLM：开启 thinking 时走流式 thinking 分支，否则普通 chat()

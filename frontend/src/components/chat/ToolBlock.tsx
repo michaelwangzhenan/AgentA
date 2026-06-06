@@ -36,6 +36,14 @@ function describe(call: ToolCallState): { label: string; Icon: typeof Wrench } {
       return { label: '抓取网页', Icon: Globe }
     case 'search_knowledge':
       return { label: q ? `检索知识库 “${q}”` : '检索知识库', Icon: BookOpen }
+    case 'update_step': {
+      // 当前步取 args.step_id；总步数从结果预览的 done/total 里取第二个数字
+      const stepId = typeof a.step_id === 'number' ? a.step_id : undefined
+      const total = call.preview?.match(/(\d+)\s*\/\s*(\d+)/)?.[2]
+      const suffix =
+        stepId != null ? ` ${stepId}/${total ?? '?'}` : total ? ` ?/${total}` : ''
+      return { label: `update_step${suffix}`, Icon: Wrench }
+    }
     default:
       return { label: call.name, Icon: Wrench }
   }

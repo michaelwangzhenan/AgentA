@@ -26,6 +26,7 @@ export type ConfigItemView = {
   side_effect_hint?: string | null
   danger?: boolean
   editable: boolean
+  hidden?: boolean // true 时设置面板不渲染（聊天页 Composer 仍经此接口读写）
 }
 
 export type ConfigGroupView = {
@@ -52,6 +53,7 @@ export type ModelOption = {
   id: string
   label: string
   thinking: boolean
+  tier?: string // 能力/价位档位：min / low / medium / high / max（空 = 不显示徽章）
 }
 
 export type ProviderModels = {

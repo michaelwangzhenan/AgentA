@@ -15,6 +15,7 @@
     - openai  : OpenAI GPT 系列（生产环境）
     - grok    : xAI Grok（生产环境）
     - claude  : Anthropic Claude（生产环境，使用原生 SDK）
+    - gemini  : Google Gemini（走 OpenAI 兼容端点，Flash 系列有永久免费额度）
 """
 
 import os
@@ -68,6 +69,10 @@ class ModelConfig:
     thinking: "ThinkingSpec | None" = None
     # 单次最大输出 tokens（None 用全局默认）；thinking 时 max_tokens 不能超此上限
     max_output_tokens: int | None = None
+    # 能力/价位档位（可选值：min / low / medium / high / max；空字符串 = 不显示徽章）
+    tier: str = ""
+    # 是否支持多轮工具调用（False 时 agent 整轮不传 tools，降级为纯聊天）
+    supports_tools: bool = True
 
 
 PROVIDER_CONFIGS: dict[str, ProviderConfig] = {
@@ -115,6 +120,12 @@ PROVIDER_CONFIGS: dict[str, ProviderConfig] = {
         label="xAI Grok",
         proxied=True,
     ),
+    "gemini": ProviderConfig(
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+        api_key=os.getenv("GEMINI_API_KEY", ""),
+        label="Google Gemini",
+        proxied=True,
+    ),
     "ollama": ProviderConfig(
         base_url="http://localhost:11434/v1",
         api_key="ollama",  # Ollama 不需要真实 key，填占位符即可
@@ -141,6 +152,7 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
         force_temperature=0.6,
         # k2.5 开启 thinking：thinking.type=enabled（keep 仅 k2.6 支持，k2.5 传会 400）
         thinking=ThinkingSpec(kind="openai_reasoning", enable_extra_body={"thinking": {"type": "enabled"}}),
+        tier="high",
     ),
     "kimi-k2.6": ModelConfig(
         provider="kimi", model_id="kimi-k2.6", label="Kimi K2.6",
@@ -148,55 +160,100 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
         force_temperature=0.6,
         # k2.6 支持 keep=all 跨轮保留思考
         thinking=ThinkingSpec(kind="openai_reasoning", enable_extra_body={"thinking": {"type": "enabled", "keep": "all"}}),
+        tier="high",
     ),
     # ── 通义千问（DashScope，全系列共用 _QWEN_EXTRA / _QWEN_THINKING）────────
     "qwen3.5-flash": ModelConfig(
         provider="qwen", model_id="qwen3.5-flash", label="Qwen3.5 Flash",
-        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING,
+        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="low",
     ),
     "qwen3.5-flash-2026-02-23": ModelConfig(
         provider="qwen", model_id="qwen3.5-flash-2026-02-23", label="Qwen3.5 Flash (2026-02-23)",
-        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING,
+        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="low",
     ),
     "qwen3.5-plus-2026-04-20": ModelConfig(
         provider="qwen", model_id="qwen3.5-plus-2026-04-20", label="Qwen3.5 Plus (2026-04-20)",
-        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING,
+        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="medium",
     ),
     "qwen3.5-plus-2026-02-15": ModelConfig(
         provider="qwen", model_id="qwen3.5-plus-2026-02-15", label="Qwen3.5 Plus (2026-02-15)",
-        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING,
+        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="medium",
     ),
     "qwen3.5-27b": ModelConfig(
         provider="qwen", model_id="qwen3.5-27b", label="Qwen3.5 27B",
-        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING,
+        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="low",
     ),
     "qwen3.5-35b-a3b": ModelConfig(
         provider="qwen", model_id="qwen3.5-35b-a3b", label="Qwen3.5 35B-A3B",
-        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING,
+        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="low",
     ),
     "qwen3.5-122b-a10b": ModelConfig(
         provider="qwen", model_id="qwen3.5-122b-a10b", label="Qwen3.5 122B-A10B",
-        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING,
+        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="medium",
     ),
     "qwen3.5-397b-a17b": ModelConfig(
         provider="qwen", model_id="qwen3.5-397b-a17b", label="Qwen3.5 397B-A17B",
-        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING,
+        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="high",
     ),
     # ── DeepSeek ───────────────────────────────────────────────────────────
+    "deepseek-v4-flash": ModelConfig(
+        provider="deepseek", model_id="deepseek-v4-flash", label="DeepSeek V4 Flash",
+        # V4 自带思考，开启时直接读 reasoning_content（不切模型、不加额外开关）
+        thinking=ThinkingSpec(kind="openai_reasoning"), tier="min",
+    ),
     "deepseek-chat": ModelConfig(
         provider="deepseek", model_id="deepseek-chat", label="DeepSeek Chat",
         # 思考能力在 deepseek-reasoner（thinking-only，无开关）；开启时切模型
         thinking=ThinkingSpec(kind="openai_reasoning", thinking_model="deepseek-reasoner"),
+        tier="medium",
+    ),
+    "deepseek-v4-pro": ModelConfig(
+        provider="deepseek", model_id="deepseek-v4-pro", label="DeepSeek V4 Pro",
+        thinking=ThinkingSpec(kind="openai_reasoning"), tier="high",
     ),
     # ── 智谱 GLM ───────────────────────────────────────────────────────────
     "glm-4-flash": ModelConfig(
-        provider="glm", model_id="glm-4-flash", label="GLM-4 Flash",
+        provider="glm", model_id="glm-4-flash", label="GLM-4 Flash (free)",
         # glm-4-flash 不支持 thinking；开启时切到 glm-4.6
         thinking=ThinkingSpec(
             kind="openai_reasoning",
             enable_extra_body={"thinking": {"type": "enabled"}},
             thinking_model="glm-4.6",
         ),
+        tier="low",
+    ),
+    "glm-4.5-flash": ModelConfig(
+        provider="glm", model_id="glm-4.5-flash", label="GLM-4.5 Flash (free)",
+        thinking=ThinkingSpec(
+            kind="openai_reasoning",
+            enable_extra_body={"thinking": {"type": "enabled"}},
+        ),
+        tier="low",
+    ),
+    "glm-4.7-flash": ModelConfig(
+        provider="glm", model_id="glm-4.7-flash", label="GLM-4.7 Flash (free)",
+        thinking=ThinkingSpec(
+            kind="openai_reasoning",
+            enable_extra_body={"thinking": {"type": "enabled"}},
+        ),
+        tier="low",
+    ),
+    "glm-4.5": ModelConfig(
+        provider="glm", model_id="glm-4.5", label="GLM-4.5",
+        # 默认不思考；开启时加 thinking.type=enabled（GLM 思考开关）
+        thinking=ThinkingSpec(
+            kind="openai_reasoning",
+            enable_extra_body={"thinking": {"type": "enabled"}},
+        ),
+        tier="medium",
+    ),
+    "glm-5.1": ModelConfig(
+        provider="glm", model_id="glm-5.1", label="GLM-5.1",
+        thinking=ThinkingSpec(
+            kind="openai_reasoning",
+            enable_extra_body={"thinking": {"type": "enabled"}},
+        ),
+        tier="high",
     ),
     # ── MiniMax ────────────────────────────────────────────────────────────
     "MiniMax-Text-01": ModelConfig(
@@ -207,20 +264,86 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
             enable_extra_body={"reasoning_split": True},
             thinking_model="MiniMax-M1",
         ),
+        tier="medium",
+    ),
+    "MiniMax-M2": ModelConfig(
+        provider="minimax", model_id="MiniMax-M2", label="MiniMax M2",
+        # M 系列本身即推理模型；reasoning_split=True 把思考拆到 reasoning_content
+        thinking=ThinkingSpec(
+            kind="openai_reasoning",
+            enable_extra_body={"reasoning_split": True},
+        ),
+        tier="medium",
+    ),
+    "MiniMax-M2.7-highspeed": ModelConfig(
+        provider="minimax", model_id="MiniMax-M2.7-highspeed", label="MiniMax M2.7 (高速)",
+        thinking=ThinkingSpec(
+            kind="openai_reasoning",
+            enable_extra_body={"reasoning_split": True},
+        ),
+        tier="high",
+    ),
+    "MiniMax-M3": ModelConfig(
+        provider="minimax", model_id="MiniMax-M3", label="MiniMax M3",
+        thinking=ThinkingSpec(
+            kind="openai_reasoning",
+            enable_extra_body={"reasoning_split": True},
+        ),
+        tier="high",
     ),
     # ── Anthropic Claude ───────────────────────────────────────────────────
     "claude-sonnet-4-5": ModelConfig(
         provider="claude", model_id="claude-sonnet-4-5", label="Claude Sonnet 4.5",
         # 原生 Extended Thinking，budget 由 budget_tokens 原生参数控制
         thinking=ThinkingSpec(kind="anthropic"),
-        max_output_tokens=64_000,
+        max_output_tokens=64_000, tier="high",
+    ),
+    "claude-sonnet-4-6": ModelConfig(
+        provider="claude", model_id="claude-sonnet-4-6", label="Claude Sonnet 4.6",
+        thinking=ThinkingSpec(kind="anthropic"),
+        max_output_tokens=64_000, tier="high",
+    ),
+    "claude-opus-4-7": ModelConfig(
+        provider="claude", model_id="claude-opus-4-7", label="Claude Opus 4.7",
+        thinking=ThinkingSpec(kind="anthropic"),
+        max_output_tokens=64_000, tier="max",
+    ),
+    "claude-opus-4-8": ModelConfig(
+        provider="claude", model_id="claude-opus-4-8", label="Claude Opus 4.8",
+        thinking=ThinkingSpec(kind="anthropic"),
+        max_output_tokens=64_000, tier="max",
     ),
     # ── OpenAI ─────────────────────────────────────────────────────────────
-    "gpt-4o": ModelConfig(provider="openai", model_id="gpt-4o", label="GPT-4o"),
+    # GPT-5 / Codex 走 chat completions，思考过程 API 不透出 reasoning_content，故不声明 thinking
+    "gpt-4o": ModelConfig(provider="openai", model_id="gpt-4o", label="GPT-4o", tier="medium"),
+    "gpt-5.3-codex": ModelConfig(provider="openai", model_id="gpt-5.3-codex", label="GPT-5.3 Codex", tier="high"),
+    "gpt-5.4": ModelConfig(provider="openai", model_id="gpt-5.4", label="GPT-5.4", tier="max"),
+    # ── Google Gemini（OpenAI 兼容端点；Flash 系列永久免费额度）──────────────
+    # 经 OpenAI 兼容 shim 调用，思考过程不稳定透出，统一不声明 thinking。
+    # 2.5 系列可正常多轮工具调用；3.x 系列每次工具调用会返回 thought_signature 且要求
+    # 下一轮原样回传，OpenAI 兼容层带不上 → 触发工具的第二轮必 400，故 3.x 仅适合纯聊天。
+    "gemini-2.5-flash-lite": ModelConfig(
+        provider="gemini", model_id="gemini-2.5-flash-lite",
+        label="Gemini 2.5 Flash-Lite (free)", tier="min",
+    ),
+    "gemini-2.5-flash": ModelConfig(
+        provider="gemini", model_id="gemini-2.5-flash",
+        label="Gemini 2.5 Flash (free)", tier="low",
+    ),
+    "gemini-3.1-flash-lite": ModelConfig(
+        provider="gemini", model_id="gemini-3.1-flash-lite",
+        label="Gemini 3.1 Flash-Lite (free) · 仅聊天", tier="min",
+        supports_tools=False,
+    ),
+    "gemini-3.5-flash": ModelConfig(
+        provider="gemini", model_id="gemini-3.5-flash",
+        label="Gemini 3.5 Flash (free) · 仅聊天", tier="low",
+        supports_tools=False,
+    ),
     # ── xAI Grok ───────────────────────────────────────────────────────────
-    "grok-3-latest": ModelConfig(provider="grok", model_id="grok-3-latest", label="Grok 3"),
+    "grok-3-latest": ModelConfig(provider="grok", model_id="grok-3-latest", label="Grok 3", tier="high"),
     # ── Ollama 本地 ────────────────────────────────────────────────────────
-    "qwen2.5:7b": ModelConfig(provider="ollama", model_id="qwen2.5:7b", label="Qwen2.5 7B (本地)"),
+    "qwen2.5:7b": ModelConfig(provider="ollama", model_id="qwen2.5:7b", label="Qwen2.5 7B (本地)", tier="min"),
 }
 
 # 当前激活的模型，从环境变量读取（model id），默认 kimi-k2.5

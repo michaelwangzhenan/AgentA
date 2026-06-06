@@ -233,12 +233,14 @@ export function SettingsView() {
     const q = search.trim().toLowerCase()
     if (!q) {
       const g = groups.find((it) => it.name === activeGroup)
-      return g ? [g] : []
+      if (!g) return []
+      return [{ ...g, items: g.items.filter((it) => !it.hidden) }]
     }
     return groups
       .map((g) => ({
         ...g,
         items: g.items.filter((it) => {
+          if (it.hidden) return false
           return (
             it.key.toLowerCase().includes(q) ||
             it.brief.toLowerCase().includes(q) ||
@@ -257,9 +259,10 @@ export function SettingsView() {
     for (const g of groups) {
       counts[g.name] = g.items.filter(
         (it) =>
-          it.key.toLowerCase().includes(q) ||
-          it.brief.toLowerCase().includes(q) ||
-          it.detail.toLowerCase().includes(q),
+          !it.hidden &&
+          (it.key.toLowerCase().includes(q) ||
+            it.brief.toLowerCase().includes(q) ||
+            it.detail.toLowerCase().includes(q)),
       ).length
     }
     return counts
