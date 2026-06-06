@@ -47,14 +47,17 @@ import type {
   ModelsResponse,
 } from '@/types/config'
 import type {
+  CreatePlanInput,
   Plan,
   PlanListResponse,
   PlanSummary,
+  QuizAnswerInput,
   QuizListResponse,
   QuizSet,
   QuizSetSummary,
   SRSCard,
   SRSCardListResponse,
+  SRSRating,
 } from '@/types/business'
 
 // ─── 通用 helper ────────────────────────────────────────────────────────
@@ -532,6 +535,43 @@ export async function getPlan(planId: number): Promise<Plan> {
   return (await res.json()) as Plan
 }
 
+export async function createPlan(input: CreatePlanInput): Promise<Plan> {
+  const res = await fetch('/api/plans', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as Plan
+}
+
+export async function updatePlanTask(
+  planId: number,
+  taskId: number,
+  status: string,
+  note = '',
+): Promise<Plan> {
+  const res = await fetch(`/api/plans/${planId}/tasks/${taskId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status, note }),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as Plan
+}
+
+export async function activatePlan(planId: number): Promise<Plan> {
+  const res = await fetch(`/api/plans/${planId}/activate`, { method: 'POST' })
+  await _ensureOk(res)
+  return (await res.json()) as Plan
+}
+
+export async function abandonPlan(planId: number): Promise<Plan> {
+  const res = await fetch(`/api/plans/${planId}/abandon`, { method: 'POST' })
+  await _ensureOk(res)
+  return (await res.json()) as Plan
+}
+
 export async function listQuizzes(): Promise<QuizSetSummary[]> {
   const res = await fetch('/api/quizzes')
   await _ensureOk(res)
@@ -540,6 +580,25 @@ export async function listQuizzes(): Promise<QuizSetSummary[]> {
 
 export async function getQuiz(quizSetId: number): Promise<QuizSet> {
   const res = await fetch(`/api/quizzes/${quizSetId}`)
+  await _ensureOk(res)
+  return (await res.json()) as QuizSet
+}
+
+export async function submitQuiz(
+  quizSetId: number,
+  answers: QuizAnswerInput[],
+): Promise<QuizSet> {
+  const res = await fetch(`/api/quizzes/${quizSetId}/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ answers }),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as QuizSet
+}
+
+export async function archiveQuiz(quizSetId: number): Promise<QuizSet> {
+  const res = await fetch(`/api/quizzes/${quizSetId}/archive`, { method: 'POST' })
   await _ensureOk(res)
   return (await res.json()) as QuizSet
 }
@@ -559,6 +618,42 @@ export async function listSRSCards(): Promise<SRSCard[]> {
 
 export async function getSRSCard(cardId: number): Promise<SRSCard> {
   const res = await fetch(`/api/srs/cards/${cardId}`)
+  await _ensureOk(res)
+  return (await res.json()) as SRSCard
+}
+
+export async function createSRSCard(input: {
+  front: string
+  back: string
+  note?: string
+}): Promise<SRSCard> {
+  const res = await fetch('/api/srs/cards', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as SRSCard
+}
+
+export async function reviewSRSCard(
+  cardId: number,
+  rating: SRSRating,
+): Promise<SRSCard> {
+  const res = await fetch(`/api/srs/cards/${cardId}/review`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rating }),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as SRSCard
+}
+
+export async function setSRSCardStatus(
+  cardId: number,
+  action: 'suspend' | 'resume' | 'archive',
+): Promise<SRSCard> {
+  const res = await fetch(`/api/srs/cards/${cardId}/${action}`, { method: 'POST' })
   await _ensureOk(res)
   return (await res.json()) as SRSCard
 }

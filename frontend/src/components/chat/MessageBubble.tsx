@@ -266,7 +266,11 @@ function AssistantBubble({
               }
             />
           ) : (
-            <ToolBlock key={it.call.call_id} call={it.call} />
+            <ToolBlock
+              key={it.call.call_id}
+              call={it.call}
+              planTotal={message.plan?.length}
+            />
           ),
         )}
 

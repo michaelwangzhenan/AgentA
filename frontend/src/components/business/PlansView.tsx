@@ -1,15 +1,41 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { CheckCircle2, Circle, MinusCircle, Star } from 'lucide-react'
+import { CheckCircle2, Circle, MinusCircle, Plus, Star } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { getPlan, listPlans } from '@/api/client'
-import { ResourcePage } from '@/components/resources/ResourcePage'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
+  abandonPlan,
+  activatePlan,
+  createPlan,
+  getPlan,
+  listPlans,
+  updatePlanTask,
+} from '@/api/client'
 import {
   TASK_STATUS_LABELS,
   type Plan,
   type PlanSummary,
   type PlanTask,
 } from '@/types/business'
+import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 
 function TaskStatusIcon({ status }: { status: string }) {
@@ -28,24 +54,36 @@ function groupByStage(tasks: PlanTask[]): Map<number, PlanTask[]> {
   return m
 }
 
+// 点任务在 待办 → 已完成 → 已跳过 → 待办 间循环
+const NEXT_STATUS: Record<string, string> = {
+  pending: 'success',
+  success: 'skipped',
+  skipped: 'pending',
+}
+
 export function PlansView() {
   const [plans, setPlans] = useState<PlanSummary[]>([])
   const [selected, setSelected] = useState<Plan | null>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [loadingList, setLoadingList] = useState(true)
-  const [loadingDetail, setLoadingDetail] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // 用函数式 setSelectedId 避免把 selectedId 放进 deps —— 否则每次切 plan 都会
-  // 让 refreshList 引用变 → useEffect 重跑 → 重复拉一遍 list 接口。
-  const refreshList = useCallback(async () => {
+  const [addOpen, setAddOpen] = useState(false)
+  const [addGoal, setAddGoal] = useState('')
+  const [addWeeks, setAddWeeks] = useState('')
+  const [addTasks, setAddTasks] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [abandonTarget, setAbandonTarget] = useState<PlanSummary | null>(null)
+
+  const refreshList = useCallback(async (preferId?: number) => {
     setLoadingList(true)
     setError(null)
     try {
       const list = await listPlans()
       setPlans(list)
       setSelectedId((prev) => {
-        if (prev !== null) return prev
+        if (preferId !== undefined) return preferId
+        if (prev !== null && list.some((p) => p.id === prev)) return prev
         const active = list.find((p) => p.is_active) ?? list[0]
         return active?.id ?? null
       })
@@ -60,30 +98,24 @@ export function PlansView() {
     refreshList()
   }, [refreshList])
 
+  const reloadDetail = useCallback(async (id: number) => {
+    try {
+      setSelected(await getPlan(id))
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }, [])
+
   useEffect(() => {
     if (selectedId === null) {
       setSelected(null)
       return
     }
-    let cancelled = false
-    ;(async () => {
-      setLoadingDetail(true)
-      try {
-        const p = await getPlan(selectedId)
-        if (!cancelled) setSelected(p)
-      } catch (e) {
-        if (!cancelled) setError((e as Error).message)
-      } finally {
-        if (!cancelled) setLoadingDetail(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [selectedId])
+    reloadDetail(selectedId)
+  }, [selectedId, reloadDetail])
 
   const stages = useMemo(
-    () => (selected ? groupByStage(selected.tasks) : new Map()),
+    () => (selected ? groupByStage(selected.tasks) : new Map<number, PlanTask[]>()),
     [selected],
   )
   const sortedStageIdxs = useMemo(
@@ -91,31 +123,111 @@ export function PlansView() {
     [stages],
   )
 
+  const resetAddForm = () => {
+    setAddGoal('')
+    setAddWeeks('')
+    setAddTasks('')
+  }
+
+  const submitAdd = async () => {
+    const goal = addGoal.trim()
+    if (!goal) return
+    const weeks = Number.parseInt(addWeeks, 10)
+    const lines = addTasks
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+    const tasks = lines.map((title, i) => ({
+      stage_idx: 1,
+      order_idx: i + 1,
+      title,
+    }))
+    setAdding(true)
+    try {
+      const plan = await createPlan({
+        goal,
+        weeks: Number.isFinite(weeks) && weeks > 0 ? weeks : 0,
+        tasks,
+      })
+      toast.success('已创建学习计划')
+      setAddOpen(false)
+      resetAddForm()
+      await refreshList(plan.id)
+    } catch (e) {
+      toast.error(`创建失败：${(e as Error).message}`)
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  const cycleTask = async (task: PlanTask) => {
+    if (!selected) return
+    const next = NEXT_STATUS[task.status] ?? 'success'
+    try {
+      const plan = await updatePlanTask(selected.id, task.id, next)
+      setSelected(plan)
+      // 列表里的完成计数也要刷新
+      refreshList(selected.id)
+    } catch (e) {
+      toast.error(`更新失败：${(e as Error).message}`)
+    }
+  }
+
+  const handleActivate = async (id: number) => {
+    try {
+      await activatePlan(id)
+      toast.success('已设为当前计划')
+      await refreshList(id)
+    } catch (e) {
+      toast.error(`操作失败：${(e as Error).message}`)
+    }
+  }
+
+  const confirmAbandon = async () => {
+    if (!abandonTarget) return
+    try {
+      await abandonPlan(abandonTarget.id)
+      toast.success('已放弃该计划')
+      setAbandonTarget(null)
+      await refreshList()
+    } catch (e) {
+      toast.error(`操作失败：${(e as Error).message}`)
+    }
+  }
+
   return (
-    <ResourcePage
-      title="学习计划"
-      subtitle="跨 session 持久化；在 chat 里让 LLM 调 create_study_plan / update_study_progress 工具维护"
-      toolbar={
-        <Button
-          onClick={refreshList}
-          size="sm"
-          variant="outline"
-          disabled={loadingList}
-        >
-          刷新
-        </Button>
-      }
-    >
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">
+          给自己定个目标，拆成阶段任务，逐条勾掉。复杂目标可在聊天里说"帮我做一份 8 周的 ML 学习计划"，让 AI 自动拟好。
+        </p>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button onClick={() => setAddOpen(true)} size="sm">
+            <Plus className="mr-1 h-4 w-4" />
+            新建计划
+          </Button>
+          <Button onClick={() => refreshList()} size="sm" variant="outline" disabled={loadingList}>
+            刷新
+          </Button>
+        </div>
+      </div>
+
       {error && (
         <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-100">
           {error}
         </div>
       )}
+
       {plans.length === 0 && !loadingList && (
-        <p className="text-sm text-muted-foreground">
-          暂无学习计划。去 chat 让 LLM 帮你拟一个："做一份 8 周的 ML 学习计划"
-        </p>
+        <div className="rounded-lg border border-dashed border-border px-4 py-10 text-center">
+          <p className="text-sm text-muted-foreground">还没有学习计划</p>
+          <Button onClick={() => setAddOpen(true)} size="sm" className="mt-3">
+            <Plus className="mr-1 h-4 w-4" />
+            新建第一个计划
+          </Button>
+        </div>
       )}
+
       {plans.length > 0 && (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-[260px_minmax(0,1fr)]">
           <div className="rounded-lg border border-border bg-card">
@@ -151,30 +263,48 @@ export function PlansView() {
           </div>
 
           <div className="min-w-0 rounded-lg border border-border bg-card">
-            {loadingDetail && !selected && (
-              <p className="px-3 py-2 text-sm text-muted-foreground">加载中…</p>
-            )}
             {selected && (
               <>
-                <div className="border-b border-border px-3 py-2">
-                  <div className="flex items-center gap-2">
-                    <h2 className="font-semibold">{selected.goal}</h2>
-                    {selected.is_active && (
-                      <span className="rounded bg-yellow-100 px-1.5 py-0.5 text-[10px] text-yellow-900 dark:bg-yellow-900 dark:text-yellow-100">
-                        当前 active
-                      </span>
-                    )}
+                <div className="flex items-start justify-between gap-2 border-b border-border px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h2 className="truncate font-semibold" title={selected.goal}>
+                        {selected.goal}
+                      </h2>
+                      {selected.is_active && (
+                        <span className="shrink-0 rounded bg-yellow-100 px-1.5 py-0.5 text-[10px] text-yellow-900 dark:bg-yellow-900 dark:text-yellow-100">
+                          当前计划
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground">
+                      {selected.weeks ? `${selected.weeks} 周 · ` : ''}
+                      {selected.status} · 创建于 {selected.created_at}
+                    </div>
                   </div>
-                  <div className="text-[10px] text-muted-foreground">
-                    {selected.weeks ? `${selected.weeks} 周 · ` : ''}
-                    {selected.status} · 创建于 {selected.created_at}
+                  <div className="flex shrink-0 items-center gap-1">
+                    {!selected.is_active && selected.status === 'active' && (
+                      <Button size="sm" variant="outline" onClick={() => handleActivate(selected.id)}>
+                        设为当前
+                      </Button>
+                    )}
+                    {selected.status !== 'abandoned' && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive"
+                        onClick={() =>
+                          setAbandonTarget(plans.find((p) => p.id === selected.id) ?? null)
+                        }
+                      >
+                        放弃
+                      </Button>
+                    )}
                   </div>
                 </div>
                 <div className="divide-y divide-border">
                   {sortedStageIdxs.length === 0 ? (
-                    <p className="px-3 py-3 text-sm text-muted-foreground">
-                      暂无任务
-                    </p>
+                    <p className="px-3 py-3 text-sm text-muted-foreground">暂无任务</p>
                   ) : (
                     sortedStageIdxs.map((idx) => (
                       <div key={idx} className="px-3 py-2">
@@ -184,7 +314,13 @@ export function PlansView() {
                         <ul className="mt-1 space-y-1">
                           {(stages.get(idx) ?? []).map((t: PlanTask) => (
                             <li key={t.id} className="flex items-start gap-2 text-sm">
-                              <TaskStatusIcon status={t.status} />
+                              <button
+                                onClick={() => cycleTask(t)}
+                                className="mt-0.5 shrink-0 rounded hover:bg-accent"
+                                title="点击切换：待办 → 已完成 → 已跳过"
+                              >
+                                <TaskStatusIcon status={t.status} />
+                              </button>
                               <div className="min-w-0 flex-1">
                                 <div
                                   className={
@@ -216,6 +352,96 @@ export function PlansView() {
           </div>
         </div>
       )}
-    </ResourcePage>
+
+      {/* 新建计划 Dialog */}
+      <Dialog
+        open={addOpen}
+        onOpenChange={(o: boolean) => {
+          if (adding) return
+          setAddOpen(o)
+          if (!o) resetAddForm()
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>新建学习计划</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">
+                目标 <span className="text-muted-foreground/70">（这次想学会什么）</span>
+              </label>
+              <Input
+                value={addGoal}
+                onChange={(e) => setAddGoal(e.target.value)}
+                placeholder="8 周系统学完机器学习基础"
+                autoFocus
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">
+                周期 <span className="text-muted-foreground/70">（周数，可留空）</span>
+              </label>
+              <Input
+                value={addWeeks}
+                onChange={(e) => setAddWeeks(e.target.value)}
+                placeholder="8"
+                inputMode="numeric"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">
+                任务 <span className="text-muted-foreground/70">（每行一条，可留空后续再加）</span>
+              </label>
+              <Textarea
+                value={addTasks}
+                onChange={(e) => setAddTasks(e.target.value)}
+                placeholder={'复习线性代数\n学习概率论基础\n动手实现线性回归'}
+                rows={4}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setAddOpen(false)
+                resetAddForm()
+              }}
+              disabled={adding}
+            >
+              取消
+            </Button>
+            <Button onClick={submitAdd} disabled={!addGoal.trim() || adding}>
+              {adding ? '创建中...' : '创建'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 放弃计划确认 */}
+      <AlertDialog
+        open={abandonTarget !== null}
+        onOpenChange={(o: boolean) => !o && setAbandonTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>放弃该计划？</AlertDialogTitle>
+            <AlertDialogDescription>
+              "{abandonTarget?.goal}" 将被标记为已放弃，不再出现在列表里。已有任务记录会保留。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={confirmAbandon}
+            >
+              放弃
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
   )
 }

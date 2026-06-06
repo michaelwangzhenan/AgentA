@@ -113,3 +113,88 @@ def test_get_plan_with_tasks(client: TestClient, store: LearningPlanStore) -> No
     plan = r.json()
     assert plan["id"] == pid
     assert plan["tasks"][0]["title"] == "t1"
+
+
+# ─── POST /api/plans（新建）─────────────────────────────────────────────
+
+
+def test_create_plan_with_tasks(client: TestClient) -> None:
+    r = client.post(
+        "/api/plans",
+        json={
+            "goal": "8 周学 ML",
+            "weeks": 8,
+            "tasks": [
+                {"stage_idx": 1, "order_idx": 1, "title": "线性代数"},
+                {"stage_idx": 1, "order_idx": 2, "title": "概率"},
+            ],
+        },
+    )
+    assert r.status_code == 201
+    plan = r.json()
+    assert plan["goal"] == "8 周学 ML"
+    assert plan["is_active"] is True
+    assert len(plan["tasks"]) == 2
+
+
+def test_create_plan_empty_goal_400(client: TestClient) -> None:
+    # goal 必填非空 → pydantic 422
+    r = client.post("/api/plans", json={"goal": "", "weeks": 1})
+    assert r.status_code == 422
+
+
+# ─── PATCH /api/plans/{id}/tasks/{task_id}（改任务）─────────────────────
+
+
+def test_update_task_status(client: TestClient, store: LearningPlanStore) -> None:
+    pid = store.create_plan("p", weeks=1)
+    store.add_tasks(pid, [{"stage_idx": 1, "order_idx": 1, "title": "t1"}])
+    task_id = store.get_plan_with_tasks(pid)["tasks"][0]["id"]
+
+    r = client.patch(
+        f"/api/plans/{pid}/tasks/{task_id}",
+        json={"status": "success", "note": "done"},
+    )
+    assert r.status_code == 200
+    task = r.json()["tasks"][0]
+    assert task["status"] == "success"
+    assert task["note"] == "done"
+
+
+def test_update_task_invalid_status_400(client: TestClient, store: LearningPlanStore) -> None:
+    pid = store.create_plan("p", weeks=1)
+    store.add_tasks(pid, [{"stage_idx": 1, "order_idx": 1, "title": "t1"}])
+    task_id = store.get_plan_with_tasks(pid)["tasks"][0]["id"]
+
+    r = client.patch(
+        f"/api/plans/{pid}/tasks/{task_id}", json={"status": "bogus"},
+    )
+    assert r.status_code == 400
+
+
+# ─── activate / abandon ─────────────────────────────────────────────────
+
+
+def test_activate_plan(client: TestClient, store: LearningPlanStore) -> None:
+    pid1 = store.create_plan("A", set_active=True)
+    pid2 = store.create_plan("B", set_active=True)  # B 现在 active
+
+    r = client.post(f"/api/plans/{pid1}/activate")
+    assert r.status_code == 200
+    assert r.json()["is_active"] is True
+    # B 已被切非 active
+    assert store.get_plan(pid2)["is_active"] is False
+
+
+def test_abandon_plan(client: TestClient, store: LearningPlanStore) -> None:
+    pid = store.create_plan("A", set_active=True)
+    r = client.post(f"/api/plans/{pid}/abandon")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "abandoned"
+    assert body["is_active"] is False
+
+
+def test_abandon_plan_404(client: TestClient) -> None:
+    r = client.post("/api/plans/9999/abandon")
+    assert r.status_code == 404

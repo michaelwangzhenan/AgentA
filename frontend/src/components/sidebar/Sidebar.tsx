@@ -5,13 +5,11 @@ import {
   Brain,
   ChevronDown,
   GraduationCap,
-  ListChecks,
   MessageSquare,
   MoreHorizontal,
   Pencil,
   Plug,
   Plus,
-  Repeat,
   ScrollText,
   Settings,
   Sparkles,
@@ -57,9 +55,7 @@ export type ViewKind =
   | 'rules'
   | 'skills'
   | 'mcp'
-  | 'plans'
-  | 'quizzes'
-  | 'srs'
+  | 'mastery'
   | 'settings'
 
 export type SidebarProps = {
@@ -191,21 +187,9 @@ export function Sidebar(props: SidebarProps) {
         />
         <ViewNavButton
           icon={<GraduationCap className="h-4 w-4" />}
-          label="学习计划"
-          active={activeView === 'plans'}
-          onClick={() => onSwitchView('plans')}
-        />
-        <ViewNavButton
-          icon={<ListChecks className="h-4 w-4" />}
-          label="Quiz"
-          active={activeView === 'quizzes'}
-          onClick={() => onSwitchView('quizzes')}
-        />
-        <ViewNavButton
-          icon={<Repeat className="h-4 w-4" />}
-          label="SRS"
-          active={activeView === 'srs'}
-          onClick={() => onSwitchView('srs')}
+          label="学而时习"
+          active={activeView === 'mastery'}
+          onClick={() => onSwitchView('mastery')}
         />
         <ViewNavButton
           icon={<Settings className="h-4 w-4" />}

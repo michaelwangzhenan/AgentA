@@ -128,3 +128,39 @@ export const SRS_STATUS_LABELS: Record<string, string> = {
   suspended: '暂停',
   archived: '归档',
 }
+
+// ─── 写端点请求体 ─────────────────────────────────────────────────────
+
+export type CreatePlanTaskInput = {
+  stage_idx: number
+  order_idx: number
+  title: string
+}
+
+export type CreatePlanInput = {
+  goal: string
+  weeks: number
+  tasks: CreatePlanTaskInput[]
+}
+
+export type QuizAnswerInput = {
+  question_id: number
+  answer: string
+}
+
+export type SRSRating = 'again' | 'hard' | 'good' | 'easy'
+
+// 4 档评分中文标签 + 语义说明（用于按钮 + Tooltip）
+export const SRS_RATING_LABELS: Record<SRSRating, string> = {
+  again: '重来',
+  hard: '困难',
+  good: '良好',
+  easy: '容易',
+}
+
+export const SRS_RATING_HINTS: Record<SRSRating, string> = {
+  again: '完全没记住，很快重新出现',
+  hard: '想起来但很吃力，间隔略缩短',
+  good: '正常答对，按计划拉长间隔',
+  easy: '太简单了，间隔拉得更长',
+}

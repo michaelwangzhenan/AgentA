@@ -21,12 +21,16 @@ import type { ToolCallState } from '@/types/chat'
 
 type Props = {
   call: ToolCallState
+  planTotal?: number
 }
 
 const URL_RE = /https?:\/\/[^\s)<>"']+/g
 
 /** 人类可读的动作名 + 图标（裸 tool 名对用户不友好） */
-function describe(call: ToolCallState): { label: string; Icon: typeof Wrench } {
+function describe(
+  call: ToolCallState,
+  planTotal?: number,
+): { label: string; Icon: typeof Wrench } {
   const a = call.args ?? {}
   const q = typeof a.query === 'string' ? a.query : ''
   switch (call.name) {
@@ -37,9 +41,12 @@ function describe(call: ToolCallState): { label: string; Icon: typeof Wrench } {
     case 'search_knowledge':
       return { label: q ? `检索知识库 “${q}”` : '检索知识库', Icon: BookOpen }
     case 'update_step': {
-      // 当前步取 args.step_id；总步数从结果预览的 done/total 里取第二个数字
-      const stepId = typeof a.step_id === 'number' ? a.step_id : undefined
-      const total = call.preview?.match(/(\d+)\s*\/\s*(\d+)/)?.[2]
+      // 结果预览开头固定带 [done/total]（后端保证不被截断）；step_id 优先用 args，
+      // 总步数优先用 plan 步数（实时可靠），都缺失时回退解析预览
+      const m = call.preview?.match(/(\d+)\s*\/\s*(\d+)/)
+      const stepId =
+        typeof a.step_id === 'number' ? a.step_id : m ? Number(m[1]) : undefined
+      const total = planTotal ?? m?.[2]
       const suffix =
         stepId != null ? ` ${stepId}/${total ?? '?'}` : total ? ` ?/${total}` : ''
       return { label: `update_step${suffix}`, Icon: Wrench }
@@ -57,9 +64,9 @@ function domainOf(url: string): string {
   }
 }
 
-export function ToolBlock({ call }: Props) {
+export function ToolBlock({ call, planTotal }: Props) {
   const [open, setOpen] = useState(false)
-  const { label, Icon } = describe(call)
+  const { label, Icon } = describe(call, planTotal)
 
   const argsJson = (() => {
     try {

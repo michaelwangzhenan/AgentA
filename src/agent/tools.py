@@ -863,11 +863,12 @@ def _tool_update_step(
     head = f"{status_icon} step {step_id}「{step.text}」状态：{status}{note_suffix}"
 
     done, total = state.progress()
+    # 进度放在最前（[done/total]），保证前端截断预览（前 100 字符）也能稳定解析总步数
     if state.is_complete():
         return ToolResult(
             status="ok",
             content=(
-                f"{head}\n\nplan 已完成 ({done}/{total})。请综合 plan 各步骤结果总结最终答案。"
+                f"[{done}/{total}] {head}\n\nplan 已完成。请综合 plan 各步骤结果总结最终答案。"
             ),
         )
     nxt = state.next_pending_step()
@@ -875,7 +876,7 @@ def _tool_update_step(
     return ToolResult(
         status="ok",
         content=(
-            f"{head}\n\n当前进度：{done}/{total}\n"
+            f"[{done}/{total}] {head}\n"
             f"→ 下一步：第 {nxt.id} 步 — {nxt.text}（请调用合适的业务 tool）"
         ),
     )

@@ -6,9 +6,7 @@ import { MCPView } from '@/components/resources/MCPView'
 import { MemoryView } from '@/components/resources/MemoryView'
 import { RulesView } from '@/components/resources/RulesView'
 import { SkillsView } from '@/components/resources/SkillsView'
-import { PlansView } from '@/components/business/PlansView'
-import { QuizzesView } from '@/components/business/QuizzesView'
-import { SRSView } from '@/components/business/SRSView'
+import { MasteryView } from '@/components/business/MasteryView'
 import { SettingsView } from '@/components/settings/SettingsView'
 import { Sidebar, type ViewKind } from '@/components/sidebar/Sidebar'
 import { useTheme } from '@/lib/theme'
@@ -137,9 +135,7 @@ function App() {
       {activeView === 'rules' && <RulesView />}
       {activeView === 'skills' && <SkillsView />}
       {activeView === 'mcp' && <MCPView />}
-      {activeView === 'plans' && <PlansView />}
-      {activeView === 'quizzes' && <QuizzesView />}
-      {activeView === 'srs' && <SRSView />}
+      {activeView === 'mastery' && <MasteryView />}
       {activeView === 'settings' && <SettingsView />}
       <Toaster
         position="bottom-right"

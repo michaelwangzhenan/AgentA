@@ -1,6 +1,6 @@
-"""SRS（间隔重复）端点响应模型"""
+"""SRS（间隔重复）端点请求 / 响应模型"""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SRSCard(BaseModel):
@@ -23,3 +23,17 @@ class SRSCard(BaseModel):
 
 class SRSCardListResponse(BaseModel):
     cards: list[SRSCard]
+
+
+# ─── 写端点请求体 ─────────────────────────────────────────────────────────
+
+
+class CreateCardRequest(BaseModel):
+    front: str = Field(min_length=1)
+    back: str = Field(min_length=1)
+    note: str = ""
+
+
+class ReviewCardRequest(BaseModel):
+    # 合法值：again / hard / good / easy（由 scheduler 二次校验）
+    rating: str

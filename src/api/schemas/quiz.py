@@ -1,6 +1,6 @@
-"""Quiz 端点响应模型"""
+"""Quiz 端点请求 / 响应模型"""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class QuizQuestion(BaseModel):
@@ -47,3 +47,15 @@ class QuizSet(BaseModel):
 
 class QuizListResponse(BaseModel):
     quizzes: list[QuizSetSummary]
+
+
+# ─── 写端点请求体 ─────────────────────────────────────────────────────────
+
+
+class QuizAnswer(BaseModel):
+    question_id: int
+    answer: str = ""
+
+
+class SubmitQuizRequest(BaseModel):
+    answers: list[QuizAnswer] = Field(default_factory=list)
