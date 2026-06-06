@@ -78,12 +78,22 @@ def test_get_returns_groups_with_items(client: TestClient) -> None:
             assert it["source"] in ("default", "override")
 
 
-def test_get_active_provider_options_match_registry(client: TestClient) -> None:
+def test_get_active_model_options_match_registry(client: TestClient) -> None:
     body = client.get("/api/config").json()
     llm = next(g for g in body["groups"] if g["name"] == "llm")
-    provider = next(it for it in llm["items"] if it["key"] == "ACTIVE_PROVIDER")
-    assert provider["type"] == "enum_str"
-    assert provider["options"] == sorted(_cfg.PROVIDER_CONFIGS.keys())
+    model = next(it for it in llm["items"] if it["key"] == "ACTIVE_MODEL")
+    assert model["type"] == "enum_str"
+    assert model["options"] == sorted(_cfg.MODEL_CONFIGS.keys())
+
+
+def test_models_catalog_endpoint(client: TestClient) -> None:
+    body = client.get("/api/config/models").json()
+    assert body["active"] == _cfg.ACTIVE_MODEL
+    # 目录里的模型总数应与 MODEL_CONFIGS 对齐，且每个模型挂在已知厂商下
+    listed = {m["id"] for p in body["providers"] for m in p["models"]}
+    assert listed == set(_cfg.MODEL_CONFIGS.keys())
+    for p in body["providers"]:
+        assert p["name"] in _cfg.PROVIDER_CONFIGS
 
 
 def test_get_no_api_keys_in_response(client: TestClient) -> None:

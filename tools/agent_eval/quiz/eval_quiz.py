@@ -259,7 +259,7 @@ def _collect_env() -> dict[str, str]:
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "git": git_part,
         "python": platform.python_version(),
-        "provider": getattr(config, "ACTIVE_PROVIDER", "?"),
+        "provider": getattr(config, "ACTIVE_MODEL", "?"),
     }
 
 

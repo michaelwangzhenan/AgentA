@@ -50,3 +50,21 @@ class ConfigItemResponse(BaseModel):
 class ConfigReloadResponse(BaseModel):
     changed_keys: list[str]
     config: ConfigResponse
+
+
+# ── 模型目录（两档：厂商 → 模型） ──────────────────────────────────────────
+class ModelOption(BaseModel):
+    id: str          # model id，也是 ACTIVE_MODEL 取值
+    label: str
+    thinking: bool   # 该模型是否支持 Extended Thinking
+
+
+class ProviderModels(BaseModel):
+    name: str        # 厂商 key
+    label: str       # 厂商显示名
+    models: list[ModelOption]
+
+
+class ModelsResponse(BaseModel):
+    active: str                     # 当前 ACTIVE_MODEL
+    providers: list[ProviderModels]

@@ -27,6 +27,9 @@ import {
   DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useDraft } from '@/hooks/useDraft'
@@ -382,25 +385,32 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               </DropdownMenuContent>
             </DropdownMenu>
 
-            {/* 模型选择 */}
+            {/* 模型选择：厂商 → 具体模型 两级菜单 */}
             <DropdownMenu>
               <DropdownMenuTrigger
                 className="flex h-8 items-center gap-1 rounded-md px-2 text-lg text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
                 disabled={settings.loading}
               >
-                {settings.activeProvider || '模型'}
+                {settings.activeModelLabel || '模型'}
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" side="top" className="w-auto min-w-44">
-                <DropdownMenuRadioGroup
-                  value={settings.activeProvider}
-                  onValueChange={(v) => void settings.setProvider(v)}
-                >
-                  {settings.providers.map((p) => (
-                    <DropdownMenuRadioItem key={p} value={p}>
-                      {p}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
+                {settings.providers.map((p) => (
+                  <DropdownMenuSub key={p.name}>
+                    <DropdownMenuSubTrigger>{p.label}</DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent className="min-w-44">
+                      <DropdownMenuRadioGroup
+                        value={settings.activeModel}
+                        onValueChange={(v) => void settings.setModel(v)}
+                      >
+                        {p.models.map((m) => (
+                          <DropdownMenuRadioItem key={m.id} value={m.id}>
+                            {m.label}
+                          </DropdownMenuRadioItem>
+                        ))}
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                ))}
               </DropdownMenuContent>
             </DropdownMenu>
 

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
-import { getConfig, patchConfig } from '@/api/client'
-import type { ConfigItemView } from '@/types/config'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { getConfig, getModels, patchConfig } from '@/api/client'
+import type { ConfigItemView, ProviderModels } from '@/types/config'
 
 export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high'
 
@@ -10,11 +10,6 @@ const LEVEL_BUDGET: Record<Exclude<ThinkingLevel, 'off'>, number> = {
   medium: 8000,
   high: 32000,
 }
-
-// 哪些 provider 名实际支持 extended thinking（其余灰显）。
-// 必须与后端各 ProviderConfig.thinking（src/config.py）严格对齐：声明了 thinking spec
-// 的 provider 才放开，其余后端会静默降级成普通 chat。
-const THINKING_PROVIDER_HINTS = ['claude', 'qwen', 'kimi', 'deepseek', 'glm', 'minimax']
 
 function budgetToLevel(enabled: boolean, budget: number): ThinkingLevel {
   if (!enabled) return 'off'
@@ -37,20 +32,17 @@ function findItem(
 /** Composer 的模型 / 推理档位设置，读写 /api/config（下一条消息生效）。 */
 export function useComposerSettings() {
   const [loading, setLoading] = useState(true)
-  const [providers, setProviders] = useState<string[]>([])
-  const [activeProvider, setActiveProvider] = useState('')
+  const [providers, setProviders] = useState<ProviderModels[]>([])
+  const [activeModel, setActiveModel] = useState('')
   const [level, setLevelState] = useState<ThinkingLevel>('off')
 
   const load = useCallback(async () => {
     try {
-      const cfg = await getConfig()
-      const provItem = findItem(cfg.groups, 'ACTIVE_PROVIDER')
+      const [catalog, cfg] = await Promise.all([getModels(), getConfig()])
+      setProviders(catalog.providers)
+      setActiveModel(catalog.active)
       const enItem = findItem(cfg.groups, 'THINKING_ENABLED')
       const budgetItem = findItem(cfg.groups, 'THINKING_BUDGET')
-      if (provItem) {
-        setProviders(provItem.options ?? [])
-        setActiveProvider(String(provItem.value ?? ''))
-      }
       const enabled = Boolean(enItem?.value)
       const budget = Number(budgetItem?.value ?? 8000)
       setLevelState(budgetToLevel(enabled, budget))
@@ -65,12 +57,12 @@ export function useComposerSettings() {
     void load()
   }, [load])
 
-  const setProvider = useCallback(async (p: string) => {
-    setActiveProvider(p) // 乐观更新
+  const setModel = useCallback(async (id: string) => {
+    setActiveModel(id) // 乐观更新
     try {
-      await patchConfig('ACTIVE_PROVIDER', p)
+      await patchConfig('ACTIVE_MODEL', id)
     } catch (e) {
-      console.error('[useComposerSettings] 切 provider 失败', e)
+      console.error('[useComposerSettings] 切模型失败', e)
       void load()
     }
   }, [load])
@@ -90,17 +82,23 @@ export function useComposerSettings() {
     }
   }, [load])
 
-  const thinkingSupported = THINKING_PROVIDER_HINTS.some((h) =>
-    activeProvider.toLowerCase().includes(h),
-  )
+  // 当前模型的 label + 是否支持 thinking，从目录里查
+  const active = useMemo(() => {
+    for (const p of providers) {
+      const m = p.models.find((x) => x.id === activeModel)
+      if (m) return { label: m.label, thinking: m.thinking }
+    }
+    return { label: activeModel, thinking: false }
+  }, [providers, activeModel])
 
   return {
     loading,
     providers,
-    activeProvider,
-    setProvider,
+    activeModel,
+    activeModelLabel: active.label,
+    setModel,
     level,
     setLevel,
-    thinkingSupported,
+    thinkingSupported: active.thinking,
   }
 }

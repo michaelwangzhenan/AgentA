@@ -44,6 +44,7 @@ import type {
   ConfigItemView,
   ConfigReloadResponse,
   ConfigResponse,
+  ModelsResponse,
 } from '@/types/config'
 import type {
   Plan,
@@ -476,6 +477,12 @@ export async function getConfig(): Promise<ConfigResponse> {
   const res = await fetch('/api/config')
   await _ensureOk(res)
   return (await res.json()) as ConfigResponse
+}
+
+export async function getModels(): Promise<ModelsResponse> {
+  const res = await fetch('/api/config/models')
+  await _ensureOk(res)
+  return (await res.json()) as ModelsResponse
 }
 
 export async function patchConfig(

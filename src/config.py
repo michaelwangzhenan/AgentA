@@ -39,116 +39,192 @@ class ThinkingSpec:
     thinking_model: str | None = None
 
 
+# ── 两档配置：厂商（连接）+ 模型（能力） ─────────────────────────────────────
+# 连接信息（base_url/api_key/SDK/代理）属于「厂商」，同厂商所有模型共用；
+# 能力和约束（model_id/extra_body/temperature/thinking/输出上限）属于「具体模型」。
+# 选择状态用单一 ACTIVE_MODEL（model id 全局唯一，厂商从 MODEL_CONFIGS[id].provider 推出）。
+
 @dataclass(frozen=True)
 class ProviderConfig:
-    """单个 LLM Provider 的配置"""
+    """单个 LLM 厂商的连接配置（只管「怎么连上」，不含任何模型能力）"""
     base_url: str
     api_key: str
-    model: str
+    label: str = ""          # UI 显示名（如 "Moonshot"）
+    sdk: str = "openai"      # "openai"（兼容协议）| "anthropic"（Claude 原生 SDK）
+    proxied: bool = False    # 是否需要走 LLM_PROXY（国外服务）
+
+
+@dataclass(frozen=True)
+class ModelConfig:
+    """单个具体模型的配置（能力 + 约束，反向指到所属厂商）"""
+    provider: str            # 所属厂商，PROVIDER_CONFIGS 的 key
+    model_id: str            # 真正发给 API 的模型名
+    label: str = ""          # UI 显示名（如 "Kimi K2.5"）
     # 透传给 openai SDK 的额外请求体参数（如 enable_thinking、response_format 等）
     extra_body: dict[str, Any] | None = None
-    # 强制覆盖 temperature（不为 None 时无视调用方传入值）。
-    # 用于个别模型对 temperature 有硬约束的情况，例如：
-    #   kimi-k2.6 要求 temperature 必须 = 1（其他值会返回 400）；
-    #   Claude Extended Thinking 也要求 temperature = 1（已在 provider.py 中单独处理）。
+    # 强制覆盖 temperature（个别模型有硬约束，如 kimi 要求 = 0.6；不为 None 时无视调用方传值）
     force_temperature: float | None = None
-    # thinking 能力声明（None = 该 provider 不支持，call_with_thinking 静默降级为普通 chat）
+    # thinking 能力声明（None = 该模型不支持，call_with_thinking 静默降级为普通 chat）
     thinking: "ThinkingSpec | None" = None
+    # 单次最大输出 tokens（None 用全局默认）；thinking 时 max_tokens 不能超此上限
+    max_output_tokens: int | None = None
 
 
-# 当前激活的 Provider，从环境变量读取，默认 kimi
-ACTIVE_PROVIDER: str = os.getenv("LLM_PROVIDER", "kimi").lower()
-
-# 所有 Provider 配置表（统一使用 OpenAI SDK 格式，claude 除外）
 PROVIDER_CONFIGS: dict[str, ProviderConfig] = {
     "kimi": ProviderConfig(
         base_url="https://api.moonshot.cn/v1",
         api_key=os.getenv("MOONSHOT_API_KEY", ""),
-        model="kimi-k2.5",
-        extra_body={"thinking": {"type": "disabled"}},
-        force_temperature=0.6,
-        # kimi 开启 thinking：thinking.type=enabled（keep 仅 k2.6 支持，k2.5 传会 400，故不带）；
-        # 多轮工具调用需回传 reasoning_content，已在 tool_call_engine 处理
-        thinking=ThinkingSpec(
-            kind="openai_reasoning",
-            enable_extra_body={"thinking": {"type": "enabled"}},
-        ),
+        label="Moonshot",
     ),
-    "openai": ProviderConfig(
-        base_url="https://api.openai.com/v1",
-        api_key=os.getenv("OPENAI_API_KEY", ""),
-        model="gpt-4o",
+    "qwen": ProviderConfig(
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        api_key=os.getenv("QWEN_API_KEY", ""),
+        label="通义千问",
     ),
     "deepseek": ProviderConfig(
         base_url="https://api.deepseek.com/v1",
         api_key=os.getenv("DEEPSEEK_API_KEY", ""),
-        model="deepseek-chat",
-        # deepseek 思考能力在 deepseek-reasoner 模型（thinking-only，无开关）；开启时切模型
-        thinking=ThinkingSpec(kind="openai_reasoning", thinking_model="deepseek-reasoner"),
-    ),
-    "grok": ProviderConfig(
-        base_url="https://api.x.ai/v1",
-        api_key=os.getenv("GROK_API_KEY1", ""),
-        model="grok-3-latest",
-    ),
-    "ollama": ProviderConfig(
-        base_url="http://localhost:11434/v1",
-        api_key="ollama",  # Ollama 不需要真实 key，填占位符即可
-        model="qwen2.5:7b",
-    ),
-    # ── 国内直连 ────────────────────────────────────────────────
-    # qwen3 支持 Extended Thinking，但非流式调用必须显式设 enable_thinking=False
-    #
-    # 模型选型：默认换成 qwen3-max 旗舰（阿里官方文档强调"upgraded for agent
-    # programming and tool invocation"），适合本项目"Agent + RAG 工具调用"链路。
-    # 备选（按价格/速度递减、精度递增）：
-    #   qwen-plus-latest    较便宜，常规对话足够
-    #   qwen3.5-plus        2026-02 新出，hybrid 线性注意力 + 稀疏 MoE
-    #   qwen3-max           ★ 当前默认，旗舰
-    #   qwen3-235b-a22b     开源 MoE 版，能力相当但延迟更高
-    "qwen": ProviderConfig(
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-        api_key=os.getenv("QWEN_API_KEY", ""),
-        model="qwen3.5-flash",
-        extra_body={"enable_thinking": False},
-        # DashScope qwen：enable_thinking=True 开启，thinking_budget 控制思考 token 上限
-        thinking=ThinkingSpec(
-            kind="openai_reasoning",
-            enable_extra_body={"enable_thinking": True},
-            budget_key="thinking_budget",
-        ),
-    ),
-    "minimax": ProviderConfig(
-        base_url="https://api.minimax.chat/v1",
-        api_key=os.getenv("MINIMAX_API_KEY", ""),
-        model="MiniMax-Text-01",
-        # MiniMax 推理模型（M1，思考默认开）；reasoning_split=True 才把思考拆到 reasoning_content
-        thinking=ThinkingSpec(
-            kind="openai_reasoning",
-            enable_extra_body={"reasoning_split": True},
-            thinking_model="MiniMax-M1",
-        ),
+        label="DeepSeek",
     ),
     "glm": ProviderConfig(
         base_url="https://open.bigmodel.cn/api/paas/v4",
         api_key=os.getenv("GLM_API_KEY", ""),
-        model="glm-4-flash",
-        # 智谱 GLM-4.6 起支持 thinking.type=enabled；glm-4-flash 不支持，开启时切到 glm-4.6
+        label="智谱 GLM",
+    ),
+    "minimax": ProviderConfig(
+        base_url="https://api.minimax.chat/v1",
+        api_key=os.getenv("MINIMAX_API_KEY", ""),
+        label="MiniMax",
+    ),
+    "claude": ProviderConfig(
+        base_url="",  # 不使用 OpenAI SDK，由 provider.py 原生调用
+        api_key=os.getenv("ANTHROPIC_API_KEY", ""),
+        label="Anthropic Claude",
+        sdk="anthropic",
+        proxied=True,
+    ),
+    "openai": ProviderConfig(
+        base_url="https://api.openai.com/v1",
+        api_key=os.getenv("OPENAI_API_KEY", ""),
+        label="OpenAI",
+        proxied=True,
+    ),
+    "grok": ProviderConfig(
+        base_url="https://api.x.ai/v1",
+        api_key=os.getenv("GROK_API_KEY1", ""),
+        label="xAI Grok",
+        proxied=True,
+    ),
+    "ollama": ProviderConfig(
+        base_url="http://localhost:11434/v1",
+        api_key="ollama",  # Ollama 不需要真实 key，填占位符即可
+        label="Ollama (本地)",
+    ),
+}
+
+# DashScope 通义千问系列共用：非流式必须 enable_thinking=False，开启 thinking 时翻成 True
+# 并用 thinking_budget 控预算（整个 qwen 系列协议一致，故抽出来共用）
+_QWEN_EXTRA = {"enable_thinking": False}
+_QWEN_THINKING = ThinkingSpec(
+    kind="openai_reasoning",
+    enable_extra_body={"enable_thinking": True},
+    budget_key="thinking_budget",
+)
+
+# 模型表（key = model id，全局唯一，也是 ACTIVE_MODEL 的取值）
+# 顺序：kimi → qwen → deepseek → glm → minimax → claude → openai → xAI → ollama
+MODEL_CONFIGS: dict[str, ModelConfig] = {
+    # ── Moonshot Kimi ──────────────────────────────────────────────────────
+    "kimi-k2.5": ModelConfig(
+        provider="kimi", model_id="kimi-k2.5", label="Kimi K2.5",
+        extra_body={"thinking": {"type": "disabled"}},
+        force_temperature=0.6,
+        # k2.5 开启 thinking：thinking.type=enabled（keep 仅 k2.6 支持，k2.5 传会 400）
+        thinking=ThinkingSpec(kind="openai_reasoning", enable_extra_body={"thinking": {"type": "enabled"}}),
+    ),
+    "kimi-k2.6": ModelConfig(
+        provider="kimi", model_id="kimi-k2.6", label="Kimi K2.6",
+        extra_body={"thinking": {"type": "disabled"}},
+        force_temperature=0.6,
+        # k2.6 支持 keep=all 跨轮保留思考
+        thinking=ThinkingSpec(kind="openai_reasoning", enable_extra_body={"thinking": {"type": "enabled", "keep": "all"}}),
+    ),
+    # ── 通义千问（DashScope，全系列共用 _QWEN_EXTRA / _QWEN_THINKING）────────
+    "qwen3.5-flash": ModelConfig(
+        provider="qwen", model_id="qwen3.5-flash", label="Qwen3.5 Flash",
+        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING,
+    ),
+    "qwen3.5-flash-2026-02-23": ModelConfig(
+        provider="qwen", model_id="qwen3.5-flash-2026-02-23", label="Qwen3.5 Flash (2026-02-23)",
+        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING,
+    ),
+    "qwen3.5-plus-2026-04-20": ModelConfig(
+        provider="qwen", model_id="qwen3.5-plus-2026-04-20", label="Qwen3.5 Plus (2026-04-20)",
+        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING,
+    ),
+    "qwen3.5-plus-2026-02-15": ModelConfig(
+        provider="qwen", model_id="qwen3.5-plus-2026-02-15", label="Qwen3.5 Plus (2026-02-15)",
+        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING,
+    ),
+    "qwen3.5-27b": ModelConfig(
+        provider="qwen", model_id="qwen3.5-27b", label="Qwen3.5 27B",
+        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING,
+    ),
+    "qwen3.5-35b-a3b": ModelConfig(
+        provider="qwen", model_id="qwen3.5-35b-a3b", label="Qwen3.5 35B-A3B",
+        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING,
+    ),
+    "qwen3.5-122b-a10b": ModelConfig(
+        provider="qwen", model_id="qwen3.5-122b-a10b", label="Qwen3.5 122B-A10B",
+        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING,
+    ),
+    "qwen3.5-397b-a17b": ModelConfig(
+        provider="qwen", model_id="qwen3.5-397b-a17b", label="Qwen3.5 397B-A17B",
+        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING,
+    ),
+    # ── DeepSeek ───────────────────────────────────────────────────────────
+    "deepseek-chat": ModelConfig(
+        provider="deepseek", model_id="deepseek-chat", label="DeepSeek Chat",
+        # 思考能力在 deepseek-reasoner（thinking-only，无开关）；开启时切模型
+        thinking=ThinkingSpec(kind="openai_reasoning", thinking_model="deepseek-reasoner"),
+    ),
+    # ── 智谱 GLM ───────────────────────────────────────────────────────────
+    "glm-4-flash": ModelConfig(
+        provider="glm", model_id="glm-4-flash", label="GLM-4 Flash",
+        # glm-4-flash 不支持 thinking；开启时切到 glm-4.6
         thinking=ThinkingSpec(
             kind="openai_reasoning",
             enable_extra_body={"thinking": {"type": "enabled"}},
             thinking_model="glm-4.6",
         ),
     ),
-    # claude 使用原生 anthropic SDK，base_url/api_key 在 provider.py 中单独处理
-    "claude": ProviderConfig(
-        base_url="",  # 不使用 OpenAI SDK，由 provider.py 原生调用
-        api_key=os.getenv("ANTHROPIC_API_KEY", ""),
-        model="claude-sonnet-4-5",
-        # Claude 原生 Extended Thinking，budget 由 budget_tokens 原生参数控制
-        thinking=ThinkingSpec(kind="anthropic"),
+    # ── MiniMax ────────────────────────────────────────────────────────────
+    "MiniMax-Text-01": ModelConfig(
+        provider="minimax", model_id="MiniMax-Text-01", label="MiniMax Text-01",
+        # 推理走 M1（思考默认开）；reasoning_split=True 才把思考拆到 reasoning_content
+        thinking=ThinkingSpec(
+            kind="openai_reasoning",
+            enable_extra_body={"reasoning_split": True},
+            thinking_model="MiniMax-M1",
+        ),
     ),
+    # ── Anthropic Claude ───────────────────────────────────────────────────
+    "claude-sonnet-4-5": ModelConfig(
+        provider="claude", model_id="claude-sonnet-4-5", label="Claude Sonnet 4.5",
+        # 原生 Extended Thinking，budget 由 budget_tokens 原生参数控制
+        thinking=ThinkingSpec(kind="anthropic"),
+        max_output_tokens=64_000,
+    ),
+    # ── OpenAI ─────────────────────────────────────────────────────────────
+    "gpt-4o": ModelConfig(provider="openai", model_id="gpt-4o", label="GPT-4o"),
+    # ── xAI Grok ───────────────────────────────────────────────────────────
+    "grok-3-latest": ModelConfig(provider="grok", model_id="grok-3-latest", label="Grok 3"),
+    # ── Ollama 本地 ────────────────────────────────────────────────────────
+    "qwen2.5:7b": ModelConfig(provider="ollama", model_id="qwen2.5:7b", label="Qwen2.5 7B (本地)"),
 }
+
+# 当前激活的模型，从环境变量读取（model id），默认 kimi-k2.5
+ACTIVE_MODEL: str = os.getenv("LLM_MODEL", "kimi-k2.5")
 
 # ChromaDB 存储路径
 CHROMA_DB_PATH: str = os.getenv("CHROMA_DB_PATH", "./chroma_db")
@@ -240,10 +316,6 @@ RAG_K_PER_SOURCE: int = int(os.getenv("RAG_K_PER_SOURCE", "3"))
 # 格式示例：http://10.144.1.10:8080
 # 置空则不使用代理
 LLM_PROXY: str = os.getenv("LLM_PROXY", "")
-
-# 需要走代理的 provider（国外服务）
-# 国内直连的 provider（kimi / deepseek / ollama）不在此集合中
-PROXIED_PROVIDERS: frozenset[str] = frozenset({"openai", "grok", "claude"})
 
 # 文本分块配置
 CHUNK_SIZE: int = int(os.getenv("CHUNK_SIZE", "600"))
@@ -404,16 +476,20 @@ SKILLS_DISABLED_FILE: str = os.getenv("SKILLS_DISABLED_FILE", ".agenta/skills/di
 USER_DISPLAY_NAME: str = os.getenv("USER_DISPLAY_NAME", "Michael")
 
 
-def get_active_config() -> ProviderConfig:
-    """获取当前激活的 Provider 配置，若不存在则抛出异常。"""
-    config = PROVIDER_CONFIGS.get(ACTIVE_PROVIDER)
-    if config is None:
-        supported = ", ".join(PROVIDER_CONFIGS.keys())
+def get_active_model() -> "tuple[ProviderConfig, ModelConfig]":
+    """返回当前激活模型的 (厂商连接配置, 模型配置)，不存在则抛异常。"""
+    model = MODEL_CONFIGS.get(ACTIVE_MODEL)
+    if model is None:
+        supported = ", ".join(MODEL_CONFIGS.keys())
         raise ValueError(
-            f"不支持的 LLM_PROVIDER: '{ACTIVE_PROVIDER}'，"
-            f"支持的值为: {supported}"
+            f"不支持的 LLM_MODEL: '{ACTIVE_MODEL}'，支持的值为: {supported}"
         )
-    return config
+    provider = PROVIDER_CONFIGS.get(model.provider)
+    if provider is None:
+        raise ValueError(
+            f"模型 '{ACTIVE_MODEL}' 指向未知厂商 '{model.provider}'"
+        )
+    return provider, model
 
 # Agent 实现方式: PYTHON | LANGCHAIN | AUTOGPT
 IMP_METHOD: str = os.getenv('IMP_METHOD', 'PYTHON').upper()

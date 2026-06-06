@@ -2,7 +2,7 @@
 LLM 统一调用接口
 
 上层业务代码只需调用 chat() 函数，完全不感知底层 Provider 差异。
-通过 config.py 中的 ACTIVE_PROVIDER 决定实际调用哪个服务。
+通过 config.py 中的 ACTIVE_MODEL 决定实际调用哪个模型（厂商从模型反推）。
 
 支持两种调用模式：
     1. 普通对话：直接返回文本内容
@@ -173,9 +173,11 @@ def chat(
 
     Raises:
         openai.APIError: OpenAI 兼容 API 调用失败时抛出。
-        anthropic.APIError: ACTIVE_PROVIDER 为 'claude' 时，原生 SDK 调用失败时抛出。
+        anthropic.APIError: 当前模型走 anthropic SDK 时，原生 SDK 调用失败时抛出。
     """
-    if config.ACTIVE_PROVIDER == "claude":
+    provider_config, model_config = config.get_active_model()
+
+    if provider_config.sdk == "anthropic":
         return _chat_claude(messages, tools, temperature, on_token_chunk)
 
     # 历史 messages / MCP tools 可能含非法 function name（`.` 分隔、空名等）
@@ -184,28 +186,26 @@ def chat(
     if tools:
         tools = _sanitize_tools_for_llm(tools)
 
-    provider_config = config.get_active_config()
-
-    # 个别模型对 temperature 有硬约束（如 kimi-k2.6 强制要求 = 1，非 1 直接 400），
-    # 由 ProviderConfig.force_temperature 声明，此处统一覆盖，避免在每个调用点重复处理。
+    # 个别模型对 temperature 有硬约束（如 kimi 强制要求 = 0.6，非约束值直接 400），
+    # 由 ModelConfig.force_temperature 声明，此处统一覆盖，避免在每个调用点重复处理。
     effective_temperature = (
-        provider_config.force_temperature
-        if provider_config.force_temperature is not None
+        model_config.force_temperature
+        if model_config.force_temperature is not None
         else temperature
     )
 
     kwargs: dict[str, Any] = {
-        "model": provider_config.model,
+        "model": model_config.model_id,
         "messages": messages,
         "temperature": effective_temperature,
     }
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
-    if provider_config.extra_body:
-        kwargs["extra_body"] = provider_config.extra_body
+    if model_config.extra_body:
+        kwargs["extra_body"] = model_config.extra_body
 
-    need_proxy = config.ACTIVE_PROVIDER in config.PROXIED_PROVIDERS and bool(config.LLM_PROXY)
+    need_proxy = provider_config.proxied and bool(config.LLM_PROXY)
 
     if on_token_chunk is not None:
         kwargs["stream"] = True
@@ -330,12 +330,12 @@ def _chat_claude(
     """
     import anthropic
 
-    provider_config = config.get_active_config()
+    provider_config, model_config = config.get_active_model()
 
     system_prompt, filtered_messages = _split_system_messages(messages)
 
     kwargs: dict[str, Any] = {
-        "model": provider_config.model,
+        "model": model_config.model_id,
         "max_tokens": config.CLAUDE_MAX_TOKENS,
         "messages": filtered_messages,
         "temperature": temperature,
@@ -452,7 +452,7 @@ def call_with_thinking(
     Returns:
         与 chat() 相同格式的 response 对象。
     """
-    spec = config.get_active_config().thinking
+    spec = config.get_active_model()[1].thinking
     if spec is None:
         return chat(messages, tools=tools, on_token_chunk=on_token_chunk)
     if spec.kind == "anthropic":
@@ -472,15 +472,16 @@ def _chat_claude_thinking(
     """Claude 原生 Extended Thinking 流式调用。"""
     import anthropic
 
-    provider_config = config.get_active_config()
+    provider_config, model_config = config.get_active_model()
 
     system_prompt, filtered_messages = _split_system_messages(messages)
 
     # budget 下限 1024（Anthropic 最小值）、上限留 4096 给正文，保证 max_tokens 不超模型上限
-    budget = max(1024, min(budget_tokens, _CLAUDE_OUTPUT_CAP - 4096))
+    output_cap = model_config.max_output_tokens or _CLAUDE_OUTPUT_CAP
+    budget = max(1024, min(budget_tokens, output_cap - 4096))
 
     kwargs: dict[str, Any] = {
-        "model": provider_config.model,
+        "model": model_config.model_id,
         # max_tokens 必须 > budget_tokens 且 <= 模型上限，Anthropic 强制要求
         "max_tokens": budget + 4096,
         "temperature": 1,  # Extended Thinking 要求 temperature=1
@@ -556,19 +557,19 @@ def _chat_openai_reasoning(
     thinking 内容通过 on_thinking_chunk 透传，并由 _run_openai_stream 挂到 message.reasoning_content，
     供 agent 多轮工具调用时回传（kimi 等不回传会 400）；但不写入 chat_history（防 prompt injection）。
     """
-    provider_config = config.get_active_config()
+    provider_config, model_config = config.get_active_model()
 
     messages = _sanitize_messages_for_llm(messages)
     if tools:
         tools = _sanitize_tools_for_llm(tools)
 
-    extra_body = dict(provider_config.extra_body or {})
+    extra_body = dict(model_config.extra_body or {})
     extra_body.update(spec.enable_extra_body or {})
     if spec.budget_key:
         extra_body[spec.budget_key] = budget_tokens
 
     kwargs: dict[str, Any] = {
-        "model": spec.thinking_model or provider_config.model,
+        "model": spec.thinking_model or model_config.model_id,
         "messages": messages,
         "stream": True,
         "stream_options": {"include_usage": True},  # 确保最后一个 chunk 携带 usage 统计
@@ -578,7 +579,7 @@ def _chat_openai_reasoning(
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
 
-    need_proxy = config.ACTIVE_PROVIDER in config.PROXIED_PROVIDERS and bool(config.LLM_PROXY)
+    need_proxy = provider_config.proxied and bool(config.LLM_PROXY)
     response = _openai_call(
         provider_config,
         need_proxy,

@@ -182,7 +182,7 @@ def _collect_env() -> dict[str, str]:
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "git": git_part,
         "python": platform.python_version(),
-        "provider": getattr(config, "ACTIVE_PROVIDER", "?"),
+        "provider": getattr(config, "ACTIVE_MODEL", "?"),
         "threshold": f"{config.HARNESS_GRADING_THRESHOLD:.2f}",
         "timeout": f"{config.HARNESS_LLM_TIMEOUT_SEC:.1f}s",
     }
@@ -332,7 +332,7 @@ def main() -> None:
     print(
         f"   threshold={config.HARNESS_GRADING_THRESHOLD:.2f}, "
         f"timeout={config.HARNESS_LLM_TIMEOUT_SEC:.1f}s, "
-        f"provider={config.ACTIVE_PROVIDER}\n"
+        f"provider={config.ACTIVE_MODEL}\n"
     )
 
     manager = HarnessManager()

@@ -28,6 +28,9 @@ from src.api.schemas.config import (
     ConfigPatchRequest,
     ConfigReloadResponse,
     ConfigResponse,
+    ModelOption,
+    ModelsResponse,
+    ProviderModels,
 )
 
 router = APIRouter(prefix="/config", tags=["config"])
@@ -51,6 +54,25 @@ def _build_view(item: ConfigItem) -> ConfigItemView:
         danger=item.danger,
         editable=item.editable,
     )
+
+
+@router.get("/models", response_model=ModelsResponse)
+def list_models() -> ModelsResponse:
+    """两档模型目录：按厂商分组的可选模型，供前端级联菜单使用。"""
+    by_provider: dict[str, list[ModelOption]] = {}
+    for mid, m in _cfg.MODEL_CONFIGS.items():
+        by_provider.setdefault(m.provider, []).append(
+            ModelOption(id=mid, label=m.label or mid, thinking=m.thinking is not None)
+        )
+    providers = [
+        ProviderModels(
+            name=pname,
+            label=_cfg.PROVIDER_CONFIGS[pname].label or pname,
+            models=models,
+        )
+        for pname, models in by_provider.items()
+    ]
+    return ModelsResponse(active=_cfg.ACTIVE_MODEL, providers=providers)
 
 
 @router.get("", response_model=ConfigResponse)

@@ -46,3 +46,21 @@ export type ConfigReloadResponse = {
   changed_keys: string[]
   config: ConfigResponse
 }
+
+// 两档模型目录（厂商 → 模型），对齐后端 GET /api/config/models
+export type ModelOption = {
+  id: string
+  label: string
+  thinking: boolean
+}
+
+export type ProviderModels = {
+  name: string
+  label: string
+  models: ModelOption[]
+}
+
+export type ModelsResponse = {
+  active: string
+  providers: ProviderModels[]
+}

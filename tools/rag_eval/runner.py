@@ -226,7 +226,7 @@ def _collect_metadata(
             "git": _git_info(repo_root),
             "python": platform.python_version(),
             "platform": sys.platform,
-            "llm_provider": config.ACTIVE_PROVIDER,
+            "llm_provider": config.ACTIVE_MODEL,
         },
         "golden": {
             "path": str(golden_path),

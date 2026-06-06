@@ -56,12 +56,12 @@ class ConfigItem:
 REGISTRY: list[ConfigItem] = [
     # ─── LLM ──────────────────────────────────────────────────────────────
     ConfigItem(
-        key="ACTIVE_PROVIDER",
+        key="ACTIVE_MODEL",
         group="llm",
         type=ItemType.ENUM_STR,
-        brief="LLM Provider",
-        detail="当前激活的 LLM provider；切换后下一次调用立即生效，无需重启。",
-        options_provider=lambda: sorted(_cfg.PROVIDER_CONFIGS.keys()),
+        brief="LLM 模型",
+        detail="当前激活的模型（厂商从模型反推）；切换后下一次调用立即生效，无需重启。",
+        options_provider=lambda: sorted(_cfg.MODEL_CONFIGS.keys()),
     ),
     ConfigItem(
         key="THINKING_ENABLED",
