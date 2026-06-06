@@ -4,21 +4,22 @@ import type {
   AssistantMessage,
   AssistantVersion,
   Message,
+  PlanStep,
   PlanStepStatus,
+  TimelineItem,
   ToolCallState,
   UserMessage,
 } from '@/types/chat'
 import { backendMessagesToFrontend } from '@/types/session'
+import { parseUserMessage } from '@/lib/attachments'
 
 function newAssistantMessage(): AssistantMessage {
   return {
     id: crypto.randomUUID(),
     role: 'assistant',
     content: '',
-    thinking: '',
-    thinkingMs: null,
     plan: null,
-    toolCalls: [],
+    timeline: [],
     error: null,
     streaming: true,
     createdAt: Date.now(),
@@ -26,20 +27,39 @@ function newAssistantMessage(): AssistantMessage {
 }
 
 /** 流结束（关闭 / 出错 / 用户中止）时，把仍在"进行中"的工具收敛成失败态，避免永远转圈 */
-function endRunningTools(calls: ToolCallState[]): ToolCallState[] {
-  if (!calls.some((c) => c.status === 'running')) return calls
-  return calls.map((c) =>
-    c.status === 'running' ? { ...c, status: 'error' as const } : c,
+function endRunningTools(timeline: TimelineItem[]): TimelineItem[] {
+  if (!timeline.some((it) => it.kind === 'tool' && it.call.status === 'running')) {
+    return timeline
+  }
+  return timeline.map((it) =>
+    it.kind === 'tool' && it.call.status === 'running'
+      ? { ...it, call: { ...it.call, status: 'error' as const } }
+      : it,
   )
+}
+
+function hasRunningTool(timeline: TimelineItem[]): boolean {
+  return timeline.some((it) => it.kind === 'tool' && it.call.status === 'running')
+}
+
+/**
+ * 流结束时把仍在"进行中"的 plan 步骤收敛到终态，避免最后一步永远转圈。
+ * 后端正常出最终答案时会补发 plan_step_end；这里是连接中断 / 出错 / 用户中止
+ * 等后端来不及补发场景的前端兜底。
+ */
+function endRunningPlan(
+  plan: PlanStep[] | null,
+  status: PlanStepStatus,
+): PlanStep[] | null {
+  if (!plan || !plan.some((s) => s.status === 'running')) return plan
+  return plan.map((s) => (s.status === 'running' ? { ...s, status } : s))
 }
 
 function snapshot(m: AssistantMessage): AssistantVersion {
   return {
     content: m.content,
-    thinking: m.thinking,
-    thinkingMs: m.thinkingMs,
     plan: m.plan,
-    toolCalls: m.toolCalls,
+    timeline: m.timeline,
     error: m.error,
   }
 }
@@ -104,8 +124,10 @@ export function useChat({ sessionId, onSettled }: Options) {
       const ctrl = new AbortController()
       streamCtrlRef.current = ctrl
 
-      // thinking 计时：首个 thinking_chunk 起记，流式中持续更新，结束定格
+      // 每次 agent 循环的 thinking 单独成段：thinking_chunk 连续到达时累进同一段，
+      // 一旦插入工具调用就把 currentThinkingId 清空，下一批 thinking 另起一段。
       let thinkingStart: number | null = null
+      let currentThinkingId: string | null = null
 
       const update = (updater: (m: AssistantMessage) => AssistantMessage) => {
         setMessages((prev) =>
@@ -122,28 +144,59 @@ export function useChat({ sessionId, onSettled }: Options) {
             onEvent(ev) {
               switch (ev.type) {
                 case 'thinking_chunk': {
-                  if (thinkingStart === null) thinkingStart = Date.now()
-                  const elapsed = Date.now() - thinkingStart
-                  update((m) => ({
-                    ...m,
-                    thinking: m.thinking + ev.payload.text,
-                    thinkingMs: elapsed,
-                  }))
+                  const now = Date.now()
+                  if (currentThinkingId === null) {
+                    const segId = crypto.randomUUID()
+                    currentThinkingId = segId
+                    thinkingStart = now
+                    update((m) => ({
+                      ...m,
+                      timeline: [
+                        ...m.timeline,
+                        {
+                          kind: 'thinking',
+                          id: segId,
+                          text: ev.payload.text,
+                          thinkingMs: 0,
+                        },
+                      ],
+                    }))
+                  } else {
+                    const segId = currentThinkingId
+                    const elapsed = thinkingStart != null ? now - thinkingStart : 0
+                    update((m) => ({
+                      ...m,
+                      timeline: m.timeline.map((it) =>
+                        it.kind === 'thinking' && it.id === segId
+                          ? {
+                              ...it,
+                              text: it.text + ev.payload.text,
+                              thinkingMs: elapsed,
+                            }
+                          : it,
+                      ),
+                    }))
+                  }
                   break
                 }
                 case 'token_chunk':
                   update((m) => ({ ...m, content: m.content + ev.payload.text }))
                   break
                 case 'tool_call_start':
+                  // 工具调用切断当前 thinking 段，下一批 thinking 归到下一次循环
+                  currentThinkingId = null
                   update((m) => ({
                     ...m,
-                    toolCalls: [
-                      ...m.toolCalls,
+                    timeline: [
+                      ...m.timeline,
                       {
-                        call_id: ev.payload.call_id,
-                        name: ev.payload.name,
-                        args: ev.payload.args,
-                        status: 'running',
+                        kind: 'tool',
+                        call: {
+                          call_id: ev.payload.call_id,
+                          name: ev.payload.name,
+                          args: ev.payload.args,
+                          status: 'running',
+                        },
                       },
                     ],
                   }))
@@ -151,15 +204,18 @@ export function useChat({ sessionId, onSettled }: Options) {
                 case 'tool_call_end':
                   update((m) => ({
                     ...m,
-                    toolCalls: m.toolCalls.map((c) =>
-                      c.call_id === ev.payload.call_id
+                    timeline: m.timeline.map((it) =>
+                      it.kind === 'tool' && it.call.call_id === ev.payload.call_id
                         ? {
-                            ...c,
-                            status:
-                              (ev.payload.status as ToolCallState['status']) ?? 'ok',
-                            preview: ev.payload.preview,
+                            ...it,
+                            call: {
+                              ...it.call,
+                              status:
+                                (ev.payload.status as ToolCallState['status']) ?? 'ok',
+                              preview: ev.payload.preview,
+                            },
                           }
-                        : c,
+                        : it,
                     ),
                   }))
                   break
@@ -219,17 +275,21 @@ export function useChat({ sessionId, onSettled }: Options) {
                 ...m,
                 error: m.error ?? `连接错误：${err.message}`,
                 streaming: false,
-                toolCalls: endRunningTools(m.toolCalls),
+                timeline: endRunningTools(m.timeline),
+                plan: endRunningPlan(m.plan, 'failed'),
               }))
             },
             onClose() {
               update((m) => {
-                const hadRunning = m.toolCalls.some((c) => c.status === 'running')
+                const hadRunning = hasRunningTool(m.timeline)
                 const noOutput = !m.content && !m.error
+                // 正常完成（有正文且无错误）→ 残留的进行中步骤收敛为完成；否则记失败
+                const cleanFinish = !!m.content && !m.error
                 return {
                   ...m,
                   streaming: false,
-                  toolCalls: endRunningTools(m.toolCalls),
+                  timeline: endRunningTools(m.timeline),
+                  plan: endRunningPlan(m.plan, cleanFinish ? 'success' : 'failed'),
                   // 流正常关闭却没产出任何正文 / 错误（典型：工具调用后服务端提前结束流）——
                   // 给个明确错误，避免留下一个空气泡 + 永远转圈的"进行中"工具
                   error:
@@ -266,10 +326,14 @@ export function useChat({ sessionId, onSettled }: Options) {
   const send = useCallback(
     (text: string) => {
       if (!sessionId || !text.trim()) return
+      // text 是含内联附件正文的完整消息：发给后端用全文，气泡展示只留 query + 附件卡片
+      const { text: display, attachments } = parseUserMessage(text)
       const userMsg: UserMessage = {
         id: crypto.randomUUID(),
         role: 'user',
-        content: text,
+        content: display,
+        rawContent: text,
+        attachments,
         createdAt: Date.now(),
       }
       const assistantMsg = newAssistantMessage()
@@ -287,7 +351,12 @@ export function useChat({ sessionId, onSettled }: Options) {
     setMessages((prev) =>
       prev.map((m) =>
         m.role === 'assistant' && m.streaming
-          ? { ...m, streaming: false, toolCalls: endRunningTools(m.toolCalls) }
+          ? {
+              ...m,
+              streaming: false,
+              timeline: endRunningTools(m.timeline),
+              plan: endRunningPlan(m.plan, 'failed'),
+            }
           : m,
       ),
     )
@@ -361,17 +430,15 @@ export function useChat({ sessionId, onSettled }: Options) {
             versions: baseVersions,
             versionIndex: baseVersions.length - 1,
             content: '',
-            thinking: '',
-            thinkingMs: null,
             plan: null,
-            toolCalls: [],
+            timeline: [],
             error: null,
             streaming: true,
             createdAt: Date.now(),
           }
         })
       })
-      void streamInto(userMsg.content, assistantId, sessionId)
+      void streamInto(userMsg.rawContent ?? userMsg.content, assistantId, sessionId)
     },
     [sessionId, streamInto],
   )

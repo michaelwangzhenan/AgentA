@@ -298,6 +298,64 @@ class TestPlanEventFlow:
         assert sum(1 for e in plan_evs if e.type == EVENT_PLAN_STEP_START) == 1
 
 
+class TestPlanAutoFinalizeOnFinalAnswer:
+    """LLM 在最后一步直接出答案（不调 update_step）时，出 final_answer 前应补发剩余 pending 步的 plan_step_end，避免 UI 永远转圈。"""
+
+    def test_pending_steps_closed_before_final_answer(self) -> None:
+        agent = _mk_agent()
+        captured: list[AgentEvent] = []
+        agent.set_event_callback(captured.append)
+
+        # 3 步 plan：只显式 update_step(1)，第 2/3 步靠 final_answer 前自动收尾
+        responses = [
+            _tool_call_response("make_plan", {"steps": ["a", "b", "c"]}, "mp1"),
+            _tool_call_response("update_step", {"step_id": 1, "status": "success"}, "u1"),
+            _text_response("综合答案"),
+        ]
+
+        def fake_chat(messages, tools=None, **kwargs):
+            return responses.pop(0)
+
+        with patch("src.agent.agent.chat", side_effect=fake_chat):
+            answer = agent.run("做任务")
+
+        assert answer == "综合答案"
+        types = [e.type for e in captured]
+        final_idx = types.index(EVENT_FINAL_ANSWER)
+        # final_answer 之前补发的 plan_step_end：step 1（显式）+ step 2/3（自动）共 3 条
+        ends_before_final = [
+            e for e in captured[:final_idx] if e.type == EVENT_PLAN_STEP_END
+        ]
+        closed_ids = {e.payload["step_id"] for e in ends_before_final}
+        assert closed_ids == {1, 2, 3}
+        # 自动补发的两步标 success
+        auto = [e for e in ends_before_final if e.payload["step_id"] in (2, 3)]
+        assert all(e.payload["status"] == "success" for e in auto)
+
+    def test_no_finalize_when_plan_already_complete(self) -> None:
+        """所有步都已显式 update_step → final_answer 前不重复补发。"""
+        agent = _mk_agent()
+        captured: list[AgentEvent] = []
+        agent.set_event_callback(captured.append)
+
+        responses = [
+            _tool_call_response("make_plan", {"steps": ["only"]}, "mp1"),
+            _tool_call_response("update_step", {"step_id": 1, "status": "success"}, "u1"),
+            _text_response("完成"),
+        ]
+
+        def fake_chat(messages, tools=None, **kwargs):
+            return responses.pop(0)
+
+        with patch("src.agent.agent.chat", side_effect=fake_chat):
+            agent.run("一步任务")
+
+        # plan_step_end 只来自显式 update_step 一条，无自动补发
+        ends = [e for e in captured if e.type == EVENT_PLAN_STEP_END]
+        assert len(ends) == 1
+        assert ends[0].payload["step_id"] == 1
+
+
 # ── Phase 2.1 — Plan-aware 循环上限自适应 ─────────────────────────────────────
 
 

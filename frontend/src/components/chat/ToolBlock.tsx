@@ -81,7 +81,13 @@ export function ToolBlock({ call }: Props) {
         <span className="truncate font-medium">{label}</span>
         <span className="ml-auto flex items-center gap-1 text-muted-foreground">
           <StatusIcon status={call.status} />
-          {call.status === 'running' ? '进行中' : null}
+          {call.status === 'running'
+            ? '进行中'
+            : call.status === 'error'
+              ? '失败'
+              : call.status === 'empty'
+                ? '空结果'
+                : null}
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -136,25 +142,6 @@ export function ToolBlock({ call }: Props) {
           ) : null}
         </div>
       </CollapsibleContent>
-
-      {/* 完成态底栏（Cursor 风格） */}
-      {call.status !== 'running' ? (
-        <div className="mt-1 flex items-center gap-1 px-3 text-[11px] text-muted-foreground">
-          {call.status === 'error' ? (
-            <>
-              <X className="h-3 w-3 text-destructive" /> 失败
-            </>
-          ) : call.status === 'empty' ? (
-            <>
-              <CircleSlash className="h-3 w-3" /> 空结果
-            </>
-          ) : (
-            <>
-              <Check className="h-3 w-3 text-green-600" /> 完成
-            </>
-          )}
-        </div>
-      ) : null}
     </Collapsible>
   )
 }

@@ -1,5 +1,6 @@
 // Session 元数据类型 —— 对齐后端 src/api/schemas/session.py
 import type { AssistantMessage, Message, ToolCallState } from '@/types/chat'
+import { parseUserMessage } from '@/lib/attachments'
 
 export type Session = {
   id: string
@@ -60,10 +61,13 @@ export function backendMessagesToFrontend(
   for (const m of raw) {
     if (m.role === 'user') {
       finalize()
+      const { text, attachments } = parseUserMessage(m.content)
       out.push({
         id: crypto.randomUUID(),
         role: 'user',
-        content: m.content,
+        content: text,
+        rawContent: m.content,
+        attachments,
       })
       continue
     }
@@ -74,10 +78,8 @@ export function backendMessagesToFrontend(
           id: crypto.randomUUID(),
           role: 'assistant',
           content: '',
-          thinking: '',
-          thinkingMs: null,
           plan: null,
-          toolCalls: [],
+          timeline: [],
           error: null,
           streaming: false,
         }
@@ -103,7 +105,8 @@ export function backendMessagesToFrontend(
             args,
             status: 'ok',
           }
-          pendingAssistant.toolCalls.push(state)
+          // 把同一个 state 引用放进 timeline，后续 role=tool 行回填 preview 时直接改它
+          pendingAssistant.timeline.push({ kind: 'tool', call: state })
           if (callId) toolCallIndex.set(callId, state)
         }
       }

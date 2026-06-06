@@ -82,13 +82,28 @@ export type ToolCallState = {
   preview?: string
 }
 
+/** 一段 thinking（对应 agent 一次循环的推理）；每次循环单独成段 */
+export type ThinkingSegment = {
+  kind: 'thinking'
+  id: string
+  text: string
+  /** 本段 reasoning 耗时（ms）；null 表示无计时 */
+  thinkingMs: number | null
+}
+
+export type ToolSegment = {
+  kind: 'tool'
+  call: ToolCallState
+}
+
+/** 按事件到达顺序排列的 thinking / 工具调用混合时间线（保留 think→act 的循环结构） */
+export type TimelineItem = ThinkingSegment | ToolSegment
+
 /** 一次生成结果的快照；regenerate 多次后用于 ‹N/M› 切换（仅前端内存，不持久化） */
 export type AssistantVersion = {
   content: string
-  thinking: string
-  thinkingMs: number | null
   plan: PlanStep[] | null
-  toolCalls: ToolCallState[]
+  timeline: TimelineItem[]
   error: string | null
 }
 
@@ -96,11 +111,8 @@ export type AssistantMessage = {
   id: string
   role: 'assistant'
   content: string
-  thinking: string
-  /** reasoning 累计耗时（ms）；null 表示本轮没有 thinking */
-  thinkingMs: number | null
   plan: PlanStep[] | null
-  toolCalls: ToolCallState[]
+  timeline: TimelineItem[]
   error: string | null
   streaming: boolean
   createdAt?: number
@@ -109,10 +121,24 @@ export type AssistantMessage = {
   versionIndex?: number
 }
 
+/** 用户消息里携带的附件（仅用于展示卡片；正文已内联进 rawContent 发给后端） */
+export type MessageAttachment = {
+  name: string
+  kind: 'text' | 'image' | 'other'
+  /** 文本附件行数；非文本附件无此值 */
+  lines?: number
+  /** 是否随消息发给了后端（图片 / 二进制当前不发） */
+  sent: boolean
+}
+
 export type UserMessage = {
   id: string
   role: 'user'
+  /** 展示用：仅用户输入的 query（不含附件正文） */
   content: string
+  /** 发 / 重发给后端的完整内容（含内联附件正文）；缺省时退回 content */
+  rawContent?: string
+  attachments?: MessageAttachment[]
   createdAt?: number
 }
 

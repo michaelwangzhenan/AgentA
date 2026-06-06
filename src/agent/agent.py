@@ -21,6 +21,7 @@ from src.agent.core.event_bus import (
     EVENT_ERROR,
     EVENT_FINAL_ANSWER,
     EVENT_INFO,
+    EVENT_PLAN_STEP_END,
     EVENT_THINKING_CHUNK,
     EVENT_TOKEN_CHUNK,
     AgentEvent,
@@ -483,6 +484,10 @@ class Agent:
                 )
                 # 跨 session 记忆提取：显式触发词 or 自动提取开关
                 memory_mgr.try_extract(user_input, final_answer)
+                # plan 收尾：LLM 在最后一步常直接出答案而不调 update_step，导致该步的
+                # plan_step_end 永不发出、UI 永远转圈。出最终答案前补发剩余 pending 步的
+                # 结束事件，让前端把它们收敛为完成态。
+                self._finalize_pending_plan_steps(messages)
                 self.events.publish(AgentEvent(
                     type=EVENT_FINAL_ANSWER,
                     payload={"text": final_answer, "usage": self.last_usage},
@@ -522,6 +527,27 @@ class Agent:
             payload={"text": fallback, "usage": self.last_usage},
         ))
         return fallback
+
+    def _finalize_pending_plan_steps(self, messages: list[dict[str, Any]]) -> None:
+        """出最终答案前，给 active plan 里仍未结束的步骤补发 plan_step_end。
+
+        LLM 跑到最后一步时常常直接产出最终答案而不调 `update_step`，于是该步的
+        plan_step_end 永不发出、前端那一步永远转圈。这里 reconstruct 当前 plan，
+        把剩余 pending 步统一标成 success 收尾（仅发事件，不写 chat_history —— plan
+        状态本就靠 messages 里的 tool_calls 重建，这是纯 UI 收敛）。
+        """
+        if not self.events.subscribers(EVENT_PLAN_STEP_END):
+            return
+        from src.agent.core.plan_manager import reconstruct_from_messages
+        plan = reconstruct_from_messages(messages)
+        if plan is None or plan.aborted or plan.is_complete():
+            return
+        for step in plan.steps:
+            if step.status == "pending":
+                self.events.publish(AgentEvent(
+                    type=EVENT_PLAN_STEP_END,
+                    payload={"step_id": step.id, "status": "success", "note": ""},
+                ))
 
     def _compute_effective_caps(self, messages: list[dict[str, Any]]) -> tuple[int, int]:
         """

@@ -7,6 +7,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Loader2,
+  FileText,
+  Image as ImageIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { ThinkingBlock } from './ThinkingBlock'
@@ -27,7 +29,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import type { AssistantMessage, Message } from '@/types/chat'
+import { fileBadge } from '@/lib/attachments'
+import type { AssistantMessage, Message, MessageAttachment } from '@/types/chat'
 
 export type BubbleCallbacks = {
   inFlight: boolean
@@ -129,11 +132,16 @@ function UserBubble({
     )
   }
 
+  const attachments = message.attachments ?? []
+
   return (
     <div className="group flex flex-col items-end gap-1">
-      <div className="max-w-[80%] rounded-2xl bg-primary px-4 py-2 text-sm break-words whitespace-pre-wrap text-primary-foreground">
-        {message.content}
-      </div>
+      {attachments.length > 0 ? <AttachmentCards items={attachments} /> : null}
+      {message.content ? (
+        <div className="max-w-[80%] rounded-2xl bg-primary px-4 py-2 text-sm break-words whitespace-pre-wrap text-primary-foreground">
+          {message.content}
+        </div>
+      ) : null}
       <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
         <span className="mr-1 text-[11px] text-muted-foreground">
           {formatTime(message.createdAt)}
@@ -152,6 +160,42 @@ function UserBubble({
           <Copy className="h-3.5 w-3.5" />
         </IconBtn>
       </div>
+    </div>
+  )
+}
+
+function AttachmentCards({ items }: { items: MessageAttachment[] }) {
+  return (
+    <div className="flex max-w-[80%] flex-wrap justify-end gap-2">
+      {items.map((a, i) => {
+        const subtitle =
+          a.kind === 'text'
+            ? `${a.lines ?? 0} 行`
+            : a.kind === 'image'
+              ? '图片（未发送）'
+              : '二进制（未发送）'
+        return (
+          <div
+            key={`${a.name}-${i}`}
+            className="flex w-44 items-start gap-2 rounded-xl border border-border bg-card px-3 py-2"
+          >
+            {a.kind === 'image' ? (
+              <ImageIcon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+            ) : (
+              <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-xs font-medium" title={a.name}>
+                {a.name}
+              </div>
+              <div className="mt-0.5 text-[11px] text-muted-foreground">{subtitle}</div>
+              <span className="mt-1 inline-block rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                {fileBadge(a.name)}
+              </span>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -198,30 +242,33 @@ function AssistantBubble({
   const vIndex = message.versionIndex ?? (versions ? versions.length - 1 : 0)
 
   const hasAny =
-    message.thinking ||
+    message.timeline.length > 0 ||
     message.plan ||
-    message.toolCalls.length > 0 ||
     message.content ||
     message.error
 
   return (
     <div className="group flex flex-col items-start gap-1">
       <div className="w-full max-w-[85%] space-y-1">
-        {message.thinking ? (
-          <ThinkingBlock
-            text={message.thinking}
-            thinkingMs={message.thinkingMs}
-            streaming={message.streaming}
-          />
-        ) : null}
-
         {message.plan && message.plan.length > 0 ? (
           <PlanBlock steps={message.plan} />
         ) : null}
 
-        {message.toolCalls.map((call) => (
-          <ToolBlock key={call.call_id} call={call} />
-        ))}
+        {/* thinking 与工具调用按发生顺序交替显示，保留每次循环 think→act 的结构 */}
+        {message.timeline.map((it, i) =>
+          it.kind === 'thinking' ? (
+            <ThinkingBlock
+              key={it.id}
+              text={it.text}
+              thinkingMs={it.thinkingMs}
+              streaming={
+                message.streaming && i === message.timeline.length - 1 && !message.content
+              }
+            />
+          ) : (
+            <ToolBlock key={it.call.call_id} call={it.call} />
+          ),
+        )}
 
         {body ? (
           <div className="rounded-2xl bg-muted px-4 py-2 text-[15px] text-foreground break-words">
