@@ -38,10 +38,9 @@ def _on_thinking_changed(_old: Any, _new: Any) -> None:
         cfg = get_agent().thinking_cfg
         cfg.enabled = _cfg.THINKING_ENABLED
         cfg.budget = _cfg.THINKING_BUDGET
-        cfg.adaptive = _cfg.THINKING_ADAPTIVE
         logger.info(
-            "[config] thinking 同步到 agent：enabled=%s budget=%d adaptive=%s",
-            cfg.enabled, cfg.budget, cfg.adaptive,
+            "[config] thinking 同步到 agent：enabled=%s budget=%d",
+            cfg.enabled, cfg.budget,
         )
     except Exception as e:
         logger.warning("[config] 同步 thinking 到 agent 失败: %s", e)
@@ -70,7 +69,6 @@ _HOOKS: dict[str, Callable[[Any, Any], None]] = {
     "MCP_CONFIG_FILE": _on_mcp_changed,
     "THINKING_ENABLED": _on_thinking_changed,
     "THINKING_BUDGET": _on_thinking_changed,
-    "THINKING_ADAPTIVE": _on_thinking_changed,
 }
 
 

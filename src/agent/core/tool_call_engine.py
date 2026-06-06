@@ -87,7 +87,14 @@ class ToolCallEngine:
         避免引导提示污染下次加载的历史记录。
         """
         assistant_msg = self.assistant_message(message)
-        messages.append(assistant_msg)
+        # thinking provider 的多轮工具调用：本轮 reasoning_content 必须随 assistant 消息回传，
+        # 否则部分 provider（如 kimi）下一轮直接 400。只挂到内存 messages 供后续轮次发送，
+        # 不写入 chat_history（thinking 内容不持久化，防 prompt injection）。
+        reasoning = getattr(message, "reasoning_content", None)
+        if reasoning:
+            messages.append({**assistant_msg, "reasoning_content": reasoning})
+        else:
+            messages.append(assistant_msg)
         self._chat_history.append(self._session_id, assistant_msg)
 
         for tool_call in message.tool_calls:

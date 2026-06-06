@@ -408,7 +408,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             <DropdownMenu>
               <DropdownMenuTrigger
                 className={cn(
-                  'flex h-8 items-center gap-1 rounded-md px-2 text-lg',
+                  'flex h-8 items-center gap-1 rounded-md px-2 text-sm',
                   settings.thinkingSupported
                     ? 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground'
                     : 'cursor-not-allowed text-muted-foreground/40',
@@ -421,9 +421,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                 }
               >
                 <Brain className="h-4 w-4" />
+                {'深度思考：'}
                 {THINKING_LABELS[settings.level]}
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" side="top" className="w-auto min-w-32">
+              <DropdownMenuContent align="end" side="top" className="w-auto min-w-32">
                 <DropdownMenuRadioGroup
                   value={settings.level}
                   onValueChange={(v) =>

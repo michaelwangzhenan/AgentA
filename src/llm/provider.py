@@ -231,12 +231,19 @@ def chat(
 def _run_openai_stream(
     client: Any,
     kwargs: dict[str, Any],
-    on_token_chunk: Callable[[str], None],
+    on_token_chunk: Callable[[str], None] | None = None,
+    on_thinking_chunk: Callable[[str], None] | None = None,
 ) -> Any:
-    """OpenAI 兼容协议流式调用，逐 token 回调并返回与非流式相同结构的 response 对象。"""
+    """OpenAI 兼容协议流式调用，逐 token 回调并返回与非流式相同结构的 response 对象。
+
+    同时服务普通对话与 thinking：reasoning provider（qwen/kimi/glm/minimax/deepseek）的思考
+    内容位于 delta.reasoning_content，经 on_thinking_chunk 实时透传，并收集后挂到返回
+    message.reasoning_content —— 供 agent 在多轮工具调用时回传（部分 provider 不回传会 400）。
+    """
     from types import SimpleNamespace
 
     content_parts: list[str] = []
+    reasoning_parts: list[str] = []
     tool_calls_map: dict[int, dict[str, Any]] = {}
     prompt_tokens = completion_tokens = 0
 
@@ -250,9 +257,17 @@ def _run_openai_stream(
             continue
         delta = chunk.choices[0].delta
 
+        # thinking 内容（OpenAI SDK 不暴露此字段，须用 getattr）：实时回调 + 收集
+        reasoning = getattr(delta, "reasoning_content", None)
+        if reasoning:
+            reasoning_parts.append(reasoning)
+            if on_thinking_chunk is not None:
+                on_thinking_chunk(reasoning)
+
         if getattr(delta, "content", None):
             content_parts.append(delta.content)
-            on_token_chunk(delta.content)
+            if on_token_chunk is not None:
+                on_token_chunk(delta.content)
 
         if getattr(delta, "tool_calls", None):
             for tc_delta in delta.tool_calls:
@@ -286,7 +301,11 @@ def _run_openai_stream(
         ]
 
     final_content = "".join(content_parts) or None
-    message = SimpleNamespace(content=final_content, tool_calls=tool_calls)
+    message = SimpleNamespace(
+        content=final_content,
+        tool_calls=tool_calls,
+        reasoning_content="".join(reasoning_parts) or None,
+    )
     choice = SimpleNamespace(message=message)
     usage = SimpleNamespace(
         prompt_tokens=prompt_tokens,
@@ -404,68 +423,9 @@ def _wrap_anthropic_response(response: Any) -> Any:
 
 # ── Extended Thinking ────────────────────────────────────────────────────────
 
-# Adaptive Thinking 三档 budget（tokens）
-_BUDGET_LOW: int = 2_048     # 简单事实、短问（< 25 字符）；与前端低档位 LEVEL_BUDGET.low 对齐
-_BUDGET_MEDIUM: int = 8_000  # 分析、解释、对比（默认档）
-_BUDGET_HIGH: int = 32_000   # 架构、规划、多步骤深度推理
-
-# 高复杂度关键词 → HIGH 档
-_HIGH_KEYWORDS: frozenset[str] = frozenset([
-    "设计", "架构", "规划", "深入", "详细分析", "多步骤",
-    "优化方案", "如何实现", "算法", "权衡", "对比分析",
-    "全面", "综合", "系统方案", "路线图",
-    "trade-off", "implement", "design", "architect",
-    "optimize", "strategy", "roadmap",
-])
-
-# 低复杂度关键词 → LOW 档
-_LOW_KEYWORDS: frozenset[str] = frozenset([
-    "什么是", "是什么", "定义", "谢谢", "好的", "知道了", "明白了",
-    "define", "what is", "who is", "thanks",
-])
-
-
-def estimate_thinking_budget(messages: list[dict[str, Any]], max_budget: int = 32_000) -> int:
-    """
-    根据对话中最后一条用户消息的内容自动估算合适的 thinking budget_tokens。
-
-    分三档（均不超过 max_budget）：
-        LOW    (1 500)  —— 短问或简单事实类
-        MEDIUM (8 000)  —— 分析、解释、对比（默认）
-        HIGH   (32 000) —— 架构、规划、多步骤深度推理
-
-    Args:
-        messages: 包含对话历史的 OpenAI 格式消息列表。
-        max_budget: thinking budget 上限，通常取 Agent.thinking_budget。
-
-    Returns:
-        估算出的 budget_tokens，已被 max_budget 截断。
-    """
-    # 取最后一条 user 消息作为复杂度评估依据
-    user_text = ""
-    for msg in reversed(messages):
-        if msg.get("role") == "user":
-            user_text = (msg.get("content") or "").strip()
-            break
-
-    text_lower = user_text.lower()
-
-    # 极短问题 → LOW
-    if len(user_text) < 25:
-        estimated = _BUDGET_LOW
-    # 含高复杂度关键词 → HIGH
-    elif any(kw in text_lower for kw in _HIGH_KEYWORDS):
-        estimated = _BUDGET_HIGH
-    # 含低复杂度关键词 → LOW
-    elif any(kw in text_lower for kw in _LOW_KEYWORDS):
-        estimated = _BUDGET_LOW
-    # 超长问题（多步骤描述）也升为 HIGH
-    elif len(user_text) > 200:
-        estimated = _BUDGET_HIGH
-    else:
-        estimated = _BUDGET_MEDIUM
-
-    return min(estimated, max_budget)
+# claude-sonnet-4-5 单次最大输出 tokens；thinking 时 max_tokens 必须 > budget_tokens
+# 且不能超模型上限，否则 Anthropic 直接 400。
+_CLAUDE_OUTPUT_CAP: int = 64_000
 
 
 def call_with_thinking(
@@ -476,15 +436,15 @@ def call_with_thinking(
     on_token_chunk: Callable[[str], None] | None = None,
 ) -> Any:
     """
-    通用 Extended Thinking 入口。
+    通用 Extended Thinking 入口，按当前 provider 的 thinking 能力声明分发。
 
-    - Claude：走流式 thinking 分支，通过 on_thinking_chunk 回调实时输出思考过程。
-    - Qwen3：走流式 thinking 分支，thinking 内容位于 delta.reasoning_content。
-    - 其他 provider：静默降级为普通 chat()，保持向后兼容。
+    - kind="anthropic"        → Claude 原生 thinking（budget_tokens 原生生效）。
+    - kind="openai_reasoning" → OpenAI 兼容，读 delta.reasoning_content（qwen/kimi/glm/minimax/deepseek）。
+    - thinking 未声明（None）  → 静默降级为普通 chat()。
 
     Args:
         messages: 对话历史（OpenAI 格式）。
-        budget_tokens: thinking 预算 tokens（Claude / Qwen3 有效）。
+        budget_tokens: thinking 预算 tokens（仅 claude 与设了 budget_key 的 provider 如 qwen 生效）。
         tools: Function Calling 工具列表，可为 None。
         on_thinking_chunk: 每收到一段 thinking 文本时的回调，可为 None。
         on_token_chunk: 每收到一段正文 token 时的回调，可为 None。
@@ -492,12 +452,14 @@ def call_with_thinking(
     Returns:
         与 chat() 相同格式的 response 对象。
     """
-    if config.ACTIVE_PROVIDER == "claude":
+    spec = config.get_active_config().thinking
+    if spec is None:
+        return chat(messages, tools=tools, on_token_chunk=on_token_chunk)
+    if spec.kind == "anthropic":
         return _chat_claude_thinking(messages, budget_tokens, tools, on_thinking_chunk, on_token_chunk)
-    if config.ACTIVE_PROVIDER == "qwen":
-        return _chat_qwen_thinking(messages, budget_tokens, tools, on_thinking_chunk, on_token_chunk)
-    # 其他 provider 静默降级，thinking 不可用
-    return chat(messages, tools=tools, on_token_chunk=on_token_chunk)
+    return _chat_openai_reasoning(
+        messages, budget_tokens, tools, on_thinking_chunk, on_token_chunk, spec,
+    )
 
 
 def _chat_claude_thinking(
@@ -514,12 +476,15 @@ def _chat_claude_thinking(
 
     system_prompt, filtered_messages = _split_system_messages(messages)
 
+    # budget 下限 1024（Anthropic 最小值）、上限留 4096 给正文，保证 max_tokens 不超模型上限
+    budget = max(1024, min(budget_tokens, _CLAUDE_OUTPUT_CAP - 4096))
+
     kwargs: dict[str, Any] = {
         "model": provider_config.model,
-        # max_tokens 必须 > budget_tokens，Anthropic 强制要求
-        "max_tokens": budget_tokens + 4096,
+        # max_tokens 必须 > budget_tokens 且 <= 模型上限，Anthropic 强制要求
+        "max_tokens": budget + 4096,
         "temperature": 1,  # Extended Thinking 要求 temperature=1
-        "thinking": {"type": "enabled", "budget_tokens": budget_tokens},
+        "thinking": {"type": "enabled", "budget_tokens": budget},
         "messages": filtered_messages,
     }
     if system_prompt:
@@ -570,122 +535,54 @@ def _run_thinking_stream(
         return stream.get_final_message()
 
 
-def _chat_qwen_thinking(
+def _chat_openai_reasoning(
     messages: list[dict[str, Any]],
     budget_tokens: int,
     tools: list[dict[str, Any]] | None,
     on_thinking_chunk: Callable[[str], None] | None,
-    on_token_chunk: Callable[[str], None] | None = None,
+    on_token_chunk: Callable[[str], None] | None,
+    spec: "config.ThinkingSpec",
 ) -> Any:
     """
-    Qwen3 Extended Thinking 流式调用。
+    OpenAI 兼容协议的 thinking 流式调用，按 ThinkingSpec 拼装请求。
 
-    Qwen3 API 要求 enable_thinking=True 时必须使用 stream=True；
-    thinking 内容位于 delta.reasoning_content，正文位于 delta.content。
-    thinking 内容仅通过回调输出到终端，不写入返回值，不进 messages，防止 prompt injection。
+    覆盖 qwen / kimi / glm / minimax / deepseek：
+    - 思考内容位于 delta.reasoning_content，开启 thinking 时多数 provider 强制 stream=True；
+    - spec.enable_extra_body 覆盖 provider 基础 extra_body 中的同名键（如把 qwen 的
+      enable_thinking=False 翻成 True、kimi 的 thinking.type 从 disabled 翻成 enabled）；
+    - spec.budget_key 不为 None 时把 budget_tokens 透传（目前仅 qwen 的 thinking_budget）；
+    - spec.thinking_model 不为 None 时切到该 provider 的专用思考模型（如 deepseek-reasoner）。
+
+    thinking 内容通过 on_thinking_chunk 透传，并由 _run_openai_stream 挂到 message.reasoning_content，
+    供 agent 多轮工具调用时回传（kimi 等不回传会 400）；但不写入 chat_history（防 prompt injection）。
     """
-    from types import SimpleNamespace
-
     provider_config = config.get_active_config()
 
+    messages = _sanitize_messages_for_llm(messages)
+    if tools:
+        tools = _sanitize_tools_for_llm(tools)
+
+    extra_body = dict(provider_config.extra_body or {})
+    extra_body.update(spec.enable_extra_body or {})
+    if spec.budget_key:
+        extra_body[spec.budget_key] = budget_tokens
+
     kwargs: dict[str, Any] = {
-        "model": provider_config.model,
+        "model": spec.thinking_model or provider_config.model,
         "messages": messages,
         "stream": True,
         "stream_options": {"include_usage": True},  # 确保最后一个 chunk 携带 usage 统计
-        "extra_body": {"enable_thinking": True},
+        "extra_body": extra_body,
     }
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
 
     need_proxy = config.ACTIVE_PROVIDER in config.PROXIED_PROVIDERS and bool(config.LLM_PROXY)
-    return _openai_call(
+    response = _openai_call(
         provider_config,
         need_proxy,
-        lambda client: _run_qwen_thinking_stream(client, kwargs, on_thinking_chunk, on_token_chunk),
+        lambda client: _run_openai_stream(client, kwargs, on_token_chunk, on_thinking_chunk),
     )
-
-
-def _run_qwen_thinking_stream(
-    client: Any,
-    kwargs: dict[str, Any],
-    on_thinking_chunk: Callable[[str], None] | None,
-    on_token_chunk: Callable[[str], None] | None = None,
-) -> Any:
-    """
-    消费 Qwen3 流式响应，分离 reasoning_content（thinking）和 content（正文），
-    拼接后返回与普通 chat() 兼容的 SimpleNamespace response 对象。
-
-    thinking 内容只通过回调透传，不写入返回对象，防止 prompt injection。
-    """
-    from types import SimpleNamespace
-
-    content_parts: list[str] = []
-    tool_calls_map: dict[int, dict[str, Any]] = {}
-    prompt_tokens = completion_tokens = 0
-
-    stream = client.chat.completions.create(**kwargs)
-    for chunk in stream:
-        # usage 在任意 chunk 上（含 choices=[] 的最后一个 chunk），必须在 continue 前读取
-        if getattr(chunk, "usage", None):
-            prompt_tokens = getattr(chunk.usage, "prompt_tokens", 0)
-            completion_tokens = getattr(chunk.usage, "completion_tokens", 0)
-
-        delta = chunk.choices[0].delta if chunk.choices else None
-        if delta is None:
-            continue
-
-        # thinking 内容：回调输出，不收集进正文
-        reasoning = getattr(delta, "reasoning_content", None)
-        if reasoning and on_thinking_chunk is not None:
-            on_thinking_chunk(reasoning)
-
-        # 正文内容
-        if delta.content:
-            content_parts.append(delta.content)
-            if on_token_chunk is not None:
-                on_token_chunk(delta.content)
-
-        # tool_calls 增量拼接
-        if delta.tool_calls:
-            for tc_delta in delta.tool_calls:
-                idx = tc_delta.index
-                if idx not in tool_calls_map:
-                    tool_calls_map[idx] = {
-                        "id": tc_delta.id or "",
-                        "type": "function",
-                        "function": {"name": "", "arguments": ""},
-                    }
-                if tc_delta.id:
-                    tool_calls_map[idx]["id"] = tc_delta.id
-                if tc_delta.function:
-                    if tc_delta.function.name:
-                        tool_calls_map[idx]["function"]["name"] += tc_delta.function.name
-                    if tc_delta.function.arguments:
-                        tool_calls_map[idx]["function"]["arguments"] += tc_delta.function.arguments
-
-    # 组装 tool_calls
-    tool_calls = None
-    if tool_calls_map:
-        tool_calls = [
-            SimpleNamespace(
-                id=tc["id"],
-                type="function",
-                function=SimpleNamespace(
-                    name=tc["function"]["name"],
-                    arguments=tc["function"]["arguments"],
-                ),
-            )
-            for tc in tool_calls_map.values()
-        ]
-
-    final_content = "".join(content_parts) or None
-    message = SimpleNamespace(content=final_content, tool_calls=tool_calls)
-    choice = SimpleNamespace(message=message)
-    usage = SimpleNamespace(
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        total_tokens=prompt_tokens + completion_tokens,
-    )
-    return SimpleNamespace(choices=[choice], usage=usage)
+    _restore_tool_call_names(response)
+    return response

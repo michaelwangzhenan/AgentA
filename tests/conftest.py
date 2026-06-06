@@ -22,9 +22,33 @@ import src.agent.agent as _agent_module
 
 
 @pytest.fixture(autouse=True)
-def _isolated_agent_memory(tmp_path):
+def _neutralize_runtime_overrides():
+    """中和运行时 override 对全局 config 的污染。
+
+    `src.api.main` 在 import 时就调 `apply_overrides()`，把 `.agenta/config_overrides.json`
+    （开发者用 UI 存的运行时配置，如 `THINKING_ENABLED=true` / `ACTIVE_PROVIDER=qwen`）灌进
+    全局 `_cfg`。全量 pytest 收集阶段一旦 import 到 main，这些 override 会泄漏到不 mock LLM 的
+    测试里（agent 误走 thinking 分支发起真·LLM 调用，导致挂起 / 断言失败）。
+
+    这里每个测试前把被 snapshot 的 editable key 复位到 import 时的 env 基线（`_initial_values`），
+    不删 override 文件（`reset_for_test` 会 unlink 文件，会清掉开发者的真实配置，故不用它）。
+    snapshot 未建立（没 import 过 main）时为 no-op，此时本来也无污染。
+    """
+    from src.api import config_overrides as _ov
+
+    if _ov._snapshot_taken:
+        for key, val in _ov._initial_values.items():
+            setattr(_ov._cfg, key, val)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _isolated_agent_memory(tmp_path, _neutralize_runtime_overrides):
     """
     每个测试使用独立的临时 DB，测试结束后自动销毁。
+
+    依赖 `_neutralize_runtime_overrides` 先复位 config 到 env 基线，确保本 fixture 对
+    USER_MEMORY_ENABLED 等的关闭发生在复位之后、不被复位覆盖回 env 值。
 
     - 替换 _chat_history：隔离对话历史 DB
     - 替换 _shared_user_memory 为 None，并临时关闭 USER_MEMORY_ENABLED：

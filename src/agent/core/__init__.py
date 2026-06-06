@@ -12,7 +12,7 @@ Agent 公共层 helpers —— 三种 Agent 实现（Python / LangChain / AutoGP
 - rules_loader.py         load_project_rules  项目根 .agenta/rules.md 一次性加载 + 截断
 - event_bus.py            EventBus           统一事件分发（多订阅 + 异常隔离）
 - tool_call_engine.py     ToolCallEngine     工具调用编排（执行 + 格式化 + 引导提示 + 写历史）
-- thinking_policy.py      ThinkingPolicy     adaptive thinking budget 估算
+- thinking_policy.py      ThinkingPolicy     thinking 配置与 budget
 - citation_builder.py     CitationBuilder    RAG 引用展示编排（注册 / 提取 / 渲染 sources 块）
 - plan_manager.py         PlanState          Phase 2.1 Plan-Execute 状态封装 + reconstruct_from_messages
 - srs_scheduler.py        schedule_review    Phase 2.4 SM-2 调度公式 + Anki 4 档 mapping

@@ -23,6 +23,23 @@ from typing import Any
 
 
 @dataclass(frozen=True)
+class ThinkingSpec:
+    """单个 Provider 的 thinking（推理）能力声明。
+
+    kind 取值：
+    - "anthropic"        : Claude 原生 Extended Thinking（provider.py 走 anthropic SDK）
+    - "openai_reasoning" : OpenAI 兼容协议，流式读 delta.reasoning_content（qwen/kimi/glm/minimax/deepseek 通用）
+    """
+    kind: str
+    # 开启 thinking 时 merge 进 extra_body 的固定字段（覆盖 ProviderConfig.extra_body 同名键）
+    enable_extra_body: dict[str, Any] | None = None
+    # budget 放进 extra_body 的 key 名（None 表示该 provider 不支持设 budget，忽略档位 budget）
+    budget_key: str | None = None
+    # thinking 专用模型（部分 provider 的常规模型不支持思考，开启时切到此模型）；None 表示沿用当前模型
+    thinking_model: str | None = None
+
+
+@dataclass(frozen=True)
 class ProviderConfig:
     """单个 LLM Provider 的配置"""
     base_url: str
@@ -35,6 +52,8 @@ class ProviderConfig:
     #   kimi-k2.6 要求 temperature 必须 = 1（其他值会返回 400）；
     #   Claude Extended Thinking 也要求 temperature = 1（已在 provider.py 中单独处理）。
     force_temperature: float | None = None
+    # thinking 能力声明（None = 该 provider 不支持，call_with_thinking 静默降级为普通 chat）
+    thinking: "ThinkingSpec | None" = None
 
 
 # 当前激活的 Provider，从环境变量读取，默认 kimi
@@ -48,6 +67,12 @@ PROVIDER_CONFIGS: dict[str, ProviderConfig] = {
         model="kimi-k2.5",
         extra_body={"thinking": {"type": "disabled"}},
         force_temperature=0.6,
+        # kimi 开启 thinking：thinking.type=enabled（keep 仅 k2.6 支持，k2.5 传会 400，故不带）；
+        # 多轮工具调用需回传 reasoning_content，已在 tool_call_engine 处理
+        thinking=ThinkingSpec(
+            kind="openai_reasoning",
+            enable_extra_body={"thinking": {"type": "enabled"}},
+        ),
     ),
     "openai": ProviderConfig(
         base_url="https://api.openai.com/v1",
@@ -58,6 +83,8 @@ PROVIDER_CONFIGS: dict[str, ProviderConfig] = {
         base_url="https://api.deepseek.com/v1",
         api_key=os.getenv("DEEPSEEK_API_KEY", ""),
         model="deepseek-chat",
+        # deepseek 思考能力在 deepseek-reasoner 模型（thinking-only，无开关）；开启时切模型
+        thinking=ThinkingSpec(kind="openai_reasoning", thinking_model="deepseek-reasoner"),
     ),
     "grok": ProviderConfig(
         base_url="https://api.x.ai/v1",
@@ -84,22 +111,42 @@ PROVIDER_CONFIGS: dict[str, ProviderConfig] = {
         api_key=os.getenv("QWEN_API_KEY", ""),
         model="qwen3.5-flash",
         extra_body={"enable_thinking": False},
+        # DashScope qwen：enable_thinking=True 开启，thinking_budget 控制思考 token 上限
+        thinking=ThinkingSpec(
+            kind="openai_reasoning",
+            enable_extra_body={"enable_thinking": True},
+            budget_key="thinking_budget",
+        ),
     ),
     "minimax": ProviderConfig(
         base_url="https://api.minimax.chat/v1",
         api_key=os.getenv("MINIMAX_API_KEY", ""),
         model="MiniMax-Text-01",
+        # MiniMax 推理模型（M1，思考默认开）；reasoning_split=True 才把思考拆到 reasoning_content
+        thinking=ThinkingSpec(
+            kind="openai_reasoning",
+            enable_extra_body={"reasoning_split": True},
+            thinking_model="MiniMax-M1",
+        ),
     ),
     "glm": ProviderConfig(
         base_url="https://open.bigmodel.cn/api/paas/v4",
         api_key=os.getenv("GLM_API_KEY", ""),
         model="glm-4-flash",
+        # 智谱 GLM-4.6 起支持 thinking.type=enabled；glm-4-flash 不支持，开启时切到 glm-4.6
+        thinking=ThinkingSpec(
+            kind="openai_reasoning",
+            enable_extra_body={"thinking": {"type": "enabled"}},
+            thinking_model="glm-4.6",
+        ),
     ),
     # claude 使用原生 anthropic SDK，base_url/api_key 在 provider.py 中单独处理
     "claude": ProviderConfig(
         base_url="",  # 不使用 OpenAI SDK，由 provider.py 原生调用
         api_key=os.getenv("ANTHROPIC_API_KEY", ""),
         model="claude-sonnet-4-5",
+        # Claude 原生 Extended Thinking，budget 由 budget_tokens 原生参数控制
+        thinking=ThinkingSpec(kind="anthropic"),
     ),
 }
 
@@ -289,14 +336,11 @@ RAG_HYDE_ENABLED: bool = os.getenv("RAG_HYDE_ENABLED", "false").lower() == "true
 RAG_TRANSLATE_QUERY_ENABLED: bool = os.getenv("RAG_TRANSLATE_QUERY_ENABLED", "true").lower() == "true"
 
 # ── Extended Thinking 配置 ────────────────────────────────────────────────────
-# true 开启 Extended Thinking；目前 Claude（原生 SDK）和 Qwen3 支持，其余 provider 静默降级
+# true 开启 Extended Thinking；支持的 provider 见各 ProviderConfig.thinking，其余静默降级
 THINKING_ENABLED: bool = os.getenv("THINKING_ENABLED", "false").lower() == "true"
 # thinking budget_tokens — 推荐：简单推理 1024~3000，复杂分析 8000~16000，AI Agent 32000+
-# 当 THINKING_ADAPTIVE=true 时，本值作为自动估算的上限，而非固定值。
+# （仅 claude 与 qwen 真正消费此值；其余 reasoning provider 不支持设 budget，忽略）
 THINKING_BUDGET: int = int(os.getenv("THINKING_BUDGET", "8000"))
-# true 开启 Adaptive Thinking：每次推理前自动估算合适的 budget，而非使用固定值。
-# 仅在 THINKING_ENABLED=true 时生效。
-THINKING_ADAPTIVE: bool = os.getenv("THINKING_ADAPTIVE", "false").lower() == "true"
 
 # ── 跨 session 用户记忆配置 ──────────────────────────────────────────────────
 # true 开启跨 session 记忆功能；false 完全禁用（不读取也不写入）

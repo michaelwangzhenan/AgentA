@@ -12,9 +12,9 @@ const LEVEL_BUDGET: Record<Exclude<ThinkingLevel, 'off'>, number> = {
 }
 
 // 哪些 provider 名实际支持 extended thinking（其余灰显）。
-// 必须与后端 call_with_thinking 的分支严格对齐：当前只有 claude / qwen 真正实现，
-// 其余 provider 后端会静默降级成普通 chat，所以前端也只对这两个放开。
-const THINKING_PROVIDER_HINTS = ['claude', 'qwen']
+// 必须与后端各 ProviderConfig.thinking（src/config.py）严格对齐：声明了 thinking spec
+// 的 provider 才放开，其余后端会静默降级成普通 chat。
+const THINKING_PROVIDER_HINTS = ['claude', 'qwen', 'kimi', 'deepseek', 'glm', 'minimax']
 
 function budgetToLevel(enabled: boolean, budget: number): ThinkingLevel {
   if (!enabled) return 'off'

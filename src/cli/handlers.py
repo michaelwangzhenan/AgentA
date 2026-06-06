@@ -422,18 +422,10 @@ def handle_thinking_cfg(
     match think_tokens[0] if think_tokens else "":
         case "on":
             thinking_cfg.enabled = True
-            adaptive_hint = "，自动 budget 已开启" if thinking_cfg.adaptive else ""
-            out(f"💭 Extended Thinking 已开启（budget={thinking_cfg.budget} tokens{adaptive_hint}）。\n")
+            out(f"💭 Extended Thinking 已开启（budget={thinking_cfg.budget} tokens）。\n")
         case "off":
             thinking_cfg.enabled = False
             out("💭 Extended Thinking 已关闭\n")
-        case "adaptive":
-            thinking_cfg.enabled = True
-            thinking_cfg.adaptive = True
-            out(
-                f"🧠 Adaptive Thinking 已开启：将按问题复杂度自动估算 budget（上限 {thinking_cfg.budget} tokens）。\n"
-                f"   三档：LOW 1 500 / MEDIUM 8 000 / HIGH 32 000\n"
-            )
         case "budget" if len(think_tokens) >= 2:
             try:
                 thinking_cfg.budget = int(think_tokens[1])
@@ -442,11 +434,9 @@ def handle_thinking_cfg(
                 out(f"❌ 无效数字：{think_tokens[1]!r}，用法: /thinking budget <整数>\n")
         case _:
             status = "开启" if thinking_cfg.enabled else "关闭"
-            adaptive_status = "✅ 开启" if thinking_cfg.adaptive else "❌ 关闭"
             out(
                 f"💭 Extended Thinking: {status}，budget={thinking_cfg.budget} tokens\n"
-                f"🧠 Adaptive Thinking: {adaptive_status}\n"
-                f"用法: /thinking on | off | adaptive | budget <N>\n"
+                f"用法: /thinking on | off | budget <N>\n"
             )
 
 

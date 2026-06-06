@@ -413,7 +413,7 @@ class Agent:
                 if thinking_policy.enabled:
                     response = call_with_thinking(
                         messages,
-                        budget_tokens=thinking_policy.effective_budget(messages),
+                        budget_tokens=thinking_policy.effective_budget(),
                         tools=active_tools,
                         on_thinking_chunk=self._on_thinking_chunk,
                         on_token_chunk=self._token_callback_for_provider(),

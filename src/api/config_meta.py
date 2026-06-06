@@ -68,23 +68,16 @@ REGISTRY: list[ConfigItem] = [
         group="llm",
         type=ItemType.BOOL,
         brief="Extended Thinking",
-        detail="开启后让模型先 reasoning 再答；仅 Claude / Qwen3 实际生效，其他 provider 静默降级。",
+        detail="开启后让模型先 reasoning 再答；支持 Claude / qwen / kimi / deepseek / glm / minimax，其他 provider 静默降级。",
     ),
     ConfigItem(
         key="THINKING_BUDGET",
         group="llm",
         type=ItemType.INT,
         brief="Thinking Budget",
-        detail="thinking 阶段最多用多少 tokens。简单推理 1024~3000；复杂分析 8000~16000；Agent 32000+。",
+        detail="thinking 阶段最多用多少 tokens（仅 Claude / qwen 消费此值，其余忽略）。简单 1024~3000；复杂 8000~16000；Agent 32000+。",
         min=512,
         max=64000,
-    ),
-    ConfigItem(
-        key="THINKING_ADAPTIVE",
-        group="llm",
-        type=ItemType.BOOL,
-        brief="Adaptive Thinking",
-        detail="开启后每次推理前自动估算合适的 budget，而非用固定值；仅在 THINKING_ENABLED=true 时生效。",
     ),
     # ─── RAG ──────────────────────────────────────────────────────────────
     ConfigItem(

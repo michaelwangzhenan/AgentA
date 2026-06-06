@@ -25,9 +25,8 @@ HELP_TEXT = """
   /<skill_name> [问题]       激活指定 Skill（注入 Skill 指令到当前会话），可附带首个问题
   /save <文件名>             导出当前 session 完整对话到 history/<文件名>.md
   /thinking                  查看 Extended Thinking 状态
-  /thinking on/off           开启/关闭 Extended Thinking（Claude / Qwen3 有效，其余降级）
-  /thinking adaptive         开启 Adaptive Thinking：自动按问题复杂度估算 budget
-  /thinking budget <N>       手动设置 thinking budget tokens（默认 8000，上限 32000）
+  /thinking on/off           开启/关闭 Extended Thinking（claude/qwen/kimi/deepseek/glm/minimax 有效，其余降级）
+  /thinking budget <N>       手动设置 thinking budget tokens（仅 claude/qwen 生效，默认 8000）
   /memory                    展示跨 session 用户记忆（按类别分组）
   /memory add <类别> <key> <value>  手动追加（类别：preference/background/instruction/task/correction）
   /memory edit <id> <新内容>        修正指定记忆条目的内容

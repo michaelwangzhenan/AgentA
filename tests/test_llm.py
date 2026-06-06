@@ -221,20 +221,16 @@ class TestProviderConfigExtraBody:
         assert isinstance(config.THINKING_BUDGET, int)
         assert config.THINKING_BUDGET > 0
 
-    def test_thinking_adaptive_is_bool(self) -> None:
-        """THINKING_ADAPTIVE 应为 bool 类型。"""
-        assert isinstance(config.THINKING_ADAPTIVE, bool)
-
 
 class TestCallWithThinking:
-    """测试 call_with_thinking() 路由逻辑（不消耗真实 API）"""
+    """测试 call_with_thinking() 按 ProviderConfig.thinking 分发的路由逻辑（不消耗真实 API）"""
 
-    def test_non_claude_non_qwen_falls_back_to_chat(self) -> None:
-        """非 claude / qwen provider 时，call_with_thinking 应静默降级为 chat()。"""
+    def test_no_thinking_spec_falls_back_to_chat(self) -> None:
+        """thinking 未声明的 provider（如 ollama）应静默降级为 chat()。"""
         from src.llm.provider import call_with_thinking
 
         original = config.ACTIVE_PROVIDER
-        config.ACTIVE_PROVIDER = "kimi"
+        config.ACTIVE_PROVIDER = "ollama"
         try:
             with patch("src.llm.provider.chat", return_value="fallback") as mock_chat:
                 result = call_with_thinking([{"role": "user", "content": "hi"}])
@@ -244,7 +240,7 @@ class TestCallWithThinking:
             config.ACTIVE_PROVIDER = original
 
     def test_claude_routes_to_claude_thinking(self) -> None:
-        """ACTIVE_PROVIDER == 'claude' 时，应调用 _chat_claude_thinking 分支。"""
+        """kind='anthropic' 的 provider（claude）应调用 _chat_claude_thinking 分支。"""
         from src.llm.provider import call_with_thinking
 
         original = config.ACTIVE_PROVIDER
@@ -259,28 +255,29 @@ class TestCallWithThinking:
         finally:
             config.ACTIVE_PROVIDER = original
 
-    def test_qwen_routes_to_qwen_thinking(self) -> None:
-        """ACTIVE_PROVIDER == 'qwen' 时，应调用 _chat_qwen_thinking 分支。"""
+    def test_openai_reasoning_providers_route_to_reasoning(self) -> None:
+        """kind='openai_reasoning' 的 provider（qwen/kimi/glm/minimax/deepseek）应走 _chat_openai_reasoning。"""
         from src.llm.provider import call_with_thinking
 
         original = config.ACTIVE_PROVIDER
-        config.ACTIVE_PROVIDER = "qwen"
-        try:
-            with patch("src.llm.provider._chat_qwen_thinking",
-                       return_value="qwen_resp") as mock_qt:
-                result = call_with_thinking([{"role": "user", "content": "hi"}],
-                                            budget_tokens=4000)
-            mock_qt.assert_called_once()
-            assert result == "qwen_resp"
-        finally:
-            config.ACTIVE_PROVIDER = original
+        for provider in ("qwen", "kimi", "glm", "minimax", "deepseek"):
+            config.ACTIVE_PROVIDER = provider
+            try:
+                with patch("src.llm.provider._chat_openai_reasoning",
+                           return_value=f"{provider}_resp") as mock_r:
+                    result = call_with_thinking([{"role": "user", "content": "hi"}],
+                                                budget_tokens=4000)
+                mock_r.assert_called_once()
+                assert result == f"{provider}_resp"
+            finally:
+                config.ACTIVE_PROVIDER = original
 
     def test_tools_passed_to_fallback_chat(self) -> None:
         """降级 chat() 调用时，tools 参数应透传。"""
         from src.llm.provider import call_with_thinking
 
         original = config.ACTIVE_PROVIDER
-        config.ACTIVE_PROVIDER = "deepseek"
+        config.ACTIVE_PROVIDER = "ollama"
         dummy_tools = [{"type": "function", "function": {"name": "dummy"}}]
         try:
             with patch("src.llm.provider.chat", return_value="ok") as mock_chat:
@@ -290,79 +287,3 @@ class TestCallWithThinking:
             assert kwargs.get("tools") == dummy_tools
         finally:
             config.ACTIVE_PROVIDER = original
-
-
-class TestEstimateThinkingBudget:
-    """测试 estimate_thinking_budget() 各分支路由逻辑"""
-
-    @staticmethod
-    def _msgs(content: str) -> list[dict]:
-        return [{"role": "user", "content": content}]
-
-    def test_short_question_returns_low(self) -> None:
-        """长度 < 25 字符的短问应返回 LOW (1500)。"""
-        from src.llm.provider import estimate_thinking_budget, _BUDGET_LOW
-        result = estimate_thinking_budget(self._msgs("今天天气？"))
-        assert result == _BUDGET_LOW
-
-    def test_long_question_over_200_returns_high(self) -> None:
-        """长度 > 200 字符的详细题应返回 HIGH (32000)。"""
-        from src.llm.provider import estimate_thinking_budget, _BUDGET_HIGH
-        long_text = "请详细" + "分析该问题" * 40
-        result = estimate_thinking_budget(self._msgs(long_text))
-        assert result == _BUDGET_HIGH
-
-    def test_high_keyword_returns_high(self) -> None:
-        """含高复杂度关键词应返回 HIGH (32000)。"""
-        from src.llm.provider import estimate_thinking_budget, _BUDGET_HIGH
-        # 28 字符，含"设计""规划""架构"，确保 >= 25 不触发 SHORT 规则
-        result = estimate_thinking_budget(
-            self._msgs("请为我们的新平台详细设计并规划一个分布式缓存架构体系方案")
-        )
-        assert result == _BUDGET_HIGH
-
-    def test_low_keyword_returns_low(self) -> None:
-        """含低复杂度关键词应返回 LOW (1500)。"""
-        from src.llm.provider import estimate_thinking_budget, _BUDGET_LOW
-        result = estimate_thinking_budget(self._msgs("什么是向量数据库？请简单解释一下。"))
-        assert result == _BUDGET_LOW
-
-    def test_medium_question_returns_medium(self) -> None:
-        """中等长度且无特征关键词，应返回 MEDIUM (8000)。"""
-        from src.llm.provider import estimate_thinking_budget, _BUDGET_MEDIUM
-        result = estimate_thinking_budget(
-            self._msgs("在向量检索结果上如何进行二阶段精排，常用方法有哪些？")
-        )
-        assert result == _BUDGET_MEDIUM
-
-    def test_max_budget_cap_applied(self) -> None:
-        """估算值不应超过 max_budget。"""
-        from src.llm.provider import estimate_thinking_budget
-        long_text = "请设计" + "架构" * 50
-        result = estimate_thinking_budget(self._msgs(long_text), max_budget=5000)
-        assert result == 5000
-
-    def test_no_user_message_returns_low(self) -> None:
-        """没有 user 消息时，user_text=''，长度 0 < 25 应返回 LOW。"""
-        from src.llm.provider import estimate_thinking_budget, _BUDGET_LOW
-        result = estimate_thinking_budget([{"role": "system", "content": "系统提示"}])
-        assert result == _BUDGET_LOW
-
-    def test_last_user_message_used(self) -> None:
-        """应取最后一条 user 消息作为估算依据。"""
-        from src.llm.provider import estimate_thinking_budget, _BUDGET_HIGH
-        msgs = [
-            {"role": "user", "content": "好的"},          # 短问，LOW
-            {"role": "assistant", "content": "好的"},
-            {"role": "user", "content": "请详细设计并分析该系统架构的核心模块划分、接口设计与优化方案"},  # HIGH
-        ]
-        result = estimate_thinking_budget(msgs)
-        assert result == _BUDGET_HIGH
-
-    def test_english_high_keyword(self) -> None:
-        """英文高复杂度关键词应正确番入 HIGH。"""
-        from src.llm.provider import estimate_thinking_budget, _BUDGET_HIGH
-        result = estimate_thinking_budget(
-            self._msgs("Please design a scalable microservices architecture for our platform")
-        )
-        assert result == _BUDGET_HIGH
