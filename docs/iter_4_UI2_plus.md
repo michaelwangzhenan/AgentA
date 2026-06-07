@@ -1,15 +1,15 @@
 # 1. 配置优化
 
-## 1.1 需求
+## 1.1. 1.1 需求
 
-### 1.1.1 已列方向（用户原始）
+### 1.1.1. 1.1.1 已列方向（用户原始）
 
 - 配置可修改并立即生效
 - bool 选项用 Switch（开关）—— 注：bool 配置业界惯例用 Switch 而非 RadioGroup，一眼看清状态、一步切换
 - 多选 / 单选枚举用下拉框（单选枚举若 ≤4 项可用 RadioGroup，少一次点击）
 - 配置项有简要说明，悬停显示详细说明
 
-### 1.1.2 业界标杆补充
+### 1.1.2. 1.1.2 业界标杆补充
 
 **A. 分组与导航**
 
@@ -81,14 +81,14 @@
 3. `reranker_model` / `default_embedding` / `active_embeddings`：保存后 toast "首次使用新模型时会加载几秒"
 4. `SECURITY_MODE` 切到 `strict`：保存前二次确认 Dialog（避免误把所有 tool 关掉）
 
-### 1.1.3 本期不做（已决定）
+### 1.1.3. 1.1.3 本期不做（已决定）
 
 - API key 等敏感字段的修改 —— 仍只能改 `.env` 后重启；UI 只展示"已设置 / 未设置"徽章
 - 多用户场景下的 audit log（谁 / 何时 / 改了哪个 key）
 - 配置导入 / 导出（备份 / 跨机迁移）
 - 修改历史与撤销（最近 N 次）
 
-## 1.2 实现步骤
+## 1.2. 1.2 实现步骤
 
 按"后端能力先行 → 前端消费"分 5 步；每步独立可验收，互不阻塞。
 
@@ -117,7 +117,7 @@ flowchart LR
 - Step 4 前端先做骨架（搜索 / 分组 / 控件工厂 / Switch + NumberInput），再补 Select / MultiSelect / 文件选择器等长尾控件
 - 不追求一次到位；Step 5 验收只看"已实现 key 的全链路通"，未接入的 key 仍走只读展示
 
-### 1.2.1 实现期决策记录
+### 1.2.1. 1.2.1 实现期决策记录
 
 实现过程遇到的多路径决策一并记下，后续讨论 / 复盘对照：
 
@@ -143,7 +143,7 @@ flowchart LR
 
 **当前 registry 覆盖范围**：8 组 27 个 key。新增 key 的成本：在 `src/api/config_meta.py` `REGISTRY` 列表加一条 `ConfigItem`，无需改前端。
 
-## 1.3 人工验收
+## 1.3. 1.3 人工验收
 
 后端 UT 已覆盖契约层（GET shape / PATCH 校验 / DELETE reset / `LOG_LEVEL` hook / 持久化跨重启 / 从文件重载 / API key 不泄漏，详 `tests/test_api_config.py` 23 条），本节只列**端到端手测**点。
 
@@ -157,7 +157,7 @@ flowchart LR
 
 > 说明：`LOG_LEVEL` / `logs uvicorn` —— `LOG_LEVEL` 控制的是 AgentA 自己的 root logger。AgentA 跑在 uvicorn 进程里，其日志被 `ui.ps1` 重定向到 `logs/uvicorn.log`（文件名只是按启动进程命名，里面混着 uvicorn 访问日志 + AgentA 业务日志）。下面 "看 `logs uvicorn`" 都指在该文件里看 **AgentA 自己的日志行**。
 
-### 1.3.1 UI 渲染与导航
+### 1.3.1. 1.3.1 UI 渲染与导航
 
 | 检查 | 预期 |
 |---|---|
@@ -169,7 +169,7 @@ flowchart LR
 | 下拉框配色 | `ACTIVE_PROVIDER` / `LOG_LEVEL` 下拉的弹出项跟 "添加记忆" 下拉一致，亮 / 暗模式都正常 |
 | info 图标 hover | 显示详细说明 + 取值范围 + 默认值 + 来源（多行） |
 
-### 1.3.2 改完即生效
+### 1.3.2. 1.3.2 改完即生效
 
 | 改 | 怎么验 |
 |---|---|
@@ -179,7 +179,7 @@ flowchart LR
 | `THINKING_ENABLED` → `true`（先把 provider 切到 claude / qwen3） | 应答前出现 thinking 折叠块 |
 | `ACTIVE_PROVIDER` 切 provider | 主区顶部 model 标签换；下一次发问 Network 看到对应 base_url |
 
-### 1.3.3 持久化与重置
+### 1.3.3. 1.3.3 持久化与重置
 
 | 步骤 | 预期 |
 |---|---|
@@ -191,7 +191,7 @@ flowchart LR
 | 改文本 / 数字框后趁保存还没落地立刻刷新浏览器 | 弹出原生 "离开页面？" 警告（有保存在飞 / 防抖排队时才弹）；保存落地后再刷新则无警告 |
 | 改值再改回原值 | 取消尚未发出的保存，行回到干净态（无需任何按钮）|
 
-### 1.3.4 从文件重载（手改文件后同步）
+### 1.3.4. 1.3.4 从文件重载（手改文件后同步）
 
 | 步骤 | 预期 |
 |---|---|
@@ -200,7 +200,7 @@ flowchart LR
 | 文件里删掉某 key 后点 `从文件重载` | 该项回到启动时初值（`.env` / 默认）|
 | 文件无变化时点 `从文件重载` | toast `overrides 文件已是最新，无变化` |
 
-### 1.3.5 校验失败
+### 1.3.5. 1.3.5 校验失败
 
 | 操作 | 预期 |
 |---|---|
@@ -208,7 +208,7 @@ flowchart LR
 | `RAG_TOP_K` 输入空 | 数字框本地兜底（空 / NaN 不发请求），不报错也不保存 |
 | 后端伪造非法 enum_str（curl `PATCH /api/config/SECURITY_MODE` body `{"value":"yolo"}`） | 400 + detail `SECURITY_MODE 取值必须在 ['normal', 'strict'] 中` |
 
-### 1.3.6 副作用提示（行内常驻）
+### 1.3.6. 1.3.6 副作用提示（行内常驻）
 
 带 `side_effect_hint` 的项在控件下方**常驻**一行灰字 "提示：…"（不是 toast）；检查文案：
 
@@ -219,7 +219,7 @@ flowchart LR
 | `RERANKER_MODEL` / `DEFAULT_EMBEDDING_ALIAS` / `RAG_ACTIVE_EMBEDDINGS` | "首次使用新模型时会加载几秒" |
 | `MCP_ENABLED` / `MCP_CONFIG_FILE` | 触发 MCP manager 重载 / 切路径停 server 重连 相关文案 |
 
-### 1.3.7 危险项二次确认
+### 1.3.7. 1.3.7 危险项二次确认
 
 危险项是离散控件，**一改动就直接弹确认**（没有中间的保存按钮）：
 
@@ -229,7 +229,7 @@ flowchart LR
 | `PLAN_PERMISSION_MODE` 拨到开 | 同上，确认才写入；取消则开关弹回 |
 | 行内 "敏感" 徽章 | 上述两项标题旁带琥珀色 "敏感" 标签 |
 
-### 1.3.8 副作用 hook 真触发
+### 1.3.8. 1.3.8 副作用 hook 真触发
 
 | key | 验证手段 |
 |---|---|
@@ -238,7 +238,7 @@ flowchart LR
 | `MCP_ENABLED` false→true | 同上看到 server 重新 `connected` |
 | `MCP_CONFIG_FILE` 切到一个空 / 不存在的路径 | 全部 server 停掉、不抛 500 |
 
-### 1.3.9 安全红线
+### 1.3.9. 1.3.9 安全红线
 
 | 检查 | 预期 |
 |---|---|
@@ -250,9 +250,9 @@ flowchart LR
 
 # 2. chat 页面优化
 
-## 2.1 需求
+## 2.1. 2.1 需求
 
-### 2.1.1 原始需求
+### 2.1.1. 2.1.1 原始需求
 
 **视觉**
 
@@ -279,7 +279,7 @@ flowchart LR
 - RAG 引用展示
 - 回答 regenerate（同已发送消息，但独立按钮在应答下）
 
-### 2.1.2 业界标杆
+### 2.1.2. 2.1.2 业界标杆
 
 参考：ChatGPT / Claude.ai / Cursor / Perplexity / Linear AI / Gemini / Cody。
 
@@ -346,7 +346,7 @@ flowchart LR
 - composer 内 `/skill_name` 自动补全（与 A 里的 Slash command 共享底层 skill 列表）
 - 业界 Cursor / Linear / Notion / Raycast 通用；本项目 skills 后端已就绪
 
-### 2.1.3 本期不做
+### 2.1.3. 2.1.3 本期不做
 
 | 项 | 业界 | 暂搁理由 |
 |---|---|---|
@@ -361,7 +361,7 @@ flowchart LR
 | Anchor link / Share message | ChatGPT | 多用户场景才有意义 |
 | 长对话虚拟滚动 | 大型 IM | 当前消息量普遍 <100，过早优化；待真需要再加 |
 
-### 2.1.4 最终需求
+### 2.1.4. 2.1.4 最终需求
 
 > - `[§3]`：依赖后面 §3 token 统计的数据接口；本期先把界面位置 / 结构留出来，数值等 §3 接口好了再填。
 > - `[后端]`：需要后端配合改 chat_history，是本期唯一有后端改动的部分。
@@ -428,7 +428,7 @@ flowchart LR
 | 焦点环 | 键盘 Tab 到的按钮 / 输入框有清晰焦点环 |
 | 对比度 | 正文与背景对比度达 WCAG AA（≥4.5:1），暗色模式不发灰 |
 
-## 2.2 实现步骤
+## 2.2. 2.2 实现步骤
 
 以 §2.1.1 原始需求为骨架，按"发送端 / 接收端 / 整体"拆成 7 步；§2.1.4 是每步"做成啥样"的细化规格（下表 A-E 即 §2.1.4 五个类别）。排序原则：纯前端、零后端依赖的先做；需要后端配合的（chat_history 分支）排最后。
 
@@ -483,7 +483,7 @@ flowchart LR
 - token 估算（Step 3）/ 元数据底栏 token（Step 4）依赖 §3 token 统计：先搭结构占位，等 §3 数据接口好了再填
 - §2.1.3 候选项（@提及 / command palette / Mermaid / KaTeX / 继续生成等）本期不做
 
-### 2.2.1 实现期决策记录
+### 2.2.1. 2.2.1 实现期决策记录
 
 Step 1-6 的组件已落地（覆盖上表全部「原」需求 + 标杆增强）。本节记录验收（Step 7）阶段做的判断，遇到岔路自己拍的选择都列在这。
 
@@ -502,7 +502,7 @@ Step 1-6 的组件已落地（覆盖上表全部「原」需求 + 标杆增强�
 - 前端 `tsc --noEmit` 0 错；`eslint` 0 错（修掉 6 个：`PlanBlock`/`ToolBlock` 未用 import、`SourcesPanel` react-refresh、`useChat`/`useSpeechInput` render 阶段写 ref）；`vite build` 通过（geist 字体 + `agentA_logo.svg` 已打包）。
 - 后端 `pytest -q` 1286 通过（唯一 1 个失败是 `test_mcp_config` 的 Windows `os.replace` 文件锁偶发，与本期无关，单独跑即过）。
 
-## 2.3 人工验收
+## 2.3. 2.3 人工验收
 
 前端 tsc / eslint / build + 后端截断 UT 已在 §2.2.1 跑通；本节是**端到端手测**清单，覆盖 §2.1.4 全部 A-E 项。每条都给"怎么操作 + 达标标准"，照着点一遍即可判定是否过关。
 
@@ -513,7 +513,7 @@ Step 1-6 的组件已落地（覆盖上表全部「原」需求 + 标杆增强�
 - 验"推理档位"前先在 `设置` 把 `ACTIVE_PROVIDER` 切到支持 thinking 的 provider（claude / qwen / moonshot / kimi / deepseek / glm 之一）。
 - 暗色相关项在系统 / 应用暗色模式下各看一遍。
 
-### 2.3.0 原始需求达标对照（§2.1.1 逐条，确保不漏）
+### 2.3.1. 2.3.0 原始需求达标对照（§2.1.1 逐条，确保不漏）
 
 | §2.1.1 原始需求 | 验收节 | 一句话达标 |
 |---|---|---|
@@ -531,7 +531,7 @@ Step 1-6 的组件已落地（覆盖上表全部「原」需求 + 标杆增强�
 | Assistant：RAG 引用 | 2.3.4 | 底部"来源"折叠面板列条目 |
 | Assistant：应答下独立 regenerate | 2.3.4 / 2.3.5 | hover 应答浮出 ↻ |
 
-### 2.3.1 视觉地基 / 字体配色（§E）
+### 2.3.2. 2.3.1 视觉地基 / 字体配色（§E）
 
 | 操作 | 达标标准 |
 |---|---|
@@ -543,7 +543,7 @@ Step 1-6 的组件已落地（覆盖上表全部「原」需求 + 标杆增强�
 | 键盘 Tab 遍历发送框 / 各按钮 | 每个可聚焦元素都有清晰焦点环 |
 | 切暗色模式通读全程 | 文字不发灰、对比度足够（正文 vs 背景 ≥ 4.5:1，可用浏览器 DevTools 对比度检查抽测正文 / 链接 / 次要灰字） |
 
-### 2.3.2 Composer 核心（§A）
+### 2.3.3. 2.3.2 Composer 核心（§A）
 
 | 操作 | 达标标准 |
 |---|---|
@@ -554,7 +554,7 @@ Step 1-6 的组件已落地（覆盖上表全部「原」需求 + 标杆增强�
 | 上传一个 `.txt` / `.md` 后发送 | 文本附件内容内联进消息体；图片 / 二进制附件随消息带一行"未随消息发送：暂不支持多模态"提示 |
 | 浏览器支持时看发送框右下 | 出现麦克风图标；点一下开始录音（图标变红），说话实时转文字填进框；再点停止。不支持的浏览器无此图标（不报错） |
 
-### 2.3.3 Composer 体验（§A 余下）
+### 2.3.4. 2.3.3 Composer 体验（§A 余下）
 
 | 操作 | 达标标准 |
 |---|---|
@@ -564,7 +564,7 @@ Step 1-6 的组件已落地（覆盖上表全部「原」需求 + 标杆增强�
 | 持续输入长文本 | 右下角实时显示 `~N tokens` 估算；超 8000 时数字变红（占位值，`[§3]` 接入后替换真实统计） |
 | 在空发送框敲 `/` | 弹出 skill 列表；上下键选 + 回车填入 `/skill名 `；继续打字过滤；Esc 关闭 |
 
-### 2.3.4 应答区渲染（§B）
+### 2.3.5. 2.3.4 应答区渲染（§B）
 
 | 操作 | 达标标准 |
 |---|---|
@@ -580,7 +580,7 @@ Step 1-6 的组件已落地（覆盖上表全部「原」需求 + 标杆增强�
 | 制造一次生成失败（如断网后发） | 显示红框错误 + "重试"按钮；点重试重发本轮 |
 | 回答底部元数据行 `[§3]` | 结构占位在（模型 / 耗时 / token 行）；数值待 §3 接口，验收只要求"不报错、位置预留" |
 
-### 2.3.5 消息操作 + regenerate + 多版本（§B / §C，含 `[后端]`）
+### 2.3.6. 2.3.5 消息操作 + regenerate + 多版本（§B / §C，含 `[后端]`）
 
 | 操作 | 达标标准 |
 |---|---|
@@ -594,7 +594,7 @@ Step 1-6 的组件已落地（覆盖上表全部「原」需求 + 标杆增强�
 
 > 多版本 `‹ N/M ›` 是**前端内存态**：刷新页面后历史只保留最后一次结果，翻页器消失（设计如此，见 §2.2.1）。
 
-### 2.3.6 消息列表 / 整体（§D）
+### 2.3.7. 2.3.6 消息列表 / 整体（§D）
 
 | 操作 | 达标标准 |
 |---|---|
@@ -607,7 +607,7 @@ Step 1-6 的组件已落地（覆盖上表全部「原」需求 + 标杆增强�
 | 两条消息真实间隔 > 30 分钟 | 之间插一行时间分隔 pill「今天 14:23 / 昨天 09:11 / Jun 4 09:11」 |
 | 一轮回答结束后看对话末尾 | 最后一条消息下方显示 AgentA logo + 问候 pill「你好，我是 AgentA，有什么可以帮你？」；流式进行中不显示该 logo |
 
-### 2.3.7 回归（确保没改坏旧功能）
+### 2.3.8. 2.3.7 回归（确保没改坏旧功能）
 
 | 检查 | 达标标准 |
 |---|---|
@@ -615,7 +615,7 @@ Step 1-6 的组件已落地（覆盖上表全部「原」需求 + 标杆增强�
 | 历史 session 的消息渲染 | thinking / plan / tool / 正文 / 来源都能从落库历史正确还原 |
 | 设置页（§1）全功能 | 仍按 §1.3 正常工作（本期改动未波及）|
 
-### 2.3.8 验收执行记录
+### 2.3.9. 2.3.8 验收执行记录
 
 按 §2.3 用浏览器端到端点了一遍（provider=kimi），结果如下。
 
@@ -651,4 +651,221 @@ Step 1-6 的组件已落地（覆盖上表全部「原」需求 + 标杆增强�
 **根因留待后续**（已拍板）：上面「流提前关闭」的**根因**（前端只收到首个事件就关闭、而后端继续跑完）本期不深挖——可能在 Vite dev proxy 的 SSE 处理 / `sse_starlette` ping 间隔 / `@microsoft/fetch-event-source` 的某个 abort 竞态，需要带运行时日志单独排查，更偏后端 / 基础设施而非本期 UI 组件。本期已用前端兜底让失败「可见」，根因修复作为独立后端任务后续单独排。
 
 
+# 3. UI 代码指南
 
+面向「没做过前端、但想看懂本项目前端并能改一些小地方」的读者。读完能定位到某块界面对应哪个文件、看懂代码大致结构、自己动手改字号 / 间距 / 颜色这类样式。
+
+## 3.1. 代码框架
+
+前端是一个 React 单页应用，技术栈一句话：**React + TypeScript 写界面逻辑，Tailwind CSS 写样式，Vite 负责本地开发和打包**。
+
+| 名词 | 一句话解释 |
+|---|---|
+| React | 把界面拆成一个个「组件」（可复用的界面块）的框架 |
+| TypeScript | 带类型标注的 JavaScript，编辑器能提前帮你查错 |
+| Tailwind CSS | 用一串短 class 名（如 `text-lg`）直接写样式，不单独写 CSS 文件 |
+| Vite | 开发时启动本地服务器、改完代码自动刷新（热更新）；上线时打包 |
+| shadcn / lucide-react / sonner | 现成的基础控件库 / 图标库 / 弹窗提示库 |
+
+代码都在 `frontend/src/` 下，按职责分目录：
+
+```mermaid
+graph TD
+    main["main.tsx<br/>程序入口，挂载到网页"] --> App["App.tsx<br/>整体布局：左侧导航 + 右侧当前页面"]
+    App --> Sidebar["components/sidebar/<br/>左侧导航栏"]
+    App --> Views["右侧各页面（按导航切换）"]
+
+    Views --> chat["components/chat/<br/>聊天页（最核心）"]
+    Views --> settings["components/settings/<br/>设置页"]
+    Views --> resources["components/resources/<br/>记忆 / 规则 / 技能 / MCP"]
+    Views --> business["components/business/<br/>学习计划 / 测验 / 复习"]
+    Views --> kb["components/kb/<br/>知识库"]
+
+    subgraph 公共底座
+      ui["components/ui/<br/>通用控件：按钮 / 输入框 / 下拉菜单"]
+      hooks["hooks/<br/>可复用逻辑：useChat 收发消息等"]
+      api["api/client.ts<br/>跟后端通信"]
+      types["types/<br/>数据类型定义"]
+      lib["lib/<br/>小工具：主题 / 样式合并"]
+      css["index.css<br/>主题色变量 + Tailwind 引入"]
+    end
+
+    chat -.用到.-> ui
+    chat -.用到.-> hooks
+    hooks -.调用.-> api
+```
+
+目录速记：
+
+| 目录 / 文件 | 放什么 |
+|---|---|
+| `components/chat/` | 聊天界面的所有块：消息列表、气泡、输入框、思考块、工具调用块 |
+| `components/ui/` | 最底层通用控件（按钮、下拉菜单等），别的组件拼装它们 |
+| `hooks/` | 抽出来复用的逻辑，函数名以 `use` 开头（核心是 `useChat`，管消息收发） |
+| `api/client.ts` | 所有「请求后端」的函数都在这 |
+| `types/` | 描述数据长什么样（如一条消息有哪些字段） |
+| `lib/` | 零碎工具函数（`cn` 合并样式、主题切换） |
+| `index.css` | 全局主题色、字体、圆角等变量 |
+
+## 3.2. 流程图
+
+以「用户发一条消息，看到 AI 流式回答」为例，看数据怎么流动：
+
+```mermaid
+sequenceDiagram
+    participant U as 用户
+    participant C as Composer（输入框）
+    participant H as useChat（状态管理）
+    participant API as api/client.ts
+    participant BE as 后端 /api/chat/stream
+    participant B as MessageBubble（气泡）
+
+    U->>C: 输入文字，点发送
+    C->>H: 调 send(text)
+    H->>API: 发起流式请求（SSE）
+    API->>BE: POST /api/chat/stream
+    BE-->>API: 不断推送事件<br/>(思考 / 文字 / 工具调用 / plan)
+    API-->>H: 每来一个事件，更新 messages
+    H-->>B: messages 变了，React 自动重画气泡
+    B-->>U: 屏幕上逐字出现回答
+```
+
+要点：
+
+- **状态在 `useChat` 里**：`messages`（消息数组）是唯一数据源；它一变，所有用到它的界面自动重画。这是 React 的核心思想——**改数据，不直接改界面**。
+- **后端是流式（SSE）**：回答不是一次性返回，而是一段段推过来，所以能看到「逐字蹦」和中间的思考 / 工具调用过程。
+- **组件只负责「把数据画出来」**：`MessageBubble` 拿到一条消息，按它的字段决定显示文字、思考块还是工具块（见 §3.1 的 `components/chat/`）。
+
+## 3.3. 语法基础
+
+看懂前端代码只需先掌握这几个概念，够改样式用了。
+
+**1. 组件 = 返回界面的函数**。函数名大写开头，`return` 里那段「像 HTML」的就是界面：
+
+```tsx
+function Hello() {
+  return <div className="text-lg">你好</div>
+}
+```
+
+**2. JSX = 在 JS 里写界面标签**。标签里用 `{}` 插入变量或表达式：
+
+```tsx
+const name = '小明'
+return <div>你好，{name}</div>   // 显示：你好，小明
+```
+
+**3. props = 父组件传给子组件的参数**（就是函数入参）：
+
+```tsx
+function Badge({ text }: { text: string }) {
+  return <span>{text}</span>
+}
+// 用：<Badge text="free" />
+```
+
+**4. state = 组件自己的可变数据**，用 `useState`，变了界面自动重画：
+
+```tsx
+const [count, setCount] = useState(0)   // count 当前值；setCount 改它
+```
+
+**5. className + Tailwind = 用短 class 名控制样式**（最常改的就是这里）：
+
+```tsx
+<button className="px-2 text-sm text-muted-foreground">按钮</button>
+//                  左右内边距  字号小   文字用「次要」色
+```
+
+**6. 条件 / 列表渲染**（代码里到处是这两种写法）：
+
+| 写法 | 含义 |
+|---|---|
+| `{ok && <X/>}` | `ok` 为真才显示 `X` |
+| `{ok ? <A/> : <B/>}` | 真显示 `A`，假显示 `B` |
+| `{list.map((x) => <X key={x.id} .../>)}` | 把数组每一项渲染成一个组件 |
+
+**7. TypeScript 类型**：冒号后面是类型标注（`text: string` 表示 text 是字符串），只是给编辑器查错用，不影响运行逻辑。看不懂类型时可先跳过，专注 `return` 里的界面部分。
+
+## 3.4. 页面调整指南
+
+改字号 / 间距 / 颜色 / 对齐这类样式，**只改 `className` 里的 Tailwind 工具类即可**，不用碰逻辑。步骤：
+
+1. **定位文件**：按下表从「界面区域」找到对应组件文件。
+2. **找到那段 JSX**：在文件里搜界面上的文字或附近元素。
+3. **改 `className`**：替换里面的工具类（见速查表）。
+4. **存盘看效果**：开发服务器（`npm run dev`）会热更新，浏览器自动刷新，不用重启。
+
+界面区域 → 文件对照：
+
+| 界面区域 | 文件 |
+|---|---|
+| 左侧导航栏 | `components/sidebar/Sidebar.tsx` |
+| 聊天输入框 / 模型选择 / 工具条 | `components/chat/Composer.tsx` |
+| 消息气泡（用户 / AI、附件卡片、操作按钮） | `components/chat/MessageBubble.tsx` |
+| 工具调用块（如 `update_step`） | `components/chat/ToolBlock.tsx` |
+| 思考过程块 | `components/chat/ThinkingBlock.tsx` |
+| 学习计划块 | `components/chat/PlanBlock.tsx` |
+| 设置页 | `components/settings/SettingsView.tsx` |
+| 记忆 / 规则 / 技能 / MCP 页 | `components/resources/` 下对应文件 |
+| 全局主题色 / 字体 / 圆角 | `index.css` |
+
+常用 Tailwind 工具类速查：
+
+| 想改 | 类名示例 | 说明 |
+|---|---|---|
+| 字号 | `text-xs` `text-sm` `text-base` `text-lg` `text-xl` | 从小到大 |
+| 字重 | `font-normal` `font-medium` `font-bold` | 常规 / 中等 / 加粗 |
+| 文字颜色 | `text-foreground` `text-muted-foreground` `text-green-600` | 主色 / 次要色 / 具体色 |
+| 背景色 | `bg-background` `bg-muted` `bg-primary` | 用主题变量，自动适配深浅色 |
+| 内边距 | `p-2`（四周）`px-2`（左右）`py-1`（上下） | 数字越大越宽 |
+| 外边距 | `m-2` `mt-1` `mb-2` | 同上，t/b/l/r 指方向 |
+| 元素间距 | `gap-2` | 配合 `flex` 用，控制子元素间隔 |
+| 宽 / 高 | `w-8` `h-8` `w-full` `max-w-3xl` | 固定值 / 占满 / 最大宽度 |
+| 横向排列 | `flex items-center justify-between` | 一行排列、垂直居中、两端对齐 |
+| 圆角 | `rounded-md` `rounded-full` | 中等圆角 / 全圆 |
+
+实战例子（就是上一轮改过的）：把工具条上当前模型名的字号从大调小，在 `Composer.tsx` 找到模型选择按钮，把 `text-lg` 改成 `text-sm` 即可：
+
+```tsx
+// 改前
+className="... px-2 text-lg text-muted-foreground ..."
+// 改后（字号变小）
+className="... px-2 text-sm text-muted-foreground ..."
+```
+
+小贴士：
+
+- **颜色优先用主题变量**（`text-muted-foreground` / `bg-muted` 等），它们在深色 / 浅色模式下会自动切换；直接写 `text-gray-500` 这种会在另一种模式下不协调。
+- 一个 `className` 里可以堆很多类，**顺序不影响效果**，按「布局 → 间距 → 字体 → 颜色」分组写更好读。
+- 改坏了不要慌，Tailwind 类是纯样式，删掉多写的类就回到原样，不会影响功能。
+
+## 3.5 more
+
+以下为后续可补充的内容（仅列方向，暂不展开）：
+
+**入门 / 环境**
+
+- 本地怎么跑起来：`npm install` / `npm run dev` / 访问地址、前后端怎么连
+- 目录命名约定：组件文件 `PascalCase`、hooks 以 `use` 开头、`ui/` 与业务组件的边界
+- 开发工具：浏览器开发者工具（看元素 / 控制台报错）、VSCode 常用插件
+
+**进阶看懂代码**
+
+- `useChat` 详解：messages 结构、流式事件如何累积成一条消息、版本切换 / 重发逻辑
+- 一条消息的数据结构（`types/chat.ts`）：思考 / 工具 / plan / 附件各字段含义
+- 前后端接口约定：`api/client.ts` 有哪些请求、SSE 事件类型一览
+- 主题与深浅色：`index.css` 里的色彩变量体系、`color-scheme` 的作用
+
+**常见改动食谱（按场景给步骤）**
+
+- 加 / 改一个设置项在设置页怎么显示
+- 给消息气泡加一个操作按钮（复制 / 重发那一排）
+- 改空状态欢迎页的文案和快捷提示
+- 新增一个左侧导航入口 + 对应页面
+
+**规范 / 排错**
+
+- 改完怎么自检：`npm run lint`、TypeScript 类型报错怎么读
+- 常见报错对照表（白屏 / key 警告 / 类型不匹配）
+- 提交前检查清单

@@ -3,6 +3,7 @@ import {
   CalendarRange,
   Check,
   ChevronDown,
+  HelpCircle,
   Layers,
   ListChecks,
   MessageSquare,
@@ -131,10 +132,10 @@ export function MasteryView(props: MasteryViewProps) {
     window.addEventListener('mouseup', onUp)
   }, [])
 
-  const dismissIntro = () => {
-    setIntroDismissed(true)
+  const setIntro = (dismissed: boolean) => {
+    setIntroDismissed(dismissed)
     try {
-      localStorage.setItem(INTRO_DISMISSED_KEY, '1')
+      localStorage.setItem(INTRO_DISMISSED_KEY, dismissed ? '1' : '0')
     } catch {
       // 隐私模式下忽略
     }
@@ -164,12 +165,23 @@ export function MasteryView(props: MasteryViewProps) {
               定计划 · 做测验 · 间隔复习，三步把知识学透
             </p>
           </div>
-          {!chatOpen && (
-            <Button size="sm" variant="outline" onClick={toggleChat}>
-              <MessageSquare className="mr-1 h-4 w-4" />
-              AI 助手
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant={introDismissed ? 'outline' : 'secondary'}
+              onClick={() => setIntro(!introDismissed)}
+              title="使用说明"
+            >
+              <HelpCircle className="mr-1 h-4 w-4" />
+              帮助
             </Button>
-          )}
+            {!chatOpen && (
+              <Button size="sm" variant="outline" onClick={toggleChat}>
+                <MessageSquare className="mr-1 h-4 w-4" />
+                AI 助手
+              </Button>
+            )}
+          </div>
         </header>
 
         <div className="flex-1 overflow-y-auto p-6">
@@ -177,18 +189,53 @@ export function MasteryView(props: MasteryViewProps) {
             {!introDismissed && (
               <div className="relative rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">
                 <button
-                  onClick={dismissIntro}
+                  onClick={() => setIntro(true)}
                   className="absolute right-2 top-2 rounded p-1 text-muted-foreground hover:bg-accent"
                   aria-label="关闭引导"
                 >
                   <X className="h-4 w-4" />
                 </button>
-                <p className="font-medium">怎么用「学而时习」</p>
-                <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-muted-foreground">
-                  <li><b>定计划</b>：设一个学习目标，拆成阶段任务，逐条勾掉。</li>
-                  <li><b>做测验</b>：用右侧 AI 助手基于知识库出题（"考我 5 道 attention 的题"），回到这里作答、自动批改。</li>
-                  <li><b>间隔复习</b>：把要记的内容做成卡片，按"重来/困难/良好/容易"打分，系统自动安排下次复习时间。</li>
-                </ol>
+                <p className="text-sm font-medium">「学而时习」</p>
+
+                <p className="mt-1 text-muted-foreground">
+                  这里是在 AI 帮助下学习的地方，三步把知识学透——
+                  <b>定计划 → 做测验 → 间隔复习</b>，分别对应下面三个 Tab。
+                </p>
+                <p className="mt-1 text-muted-foreground">
+                  操作分两类：<b>大部分直接在页面点就行</b>；只有
+                  <b>出题</b>和<b>让 AI 帮你拟计划</b>需要在右侧「AI 助手」里说一句，
+                  AI 做完这里会自动刷新。
+                </p>
+
+                <div className="mt-3 space-y-2.5">
+                  <div>
+                    <p className="font-medium">学习计划：把目标拆开、跟踪进度</p>
+                    <ul className="mt-0.5 list-disc space-y-0.5 pl-5 text-muted-foreground">
+                      <li><b>新建计划</b>：点"新建计划"，填学习目标和阶段任务。</li>
+                      <li><b>让 AI 拟计划</b>：在 AI 助手里说"帮我做一份 8 周的 ML 学习计划"，拟好后自动出现在列表里。</li>
+                      <li><b>更新进度</b>：点任务前的图标循环切换——待办 → 已完成 → 已跳过。</li>
+                      <li><b>设为当前 / 放弃</b>：用计划卡片上的按钮切换主攻计划或放弃。</li>
+                    </ul>
+                  </div>
+
+                  <div>
+                    <p className="font-medium">测验：出题检验掌握程度</p>
+                    <ul className="mt-0.5 list-disc space-y-0.5 pl-5 text-muted-foreground">
+                      <li><b>出题</b>：在 AI 助手里说"考我 5 道 attention 的题"，题目会基于你导入的资料生成。</li>
+                      <li><b>答题批改</b>：在页面作答后点"提交批改"——选择题立即判分，简答由 AI 批改，马上出分。</li>
+                      <li><b>归档</b>：做完的题可以点"归档"收起。</li>
+                    </ul>
+                  </div>
+
+                  <div>
+                    <p className="font-medium">复习：间隔重复，记得更牢</p>
+                    <ul className="mt-0.5 list-disc space-y-0.5 pl-5 text-muted-foreground">
+                      <li><b>新建卡片</b>：点"新建卡片"，填正面（问题）和反面（答案）。</li>
+                      <li><b>复习打分</b>：翻面看答案后按"重来 / 困难 / 良好 / 容易"给自己打分，系统据此安排下次该什么时候再看。</li>
+                      <li><b>暂停 / 恢复 / 归档</b>：暂时不想复习某张卡，可在卡片上暂停，需要时再恢复或归档。</li>
+                    </ul>
+                  </div>
+                </div>
               </div>
             )}
 
