@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { getConfig, getModels, patchConfig } from '@/api/client'
-import type { ConfigItemView, ProviderModels } from '@/types/config'
+import { getLlmPrefs, getModels, patchLlmPrefs } from '@/api/client'
+import type { ProviderModels } from '@/types/config'
 
 export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high'
 
@@ -18,18 +18,7 @@ function budgetToLevel(enabled: boolean, budget: number): ThinkingLevel {
   return 'high'
 }
 
-function findItem(
-  groups: { items: ConfigItemView[] }[],
-  key: string,
-): ConfigItemView | undefined {
-  for (const g of groups) {
-    const it = g.items.find((i) => i.key === key)
-    if (it) return it
-  }
-  return undefined
-}
-
-/** Composer 的模型 / 推理档位设置，读写 /api/config（下一条消息生效）。 */
+/** Composer 的模型 / 推理档位设置，读写每用户偏好 /api/auth/llm-prefs（下一条消息生效，各用户互不干扰）。 */
 export function useComposerSettings() {
   const [loading, setLoading] = useState(true)
   const [providers, setProviders] = useState<ProviderModels[]>([])
@@ -38,14 +27,10 @@ export function useComposerSettings() {
 
   const load = useCallback(async () => {
     try {
-      const [catalog, cfg] = await Promise.all([getModels(), getConfig()])
+      const [catalog, prefs] = await Promise.all([getModels(), getLlmPrefs()])
       setProviders(catalog.providers)
-      setActiveModel(catalog.active)
-      const enItem = findItem(cfg.groups, 'THINKING_ENABLED')
-      const budgetItem = findItem(cfg.groups, 'THINKING_BUDGET')
-      const enabled = Boolean(enItem?.value)
-      const budget = Number(budgetItem?.value ?? 8000)
-      setLevelState(budgetToLevel(enabled, budget))
+      setActiveModel(prefs.active_model)
+      setLevelState(budgetToLevel(prefs.thinking_enabled, prefs.thinking_budget))
     } catch (e) {
       console.error('[useComposerSettings] 读配置失败', e)
     } finally {
@@ -60,7 +45,7 @@ export function useComposerSettings() {
   const setModel = useCallback(async (id: string) => {
     setActiveModel(id) // 乐观更新
     try {
-      await patchConfig('ACTIVE_MODEL', id)
+      await patchLlmPrefs({ active_model: id })
     } catch (e) {
       console.error('[useComposerSettings] 切模型失败', e)
       void load()
@@ -71,10 +56,9 @@ export function useComposerSettings() {
     setLevelState(lv)
     try {
       if (lv === 'off') {
-        await patchConfig('THINKING_ENABLED', false)
+        await patchLlmPrefs({ thinking_enabled: false })
       } else {
-        await patchConfig('THINKING_ENABLED', true)
-        await patchConfig('THINKING_BUDGET', LEVEL_BUDGET[lv])
+        await patchLlmPrefs({ thinking_enabled: true, thinking_budget: LEVEL_BUDGET[lv] })
       }
     } catch (e) {
       console.error('[useComposerSettings] 设推理档位失败', e)

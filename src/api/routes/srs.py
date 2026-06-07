@@ -7,7 +7,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.agent.core.srs_scheduler import card_state_from_dict, parse_rating, schedule_review
-from src.api.deps import get_srs_store
+from src.api.deps import get_current_user, get_srs_store
 from src.api.schemas.srs import (
     CreateCardRequest,
     ReviewCardRequest,
@@ -19,8 +19,8 @@ from src.memory.srs_store import SRSStore
 router = APIRouter(prefix="/srs", tags=["srs"])
 
 
-def _load_card_or_404(store: SRSStore, card_id: int) -> SRSCard:
-    card = store.get_card(card_id)
+def _load_card_or_404(store: SRSStore, card_id: int, user_id: int) -> SRSCard:
+    card = store.get_card(card_id, user_id=user_id)
     if card is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -33,16 +33,18 @@ def _load_card_or_404(store: SRSStore, card_id: int) -> SRSCard:
 def list_due(
     limit: int | None = None,
     store: SRSStore = Depends(get_srs_store),
+    user: dict = Depends(get_current_user),
 ) -> SRSCardListResponse:
-    rows = store.list_due(limit=limit)
+    rows = store.list_due(limit=limit, user_id=user["id"])
     return SRSCardListResponse(cards=[SRSCard(**row) for row in rows])
 
 
 @router.get("/cards", response_model=SRSCardListResponse)
 def list_cards(
     store: SRSStore = Depends(get_srs_store),
+    user: dict = Depends(get_current_user),
 ) -> SRSCardListResponse:
-    rows = store.list_cards()
+    rows = store.list_cards(user_id=user["id"])
     return SRSCardListResponse(cards=[SRSCard(**row) for row in rows])
 
 
@@ -50,8 +52,9 @@ def list_cards(
 def get_card(
     card_id: int,
     store: SRSStore = Depends(get_srs_store),
+    user: dict = Depends(get_current_user),
 ) -> SRSCard:
-    return _load_card_or_404(store, card_id)
+    return _load_card_or_404(store, card_id, user["id"])
 
 
 # ─── 写端点（页面内操作）────────────────────────────────────────────────
@@ -61,16 +64,17 @@ def get_card(
 def create_card(
     req: CreateCardRequest,
     store: SRSStore = Depends(get_srs_store),
+    user: dict = Depends(get_current_user),
 ) -> SRSCard:
     """手动新建一张复习卡（正面 front / 背面 back）。新卡立即 due。"""
     try:
         card_id = store.add_card(
             source_type="manual", front=req.front, back=req.back,
-            source_ref=None, note=req.note,
+            source_ref=None, note=req.note, user_id=user["id"],
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-    return _load_card_or_404(store, card_id)
+    return _load_card_or_404(store, card_id, user["id"])
 
 
 @router.post("/cards/{card_id}/review", response_model=SRSCard)
@@ -78,9 +82,10 @@ def review_card(
     card_id: int,
     req: ReviewCardRequest,
     store: SRSStore = Depends(get_srs_store),
+    user: dict = Depends(get_current_user),
 ) -> SRSCard:
     """4 档评分（again / hard / good / easy）→ 跑 SM-2 → 写回下次复习时间。"""
-    card = store.get_card(card_id)
+    card = store.get_card(card_id, user_id=user["id"])
     if card is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -104,47 +109,51 @@ def review_card(
         repetitions=result.repetitions,
         lapses=result.lapses,
         next_review_at=result.next_review_at,
+        user_id=user["id"],
     )
-    return _load_card_or_404(store, card_id)
+    return _load_card_or_404(store, card_id, user["id"])
 
 
 @router.post("/cards/{card_id}/suspend", response_model=SRSCard)
 def suspend_card(
     card_id: int,
     store: SRSStore = Depends(get_srs_store),
+    user: dict = Depends(get_current_user),
 ) -> SRSCard:
     """暂停卡片（不再出现在 due 队列，可恢复）。"""
-    if not store.suspend(card_id):
+    if not store.suspend(card_id, user_id=user["id"]):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"srs card id={card_id} 不存在",
         )
-    return _load_card_or_404(store, card_id)
+    return _load_card_or_404(store, card_id, user["id"])
 
 
 @router.post("/cards/{card_id}/resume", response_model=SRSCard)
 def resume_card(
     card_id: int,
     store: SRSStore = Depends(get_srs_store),
+    user: dict = Depends(get_current_user),
 ) -> SRSCard:
     """从 suspended 恢复为 active。"""
-    if not store.resume(card_id):
+    if not store.resume(card_id, user_id=user["id"]):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"card id={card_id} 不存在或当前不是 suspended，无法恢复",
         )
-    return _load_card_or_404(store, card_id)
+    return _load_card_or_404(store, card_id, user["id"])
 
 
 @router.post("/cards/{card_id}/archive", response_model=SRSCard)
 def archive_card(
     card_id: int,
     store: SRSStore = Depends(get_srs_store),
+    user: dict = Depends(get_current_user),
 ) -> SRSCard:
     """归档卡片（软删除，不再出现在默认列表）。"""
-    if not store.archive(card_id):
+    if not store.archive(card_id, user_id=user["id"]):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"srs card id={card_id} 不存在",
         )
-    return _load_card_or_404(store, card_id)
+    return _load_card_or_404(store, card_id, user["id"])

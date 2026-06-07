@@ -22,6 +22,21 @@ import src.agent.agent as _agent_module
 
 
 @pytest.fixture(autouse=True)
+def _disable_auth_by_default():
+    """默认关认证：所有 API 测试落到 DEFAULT_USER_ID（且为 admin），
+
+    保持既有 API 测试无需登录即可跑通。需要验证认证 / 隔离的测试自行
+    把 `_cfg.AUTH_ENABLED` 设回 True。
+    """
+    import src.config as _cfg
+
+    orig = _cfg.AUTH_ENABLED
+    _cfg.AUTH_ENABLED = False
+    yield
+    _cfg.AUTH_ENABLED = orig
+
+
+@pytest.fixture(autouse=True)
 def _neutralize_runtime_overrides():
     """中和运行时 override 对全局 config 的污染。
 

@@ -10,10 +10,11 @@
 **API key 等敏感字段不在 registry 中**，永不暴露 / 永不允许修改（详 docs/iter_4_UI2_plus.md §1.1.3）。
 """
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 import src.config as _cfg
 from src.api import config_hooks, config_overrides
+from src.api.deps import get_current_user, require_admin
 from src.api.config_meta import (
     GROUP_LABELS,
     REGISTRY,
@@ -58,7 +59,7 @@ def _build_view(item: ConfigItem) -> ConfigItemView:
 
 
 @router.get("/models", response_model=ModelsResponse)
-def list_models() -> ModelsResponse:
+def list_models(_: dict = Depends(get_current_user)) -> ModelsResponse:
     """两档模型目录：按厂商分组的可选模型，供前端级联菜单使用。"""
     by_provider: dict[str, list[ModelOption]] = {}
     for mid, m in _cfg.MODEL_CONFIGS.items():
@@ -82,7 +83,7 @@ def list_models() -> ModelsResponse:
 
 
 @router.get("", response_model=ConfigResponse)
-def get_config() -> ConfigResponse:
+def get_config(_: dict = Depends(get_current_user)) -> ConfigResponse:
     by_group: dict[str, list[ConfigItemView]] = {g: [] for g in GROUP_LABELS}
     for item in REGISTRY:
         by_group.setdefault(item.group, []).append(_build_view(item))
@@ -95,7 +96,9 @@ def get_config() -> ConfigResponse:
 
 
 @router.patch("/{key}", response_model=ConfigItemResponse)
-def patch_config(key: str, req: ConfigPatchRequest) -> ConfigItemResponse:
+def patch_config(
+    key: str, req: ConfigPatchRequest, _: dict = Depends(require_admin)
+) -> ConfigItemResponse:
     item = get_item(key)
     if item is None or not item.editable:
         raise HTTPException(
@@ -116,7 +119,7 @@ def patch_config(key: str, req: ConfigPatchRequest) -> ConfigItemResponse:
 
 
 @router.delete("/{key}", response_model=ConfigItemResponse)
-def reset_config(key: str) -> ConfigItemResponse:
+def reset_config(key: str, _: dict = Depends(require_admin)) -> ConfigItemResponse:
     item = get_item(key)
     if item is None or not item.editable:
         raise HTTPException(
@@ -130,7 +133,7 @@ def reset_config(key: str) -> ConfigItemResponse:
 
 
 @router.post("/reload", response_model=ConfigReloadResponse)
-def reload_config() -> ConfigReloadResponse:
+def reload_config(_: dict = Depends(require_admin)) -> ConfigReloadResponse:
     """从磁盘 overrides 文件重新加载，同步到 _cfg 并触发变化项的 hook。"""
     changed = config_overrides.reload_from_file()
     return ConfigReloadResponse(

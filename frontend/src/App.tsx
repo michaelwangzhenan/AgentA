@@ -7,9 +7,11 @@ import { MemoryView } from '@/components/resources/MemoryView'
 import { RulesView } from '@/components/resources/RulesView'
 import { SkillsView } from '@/components/resources/SkillsView'
 import { MasteryView } from '@/components/business/MasteryView'
-import { SettingsView } from '@/components/settings/SettingsView'
+import { SettingsPage } from '@/components/settings/SettingsPage'
+import { LoginView } from '@/components/auth/LoginView'
 import { Sidebar, type ViewKind } from '@/components/sidebar/Sidebar'
 import { useTheme } from '@/lib/theme'
+import { useAuth } from '@/lib/auth'
 import { useChat } from '@/hooks/useChat'
 import {
   createSession,
@@ -21,6 +23,7 @@ import type { Session } from '@/types/session'
 
 function App() {
   const { theme } = useTheme()
+  const { user, loading: authLoading, isAdmin, logout } = useAuth()
   const [activeView, setActiveView] = useState<ViewKind>('chat')
   const [sessions, setSessions] = useState<Session[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
@@ -46,8 +49,9 @@ function App() {
     switchVersion,
   } = useChat({ sessionId: activeSessionId, onSettled: refreshSessions })
 
-  // ─── 首屏：拉 sessions，空则自动建一个 ─────────────────────────────────
+  // ─── 首屏：登录后拉 sessions，空则自动建一个 ───────────────────────────
   useEffect(() => {
+    if (!user) return
     let cancelled = false
     ;(async () => {
       try {
@@ -69,7 +73,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [user])
 
   // ─── Sidebar 回调 ─────────────────────────────────────────────────────
   const handleSelect = useCallback((id: string) => {
@@ -105,12 +109,27 @@ function App() {
     [sessions, activeSessionId],
   )
 
+  if (authLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background text-sm text-muted-foreground">
+        加载中…
+      </div>
+    )
+  }
+
+  if (!user) {
+    return <LoginView />
+  }
+
   return (
     <div className="flex h-screen bg-background">
       <Sidebar
         sessions={sessions}
         activeId={activeSessionId}
         activeView={activeView}
+        username={user.username}
+        isAdmin={isAdmin}
+        onLogout={logout}
         onSelect={handleSelect}
         onCreate={handleCreate}
         onRename={handleRename}
@@ -133,8 +152,8 @@ function App() {
       {activeView === 'kb' && <KnowledgeBaseView />}
       {activeView === 'memory' && <MemoryView />}
       {activeView === 'rules' && <RulesView />}
-      {activeView === 'skills' && <SkillsView />}
-      {activeView === 'mcp' && <MCPView />}
+      {activeView === 'skills' && isAdmin && <SkillsView />}
+      {activeView === 'mcp' && isAdmin && <MCPView />}
       {activeView === 'mastery' && (
         <MasteryView
           sessionId={activeSessionId}
@@ -151,7 +170,7 @@ function App() {
           onSwitchVersion={switchVersion}
         />
       )}
-      {activeView === 'settings' && <SettingsView />}
+      {activeView === 'settings' && <SettingsPage />}
       <Toaster
         position="bottom-right"
         richColors

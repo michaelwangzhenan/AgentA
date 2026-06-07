@@ -13,9 +13,9 @@
 
 import logging
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
-from src.api.deps import get_agent
+from src.api.deps import get_agent, get_current_user, require_admin
 from src.api.schemas.skills import (
     SkillCreateRequest,
     SkillFailure,
@@ -80,12 +80,12 @@ def _reload_agent_cache() -> None:
 
 
 @router.get("", response_model=SkillsResponse)
-def list_skills() -> SkillsResponse:
+def list_skills(_: dict = Depends(get_current_user)) -> SkillsResponse:
     return _scan_to_response(scan_skills())
 
 
 @router.post("/reload", response_model=SkillReloadResponse)
-def reload_skills() -> SkillReloadResponse:
+def reload_skills(_: dict = Depends(require_admin)) -> SkillReloadResponse:
     """重新扫描 .agenta/skills/ 并清空 Agent 单例缓存。
 
     下一次 chat 请求会触发 `get_agent()` 重建实例，新 catalog 立即可用。
@@ -102,7 +102,9 @@ def reload_skills() -> SkillReloadResponse:
 
 
 @router.post("", response_model=SkillItem, status_code=status.HTTP_201_CREATED)
-def create_skill_endpoint(req: SkillCreateRequest) -> SkillItem:
+def create_skill_endpoint(
+    req: SkillCreateRequest, _: dict = Depends(require_admin)
+) -> SkillItem:
     try:
         info = create_skill(
             req.name,
@@ -118,7 +120,9 @@ def create_skill_endpoint(req: SkillCreateRequest) -> SkillItem:
 
 
 @router.put("/{name}", response_model=SkillItem)
-def update_skill_endpoint(name: str, req: SkillUpdateRequest) -> SkillItem:
+def update_skill_endpoint(
+    name: str, req: SkillUpdateRequest, _: dict = Depends(require_admin)
+) -> SkillItem:
     try:
         info = update_skill(
             name,
@@ -134,7 +138,9 @@ def update_skill_endpoint(name: str, req: SkillUpdateRequest) -> SkillItem:
 
 
 @router.post("/{name}/rename", response_model=SkillItem)
-def rename_skill_endpoint(name: str, req: SkillRenameRequest) -> SkillItem:
+def rename_skill_endpoint(
+    name: str, req: SkillRenameRequest, _: dict = Depends(require_admin)
+) -> SkillItem:
     """改名：目录从 `<dir>/{name}/` 移到 `<dir>/{new_name}/`，同时同步
     frontmatter `name:` 字段（强一致）。如旧 name 在 disabled list 里，
     迁移到新 name 保持禁用状态。
@@ -149,7 +155,7 @@ def rename_skill_endpoint(name: str, req: SkillRenameRequest) -> SkillItem:
 
 
 @router.delete("/{name}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_skill_endpoint(name: str) -> None:
+def delete_skill_endpoint(name: str, _: dict = Depends(require_admin)) -> None:
     try:
         delete_skill(name)
     except SkillIOError as e:
@@ -159,7 +165,9 @@ def delete_skill_endpoint(name: str) -> None:
 
 
 @router.post("/{name}/toggle", response_model=SkillToggleResponse)
-def toggle_skill_endpoint(name: str, req: SkillToggleRequest) -> SkillToggleResponse:
+def toggle_skill_endpoint(
+    name: str, req: SkillToggleRequest, _: dict = Depends(require_admin)
+) -> SkillToggleResponse:
     # 先扫盘拿到所有已存在的 name（含 disabled），再 toggle，防止操作不存在的 skill
     current = scan_skills()
     valid_names = set(current.loaded.keys()) | set(current.disabled.keys())

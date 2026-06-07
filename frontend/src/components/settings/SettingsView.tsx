@@ -34,7 +34,7 @@ function isInstantType(t: ConfigItemView['type']): boolean {
   return t === 'bool' || t === 'enum_str' || t === 'multi_enum_str'
 }
 
-export function SettingsView() {
+export function SettingsView({ embedded = false }: { embedded?: boolean } = {}) {
   const [groups, setGroups] = useState<ConfigGroupView[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -281,30 +281,28 @@ export function SettingsView() {
     return counts
   }, [edits, groups])
 
-  return (
-    <ResourcePage
-      title="设置"
-      subtitle="改完立即生效；持久化到 .agenta/config_overrides.json，下次启动仍生效"
-      toolbar={
-        <>
-          {inflightCount > 0 && (
-            <span className="text-xs text-muted-foreground">{inflightCount} 项保存中…</span>
-          )}
-          <Button
-            onClick={handleReload}
-            size="sm"
-            variant="outline"
-            disabled={loading}
-            title="把磁盘上 .agenta/config_overrides.json 的内容拉回内存（用于手动改完文件后同步）"
-          >
-            从文件重载
-          </Button>
-          <Button onClick={refresh} size="sm" variant="outline" disabled={loading}>
-            刷新
-          </Button>
-        </>
-      }
-    >
+  const toolbar = (
+    <>
+      {inflightCount > 0 && (
+        <span className="text-xs text-muted-foreground">{inflightCount} 项保存中…</span>
+      )}
+      <Button
+        onClick={handleReload}
+        size="sm"
+        variant="outline"
+        disabled={loading}
+        title="把磁盘上 .agenta/config_overrides.json 的内容拉回内存（用于手动改完文件后同步）"
+      >
+        从文件重载
+      </Button>
+      <Button onClick={refresh} size="sm" variant="outline" disabled={loading}>
+        刷新
+      </Button>
+    </>
+  )
+
+  const content = (
+    <>
       {loadError && (
         <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-100">
           {loadError}
@@ -433,6 +431,28 @@ export function SettingsView() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </>
+  )
+
+  // 嵌入设置弹窗时去掉整页 ResourcePage 外壳，只保留工具条 + 正文（自带滚动）
+  if (embedded) {
+    return (
+      <div className="flex h-full min-h-0 flex-col gap-3">
+        <div className="flex items-center justify-end gap-2">{toolbar}</div>
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
+          {content}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <ResourcePage
+      title="设置"
+      subtitle="改完立即生效；持久化到 .agenta/config_overrides.json，下次启动仍生效"
+      toolbar={toolbar}
+    >
+      {content}
     </ResourcePage>
   )
 }

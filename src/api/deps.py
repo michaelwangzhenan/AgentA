@@ -14,6 +14,9 @@
 """
 
 from functools import lru_cache
+from typing import Any
+
+from fastapi import Depends, HTTPException, Request, status
 
 import src.config as _cfg
 from src.agent.agent import Agent
@@ -27,6 +30,8 @@ from src.memory.quiz_store import get_shared_store as _get_shared_quiz_store
 from src.memory.srs_store import SRSStore
 from src.memory.srs_store import get_shared_store as _get_shared_srs_store
 from src.memory.user_memory import UserMemoryStore
+from src.memory.user_store import ROLE_ADMIN, UserStore
+from src.memory.user_store import get_shared_store as _get_shared_user_store
 
 
 @lru_cache(maxsize=1)
@@ -84,3 +89,46 @@ def get_quiz_store() -> QuizStore:
 def get_srs_store() -> SRSStore:
     """复用 srs_store 进程内共享单例。"""
     return _get_shared_srs_store()
+
+
+def get_user_store() -> UserStore:
+    """复用 user_store 进程内共享单例（账号 / 登录态 / 每用户 rules）。"""
+    return _get_shared_user_store()
+
+
+# 关认证时回落到的默认用户（CLI / 单机自用）；admin 角色让 admin 门也能过
+_ANON_USER: dict[str, Any] = {
+    "id": _cfg.DEFAULT_USER_ID,
+    "username": "local",
+    "role": ROLE_ADMIN,
+    "created_at": "",
+}
+
+
+def get_current_user(
+    request: Request,
+    store: UserStore = Depends(get_user_store),
+) -> dict[str, Any]:
+    """解析当前登录用户：读 cookie token → 查 auth_sessions → 取 user。
+
+    `AUTH_ENABLED=false` 时跳过校验，回落到默认用户（id=DEFAULT_USER_ID，admin）。
+    未登录 / token 失效 → 401。
+    """
+    if not _cfg.AUTH_ENABLED:
+        return dict(_ANON_USER)
+    token = request.cookies.get(_cfg.AUTH_COOKIE_NAME)
+    user = store.get_user_by_token(token or "")
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录或登录已过期"
+        )
+    return user
+
+
+def require_admin(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    """在 get_current_user 之上要求 admin 角色，否则 403。"""
+    if user.get("role") != ROLE_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限"
+        )
+    return user

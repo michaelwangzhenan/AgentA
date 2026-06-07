@@ -5,6 +5,8 @@ import {
   Brain,
   ChevronDown,
   GraduationCap,
+  HelpCircle,
+  LogOut,
   MessageSquare,
   MoreHorizontal,
   Pencil,
@@ -14,6 +16,7 @@ import {
   Settings,
   Sparkles,
   Trash2,
+  UserCircle2,
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -62,6 +65,9 @@ export type SidebarProps = {
   sessions: Session[]
   activeId: string | null
   activeView: ViewKind
+  username: string
+  isAdmin: boolean
+  onLogout: () => void
   onSelect: (id: string) => void
   onCreate: () => void
   onRename: (id: string, title: string) => Promise<void> | void
@@ -74,6 +80,9 @@ export function Sidebar(props: SidebarProps) {
     sessions,
     activeId,
     activeView,
+    username,
+    isAdmin,
+    onLogout,
     onSelect,
     onCreate,
     onRename,
@@ -84,6 +93,8 @@ export function Sidebar(props: SidebarProps) {
   const [renameTarget, setRenameTarget] = useState<Session | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null)
+  const [confirmLogout, setConfirmLogout] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const [recentsCollapsed, setRecentsCollapsed] = useState<boolean>(() => {
     try {
       return localStorage.getItem(RECENTS_COLLAPSED_KEY) === '1'
@@ -173,29 +184,27 @@ export function Sidebar(props: SidebarProps) {
           active={activeView === 'rules'}
           onClick={() => onSwitchView('rules')}
         />
-        <ViewNavButton
-          icon={<Sparkles className="h-4 w-4" />}
-          label="Skills"
-          active={activeView === 'skills'}
-          onClick={() => onSwitchView('skills')}
-        />
-        <ViewNavButton
-          icon={<Plug className="h-4 w-4" />}
-          label="MCP"
-          active={activeView === 'mcp'}
-          onClick={() => onSwitchView('mcp')}
-        />
+        {isAdmin && (
+          <ViewNavButton
+            icon={<Sparkles className="h-4 w-4" />}
+            label="Skills"
+            active={activeView === 'skills'}
+            onClick={() => onSwitchView('skills')}
+          />
+        )}
+        {isAdmin && (
+          <ViewNavButton
+            icon={<Plug className="h-4 w-4" />}
+            label="MCP"
+            active={activeView === 'mcp'}
+            onClick={() => onSwitchView('mcp')}
+          />
+        )}
         <ViewNavButton
           icon={<GraduationCap className="h-4 w-4" />}
           label="学而时习"
           active={activeView === 'mastery'}
           onClick={() => onSwitchView('mastery')}
-        />
-        <ViewNavButton
-          icon={<Settings className="h-4 w-4" />}
-          label="设置"
-          active={activeView === 'settings'}
-          onClick={() => onSwitchView('settings')}
         />
       </div>
 
@@ -272,7 +281,39 @@ export function Sidebar(props: SidebarProps) {
         )}
       </div>
 
-      <div className="flex items-center justify-end border-t border-border px-3 py-2">
+      <div className="flex items-center justify-between gap-2 border-t border-border px-3 py-2">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1 text-left hover:bg-accent/60"
+            title={username}
+          >
+            <UserCircle2 className="h-5 w-5 shrink-0 text-muted-foreground" />
+            <div className="flex min-w-0 flex-col">
+              <span className="truncate text-sm leading-tight">{username}</span>
+              <span className="truncate text-[11px] leading-tight text-muted-foreground">
+                {isAdmin ? 'ADMIN' : 'User'}
+              </span>
+            </div>
+            <ChevronDown className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" side="top" className="w-44">
+            <DropdownMenuItem onClick={() => onSwitchView('settings')}>
+              <Settings className="mr-2 h-4 w-4" />
+              设置
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setHelpOpen(true)}>
+              <HelpCircle className="mr-2 h-4 w-4" />
+              帮助
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              onClick={() => setConfirmLogout(true)}
+            >
+              <LogOut className="mr-2 h-4 w-4" />
+              退出
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <ThemeToggle />
       </div>
 
@@ -343,6 +384,43 @@ export function Sidebar(props: SidebarProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* 退出确认 AlertDialog */}
+      <AlertDialog
+        open={confirmLogout}
+        onOpenChange={(o: boolean) => setConfirmLogout(o)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>退出登录？</AlertDialogTitle>
+            <AlertDialogDescription>
+              退出后需重新登录才能继续使用。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmLogout(false)
+                onLogout()
+              }}
+              autoFocus
+            >
+              退出
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 帮助（占位） */}
+      <Dialog open={helpOpen} onOpenChange={(o: boolean) => setHelpOpen(o)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>帮助</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">帮助文档即将上线，敬请期待。</p>
+        </DialogContent>
+      </Dialog>
     </aside>
   )
 }

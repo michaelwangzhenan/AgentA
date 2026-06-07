@@ -518,20 +518,19 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 
 ## 3.5 Prompt 管理
 
-用户在项目根放一份 Markdown 偏好文件，Agent 每次对话自动遵守，无需每轮重申。
+每个用户维护一份 Markdown 偏好，Agent 每次对话自动遵守，无需每轮重申；多用户下每人一份、互不影响。
 对比 [§3.4 用户记忆](#34-用户记忆memory)：**静态偏好**（用户主动声明）vs. **动态偏好**（会话中学到）。
-同理 Cursor Rules(.cursor/rules/agenta-conventions.mdc) / GHC Instructions(.github/instructions.md)。
+概念同 Cursor Rules / GHC Instructions（持久生效的偏好），区别是 AgentA 按用户存库、即时生效。
 
-### 3.5.1 文件位置与加载
+### 3.5.1 存储与加载
 
 | 项 | 约定 |
 |---|---|
-| 默认路径 | `.agenta/rules.md`（可由 `USER_RULES_FILE` 配置） |
+| 存储 | `auth.db` 的 `user_rules` 表，每用户一条（`user_id` 主键） |
 | 格式 | 纯 Markdown / 文本，无 frontmatter，无元数据 |
-| 加载时机 | 进程启动后**一次性**读入并缓存；改完文件需重启 AgentA 生效 |
-| 异常处理 | 文件缺失 / 空 / 全空白 → 静默跳过（不报错）；超过 `USER_RULES_MAX_CHARS` 自动截断 |
-
-注：不支持热加载 / 文件 watch。
+| 编辑 | Rules 页 / `PUT /api/rules`，只写当前用户那条 |
+| 加载时机 | 每轮对话即时读当前用户的 rules，改完即时生效 |
+| 异常处理 | 未设置 / 空 / `USER_RULES_ENABLED=false` → 静默跳过（不拼 `<project_rules>` 块） |
 
 ### 3.5.2 四层注入顺序
 
@@ -540,7 +539,7 @@ system prompt 最终由四层拼成：
 | 层 | 来源 | 决定 | 切换粒度 |
 |---|---|---|---|
 | **`base system_prompt`** | `agent.py:SYSTEM_PROMPT` 常量 + 启动时拼接的 `<available_skills>` skill catalog（详 [§3.7.2](#372-渐进披露)） | "Agent 是谁" + "有哪些 skill 可调" | 常量全局不变；catalog 在 `/reload-skills` 后刷新 |
-| **`<project_rules>`** | 项目根 `.agenta/rules.md` | "Agent 在本项目下要遵守什么" — 语言 / 格式 / 引用风格等静态偏好 | 进程启动加载一次；改 `.agenta/rules.md` 后重启生效 |
+| **`<project_rules>`** | 当前用户的 rules（`auth.db.user_rules`） | "Agent 要遵守该用户什么偏好" — 语言 / 格式 / 引用风格等静态偏好 | 每轮对话即时读当前用户的，改完即时生效 |
 | **`<user_context>`** | `UserMemoryStore` （[§3.4](#34-用户记忆memory)） | "Agent 这次会话还要注意什么" — 动态学到的临时偏好 | 每轮对话即时刷新 |
 | **`<active_study_plan>`** | 学习计划（[§3.9.4](#394-跨-session-状态可见性)） | "Agent 当前在帮用户跟踪哪个学习计划 / 进度到哪了" |  `/study load` 手动注入 |
 
@@ -548,13 +547,13 @@ system prompt 最终由四层拼成：
 flowchart TD
     SYS["agent.py SYSTEM_PROMPT"]
     SKILLS[(".agenta/skills/*/SKILL.md<br/>frontmatter description")]
-    RULES[(".agenta/rules.md<br/>静态偏好")]
+    RULES[("auth.db.user_rules<br/>每用户静态偏好")]
     MEM[("user_memory 池<br/>动态偏好")]
     LP[("learning.db<br/>已 /study load 的 plan")]
 
     SYS --> BASE["base system_prompt<br/>= 常量 + &lt;available_skills&gt; catalog"]
     SKILLS -.->|"启动时拼 catalog"| BASE
-    RULES -.->|"启动时一次性加载"| R["拼 &lt;project_rules&gt; 块"]
+    RULES -.->|"每轮读当前用户"| R["拼 &lt;project_rules&gt; 块"]
     MEM -.->|"每轮 load_for_context()"| C["拼 &lt;user_context&gt; 块"]
     LP -.->|"仅当本 session 已 /study load"| P["拼 &lt;active_study_plan&gt; 块"]
 
@@ -569,10 +568,10 @@ flowchart TD
 | 层 | 放什么 | 不放什么 |
 |---|---|---|
 | `SYSTEM_PROMPT` 常量 | **绝对系统指令**：工具调用协议、引用规范、untrusted 数据隔离等改了就破契约的硬约束 | 业务语义假设（KB 性质、应用场景） |
-| `.agenta/rules.md` | **业务偏好**：应用场景、KB 性质、领域术语、何时该查 KB、回答风格 | 工具协议 / 引用规范 / 安全约束（已在 `SYSTEM_PROMPT`） |
+| 用户 rules（`user_rules`） | **业务偏好**：应用场景、KB 性质、领域术语、何时该查 KB、回答风格 | 工具协议 / 引用规范 / 安全约束（已在 `SYSTEM_PROMPT`） |
 
 - 两者**不重复**
-- rules.md 缺失时 `SYSTEM_PROMPT` 必须能独立工作（详 prompt 内 "工具策略 / Fallback" 段），由 `tests/test_system_prompt.py` 守护 fallback 文案与契约 token 不被删
+- rules 未设置时 `SYSTEM_PROMPT` 必须能独立工作（详 prompt 内 "工具策略 / Fallback" 段），由 `tests/test_system_prompt.py` 守护 fallback 文案与契约 token 不被删
 
 
 ### 3.5.3 防 prompt injection
@@ -1454,7 +1453,7 @@ UI 通过 `/api/mcp/*` 端点对 server 做 CRUD（详 iter_4_UI.md §6.4.6 API 
 | `src/agent/core/plan_manager.py` | `PlanState` / `PlanStep` dataclass + 从 messages reconstruct plan 状态（详 [§3.8.1](#381-数据载体)） | `reconstruct_from_messages(messages)` |
 | `src/agent/core/srs_scheduler.py` | SM-2 公式纯函数（4 档 → ease / interval / repetitions / lapses，详 [§3.11.2](#3112-sm-2-算法核心)） | `schedule_review(card, rating)` |
 | `src/agent/core/harness_manager.py` | Q1 测验批改自检 + R1 RAG 召回过滤；复用 `judge_with_llm`（详 [§3.12](#312-harness-自检)） | `HarnessManager.review_grading()` · `filter_chunks()` |
-| `src/agent/core/rules_loader.py` | 项目 `.agenta/rules.md` 加载 + `<project_rules>` block 拼接（详 [§3.5](#35-prompt-管理)） | `load_project_rules()` · `build_rules_block()` |
+| `src/agent/core/rules_loader.py` | 把用户 rules 文本拼成 `<project_rules>` block（rules 文本由 Agent 按当前用户从 `user_rules` 读，详 [§3.5](#35-prompt-管理)） | `build_rules_block()` |
 | `src/agent/core/mcp_config.py` | MCP servers 配置解析 + UI 编辑路径的 CRUD 辅助 + disabled 列表管理（详 [§3.14.3](#3143-配置文件) / [§3.14.4](#3144-web-ui-管理)） | `load_mcp_config()` · `add_server()` · `update_server()` · `delete_server()` · `rename_server()` · `toggle_server()` |
 | `src/agent/core/mcp_manager.py` | MCP server 子进程生命周期 + tool 发现 / 调用（asyncio loop 跑在后台线程） | `MCPManager.start_all()` · `start_one()` · `stop_one()` · `reload()` · `list_tools()` · `call_tool()` |
 | `src/agent/core/url_guard.py` | SSRF 防护：私网 / 链路本地 / 保留段 IP 拦截 | `is_url_safe(url)` |
@@ -1581,14 +1580,12 @@ flowchart TB
 
     subgraph FILES["文件驱动配置"]
         direction LR
-        R[".agenta/rules.md"]
         SK[".agenta/skills/&lt;name&gt;/SKILL.md"]
     end
 
     H -->|"调用"| AAPI
     WS -->|"事件流 + 调用"| AAPI
     SCRIPT -->|"调用"| AAPI
-    R -.加载.-> H
     SK -.加载.-> H
 ```
 

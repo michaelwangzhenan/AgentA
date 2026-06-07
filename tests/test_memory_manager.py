@@ -80,7 +80,7 @@ class TestBuildSystemPrompt:
 # ── Phase 1.3：rules + memory 拼接顺序契约 ──────────────────────────────
 #
 # Agent.run() 实际拼接代码（src/agent/agent.py）：
-#     base_with_rules = self.system_prompt + build_rules_block(load_project_rules())
+#     base_with_rules = self.system_prompt + build_rules_block(_get_active_rules())
 #     system_content  = memory_mgr.build_system_prompt(base_with_rules)
 #
 # 这里测的是同一拼接序列的**纯逻辑**，避免依赖 Agent 实例化重型路径。

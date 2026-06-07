@@ -31,7 +31,7 @@ from src.agent.core.mcp_config import (
     update_server,
 )
 from src.agent.core.mcp_manager import MCPManager
-from src.api.deps import get_mcp_manager
+from src.api.deps import get_current_user, get_mcp_manager, require_admin
 from src.api.schemas.mcp import (
     MCPReloadResponse,
     MCPServer,
@@ -119,6 +119,7 @@ def _build_server_list(manager: MCPManager) -> list[MCPServer]:
 @router.get("/servers", response_model=MCPServerListResponse)
 def list_servers(
     manager: MCPManager = Depends(get_mcp_manager),
+    _: dict = Depends(get_current_user),
 ) -> MCPServerListResponse:
     return MCPServerListResponse(servers=_build_server_list(manager))
 
@@ -126,6 +127,7 @@ def list_servers(
 @router.get("/tools", response_model=MCPToolListResponse)
 def list_tools(
     manager: MCPManager = Depends(get_mcp_manager),
+    _: dict = Depends(get_current_user),
 ) -> MCPToolListResponse:
     rows = manager.list_tools()
     return MCPToolListResponse(tools=[MCPTool(**row) for row in rows])
@@ -139,6 +141,7 @@ def list_tools(
 def create_server_endpoint(
     req: MCPServerCreateRequest,
     manager: MCPManager = Depends(get_mcp_manager),
+    _: dict = Depends(require_admin),
 ) -> MCPServer:
     try:
         spec = add_server(req.name, req.command, list(req.args), dict(req.env))
@@ -155,6 +158,7 @@ def update_server_endpoint(
     name: str,
     req: MCPServerUpdateRequest,
     manager: MCPManager = Depends(get_mcp_manager),
+    _: dict = Depends(require_admin),
 ) -> MCPServer:
     try:
         spec = update_server(name, req.command, list(req.args), dict(req.env))
@@ -173,6 +177,7 @@ def rename_server_endpoint(
     name: str,
     req: MCPServerRenameRequest,
     manager: MCPManager = Depends(get_mcp_manager),
+    _: dict = Depends(require_admin),
 ) -> MCPServer:
     try:
         spec = rename_server(name, req.new_name)
@@ -190,6 +195,7 @@ def rename_server_endpoint(
 def delete_server_endpoint(
     name: str,
     manager: MCPManager = Depends(get_mcp_manager),
+    _: dict = Depends(require_admin),
 ) -> None:
     try:
         delete_server(name)
@@ -206,6 +212,7 @@ def toggle_server_endpoint(
     name: str,
     req: MCPServerToggleRequest,
     manager: MCPManager = Depends(get_mcp_manager),
+    _: dict = Depends(require_admin),
 ) -> MCPServerToggleResponse:
     # 校验 name 在 config.json 中存在
     try:
@@ -233,6 +240,7 @@ def toggle_server_endpoint(
 @router.post("/reload", response_model=MCPReloadResponse)
 def reload_endpoint(
     manager: MCPManager = Depends(get_mcp_manager),
+    _: dict = Depends(require_admin),
 ) -> MCPReloadResponse:
     """重读 config.json + disabled.json，按差异 diff 启停 server。
 

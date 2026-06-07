@@ -48,6 +48,7 @@ from pathlib import Path
 from typing import Any
 
 import src.config as config
+from src.agent.core.user_context import current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -91,9 +92,12 @@ class QuizStore:
         的 fail-fast 模式：旧 quiz.db 升级时不做 ALTER TABLE auto-migrate，PRAGMA 自检
         缺列直接抛 RuntimeError 提示删库重建（单用户 MVP 场景损失可接受，避免引入迁移代码）。
         """
+        # 先只建表（IF NOT EXISTS）；引用 user_id 的索引放到 fail-fast 自检之后，
+        # 否则旧库（缺 user_id）会在建索引时抛裸 OperationalError，盖过友好提示。
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS quiz_sets (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id         INTEGER NOT NULL DEFAULT 1,
                 topic           TEXT    NOT NULL,
                 plan_id         INTEGER,
                 stage_idx       INTEGER,
@@ -104,11 +108,6 @@ class QuizStore:
                 graded_at       TEXT    NOT NULL DEFAULT '',
                 updated_at      TEXT    NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_quiz_sets_status
-                ON quiz_sets(status);
-            CREATE INDEX IF NOT EXISTS idx_quiz_sets_plan
-                ON quiz_sets(plan_id);
-
             CREATE TABLE IF NOT EXISTS quiz_questions (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 quiz_set_id     INTEGER NOT NULL REFERENCES quiz_sets(id) ON DELETE CASCADE,
@@ -123,19 +122,28 @@ class QuizStore:
                 feedback        TEXT    NOT NULL DEFAULT '',
                 harness_flagged INTEGER NOT NULL DEFAULT 0
             );
+        """)
+        self._conn.commit()
+
+        # fail-fast：旧 quiz.db 升级时 PRAGMA 自检缺列直接抛 RuntimeError 让用户删库重建
+        # （不走 ALTER TABLE auto-migrate）
+        set_cols = {row[1] for row in self._conn.execute("PRAGMA table_info(quiz_sets)")}
+        q_cols = {row[1] for row in self._conn.execute("PRAGMA table_info(quiz_questions)")}
+        if "user_id" not in set_cols or "harness_flagged" not in q_cols:
+            raise RuntimeError(
+                f"quiz.db schema 已过期（缺 user_id / harness_flagged 列）。\n"
+                f"请删除 {self._db_path} 后重启（单用户 MVP 不做向后兼容迁移）。"
+            )
+
+        self._conn.executescript("""
+            CREATE INDEX IF NOT EXISTS idx_quiz_sets_status
+                ON quiz_sets(user_id, status);
+            CREATE INDEX IF NOT EXISTS idx_quiz_sets_plan
+                ON quiz_sets(plan_id);
             CREATE INDEX IF NOT EXISTS idx_quiz_questions_set
                 ON quiz_questions(quiz_set_id, order_idx);
         """)
         self._conn.commit()
-
-        # fail-fast：旧 quiz.db 升级到 Phase 2.5 时，PRAGMA 自检缺 harness_flagged 列
-        # 直接抛 RuntimeError 让用户删库重建（不走 ALTER TABLE auto-migrate）
-        cols = {row[1] for row in self._conn.execute("PRAGMA table_info(quiz_questions)")}
-        if "harness_flagged" not in cols:
-            raise RuntimeError(
-                f"quiz.db schema 已过期（缺 harness_flagged 列，Phase 2.5 引入）。\n"
-                f"请删除 {self._db_path} 后重启（单用户 MVP 不做向后兼容迁移）。"
-            )
 
     # ── 内部 helper ───────────────────────────────────────────────────────────
 
@@ -190,6 +198,7 @@ class QuizStore:
         num_questions: int,
         plan_id: int | None = None,
         stage_idx: int | None = None,
+        user_id: int | None = None,
     ) -> int:
         """
         新建一个 quiz_set 记录（status 默认 created，未批改）。
@@ -213,13 +222,14 @@ class QuizStore:
         if stage_idx is not None and stage_idx < 1:
             raise ValueError(f"stage_idx 必须 ≥ 1 或 None，收到 {stage_idx!r}")
 
+        uid = user_id if user_id is not None else current_user_id()
         now = self._now()
         with self._conn:
             cursor = self._conn.execute(
-                "INSERT INTO quiz_sets(topic, plan_id, stage_idx, num_questions, "
+                "INSERT INTO quiz_sets(user_id, topic, plan_id, stage_idx, num_questions, "
                 "status, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, 'created', ?, ?)",
-                (topic, plan_id, stage_idx, num_questions, now, now),
+                "VALUES (?, ?, ?, ?, ?, 'created', ?, ?)",
+                (uid, topic, plan_id, stage_idx, num_questions, now, now),
             )
         quiz_set_id = int(cursor.lastrowid or 0)
         logger.info(
@@ -228,7 +238,8 @@ class QuizStore:
         )
         return quiz_set_id
 
-    def add_questions(self, quiz_set_id: int, questions: list[dict[str, Any]]) -> int:
+    def add_questions(self, quiz_set_id: int, questions: list[dict[str, Any]],
+                      user_id: int | None = None) -> int:
         """
         批量给指定 quiz_set 添加题目。
 
@@ -240,9 +251,10 @@ class QuizStore:
         Returns:
             插入的题目数；非法 row 静默跳过并 log warning。
         """
+        uid = user_id if user_id is not None else current_user_id()
         if not isinstance(questions, list) or not questions:
             return 0
-        if self.get_quiz_set(quiz_set_id) is None:
+        if self.get_quiz_set(quiz_set_id, user_id=uid) is None:
             raise ValueError(f"quiz_set_id={quiz_set_id} 不存在")
 
         rows: list[tuple[Any, ...]] = []
@@ -285,16 +297,18 @@ class QuizStore:
         logger.info("add_questions: quiz_set_id=%d, +%d question", quiz_set_id, len(rows))
         return len(rows)
 
-    def get_quiz_set(self, quiz_set_id: int) -> dict[str, Any] | None:
-        """读单个 quiz_set 元信息（不含 questions）。"""
+    def get_quiz_set(self, quiz_set_id: int, user_id: int | None = None) -> dict[str, Any] | None:
+        """读单个 quiz_set 元信息（不含 questions）；限本人，不属于该用户返回 None。"""
+        uid = user_id if user_id is not None else current_user_id()
         row = self._conn.execute(
-            "SELECT * FROM quiz_sets WHERE id = ?", (quiz_set_id,),
+            "SELECT * FROM quiz_sets WHERE id = ? AND user_id = ?", (quiz_set_id, uid),
         ).fetchone()
         return self._row_to_quiz_set(row) if row else None
 
-    def get_quiz_with_questions(self, quiz_set_id: int) -> dict[str, Any] | None:
+    def get_quiz_with_questions(self, quiz_set_id: int, user_id: int | None = None) -> dict[str, Any] | None:
         """读单个 quiz_set + 全部 questions（按 order_idx 升序）。"""
-        quiz_set = self.get_quiz_set(quiz_set_id)
+        uid = user_id if user_id is not None else current_user_id()
+        quiz_set = self.get_quiz_set(quiz_set_id, user_id=uid)
         if quiz_set is None:
             return None
         quiz_set["questions"] = self._get_questions(quiz_set_id)
@@ -305,18 +319,21 @@ class QuizStore:
         plan_id: int | None = None,
         limit: int | None = None,
         include_archived: bool = False,
+        user_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """
-        列 quiz_set 摘要，按创建时间倒序 + id 倒序作稳定 tie-breaker。
+        列当前用户 quiz_set 摘要，按创建时间倒序 + id 倒序作稳定 tie-breaker。
 
         Args:
             plan_id: 可选过滤；只列与该 plan 绑定的 quiz。
             limit: 可选条数上限；None 不限。
             include_archived: 是否包含 archived 状态；默认不含。
+            user_id: 归属用户；None 取 current_user_id()。
         """
+        uid = user_id if user_id is not None else current_user_id()
         sql = "SELECT * FROM quiz_sets"
-        clauses: list[str] = []
-        params: list[Any] = []
+        clauses: list[str] = ["user_id = ?"]
+        params: list[Any] = [uid]
         if not include_archived:
             clauses.append("status != 'archived'")
         if plan_id is not None:
@@ -338,6 +355,7 @@ class QuizStore:
         quiz_set_id: int,
         gradings: list[dict[str, Any]],
         total_score: float,
+        user_id: int | None = None,
     ) -> bool:
         """
         批量写入批改结果 + 同步 quiz_set 状态为 graded。
@@ -350,7 +368,8 @@ class QuizStore:
         Returns:
             True 全部更新成功；False quiz_set 不存在 / archived。
         """
-        quiz_set = self.get_quiz_set(quiz_set_id)
+        uid = user_id if user_id is not None else current_user_id()
+        quiz_set = self.get_quiz_set(quiz_set_id, user_id=uid)
         if quiz_set is None:
             logger.warning("update_grading: quiz_set_id=%d 不存在", quiz_set_id)
             return False
@@ -417,9 +436,10 @@ class QuizStore:
 
     # ── 归档 / 删除 ──────────────────────────────────────────────────────────
 
-    def archive_quiz_set(self, quiz_set_id: int) -> bool:
+    def archive_quiz_set(self, quiz_set_id: int, user_id: int | None = None) -> bool:
         """将指定 quiz_set 标为 archived；不存在返回 False。数据保留可后续查。"""
-        quiz_set = self.get_quiz_set(quiz_set_id)
+        uid = user_id if user_id is not None else current_user_id()
+        quiz_set = self.get_quiz_set(quiz_set_id, user_id=uid)
         if quiz_set is None:
             return False
         if quiz_set["status"] == "archived":
@@ -427,26 +447,38 @@ class QuizStore:
         now = self._now()
         with self._conn:
             self._conn.execute(
-                "UPDATE quiz_sets SET status = 'archived', updated_at = ? WHERE id = ?",
-                (now, quiz_set_id),
+                "UPDATE quiz_sets SET status = 'archived', updated_at = ? WHERE id = ? AND user_id = ?",
+                (now, quiz_set_id, uid),
             )
         logger.info("archive_quiz_set: quiz_set_id=%d", quiz_set_id)
         return True
 
-    def delete_quiz_set(self, quiz_set_id: int) -> bool:
+    def delete_quiz_set(self, quiz_set_id: int, user_id: int | None = None) -> bool:
         """
         硬删除 quiz_set + 级联删除其 questions（ON DELETE CASCADE）。
 
         给 CLI `/quiz del` 与测试清理用；常规业务请用 archive_quiz_set。
         """
+        uid = user_id if user_id is not None else current_user_id()
         with self._conn:
             cursor = self._conn.execute(
-                "DELETE FROM quiz_sets WHERE id = ?", (quiz_set_id,),
+                "DELETE FROM quiz_sets WHERE id = ? AND user_id = ?", (quiz_set_id, uid),
             )
         deleted = cursor.rowcount > 0
         if deleted:
             logger.info("delete_quiz_set: quiz_set_id=%d", quiz_set_id)
         return deleted
+
+    def delete_all_for_user(self, user_id: int) -> None:
+        """删除某用户的全部测验集及其题目（admin 删用户时级联清理）。"""
+        with self._conn:
+            self._conn.execute(
+                "DELETE FROM quiz_questions WHERE quiz_set_id IN "
+                "(SELECT id FROM quiz_sets WHERE user_id = ?)",
+                (user_id,),
+            )
+            self._conn.execute("DELETE FROM quiz_sets WHERE user_id = ?", (user_id,))
+        logger.info("已删除 user=%d 的全部测验集", user_id)
 
     # ── question CRUD（仅内部 / 测试用） ─────────────────────────────────────
 

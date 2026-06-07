@@ -16,14 +16,10 @@ export type MemoryListResponse = {
 
 export type RulesReadResponse = {
   text: string
-  path: string
-  exists: boolean
 }
 
 export type RulesWriteResponse = {
-  path: string
   length: number
-  restart_required: boolean
 }
 
 export type SkillItem = {

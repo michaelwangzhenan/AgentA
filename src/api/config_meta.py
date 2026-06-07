@@ -207,24 +207,9 @@ REGISTRY: list[ConfigItem] = [
         key="USER_RULES_ENABLED",
         group="rules",
         type=ItemType.BOOL,
-        brief="项目 Rules",
-        detail="开启后启动时把 .agenta/rules.md 注入 system prompt 的 <project_rules> 块。",
-    ),
-    ConfigItem(
-        key="USER_RULES_FILE",
-        group="rules",
-        type=ItemType.PATH,
-        brief="Rules 文件路径",
-        detail="相对项目根；文件不存在时静默跳过。",
-    ),
-    ConfigItem(
-        key="USER_RULES_MAX_CHARS",
-        group="rules",
-        type=ItemType.INT,
-        brief="注入字符上限",
-        detail="rules 文本注入字符数上限；超出截断。",
-        min=100,
-        max=20000,
+        brief="用户 Rules",
+        detail="开启后每轮对话把当前用户的 rules（每人一份，存数据库）注入 "
+        "system prompt 的 <project_rules> 块；在 Rules 页编辑。",
     ),
     # ─── MCP ──────────────────────────────────────────────────────────────
     ConfigItem(
@@ -306,14 +291,6 @@ REGISTRY: list[ConfigItem] = [
         detail="logger 输出级别，立即生效。",
         options=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
     ),
-    # ─── UI ───────────────────────────────────────────────────────────────
-    ConfigItem(
-        key="USER_DISPLAY_NAME",
-        group="ui",
-        type=ItemType.STRING,
-        brief="显示用户名",
-        detail="聊天空状态欢迎语「下午好，<名字>」里显示的名字；多用户支持前用固定值。",
-    ),
 ]
 
 
@@ -326,7 +303,6 @@ GROUP_LABELS: dict[str, str] = {
     "security": "Security",
     "web": "Web",
     "log": "Log",
-    "ui": "界面",
 }
 
 

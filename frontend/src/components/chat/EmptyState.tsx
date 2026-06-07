@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react'
 import { BookOpen, ClipboardList, CalendarRange, Layers, MessageCircle } from 'lucide-react'
-import { getConfig } from '@/api/client'
+import { useAuth } from '@/lib/auth'
 import logoUrl from '@/assets/agentA_logo.svg'
 
 type Chip = {
@@ -44,24 +43,14 @@ function greeting(): string {
 }
 
 export function EmptyState() {
-  const [name, setName] = useState('Michael')
-
-  useEffect(() => {
-    getConfig()
-      .then((cfg) => {
-        for (const g of cfg.groups) {
-          const it = g.items.find((i) => i.key === 'USER_DISPLAY_NAME')
-          if (it) setName(String(it.value || 'Michael'))
-        }
-      })
-      .catch(() => {})
-  }, [])
+  const { user } = useAuth()
+  const name = user?.username ?? ''
 
   return (
     <div className="flex items-center justify-center">
       <img src={logoUrl} alt="AgentA" className="h-30 w-30 opacity-100" />
       <h2 className="text-4xl font-bold text-foreground/90">
-        {greeting()}，{name}
+        {greeting()}{name ? `，${name}` : ''}
       </h2>
     </div>
   )

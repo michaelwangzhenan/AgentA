@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 import src.config as config
+from src.agent.core.user_context import current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,7 @@ class SRSStore:
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS srs_cards (
                 id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id          INTEGER NOT NULL DEFAULT 1,
                 source_type      TEXT    NOT NULL,
                 source_ref       INTEGER,
                 front            TEXT    NOT NULL,
@@ -104,9 +106,9 @@ class SRSStore:
                 updated_at       TEXT    NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_srs_status_due
-                ON srs_cards(status, next_review_at);
+                ON srs_cards(user_id, status, next_review_at);
             CREATE INDEX IF NOT EXISTS idx_srs_source
-                ON srs_cards(source_type, source_ref);
+                ON srs_cards(user_id, source_type, source_ref);
         """)
         self._conn.commit()
 
@@ -146,6 +148,7 @@ class SRSStore:
         back: str,
         source_ref: int | None = None,
         note: str = "",
+        user_id: int | None = None,
     ) -> int:
         """
         新建一张 SRS 卡。`next_review_at` 初始化为 now（新卡立即 due 一次，
@@ -187,17 +190,18 @@ class SRSStore:
                     f"source_type=manual 时 source_ref 必须为 None，收到 {source_ref!r}"
                 )
 
+        uid = user_id if user_id is not None else current_user_id()
         note = (note or "")[:200]
         now = self._now()
         with self._conn:
             cursor = self._conn.execute(
                 "INSERT INTO srs_cards("
-                "  source_type, source_ref, front, back, note,"
+                "  user_id, source_type, source_ref, front, back, note,"
                 "  ease_factor, interval_days, repetitions, lapses,"
                 "  next_review_at, last_reviewed_at, status,"
                 "  created_at, updated_at"
-                ") VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, ?, '', 'active', ?, ?)",
-                (source_type, source_ref, front, back, note,
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, '', 'active', ?, ?)",
+                (uid, source_type, source_ref, front, back, note,
                  EASE_FACTOR_INIT, now, now, now),
             )
         card_id = int(cursor.lastrowid or 0)
@@ -207,14 +211,16 @@ class SRSStore:
         )
         return card_id
 
-    def get_card(self, card_id: int) -> dict[str, Any] | None:
-        """读单卡（含全部 SM-2 调度字段 + 元信息）。"""
+    def get_card(self, card_id: int, user_id: int | None = None) -> dict[str, Any] | None:
+        """读单卡（含全部 SM-2 调度字段 + 元信息）；限本人，不属于该用户返回 None。"""
+        uid = user_id if user_id is not None else current_user_id()
         row = self._conn.execute(
-            "SELECT * FROM srs_cards WHERE id = ?", (card_id,),
+            "SELECT * FROM srs_cards WHERE id = ? AND user_id = ?", (card_id, uid),
         ).fetchone()
         return self._row_to_card(row) if row else None
 
-    def card_exists_for_source(self, source_type: str, source_ref: int) -> int | None:
+    def card_exists_for_source(self, source_type: str, source_ref: int,
+                               user_id: int | None = None) -> int | None:
         """
         查给定 (source_type, source_ref) 是否已存在 active / suspended 卡片；
         archived 不计（用户已归档表示"不要这张卡了"）。
@@ -224,11 +230,12 @@ class SRSStore:
         """
         if source_type not in _SOURCE_TYPES:
             return None
+        uid = user_id if user_id is not None else current_user_id()
         row = self._conn.execute(
             "SELECT id FROM srs_cards "
-            "WHERE source_type = ? AND source_ref = ? AND status != 'archived' "
+            "WHERE user_id = ? AND source_type = ? AND source_ref = ? AND status != 'archived' "
             "LIMIT 1",
-            (source_type, source_ref),
+            (uid, source_type, source_ref),
         ).fetchone()
         return int(row["id"]) if row else None
 
@@ -236,17 +243,20 @@ class SRSStore:
         self,
         status: str | None = None,
         limit: int | None = None,
+        user_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """
-        列卡片，按创建时间倒序 + id 倒序作稳定 tie-breaker。
+        列当前用户卡片，按创建时间倒序 + id 倒序作稳定 tie-breaker。
 
         Args:
             status: 可选过滤；None → 列 active + suspended（archived 默认排除）。
             limit: 可选条数上限；None 不限。
+            user_id: 归属用户；None 取 current_user_id()。
         """
+        uid = user_id if user_id is not None else current_user_id()
         sql = "SELECT * FROM srs_cards"
-        clauses: list[str] = []
-        params: list[Any] = []
+        clauses: list[str] = ["user_id = ?"]
+        params: list[Any] = [uid]
         if status is None:
             clauses.append("status != 'archived'")
         else:
@@ -263,23 +273,26 @@ class SRSStore:
         rows = self._conn.execute(sql, params).fetchall()
         return [self._row_to_card(r) for r in rows]
 
-    def list_due(self, limit: int | None = None, now: str | None = None) -> list[dict[str, Any]]:
+    def list_due(self, limit: int | None = None, now: str | None = None,
+                 user_id: int | None = None) -> list[dict[str, Any]]:
         """
-        列 due 卡片（status='active' 且 next_review_at <= now），按 next_review_at
+        列当前用户 due 卡片（status='active' 且 next_review_at <= now），按 next_review_at
         升序（最早 due 的先 review）+ id 升序作 tie-breaker。
 
         Args:
             limit: 返回最多条数；None 走 config.SRS_DEFAULT_DUE_QUERY_LIMIT。
             now: 可选 ISO 时间串覆盖（UT 用）；None 取当前本地时间。
+            user_id: 归属用户；None 取 current_user_id()。
         """
+        uid = user_id if user_id is not None else current_user_id()
         eff_now = now if now is not None else self._now()
         eff_limit = limit if isinstance(limit, int) and limit > 0 else config.SRS_DEFAULT_DUE_QUERY_LIMIT
         rows = self._conn.execute(
             "SELECT * FROM srs_cards "
-            "WHERE status = 'active' AND next_review_at <= ? "
+            "WHERE user_id = ? AND status = 'active' AND next_review_at <= ? "
             "ORDER BY next_review_at ASC, id ASC "
             f"LIMIT {int(eff_limit)}",
-            (eff_now,),
+            (uid, eff_now),
         ).fetchall()
         return [self._row_to_card(r) for r in rows]
 
@@ -292,6 +305,7 @@ class SRSStore:
         repetitions: int,
         lapses: int,
         next_review_at: str,
+        user_id: int | None = None,
     ) -> bool:
         """
         把 SM-2 公式算出来的新状态写库 + 更新 last_reviewed_at + updated_at。
@@ -299,7 +313,8 @@ class SRSStore:
         Returns:
             True 更新成功；False card 不存在 / 不是 active（suspended / archived 不允许 review）。
         """
-        card = self.get_card(card_id)
+        uid = user_id if user_id is not None else current_user_id()
+        card = self.get_card(card_id, user_id=uid)
         if card is None:
             logger.warning("update_review_state: card_id=%d 不存在", card_id)
             return False
@@ -331,7 +346,7 @@ class SRSStore:
         )
         return True
 
-    def set_status(self, card_id: int, status: str) -> bool:
+    def set_status(self, card_id: int, status: str, user_id: int | None = None) -> bool:
         """
         修改卡片状态（active / suspended / archived）；非法 status 拒改。
         archived 是"软删除"，与 delete_card（硬删）不同。
@@ -339,47 +354,56 @@ class SRSStore:
         if status not in _CARD_STATUS:
             logger.warning("set_status: 非法 status=%r", status)
             return False
-        card = self.get_card(card_id)
+        uid = user_id if user_id is not None else current_user_id()
+        card = self.get_card(card_id, user_id=uid)
         if card is None:
             return False
         now = self._now()
         with self._conn:
             self._conn.execute(
-                "UPDATE srs_cards SET status = ?, updated_at = ? WHERE id = ?",
-                (status, now, card_id),
+                "UPDATE srs_cards SET status = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+                (status, now, card_id, uid),
             )
         logger.info("set_status: card_id=%d, status=%s", card_id, status)
         return True
 
-    def suspend(self, card_id: int) -> bool:
+    def suspend(self, card_id: int, user_id: int | None = None) -> bool:
         """暂停一张卡（不再出现在 due 列表，但保留 SM-2 状态可恢复）。"""
-        return self.set_status(card_id, "suspended")
+        return self.set_status(card_id, "suspended", user_id=user_id)
 
-    def resume(self, card_id: int) -> bool:
+    def resume(self, card_id: int, user_id: int | None = None) -> bool:
         """从 suspended 恢复为 active。"""
-        card = self.get_card(card_id)
+        uid = user_id if user_id is not None else current_user_id()
+        card = self.get_card(card_id, user_id=uid)
         if card is None or card["status"] != "suspended":
             return False
-        return self.set_status(card_id, "active")
+        return self.set_status(card_id, "active", user_id=uid)
 
-    def archive(self, card_id: int) -> bool:
+    def archive(self, card_id: int, user_id: int | None = None) -> bool:
         """归档一张卡（软删除，不出现在 list_cards 默认列表）。"""
-        return self.set_status(card_id, "archived")
+        return self.set_status(card_id, "archived", user_id=user_id)
 
-    def delete_card(self, card_id: int) -> bool:
+    def delete_card(self, card_id: int, user_id: int | None = None) -> bool:
         """硬删除一张卡（不可恢复）。常规业务请用 archive。"""
+        uid = user_id if user_id is not None else current_user_id()
         with self._conn:
             cursor = self._conn.execute(
-                "DELETE FROM srs_cards WHERE id = ?", (card_id,),
+                "DELETE FROM srs_cards WHERE id = ? AND user_id = ?", (card_id, uid),
             )
         deleted = cursor.rowcount > 0
         if deleted:
             logger.info("delete_card: card_id=%d", card_id)
         return deleted
 
+    def delete_all_for_user(self, user_id: int) -> None:
+        """删除某用户的全部 SRS 卡片（admin 删用户时级联清理）。"""
+        with self._conn:
+            self._conn.execute("DELETE FROM srs_cards WHERE user_id = ?", (user_id,))
+        logger.info("已删除 user=%d 的全部 SRS 卡片", user_id)
+
     # ── 统计 ──────────────────────────────────────────────────────────────────
 
-    def stats(self, now: str | None = None) -> dict[str, Any]:
+    def stats(self, now: str | None = None, user_id: int | None = None) -> dict[str, Any]:
         """
         返回 SRS 队列摘要统计（D15 MVP 最简版）：
             - total_active：未归档 active 卡总数
@@ -389,6 +413,7 @@ class SRSStore:
             - avg_ease：active 卡平均 ease_factor（无 active 卡返 0.0）
             - mature_count：active 中 interval_days >= 21（Anki 默认"mature"门槛）
         """
+        uid = user_id if user_id is not None else current_user_id()
         eff_now = now if now is not None else self._now()
         row = self._conn.execute("""
             SELECT
@@ -398,8 +423,8 @@ class SRSStore:
               SUM(CASE WHEN status = 'active' AND next_review_at <= ? THEN 1 ELSE 0 END) AS due_count,
               AVG(CASE WHEN status = 'active' THEN ease_factor ELSE NULL END) AS avg_ease,
               SUM(CASE WHEN status = 'active' AND interval_days >= 21 THEN 1 ELSE 0 END) AS mature_count
-            FROM srs_cards
-        """, (eff_now,)).fetchone()
+            FROM srs_cards WHERE user_id = ?
+        """, (eff_now, uid)).fetchone()
         return {
             "total_active": int(row["total_active"] or 0),
             "total_suspended": int(row["total_suspended"] or 0),

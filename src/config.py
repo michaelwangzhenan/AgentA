@@ -19,8 +19,10 @@
 """
 
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterator
 
 
 @dataclass(frozen=True)
@@ -355,6 +357,20 @@ CHROMA_DB_PATH: str = os.getenv("CHROMA_DB_PATH", "./chroma_db")
 # 对话历史 SQLite 路径，可通过 .env 中的 MEMORY_DB_PATH 覆盖
 MEMORY_DB_PATH: str = os.getenv("MEMORY_DB_PATH", "./sqlite_db/chat_history.db")
 
+# ── 多用户 / 认证 ────────────────────────────────────────────────────────────
+# 是否启用多用户认证（可选值：true / false）；false 时不校验登录，全部落到 DEFAULT_USER_ID
+AUTH_ENABLED: bool = os.getenv("AUTH_ENABLED", "true").lower() == "true"
+# 账号 / 登录态 / 每用户 rules 的 SQLite 路径
+AUTH_DB_PATH: str = os.getenv("AUTH_DB_PATH", "./sqlite_db/auth.db")
+# 该用户名注册后自动成为 admin，其余均为普通用户
+AUTH_ADMIN_USERNAME: str = os.getenv("AUTH_ADMIN_USERNAME", "admin")
+# 登录态有效天数
+AUTH_SESSION_TTL_DAYS: int = int(os.getenv("AUTH_SESSION_TTL_DAYS", "30"))
+# 存放 session token 的 cookie 名
+AUTH_COOKIE_NAME: str = os.getenv("AUTH_COOKIE_NAME", "agenta_session")
+# CLI / 测试 / 关认证时使用的用户 id
+DEFAULT_USER_ID: int = int(os.getenv("DEFAULT_USER_ID", "1"))
+
 # ── Embedding 模型配置 ────────────────────────────────────────────────────────
 # 预定义的 embedding 模型别名，每个别名绑定一个独立的 ChromaDB collection，
 # 不同模型向量维度不同（MiniLM=384, bge-small-zh=512, bge-m3=1024），必须分开存储。
@@ -585,32 +601,67 @@ HARNESS_GRADING_THRESHOLD: float = float(os.getenv("HARNESS_GRADING_THRESHOLD", 
 # 用户输入短于此字符数不触发自动提取（显式触发不受此限；设为 0 禁用）
 USER_MEMORY_EXTRACT_MIN_INPUT_LEN: int = int(os.getenv("USER_MEMORY_EXTRACT_MIN_INPUT_LEN", "20"))
 
-# 是否启用项目级 rules 注入（可选值：true / false）
+# 是否启用用户 rules 注入（每用户一份，存数据库；可选值：true / false）
 USER_RULES_ENABLED: bool = os.getenv("USER_RULES_ENABLED", "true").lower() == "true"
-# rules 文件路径（相对项目根；文件不存在静默跳过）
-USER_RULES_FILE: str = os.getenv("USER_RULES_FILE", ".agenta/rules.md")
-# 注入字符上限，超出截断（防止占用过多 context）
-USER_RULES_MAX_CHARS: int = int(os.getenv("USER_RULES_MAX_CHARS", "4000"))
 
 # Skills 禁用列表文件路径（相对项目根；文件不存在视作"未禁用任何 skill"）
 SKILLS_DISABLED_FILE: str = os.getenv("SKILLS_DISABLED_FILE", ".agenta/skills/disabled.json")
 
-# 聊天界面显示的用户名（空状态欢迎语「下午好，<名字>」；多用户支持前用固定值）
-USER_DISPLAY_NAME: str = os.getenv("USER_DISPLAY_NAME", "Michael")
+
+# ── 每请求 LLM 偏好覆盖（多用户隔离）─────────────────────────────────────────
+# Web 层处理某用户请求时用 use_llm_prefs(...) 把该用户选的模型 / thinking 压进
+# contextvar；provider 与 agent 在本请求内读到的就是这个用户的偏好，互不干扰。
+# CLI / 未设置时回落到下面的全局默认（ACTIVE_MODEL / THINKING_*）。
+_MODEL_OVERRIDE: ContextVar[str | None] = ContextVar("llm_model_override", default=None)
+_THINKING_OVERRIDE: ContextVar["tuple[bool, int] | None"] = ContextVar(
+    "llm_thinking_override", default=None
+)
+
+
+def current_active_model() -> str:
+    """当前生效的 model id：优先本请求覆盖，否则全局 ACTIVE_MODEL。"""
+    return _MODEL_OVERRIDE.get() or ACTIVE_MODEL
+
+
+def current_thinking_override() -> "tuple[bool, int] | None":
+    """本请求的 thinking 覆盖 (enabled, budget)；未设置返回 None（调用方回落默认）。"""
+    return _THINKING_OVERRIDE.get()
+
+
+@contextmanager
+def use_llm_prefs(
+    active_model: str, thinking_enabled: bool, thinking_budget: int
+) -> Iterator[None]:
+    """在 with 块内把当前请求的模型 / thinking 偏好压进 contextvar，退出复位。
+
+    三个参数均为已算好的生效值（调用方负责把"用户设置 or 全局默认"合并好）。
+    contextvar 不随线程池传播，须在实际执行 agent 的线程内进入本上下文。
+    """
+    m_token = _MODEL_OVERRIDE.set(active_model)
+    t_token = _THINKING_OVERRIDE.set((bool(thinking_enabled), int(thinking_budget)))
+    try:
+        yield
+    finally:
+        _MODEL_OVERRIDE.reset(m_token)
+        _THINKING_OVERRIDE.reset(t_token)
 
 
 def get_active_model() -> "tuple[ProviderConfig, ModelConfig]":
-    """返回当前激活模型的 (厂商连接配置, 模型配置)，不存在则抛异常。"""
-    model = MODEL_CONFIGS.get(ACTIVE_MODEL)
+    """返回当前激活模型的 (厂商连接配置, 模型配置)，不存在则抛异常。
+
+    model id 取 `current_active_model()`：本请求有覆盖用覆盖，否则全局 ACTIVE_MODEL。
+    """
+    model_id = current_active_model()
+    model = MODEL_CONFIGS.get(model_id)
     if model is None:
         supported = ", ".join(MODEL_CONFIGS.keys())
         raise ValueError(
-            f"不支持的 LLM_MODEL: '{ACTIVE_MODEL}'，支持的值为: {supported}"
+            f"不支持的 LLM_MODEL: '{model_id}'，支持的值为: {supported}"
         )
     provider = PROVIDER_CONFIGS.get(model.provider)
     if provider is None:
         raise ValueError(
-            f"模型 '{ACTIVE_MODEL}' 指向未知厂商 '{model.provider}'"
+            f"模型 '{model_id}' 指向未知厂商 '{model.provider}'"
         )
     return provider, model
 

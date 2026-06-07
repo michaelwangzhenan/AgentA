@@ -59,15 +59,28 @@ import type {
   SRSCardListResponse,
   SRSRating,
 } from '@/types/business'
+import type { AuthResponse, LlmPrefs, LlmPrefsUpdate, UserInfo } from '@/types/auth'
+
+// ─── 401 全局处理 ──────────────────────────────────────────────────────
+// 登录态失效时，由 AuthProvider 注册回调把界面切回登录页。
+
+let _onUnauthorized: (() => void) | null = null
+
+export function setUnauthorizedHandler(fn: (() => void) | null): void {
+  _onUnauthorized = fn
+}
 
 // ─── 通用 helper ────────────────────────────────────────────────────────
 
 async function _ensureOk(res: Response): Promise<void> {
   if (res.ok) return
+  if (res.status === 401) _onUnauthorized?.()
+  // 后端给了友好 detail（如"用户名或密码错误"）就直接用，不加 "HTTP 401:" 前缀；
+  // 没 detail 时才回落到 HTTP 状态码。
   let detail = `HTTP ${res.status}`
   try {
     const data = (await res.json()) as { detail?: string }
-    if (data?.detail) detail = `${detail}: ${data.detail}`
+    if (data?.detail) detail = data.detail
   } catch {
     // 响应不是 JSON
   }
@@ -134,6 +147,7 @@ export async function streamChat(
         if (response.ok && ct.includes('text/event-stream')) {
           return
         }
+        if (response.status === 401) _onUnauthorized?.()
         let detail = `HTTP ${response.status}`
         try {
           const data = (await response.json()) as { detail?: string }
@@ -656,4 +670,93 @@ export async function setSRSCardStatus(
   const res = await fetch(`/api/srs/cards/${cardId}/${action}`, { method: 'POST' })
   await _ensureOk(res)
   return (await res.json()) as SRSCard
+}
+
+// ─── Step 8：认证（注册 / 登录 / 退出 / 当前用户） ─────────────────────
+
+/** 拉当前登录用户；未登录返回 null（不触发全局 401 跳转）。 */
+export async function getMe(): Promise<UserInfo | null> {
+  const res = await fetch('/api/auth/me')
+  if (res.status === 401) return null
+  await _ensureOk(res)
+  return (await res.json()) as UserInfo
+}
+
+export async function login(username: string, password: string): Promise<UserInfo> {
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  })
+  await _ensureOk(res)
+  return ((await res.json()) as AuthResponse).user
+}
+
+export async function register(username: string, password: string): Promise<UserInfo> {
+  const res = await fetch('/api/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  })
+  await _ensureOk(res)
+  return ((await res.json()) as AuthResponse).user
+}
+
+export async function logout(): Promise<void> {
+  const res = await fetch('/api/auth/logout', { method: 'POST' })
+  await _ensureOk(res)
+}
+
+export async function updateUsername(username: string): Promise<UserInfo> {
+  const res = await fetch('/api/auth/username', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username }),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as UserInfo
+}
+
+export async function changePassword(
+  oldPassword: string,
+  newPassword: string,
+): Promise<void> {
+  const res = await fetch('/api/auth/password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+  })
+  await _ensureOk(res)
+}
+
+export async function listUsers(): Promise<UserInfo[]> {
+  const res = await fetch('/api/admin/users')
+  await _ensureOk(res)
+  return ((await res.json()) as { users: UserInfo[] }).users
+}
+
+export async function deleteUser(userId: number): Promise<void> {
+  const res = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' })
+  await _ensureOk(res)
+}
+
+export async function deleteOwnAccount(): Promise<void> {
+  const res = await fetch('/api/auth/me', { method: 'DELETE' })
+  await _ensureOk(res)
+}
+
+export async function getLlmPrefs(): Promise<LlmPrefs> {
+  const res = await fetch('/api/auth/llm-prefs')
+  await _ensureOk(res)
+  return (await res.json()) as LlmPrefs
+}
+
+export async function patchLlmPrefs(update: LlmPrefsUpdate): Promise<LlmPrefs> {
+  const res = await fetch('/api/auth/llm-prefs', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(update),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as LlmPrefs
 }

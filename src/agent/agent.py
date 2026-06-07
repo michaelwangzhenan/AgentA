@@ -29,7 +29,7 @@ from src.agent.core.event_bus import (
 )
 from src.agent.core.history_manager import HistoryManager
 from src.agent.core.memory_manager import MemoryManager
-from src.agent.core.rules_loader import build_rules_block, load_project_rules
+from src.agent.core.rules_loader import build_rules_block
 from src.agent.core.thinking_policy import ThinkingConfig, ThinkingPolicy  # noqa: F401 — re-export
 from src.agent.core.tool_call_engine import ToolCallEngine
 from src.agent.tools import get_tools
@@ -57,9 +57,8 @@ _chat_history: ChatHistoryStore | None = None
 _shared_user_memory: UserMemoryStore | None = None
 _shared_user_memory_lock = __import__("threading").Lock()
 
-# 模块级缓存的项目 rules 文本（进程启动后只读一次，重启进程才会刷新）
-_shared_project_rules: str | None = None
-_shared_project_rules_loaded: bool = False
+# 多用户：rules 改为按用户独享，存 UserStore（auth.db 的 user_rules 表）。
+# 不再用进程级缓存的项目文件 —— 每轮按 current_user_id() 读当前用户的 rules。
 
 
 def _get_shared_chat_history() -> ChatHistoryStore:
@@ -86,17 +85,22 @@ def _get_shared_user_memory() -> UserMemoryStore | None:
     return _shared_user_memory
 
 
-def _get_shared_project_rules() -> str | None:
-    """获取项目 rules 文本，首次调用时一次性加载，后续命中缓存。
+def _get_active_rules() -> str | None:
+    """读当前用户的 rules 文本（多用户：每人一份，存 UserStore）。
 
-    返回 `None` 表示 disabled / 文件缺失 / 空。重新加载需重启进程
-    （Phase 1.3 设计上不做 watch / 热加载）。
+    返回 `None` 表示 disabled / 该用户未设置 / 空。每轮即时读取，改完即时生效。
     """
-    global _shared_project_rules, _shared_project_rules_loaded
-    if not _shared_project_rules_loaded:
-        _shared_project_rules = load_project_rules()
-        _shared_project_rules_loaded = True
-    return _shared_project_rules
+    if not _cfg.USER_RULES_ENABLED:
+        return None
+    try:
+        from src.agent.core.user_context import current_user_id
+        from src.memory.user_store import get_shared_store as _get_user_store
+        text = _get_user_store().get_rules(current_user_id())
+    except Exception as exc:
+        logger.warning("[Agent] 读取用户 rules 失败：%s", exc)
+        return None
+    text = (text or "").strip()
+    return text or None
 
 
 def build_active_study_plan_block(session_id: str, max_chars: int | None = None) -> str:
@@ -359,7 +363,7 @@ class Agent:
         # 注意：学习计划默认**不**注入，必须用户用 CLI `/study load [id]` 显式激活；
         # 对标 Agent Skills 的 load_skill 生命周期。详 design.md §3.9.4。
         memory_mgr = MemoryManager(self._user_memory, self._chat_history, self.session_id, chat)
-        base_with_rules = self.system_prompt + build_rules_block(_get_shared_project_rules())
+        base_with_rules = self.system_prompt + build_rules_block(_get_active_rules())
         system_content = memory_mgr.build_system_prompt(base_with_rules)
         system_content = system_content + build_active_study_plan_block(self.session_id)
 
@@ -386,7 +390,15 @@ class Agent:
             citation_builder=citation_builder,
             approval_fn=self.request_plan_approval,
         )
-        thinking_policy = ThinkingPolicy(self.thinking_cfg)
+        # 多用户：本请求若设了 thinking 偏好覆盖（use_llm_prefs），用覆盖值；
+        # 否则回落到 agent 构造时的快照 self.thinking_cfg（CLI / 全局默认）。
+        _thinking_ov = _cfg.current_thinking_override()
+        if _thinking_ov is not None:
+            thinking_policy = ThinkingPolicy(
+                ThinkingConfig(enabled=_thinking_ov[0], budget=_thinking_ov[1])
+            )
+        else:
+            thinking_policy = ThinkingPolicy(self.thinking_cfg)
 
         # session 启动事件（payload 含本轮基础元信息，供监听者关联日志）
         self.events.publish(AgentEvent(

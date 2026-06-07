@@ -10,9 +10,10 @@ import asyncio
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 import src.config as config
+from src.api.deps import get_current_user
 from src.api.schemas.kb import (
     KBClearAllResponse,
     KBDeleteResponse,
@@ -49,14 +50,16 @@ def _md_to_kbdoc(md: dict) -> KBDocument:
 
 
 @router.get("/kb/documents", response_model=KBDocumentListResponse)
-def list_documents() -> KBDocumentListResponse:
+def list_documents(_: dict = Depends(get_current_user)) -> KBDocumentListResponse:
     """列出默认 collection 内已入库的所有文档（按上传时间倒序）。"""
     docs = list_kb_documents(model=config.DEFAULT_EMBEDDING_ALIAS)
     return KBDocumentListResponse(documents=[_md_to_kbdoc(d) for d in docs])
 
 
 @router.post("/kb/upload", response_model=KBUploadResponse)
-async def upload_document(file: UploadFile = File(...)) -> KBUploadResponse:
+async def upload_document(
+    file: UploadFile = File(...), _: dict = Depends(get_current_user)
+) -> KBUploadResponse:
     """上传一个文件 + 同步 ingest 到默认 collection。
 
     校验：
@@ -154,7 +157,7 @@ async def upload_document(file: UploadFile = File(...)) -> KBUploadResponse:
 
 
 @router.delete("/kb/documents/{doc_id}", response_model=KBDeleteResponse)
-def delete_document(doc_id: str) -> KBDeleteResponse:
+def delete_document(doc_id: str, _: dict = Depends(get_current_user)) -> KBDeleteResponse:
     """删除单文档（Chroma + BM25 + web_uploads 物理文件，一并清）。
 
     幂等：doc_id 不存在返回 200 + deleted=False。
@@ -167,7 +170,7 @@ def delete_document(doc_id: str) -> KBDeleteResponse:
 
 
 @router.delete("/kb/documents", response_model=KBClearAllResponse)
-def clear_all_documents() -> KBClearAllResponse:
+def clear_all_documents(_: dict = Depends(get_current_user)) -> KBClearAllResponse:
     """清空整个 KB（Chroma collection + BM25 + web_uploads 物理文件）。
 
     破坏性操作；前端应在调用前做二次确认。幂等：空 KB 调用返回全 0。

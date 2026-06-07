@@ -11,8 +11,6 @@ SYSTEM_PROMPT 不变量测试 —— 锁住"基石契约"，防止以后被破�
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from src.agent.agent import SYSTEM_PROMPT
@@ -176,8 +174,8 @@ class TestSystemPromptCitationContract:
 # 6. Fallback：<project_rules> 缺席时的行为指引必须存在
 # ---------------------------------------------------------------------------
 class TestSystemPromptFallback:
-    """rules_loader 在 rules.md 缺失 / OSError / USER_RULES_ENABLED=false 时
-    返回 None 且不拼接 `<project_rules>` block。prompt 必须有 fallback 行为指引，
+    """当前用户未设置 rules / USER_RULES_ENABLED=false 时，`_get_active_rules` 返回
+    None 且不拼接 `<project_rules>` block。prompt 必须有 fallback 行为指引，
     否则"何时调 search_knowledge"指令悬空，LLM 行为不可预测。"""
 
     def test_has_fallback_for_missing_project_rules(self) -> None:
@@ -194,62 +192,24 @@ class TestSystemPromptFallback:
 
 
 # ---------------------------------------------------------------------------
-# 7. 集成：SYSTEM_PROMPT + rules_loader / memory_manager 拼接路径
+# 7. 集成：SYSTEM_PROMPT + build_rules_block 拼接路径
 # ---------------------------------------------------------------------------
 class TestSystemPromptInjectionIntegration:
-    """端到端验证 prompt + 注入路径在两类极端场景下的拼接结果。"""
+    """端到端验证 prompt + build_rules_block 拼接结果。"""
 
-    def test_rules_block_appended_when_file_exists(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """rules.md 存在时：最终 prompt 含 `<project_rules>...</project_rules>` 包裹的内容。"""
-        from src.agent.core.rules_loader import build_rules_block, load_project_rules
+    def test_rules_block_appended_when_rules_present(self) -> None:
+        """有 rules 文本时：最终 prompt 含 `<project_rules>...</project_rules>` 包裹的内容。"""
+        from src.agent.core.rules_loader import build_rules_block
 
-        rules_dir = tmp_path / ".agenta"
-        rules_dir.mkdir()
-        (rules_dir / "rules.md").write_text("我的偏好-INVARIANT-TEST", encoding="utf-8")
-
-        # 确保 enabled
-        import src.config as _cfg
-
-        monkeypatch.setattr(_cfg, "USER_RULES_ENABLED", True)
-        monkeypatch.setattr(_cfg, "USER_RULES_MAX_CHARS", 10000)
-
-        rules = load_project_rules(root=tmp_path, file=".agenta/rules.md")
-        block = build_rules_block(rules)
+        block = build_rules_block("我的偏好-INVARIANT-TEST")
         final = SYSTEM_PROMPT + block
 
-        assert rules == "我的偏好-INVARIANT-TEST"
         assert "<project_rules>" in final
         assert "我的偏好-INVARIANT-TEST" in final
         assert "</project_rules>" in final
 
-    def test_no_rules_block_when_file_missing(self, tmp_path: Path) -> None:
-        """rules.md 缺失时：load_project_rules 返回 None，build_rules_block 返回 ""；
-        最终拼接不会引入额外 `<project_rules>` 块。"""
-        from src.agent.core.rules_loader import build_rules_block, load_project_rules
+    def test_no_rules_block_when_rules_absent(self) -> None:
+        """无 rules（None）时：build_rules_block 返回 ""，拼接不引入额外 `<project_rules>` 块。"""
+        from src.agent.core.rules_loader import build_rules_block
 
-        # tmp_path 下没有 .agenta/rules.md
-        rules = load_project_rules(root=tmp_path, file=".agenta/rules.md")
-        block = build_rules_block(rules)
-
-        assert rules is None
-        assert block == ""
-
-    def test_rules_loader_handles_disabled_flag(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """USER_RULES_ENABLED=false 时：即便 rules.md 存在也不加载，
-        prompt 走 fallback 路径（由 TestSystemPromptFallback 守护 fallback 文案存在）。"""
-        from src.agent.core.rules_loader import load_project_rules
-
-        rules_dir = tmp_path / ".agenta"
-        rules_dir.mkdir()
-        (rules_dir / "rules.md").write_text("不该被加载", encoding="utf-8")
-
-        import src.config as _cfg
-
-        monkeypatch.setattr(_cfg, "USER_RULES_ENABLED", False)
-
-        rules = load_project_rules(root=tmp_path, file=".agenta/rules.md")
-        assert rules is None
+        assert build_rules_block(None) == ""

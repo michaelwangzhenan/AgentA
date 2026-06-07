@@ -40,6 +40,7 @@ from typing import Any, Protocol, runtime_checkable
 # prompt injection 风险模式：物理位置统一在 src/agent/core/security_filter，
 # 本模块 import 复用（详 docs/iter_2_agent.md §4.9.12 D7）
 from src.agent.core.security_filter import _INJECTION_PATTERNS
+from src.agent.core.user_context import current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -264,28 +265,32 @@ class UserMemoryStore:
             self._conn.execute("""
                 CREATE TABLE IF NOT EXISTS user_memories (
                     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id     INTEGER NOT NULL DEFAULT 1,
                     category    TEXT    NOT NULL,
                     key         TEXT    NOT NULL,
                     value       TEXT    NOT NULL,
                     source      TEXT    NOT NULL DEFAULT 'auto',
                     created_at  TEXT    NOT NULL,
                     accessed_at TEXT    NOT NULL,
-                    UNIQUE(category, key)
+                    UNIQUE(user_id, category, key)
                 )
             """)
-            self._conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_user_memories_category
-                    ON user_memories(category)
-            """)
+            # 先自检再建索引：旧库（缺 user_id）若先建 user_id 索引会抛裸
+            # OperationalError，盖过下面这条带操作指引的友好 RuntimeError。
             cols = {row[1] for row in self._conn.execute("PRAGMA table_info(user_memories)")}
-            if "source" not in cols:
+            if "user_id" not in cols:
                 raise RuntimeError(
-                    f"user_memory.db schema 已过期，请删除后重启。"
+                    "user_memory.db schema 已过期（缺 user_id 列），请删除 ./sqlite_db/user_memory.db 后重启。"
                 )
+            self._conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_user_memories_user_category
+                    ON user_memories(user_id, category)
+            """)
 
     # ── 核心 CRUD ─────────────────────────────────────────────────────────────
 
-    def upsert(self, category: str, key: str, value: str, source: str = "auto") -> int | None:
+    def upsert(self, category: str, key: str, value: str, source: str = "auto",
+               user_id: int | None = None) -> int | None:
         """
         插入或更新一条记忆。同 (category, key) 的旧值被新值覆盖（去重）。
 
@@ -300,6 +305,7 @@ class UserMemoryStore:
             写入或更新后的记录 id；任何校验跳过（未知类别 / 清洗后为空）返回 None。
             历史调用方丢弃返回值仍兼容（None 也是 falsy）。
         """
+        uid = user_id if user_id is not None else current_user_id()
         if category not in MEMORY_CATEGORIES:
             logger.warning("[UserMemory] 未知类别 %r，跳过写入", category)
             return None
@@ -319,8 +325,8 @@ class UserMemoryStore:
         # 所以分两步：先查是否已存在 → 决定 update / insert
         with self._lock, self._conn:
             existing = self._conn.execute(
-                "SELECT id FROM user_memories WHERE category = ? AND key = ?",
-                (category, clean_key),
+                "SELECT id FROM user_memories WHERE user_id = ? AND category = ? AND key = ?",
+                (uid, category, clean_key),
             ).fetchone()
             if existing is not None:
                 self._conn.execute(
@@ -330,15 +336,15 @@ class UserMemoryStore:
                 row_id = int(existing["id"])
             else:
                 cursor = self._conn.execute(
-                    """INSERT INTO user_memories(category, key, value, source, created_at, accessed_at)
-                       VALUES(?, ?, ?, ?, ?, ?)""",
-                    (category, clean_key, clean_value, source, now, now),
+                    """INSERT INTO user_memories(user_id, category, key, value, source, created_at, accessed_at)
+                       VALUES(?, ?, ?, ?, ?, ?, ?)""",
+                    (uid, category, clean_key, clean_value, source, now, now),
                 )
                 row_id = int(cursor.lastrowid or 0)
         logger.info("[UserMemory] 已写入 [%s] %s (source=%s, id=%d)", category, key, source, row_id)
         return row_id
 
-    def update_value(self, memory_id: int, new_value: str) -> bool:
+    def update_value(self, memory_id: int, new_value: str, user_id: int | None = None) -> bool:
         """
         按 id 更新单条记忆的 value（保持 category/key/source 不变；accessed_at 同步刷新）。
 
@@ -356,28 +362,32 @@ class UserMemoryStore:
         if not clean_value:
             logger.warning("[UserMemory] update_value: 清洗后为空，跳过 id=%d", memory_id)
             return False
+        uid = user_id if user_id is not None else current_user_id()
         now = datetime.now().isoformat(timespec="seconds")
         with self._lock, self._conn:
             cursor = self._conn.execute(
-                "UPDATE user_memories SET value = ?, accessed_at = ? WHERE id = ?",
-                (clean_value, now, memory_id),
+                "UPDATE user_memories SET value = ?, accessed_at = ? WHERE id = ? AND user_id = ?",
+                (clean_value, now, memory_id, uid),
             )
         updated = cursor.rowcount > 0
         if updated:
             logger.info("[UserMemory] 已更新 id=%d", memory_id)
         return updated
 
-    def load_all(self) -> list[dict[str, Any]]:
-        """加载全部记忆条目，按类别和创建时间升序排序。返回字段含 source。"""
+    def load_all(self, user_id: int | None = None) -> list[dict[str, Any]]:
+        """加载某用户的全部记忆条目，按类别和创建时间升序排序。返回字段含 source。"""
+        uid = user_id if user_id is not None else current_user_id()
         with self._lock:
             rows = self._conn.execute(
                 """SELECT id, category, key, value, source, created_at, accessed_at
                    FROM user_memories
-                   ORDER BY category, created_at ASC"""
+                   WHERE user_id = ?
+                   ORDER BY category, created_at ASC""",
+                (uid,),
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def load_for_context(self, max_chars: int = 1500) -> str:
+    def load_for_context(self, max_chars: int = 1500, user_id: int | None = None) -> str:
         """
         加载记忆并格式化为可注入 system prompt 的文本块。
 
@@ -387,11 +397,14 @@ class UserMemoryStore:
         Returns:
             格式化后的记忆文本，无记忆时返回空字符串。
         """
+        uid = user_id if user_id is not None else current_user_id()
         with self._lock:
             rows = self._conn.execute(
                 """SELECT id, category, key, value
                    FROM user_memories
-                   ORDER BY accessed_at DESC, created_at DESC"""
+                   WHERE user_id = ?
+                   ORDER BY accessed_at DESC, created_at DESC""",
+                (uid,),
             ).fetchall()
         if not rows:
             return ""
@@ -422,20 +435,22 @@ class UserMemoryStore:
 
         return "\n".join(lines)
 
-    def delete(self, memory_id: int) -> bool:
-        """删除指定 id 的记忆条目，返回是否实际删除。"""
+    def delete(self, memory_id: int, user_id: int | None = None) -> bool:
+        """删除指定 id 的记忆条目（限本人），返回是否实际删除。"""
+        uid = user_id if user_id is not None else current_user_id()
         with self._lock, self._conn:
             cursor = self._conn.execute(
-                "DELETE FROM user_memories WHERE id = ?", (memory_id,)
+                "DELETE FROM user_memories WHERE id = ? AND user_id = ?", (memory_id, uid)
             )
         return cursor.rowcount > 0
 
-    def clear(self) -> int:
-        """清空全部记忆，返回被删除的条目数。"""
+    def clear(self, user_id: int | None = None) -> int:
+        """清空某用户的全部记忆，返回被删除的条目数。"""
+        uid = user_id if user_id is not None else current_user_id()
         with self._lock, self._conn:
-            cursor = self._conn.execute("DELETE FROM user_memories")
+            cursor = self._conn.execute("DELETE FROM user_memories WHERE user_id = ?", (uid,))
         count = cursor.rowcount
-        logger.info("[UserMemory] 已清空全部 %d 条记忆", count)
+        logger.info("[UserMemory] 已清空用户 %d 的全部 %d 条记忆", uid, count)
         return count
 
     def close(self) -> None:

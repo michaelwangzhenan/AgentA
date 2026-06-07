@@ -511,7 +511,7 @@ class TestCustomSystemPrompt:
     def _isolate_project_rules(self, monkeypatch):
         """隔离仓库根 .agenta/rules.md 文件，否则真实存在时会把 <project_rules>
         块拼到 system_prompt 末尾，破坏本类"裸 system_prompt"的断言。"""
-        monkeypatch.setattr("src.agent.agent._get_shared_project_rules", lambda: None)
+        monkeypatch.setattr("src.agent.agent._get_active_rules", lambda: None)
 
     def test_custom_system_prompt_replaces_default(self) -> None:
         """传入 system_prompt 时，LLM 收到的 messages[0] 内容应为自定义内容。"""

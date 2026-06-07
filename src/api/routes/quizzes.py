@@ -7,7 +7,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from src.api.deps import get_quiz_store
+from src.api.deps import get_current_user, get_quiz_store
 from src.api.schemas.quiz import (
     QuizListResponse,
     QuizSet,
@@ -22,8 +22,9 @@ router = APIRouter(prefix="/quizzes", tags=["quizzes"])
 @router.get("", response_model=QuizListResponse)
 def list_quizzes(
     store: QuizStore = Depends(get_quiz_store),
+    user: dict = Depends(get_current_user),
 ) -> QuizListResponse:
-    rows = store.list_quiz_sets(include_archived=False)
+    rows = store.list_quiz_sets(include_archived=False, user_id=user["id"])
     return QuizListResponse(quizzes=[QuizSetSummary(**row) for row in rows])
 
 
@@ -31,8 +32,9 @@ def list_quizzes(
 def get_quiz(
     quiz_set_id: int,
     store: QuizStore = Depends(get_quiz_store),
+    user: dict = Depends(get_current_user),
 ) -> QuizSet:
-    quiz = store.get_quiz_with_questions(quiz_set_id)
+    quiz = store.get_quiz_with_questions(quiz_set_id, user_id=user["id"])
     if quiz is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -49,12 +51,13 @@ def submit_quiz(
     quiz_set_id: int,
     req: SubmitQuizRequest,
     store: QuizStore = Depends(get_quiz_store),
+    user: dict = Depends(get_current_user),
 ) -> QuizSet:
     """提交答案批改：选择题本地字符串比对，简答走 LLM-judge；落库后返回带分数的 quiz。"""
     # 复用 tools.py 的批改 helper，避免重复实现两套评分逻辑（详 §2.5 决策）。
     from src.agent.tools import _MCQ_TYPES, _grade_one_mcq, _grade_one_short_answer
 
-    quiz = store.get_quiz_with_questions(quiz_set_id)
+    quiz = store.get_quiz_with_questions(quiz_set_id, user_id=user["id"])
     if quiz is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -88,23 +91,24 @@ def submit_quiz(
         total_raw += score
 
     total_score = round(total_raw * 100.0 / len(questions), 1)
-    if not store.update_grading(quiz_set_id, gradings, total_score):
+    if not store.update_grading(quiz_set_id, gradings, total_score, user_id=user["id"]):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"持久化批改结果失败（quiz id={quiz_set_id}）",
         )
-    return get_quiz(quiz_set_id, store)
+    return get_quiz(quiz_set_id, store, user)
 
 
 @router.post("/{quiz_set_id}/archive", response_model=QuizSet)
 def archive_quiz(
     quiz_set_id: int,
     store: QuizStore = Depends(get_quiz_store),
+    user: dict = Depends(get_current_user),
 ) -> QuizSet:
     """归档 quiz（软删除，不再出现在默认列表）。"""
-    if not store.archive_quiz_set(quiz_set_id):
+    if not store.archive_quiz_set(quiz_set_id, user_id=user["id"]):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"无法归档 quiz id={quiz_set_id}（不存在或已归档）",
         )
-    return get_quiz(quiz_set_id, store)
+    return get_quiz(quiz_set_id, store, user)

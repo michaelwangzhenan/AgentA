@@ -672,7 +672,8 @@ Step 1-6 的组件已落地（覆盖上表全部「原」需求 + 标杆增强�
 ```mermaid
 graph TD
     main["main.tsx<br/>程序入口，挂载到网页"] --> App["App.tsx<br/>整体布局：左侧导航 + 右侧当前页面"]
-    App --> Sidebar["components/sidebar/<br/>左侧导航栏"]
+    App --> auth["components/auth/<br/>登录 / 注册页（未登录时只显示这页）"]
+    App --> Sidebar["components/sidebar/<br/>左侧导航栏（底部显示当前用户 + 退出）"]
     App --> Views["右侧各页面（按导航切换）"]
 
     Views --> chat["components/chat/<br/>聊天页（最核心）"]
@@ -700,9 +701,11 @@ graph TD
 | 目录 / 文件 | 放什么 |
 |---|---|
 | `components/chat/` | 聊天界面的所有块：消息列表、气泡、输入框、思考块、工具调用块 |
+| `components/auth/` | 登录 / 注册页；没登录时整个应用只显示这一页 |
 | `components/ui/` | 最底层通用控件（按钮、下拉菜单等），别的组件拼装它们 |
 | `hooks/` | 抽出来复用的逻辑，函数名以 `use` 开头（核心是 `useChat`，管消息收发） |
-| `api/client.ts` | 所有「请求后端」的函数都在这 |
+| `api/client.ts` | 所有「请求后端」的函数都在这（含登录 / 注册 / 退出） |
+| `lib/auth.tsx` | 管「当前登录的是谁」：登录 / 注册 / 退出、是否管理员，都从这取 |
 | `types/` | 描述数据长什么样（如一条消息有哪些字段） |
 | `lib/` | 零碎工具函数（`cn` 合并样式、主题切换） |
 | `index.css` | 全局主题色、字体、圆角等变量 |
@@ -800,7 +803,8 @@ const [count, setCount] = useState(0)   // count 当前值；setCount 改它
 
 | 界面区域 | 文件 |
 |---|---|
-| 左侧导航栏 | `components/sidebar/Sidebar.tsx` |
+| 登录 / 注册页（含左上 logo + 标题） | `components/auth/LoginView.tsx` |
+| 左侧导航栏（底部当前用户名 / 退出按钮；管理员才显示技能 / MCP / 设置入口） | `components/sidebar/Sidebar.tsx` |
 | 聊天输入框 / 模型选择 / 工具条 | `components/chat/Composer.tsx` |
 | 消息气泡（用户 / AI、附件卡片、操作按钮） | `components/chat/MessageBubble.tsx` |
 | 工具调用块（如 `update_step`） | `components/chat/ToolBlock.tsx` |

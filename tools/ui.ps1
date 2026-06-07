@@ -114,9 +114,12 @@ function Start-One {
 
     # 用 .cmd 包装：避开 PowerShell -> cmd.exe 的引号转义陷阱（路径含空格也安全）
     $wrapper = Join-Path $RunDir "$Name.cmd"
+    # PYTHONIOENCODING=utf-8：Windows 中文系统下 Python 重定向输出默认走 GBK，
+    # 写进日志文件后编辑器按 UTF-8 读会乱码；强制 stdio 用 UTF-8 即可。
     $wrapperContent = @"
 @echo off
 cd /d "$($Svc.Cwd)"
+set PYTHONIOENCODING=utf-8
 $($Svc.CmdLine) > "$($Svc.LogFile)" 2>&1
 "@
     Set-Content -Path $wrapper -Value $wrapperContent -Encoding ascii

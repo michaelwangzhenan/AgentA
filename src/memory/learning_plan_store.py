@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any
 
 import src.config as config
+from src.agent.core.user_context import current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,7 @@ class LearningPlanStore:
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS learning_plans (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER NOT NULL DEFAULT 1,
                 goal        TEXT    NOT NULL,
                 weeks       INTEGER NOT NULL DEFAULT 0,
                 status      TEXT    NOT NULL DEFAULT 'active',
@@ -98,7 +100,7 @@ class LearningPlanStore:
                 updated_at  TEXT    NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_plans_active
-                ON learning_plans(is_active);
+                ON learning_plans(user_id, is_active);
             CREATE INDEX IF NOT EXISTS idx_plans_status
                 ON learning_plans(status);
 
@@ -152,7 +154,8 @@ class LearningPlanStore:
 
     # ── plan CRUD ────────────────────────────────────────────────────────────
 
-    def create_plan(self, goal: str, weeks: int = 0, set_active: bool = True) -> int:
+    def create_plan(self, goal: str, weeks: int = 0, set_active: bool = True,
+                    user_id: int | None = None) -> int:
         """
         新建一个学习计划。
 
@@ -164,6 +167,7 @@ class LearningPlanStore:
         Returns:
             新 plan 的 id（自增整数）。
         """
+        uid = user_id if user_id is not None else current_user_id()
         goal = (goal or "").strip()
         if not goal:
             raise ValueError("goal 不能为空")
@@ -173,23 +177,23 @@ class LearningPlanStore:
         now = self._now()
         with self._conn:
             if set_active:
-                # 先把所有 plan 置为非 active，确保互斥
+                # 先把该用户所有 plan 置为非 active，确保 per-user 互斥
                 self._conn.execute(
                     "UPDATE learning_plans SET is_active = 0, updated_at = ? "
-                    "WHERE is_active = 1",
-                    (now,),
+                    "WHERE is_active = 1 AND user_id = ?",
+                    (now, uid),
                 )
             cursor = self._conn.execute(
-                "INSERT INTO learning_plans(goal, weeks, status, is_active, created_at, updated_at) "
-                "VALUES (?, ?, 'active', ?, ?, ?)",
-                (goal, weeks, 1 if set_active else 0, now, now),
+                "INSERT INTO learning_plans(user_id, goal, weeks, status, is_active, created_at, updated_at) "
+                "VALUES (?, ?, ?, 'active', ?, ?, ?)",
+                (uid, goal, weeks, 1 if set_active else 0, now, now),
             )
         plan_id = int(cursor.lastrowid or 0)
         logger.info("create_plan: id=%d, goal=%r, weeks=%d, active=%s",
                     plan_id, goal, weeks, set_active)
         return plan_id
 
-    def add_tasks(self, plan_id: int, tasks: list[dict[str, Any]]) -> int:
+    def add_tasks(self, plan_id: int, tasks: list[dict[str, Any]], user_id: int | None = None) -> int:
         """
         批量给指定 plan 添加任务。
 
@@ -200,9 +204,10 @@ class LearningPlanStore:
         Returns:
             插入的任务数。
         """
+        uid = user_id if user_id is not None else current_user_id()
         if not isinstance(tasks, list) or not tasks:
             return 0
-        if self.get_plan(plan_id) is None:
+        if self.get_plan(plan_id, user_id=uid) is None:
             raise ValueError(f"plan_id={plan_id} 不存在")
 
         rows = []
@@ -230,25 +235,28 @@ class LearningPlanStore:
         logger.info("add_tasks: plan_id=%d, +%d task", plan_id, len(rows))
         return len(rows)
 
-    def get_plan(self, plan_id: int) -> dict[str, Any] | None:
-        """读单个 plan 元信息（不含 tasks）。"""
+    def get_plan(self, plan_id: int, user_id: int | None = None) -> dict[str, Any] | None:
+        """读单个 plan 元信息（不含 tasks）；限本人，不属于该用户返回 None。"""
+        uid = user_id if user_id is not None else current_user_id()
         row = self._conn.execute(
-            "SELECT * FROM learning_plans WHERE id = ?", (plan_id,),
+            "SELECT * FROM learning_plans WHERE id = ? AND user_id = ?", (plan_id, uid),
         ).fetchone()
         return self._row_to_plan(row) if row else None
 
-    def get_plan_with_tasks(self, plan_id: int) -> dict[str, Any] | None:
+    def get_plan_with_tasks(self, plan_id: int, user_id: int | None = None) -> dict[str, Any] | None:
         """读单个 plan + 全部 tasks（按 stage_idx, order_idx 升序）。"""
-        plan = self.get_plan(plan_id)
+        uid = user_id if user_id is not None else current_user_id()
+        plan = self.get_plan(plan_id, user_id=uid)
         if plan is None:
             return None
         plan["tasks"] = self._get_tasks(plan_id)
         return plan
 
-    def get_active(self) -> dict[str, Any] | None:
-        """读当前 active plan + 全部 tasks；无 active 返回 None。"""
+    def get_active(self, user_id: int | None = None) -> dict[str, Any] | None:
+        """读当前用户的 active plan + 全部 tasks；无 active 返回 None。"""
+        uid = user_id if user_id is not None else current_user_id()
         row = self._conn.execute(
-            "SELECT * FROM learning_plans WHERE is_active = 1 LIMIT 1",
+            "SELECT * FROM learning_plans WHERE is_active = 1 AND user_id = ? LIMIT 1", (uid,),
         ).fetchone()
         if not row:
             return None
@@ -256,23 +264,26 @@ class LearningPlanStore:
         plan["tasks"] = self._get_tasks(plan["id"])
         return plan
 
-    def list_plans(self, include_abandoned: bool = False) -> list[dict[str, Any]]:
+    def list_plans(self, include_abandoned: bool = False, user_id: int | None = None) -> list[dict[str, Any]]:
         """
-        列全部 plan 摘要（含 task 计数 + 完成数），按 active 优先 + 创建时间倒序。
+        列当前用户全部 plan 摘要（含 task 计数 + 完成数），按 active 优先 + 创建时间倒序。
 
         Args:
             include_abandoned: 是否包含 abandoned 状态的 plan，默认不含。
+            user_id: 归属用户；None 取 current_user_id()。
         """
+        uid = user_id if user_id is not None else current_user_id()
         sql = """
             SELECT p.*,
                    COUNT(t.id) AS task_count,
                    SUM(CASE WHEN t.status = 'success' THEN 1 ELSE 0 END) AS done_count
             FROM learning_plans p
             LEFT JOIN learning_tasks t ON p.id = t.plan_id
+            WHERE p.user_id = ?
         """
-        params: list[Any] = []
+        params: list[Any] = [uid]
         if not include_abandoned:
-            sql += " WHERE p.status != 'abandoned'"
+            sql += " AND p.status != 'abandoned'"
         # id DESC 作 created_at tie-breaker：批量测试 / 同秒新建时按"新→旧"稳定排
         sql += " GROUP BY p.id ORDER BY p.is_active DESC, p.created_at DESC, p.id DESC"
         rows = self._conn.execute(sql, params).fetchall()
@@ -286,14 +297,15 @@ class LearningPlanStore:
 
     # ── active 标记互斥维护（D9） ─────────────────────────────────────────────
 
-    def switch_active(self, plan_id: int) -> bool:
+    def switch_active(self, plan_id: int, user_id: int | None = None) -> bool:
         """
-        把指定 plan 切为 active；其它 plan 自动 set is_active=0。
+        把指定 plan 切为 active；该用户其它 plan 自动 set is_active=0。
 
         Returns:
             True 切换成功；False plan 不存在 / 已 abandoned。
         """
-        plan = self.get_plan(plan_id)
+        uid = user_id if user_id is not None else current_user_id()
+        plan = self.get_plan(plan_id, user_id=uid)
         if plan is None:
             logger.warning("switch_active: plan_id=%d 不存在", plan_id)
             return False
@@ -305,63 +317,77 @@ class LearningPlanStore:
         with self._conn:
             self._conn.execute(
                 "UPDATE learning_plans SET is_active = 0, updated_at = ? "
-                "WHERE is_active = 1 AND id != ?",
-                (now, plan_id),
+                "WHERE is_active = 1 AND id != ? AND user_id = ?",
+                (now, plan_id, uid),
             )
             self._conn.execute(
-                "UPDATE learning_plans SET is_active = 1, updated_at = ? WHERE id = ?",
-                (now, plan_id),
+                "UPDATE learning_plans SET is_active = 1, updated_at = ? WHERE id = ? AND user_id = ?",
+                (now, plan_id, uid),
             )
         logger.info("switch_active: plan_id=%d", plan_id)
         return True
 
-    def abandon_plan(self, plan_id: int) -> bool:
+    def abandon_plan(self, plan_id: int, user_id: int | None = None) -> bool:
         """
         将指定 plan 标为 abandoned + 置非 active；plan 不存在返回 False。
         """
-        plan = self.get_plan(plan_id)
+        uid = user_id if user_id is not None else current_user_id()
+        plan = self.get_plan(plan_id, user_id=uid)
         if plan is None:
             return False
         now = self._now()
         with self._conn:
             self._conn.execute(
                 "UPDATE learning_plans SET status = 'abandoned', is_active = 0, updated_at = ? "
-                "WHERE id = ?",
-                (now, plan_id),
+                "WHERE id = ? AND user_id = ?",
+                (now, plan_id, uid),
             )
         logger.info("abandon_plan: plan_id=%d", plan_id)
         return True
 
-    def complete_plan(self, plan_id: int) -> bool:
+    def complete_plan(self, plan_id: int, user_id: int | None = None) -> bool:
         """
         将指定 plan 标为 completed + 置非 active（所有 task 完成时由业务层调用）。
         """
-        plan = self.get_plan(plan_id)
+        uid = user_id if user_id is not None else current_user_id()
+        plan = self.get_plan(plan_id, user_id=uid)
         if plan is None:
             return False
         now = self._now()
         with self._conn:
             self._conn.execute(
                 "UPDATE learning_plans SET status = 'completed', is_active = 0, updated_at = ? "
-                "WHERE id = ?",
-                (now, plan_id),
+                "WHERE id = ? AND user_id = ?",
+                (now, plan_id, uid),
             )
         logger.info("complete_plan: plan_id=%d", plan_id)
         return True
 
-    def delete_plan(self, plan_id: int) -> bool:
+    def delete_plan(self, plan_id: int, user_id: int | None = None) -> bool:
         """
         硬删除 plan + 级联删除其 tasks（ON DELETE CASCADE）。
         主要给测试 / 手动清理用；常规业务请用 abandon_plan。
         """
+        uid = user_id if user_id is not None else current_user_id()
         with self._conn:
             cursor = self._conn.execute(
-                "DELETE FROM learning_plans WHERE id = ?", (plan_id,),
+                "DELETE FROM learning_plans WHERE id = ? AND user_id = ?", (plan_id, uid),
             )
         deleted = cursor.rowcount > 0
         if deleted:
             logger.info("delete_plan: plan_id=%d", plan_id)
         return deleted
+
+    def delete_all_for_user(self, user_id: int) -> None:
+        """删除某用户的全部学习计划及其任务（admin 删用户时级联清理）。"""
+        with self._conn:
+            self._conn.execute(
+                "DELETE FROM learning_tasks WHERE plan_id IN "
+                "(SELECT id FROM learning_plans WHERE user_id = ?)",
+                (user_id,),
+            )
+            self._conn.execute("DELETE FROM learning_plans WHERE user_id = ?", (user_id,))
+        logger.info("已删除 user=%d 的全部学习计划", user_id)
 
     # ── task CRUD ────────────────────────────────────────────────────────────
 
@@ -375,6 +401,7 @@ class LearningPlanStore:
 
     def update_task_status(
         self, plan_id: int, task_id: int, status: str, note: str = "",
+        user_id: int | None = None,
     ) -> bool:
         """
         更新指定 task 的 status / note。
@@ -392,6 +419,11 @@ class LearningPlanStore:
             logger.warning("update_task_status: 非法 status=%r", status)
             return False
 
+        uid = user_id if user_id is not None else current_user_id()
+        # 先确认 plan 归属当前用户，再校验 task 属于该 plan（防跨用户 / 跨 plan 误更新）
+        if self.get_plan(plan_id, user_id=uid) is None:
+            logger.warning("update_task_status: plan_id=%d 不属于 user=%d", plan_id, uid)
+            return False
         row = self._conn.execute(
             "SELECT id FROM learning_tasks WHERE id = ? AND plan_id = ?",
             (task_id, plan_id),
@@ -421,7 +453,7 @@ class LearningPlanStore:
     # 手动激活；切 session 自然清空（因 session_id 变了 dict 里查不到）。
     # 不提供"卸载"命令 —— 新建 session 即天然清空。详 design.md §3.9.4。
 
-    def mark_loaded(self, session_id: str, plan_id: int) -> bool:
+    def mark_loaded(self, session_id: str, plan_id: int, user_id: int | None = None) -> bool:
         """
         将指定 plan 标记为当前 session 已"加载"到 prompt 注入。
 
@@ -432,7 +464,8 @@ class LearningPlanStore:
         Returns:
             True 标记成功；False plan 不存在 / 已 abandoned（不写映射）。
         """
-        plan = self.get_plan(plan_id)
+        uid = user_id if user_id is not None else current_user_id()
+        plan = self.get_plan(plan_id, user_id=uid)
         if plan is None:
             logger.warning("mark_loaded: plan_id=%d 不存在", plan_id)
             return False
@@ -471,13 +504,15 @@ class LearningPlanStore:
 
     # ── 摘要 / 上下文注入 helper ─────────────────────────────────────────────
 
-    def render_plan_for_prompt(self, plan_id: int, max_chars: int = 1500) -> str:
+    def render_plan_for_prompt(self, plan_id: int, max_chars: int = 1500,
+                               user_id: int | None = None) -> str:
         """
         把指定 plan 渲染成可注入 system prompt 的 markdown 块；
         plan 不存在 / 已 abandoned 时返回空字符串（caller 凭此跳过注入）。
         超出 max_chars 自动截断（保留前部 + 末尾标注 "...截断..."）。
         """
-        plan = self.get_plan_with_tasks(plan_id)
+        uid = user_id if user_id is not None else current_user_id()
+        plan = self.get_plan_with_tasks(plan_id, user_id=uid)
         if plan is None or plan["status"] == "abandoned":
             return ""
 

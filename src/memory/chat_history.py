@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 import src.config as config
+from src.agent.core.user_context import current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -84,9 +85,11 @@ class ChatHistoryStore:
 
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id    TEXT PRIMARY KEY,
+                user_id       INTEGER NOT NULL DEFAULT 1,
                 created_at    TEXT NOT NULL,
                 first_user_msg TEXT NOT NULL DEFAULT ''
             );
+            CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
         """)
         self._conn.commit()
 
@@ -106,17 +109,19 @@ class ChatHistoryStore:
 
     # ── 核心接口 ──────────────────────────────────────────────────────────────
 
-    def append(self, session_id: str, msg: dict[str, Any]) -> None:
+    def append(self, session_id: str, msg: dict[str, Any], user_id: int | None = None) -> None:
         """
         将单条 message 追加到指定 session。
 
         自动处理 tool_calls（assistant role）和 tool_call_id（tool role）的序列化。
-        若 session 不存在则自动创建。
+        若 session 不存在则自动创建（归属 user_id，缺省取当前用户）。
 
         Args:
             session_id: 会话 ID。
             msg: 标准 OpenAI messages 格式的单条消息 dict。
+            user_id: 新建 session 时的归属用户；None 取 current_user_id()。
         """
+        uid = user_id if user_id is not None else current_user_id()
         role: str = msg.get("role", "")
         content: str = msg.get("content") or ""
         tool_calls_raw = msg.get("tool_calls") or []
@@ -132,8 +137,8 @@ class ChatHistoryStore:
             ).fetchone()
             if existing is None:
                 self._conn.execute(
-                    "INSERT INTO sessions(session_id, created_at, first_user_msg) VALUES(?,?,?)",
-                    (session_id, now, content[:_FIRST_MSG_PREVIEW_LEN] if role == "user" else ""),
+                    "INSERT INTO sessions(session_id, user_id, created_at, first_user_msg) VALUES(?,?,?,?)",
+                    (session_id, uid, now, content[:_FIRST_MSG_PREVIEW_LEN] if role == "user" else ""),
                 )
             elif role == "user" and not existing["first_user_msg"]:
                 # session 由 create_empty_session 预建（标题为空），首条 user 消息时回填标题
@@ -249,6 +254,17 @@ class ChatHistoryStore:
             )
         logger.info("已清空 session: %s", session_id)
 
+    def delete_all_for_user(self, user_id: int) -> None:
+        """删除某用户的全部会话及其消息（admin 删用户时级联清理）。"""
+        with self._conn:
+            self._conn.execute(
+                "DELETE FROM messages WHERE session_id IN "
+                "(SELECT session_id FROM sessions WHERE user_id = ?)",
+                (user_id,),
+            )
+            self._conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        logger.info("已删除 user=%d 的全部会话", user_id)
+
     def rename_session(self, session_id: str, title: str) -> bool:
         """
         重命名 session（复用 `first_user_msg` 列存用户手动标题）。
@@ -272,24 +288,42 @@ class ChatHistoryStore:
             logger.info("rename_session: session 不存在，跳过: %s", session_id)
         return ok
 
-    def create_empty_session(self, session_id: str, title: str = "") -> bool:
+    def create_empty_session(self, session_id: str, title: str = "", user_id: int | None = None) -> bool:
         """
         显式创建空 session（不写任何 message 也立即出现在列表里）。
 
         Args:
             session_id: 会话 ID。
             title:      初始标题（默认空字符串，前端展示时 fallback 到 `session_id 前 8 位`）。
+            user_id:    归属用户；None 取 current_user_id()。
 
         Returns:
             True 表示新创建；False 表示 session 已存在（幂等，未改动）。
         """
+        uid = user_id if user_id is not None else current_user_id()
         now = datetime.now().isoformat(timespec="seconds")
         with self._conn:
             cur = self._conn.execute(
-                "INSERT OR IGNORE INTO sessions(session_id, created_at, first_user_msg) VALUES(?,?,?)",
-                (session_id, now, title[:_FIRST_MSG_PREVIEW_LEN]),
+                "INSERT OR IGNORE INTO sessions(session_id, user_id, created_at, first_user_msg) VALUES(?,?,?,?)",
+                (session_id, uid, now, title[:_FIRST_MSG_PREVIEW_LEN]),
             )
         return cur.rowcount > 0
+
+    def owns_session(self, session_id: str, user_id: int | None = None) -> bool:
+        """该 session 是否归属指定用户（用于 API 层鉴权）。session 不存在返回 False。"""
+        uid = user_id if user_id is not None else current_user_id()
+        row = self._conn.execute(
+            "SELECT 1 FROM sessions WHERE session_id = ? AND user_id = ?",
+            (session_id, uid),
+        ).fetchone()
+        return row is not None
+
+    def get_session_owner(self, session_id: str) -> int | None:
+        """返回 session 归属的 user_id；session 不存在返回 None。"""
+        row = self._conn.execute(
+            "SELECT user_id FROM sessions WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        return int(row["user_id"]) if row else None
 
     def delete_session(self, session_id: str) -> bool:
         """
@@ -338,31 +372,35 @@ class ChatHistoryStore:
         self,
         query: str | None = None,
         limit: int | None = None,
+        user_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """
-        列出历史 session，按创建时间降序排列。
+        列出指定用户的历史 session，按创建时间降序排列。
 
         Args:
             query: 可选搜索词，按 session_id 前缀（去前后空白后大小写敏感）OR
                    first_user_msg 大小写不敏感 LIKE 匹配。None 或空串视为不过滤。
             limit: 可选返回上限。None 表示返回全部。
+            user_id: 归属用户；None 取 current_user_id()。
 
         Returns:
             list of dict，每项包含 session_id、created_at、first_user_msg、msg_count。
         """
+        uid = user_id if user_id is not None else current_user_id()
         sql = """
             SELECT s.session_id, s.created_at, s.first_user_msg,
                    COUNT(m.id) AS msg_count
             FROM sessions s
             LEFT JOIN messages m ON s.session_id = m.session_id
+            WHERE s.user_id = ?
         """
-        params: list[Any] = []
+        params: list[Any] = [uid]
         if query:
             q = query.strip()
             if q:
                 sql += (
-                    " WHERE s.session_id LIKE ? "
-                    "OR LOWER(s.first_user_msg) LIKE LOWER(?)"
+                    " AND (s.session_id LIKE ? "
+                    "OR LOWER(s.first_user_msg) LIKE LOWER(?))"
                 )
                 params.extend([f"{q}%", f"%{q}%"])
         sql += " GROUP BY s.session_id ORDER BY s.created_at DESC"

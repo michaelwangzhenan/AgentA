@@ -11,10 +11,26 @@ load_dotenv(override=True)
 
 import atexit  # noqa: E402
 import logging  # noqa: E402
+import os  # noqa: E402
 from contextlib import asynccontextmanager  # noqa: E402
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+
+# uvicorn 默认只配自己的 uvicorn.* logger，不给 root 加 handler，src.* 的 INFO 日志会被
+# lastResort handler（WARNING 级）吞掉。这里跟 CLI 入口 main.py 对齐配一次 root，让 agent
+# 业务日志按 LOG_LEVEL 全量进 logs/uvicorn.log（ui.ps1 把进程 stdout+stderr 重定向到那）。
+_LOG_LEVEL_NAME = os.getenv("LOG_LEVEL", "INFO").upper()
+_log_level = getattr(logging, _LOG_LEVEL_NAME, None)
+if not isinstance(_log_level, int):
+    _log_level = logging.INFO
+logging.basicConfig(
+    level=_log_level,
+    format="%(asctime)s [%(levelname)s] %(filename)s:%(lineno)d - %(message)s",
+    datefmt="%H:%M:%S",
+)
+for _noisy in ("httpx", "httpcore", "openai", "chromadb", "sentence_transformers"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 
 import src.config as _cfg  # noqa: E402
 from src.api import config_overrides as _config_overrides  # noqa: E402
@@ -25,6 +41,8 @@ from src.api import config_overrides as _config_overrides  # noqa: E402
 _config_overrides.apply_overrides()
 
 from src.api.routes import (  # noqa: E402
+    admin,
+    auth,
     chat,
     config as config_route,
     health,
@@ -90,6 +108,8 @@ app.add_middleware(
 )
 
 app.include_router(health.router, prefix="/api", tags=["health"])
+app.include_router(auth.router, prefix="/api", tags=["auth"])
+app.include_router(admin.router, prefix="/api", tags=["admin"])
 app.include_router(chat.router, prefix="/api", tags=["chat"])
 app.include_router(sessions.router, prefix="/api", tags=["sessions"])
 app.include_router(kb.router, prefix="/api", tags=["kb"])
