@@ -177,12 +177,16 @@ def chat(
     """
     provider_config, model_config = config.get_active_model()
 
+    # 历史 messages 可能含空名 / 非法 function name 的 tool_call（早期 bug 或 MCP 带来）。
+    # anthropic 与 openai 两条分支都先清理：空名 tool_call 整条丢 + 对应 orphan tool 响应丢，
+    # 否则 provider 端会直接 400。
+    messages = _sanitize_messages_for_llm(messages)
+
     if provider_config.sdk == "anthropic":
         return _chat_claude(messages, tools, temperature, on_token_chunk)
 
-    # 历史 messages / MCP tools 可能含非法 function name（`.` 分隔、空名等）
-    # 在发给 LLM 前 sanitize，返回时由 _restore_tool_call_names 反向还原
-    messages = _sanitize_messages_for_llm(messages)
+    # openai 兼容分支额外 sanitize tools 的 function name（`.` 分隔等），返回时由
+    # _restore_tool_call_names 反向还原；claude 分支的 tool 名按原样透传，无需还原。
     if tools:
         tools = _sanitize_tools_for_llm(tools)
 

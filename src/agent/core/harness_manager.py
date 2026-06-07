@@ -1,9 +1,9 @@
-"""Harness 自检 manager（Phase 2.5，详 docs/iter_2_agent.md §4.9.10）
+"""Harness 自检 manager
 
 提供两路生产路径 critic：
 
-1. `review_grading()` — 单题 quiz 批改自检（Q1）；复用 [`judge_with_llm`](../../../tools/agent_eval/judge/__init__.py) helper
-2. `filter_chunks()` — RAG 召回 chunks 相关性批量过滤（R1）；K 条一次 LLM 调用（D12 = B）
+1. `review_grading()` — 单题 quiz 批改自检；复用 [`judge_with_llm`](../../../tools/agent_eval/judge/__init__.py) helper
+2. `filter_chunks()` — RAG 召回 chunks 相关性批量过滤；K 条一次 LLM 调用
 
 所有 critic 调用都用 `ThreadPoolExecutor` 包 timeout（跨平台），超时静默降级保留原始输出。
 任何异常软返回，不向上传播，不阻塞主流程（grade_quiz / search_knowledge）。

@@ -72,6 +72,12 @@ export function setUnauthorizedHandler(fn: (() => void) | null): void {
 
 // ─── 通用 helper ────────────────────────────────────────────────────────
 
+// 所有 API 请求统一显式带上 cookie 凭证。同源部署靠浏览器默认即可，但显式声明能在
+// 前后端跨域部署时仍带上登录态（与 iter_6 §3.6 设计一致）。
+function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  return fetch(input, { credentials: 'include', ...init })
+}
+
 async function _ensureOk(res: Response): Promise<void> {
   if (res.ok) return
   if (res.status === 401) _onUnauthorized?.()
@@ -90,23 +96,12 @@ async function _ensureOk(res: Response): Promise<void> {
 // ─── Step 1：非流式（保留作为 fallback / 调试入口）────────────────────
 
 export async function postChat(message: string): Promise<ChatResponse> {
-  const res = await fetch('/api/chat', {
+  const res = await apiFetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message } satisfies ChatRequest),
   })
-
-  if (!res.ok) {
-    let detail = `HTTP ${res.status}`
-    try {
-      const data = (await res.json()) as { detail?: string }
-      if (data?.detail) detail = `${detail}: ${data.detail}`
-    } catch {
-      // 响应不是 JSON / 解析失败，沿用 detail 默认值
-    }
-    throw new Error(detail)
-  }
-
+  await _ensureOk(res)
   return (await res.json()) as ChatResponse
 }
 
@@ -131,6 +126,7 @@ export async function streamChat(
     await fetchEventSource('/api/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({
         message,
         ...(sessionId ? { session_id: sessionId } : {}),
@@ -191,13 +187,13 @@ export async function streamChat(
 // ─── Step 3：Session 管理 ──────────────────────────────────────────────
 
 export async function listSessions(): Promise<Session[]> {
-  const res = await fetch('/api/sessions')
+  const res = await apiFetch('/api/sessions')
   await _ensureOk(res)
   return ((await res.json()) as SessionListResponse).sessions
 }
 
 export async function createSession(title?: string): Promise<Session> {
-  const res = await fetch('/api/sessions', {
+  const res = await apiFetch('/api/sessions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(title ? { title } : {}),
@@ -207,7 +203,7 @@ export async function createSession(title?: string): Promise<Session> {
 }
 
 export async function renameSession(id: string, title: string): Promise<Session> {
-  const res = await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
+  const res = await apiFetch(`/api/sessions/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title }),
@@ -217,7 +213,7 @@ export async function renameSession(id: string, title: string): Promise<Session>
 }
 
 export async function deleteSession(id: string): Promise<{ deleted: boolean }> {
-  const res = await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
+  const res = await apiFetch(`/api/sessions/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   })
   await _ensureOk(res)
@@ -227,7 +223,7 @@ export async function deleteSession(id: string): Promise<{ deleted: boolean }> {
 export async function loadSessionMessages(
   id: string,
 ): Promise<SessionMessagesResponse> {
-  const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/messages`)
+  const res = await apiFetch(`/api/sessions/${encodeURIComponent(id)}/messages`)
   await _ensureOk(res)
   return (await res.json()) as SessionMessagesResponse
 }
@@ -237,7 +233,7 @@ export async function truncateSession(
   id: string,
   userMessageIndex: number,
 ): Promise<{ deleted: number }> {
-  const res = await fetch(
+  const res = await apiFetch(
     `/api/sessions/${encodeURIComponent(id)}/truncate`,
     {
       method: 'POST',
@@ -252,7 +248,7 @@ export async function truncateSession(
 // ─── Step 4：Knowledge Base ────────────────────────────────────────────
 
 export async function listKBDocuments(): Promise<KBDocument[]> {
-  const res = await fetch('/api/kb/documents')
+  const res = await apiFetch('/api/kb/documents')
   await _ensureOk(res)
   return ((await res.json()) as KBDocumentListResponse).documents
 }
@@ -260,7 +256,7 @@ export async function listKBDocuments(): Promise<KBDocument[]> {
 export async function uploadKBFile(file: File): Promise<KBUploadResponse> {
   const form = new FormData()
   form.append('file', file)
-  const res = await fetch('/api/kb/upload', {
+  const res = await apiFetch('/api/kb/upload', {
     method: 'POST',
     body: form,
   })
@@ -269,7 +265,7 @@ export async function uploadKBFile(file: File): Promise<KBUploadResponse> {
 }
 
 export async function deleteKBDocument(docId: string): Promise<KBDeleteResponse> {
-  const res = await fetch(`/api/kb/documents/${encodeURIComponent(docId)}`, {
+  const res = await apiFetch(`/api/kb/documents/${encodeURIComponent(docId)}`, {
     method: 'DELETE',
   })
   await _ensureOk(res)
@@ -277,7 +273,7 @@ export async function deleteKBDocument(docId: string): Promise<KBDeleteResponse>
 }
 
 export async function clearAllKBDocuments(): Promise<KBClearAllResponse> {
-  const res = await fetch('/api/kb/documents', { method: 'DELETE' })
+  const res = await apiFetch('/api/kb/documents', { method: 'DELETE' })
   await _ensureOk(res)
   return (await res.json()) as KBClearAllResponse
 }
@@ -285,7 +281,7 @@ export async function clearAllKBDocuments(): Promise<KBClearAllResponse> {
 // ─── Step 5：User Memory / Rules / Skills / MCP ───────────────────────
 
 export async function listMemories(): Promise<MemoryItem[]> {
-  const res = await fetch('/api/memory')
+  const res = await apiFetch('/api/memory')
   await _ensureOk(res)
   return ((await res.json()) as MemoryListResponse).memories
 }
@@ -296,7 +292,7 @@ export async function upsertMemory(
   value: string,
   source: string = 'manual',
 ): Promise<MemoryItem> {
-  const res = await fetch('/api/memory', {
+  const res = await apiFetch('/api/memory', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ category, key, value, source }),
@@ -309,7 +305,7 @@ export async function patchMemory(
   id: number,
   value: string,
 ): Promise<{ updated: boolean }> {
-  const res = await fetch(`/api/memory/${id}`, {
+  const res = await apiFetch(`/api/memory/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ value }),
@@ -319,25 +315,25 @@ export async function patchMemory(
 }
 
 export async function deleteMemory(id: number): Promise<{ deleted: boolean }> {
-  const res = await fetch(`/api/memory/${id}`, { method: 'DELETE' })
+  const res = await apiFetch(`/api/memory/${id}`, { method: 'DELETE' })
   await _ensureOk(res)
   return (await res.json()) as { deleted: boolean }
 }
 
 export async function clearMemories(): Promise<{ cleared: number }> {
-  const res = await fetch('/api/memory', { method: 'DELETE' })
+  const res = await apiFetch('/api/memory', { method: 'DELETE' })
   await _ensureOk(res)
   return (await res.json()) as { cleared: number }
 }
 
 export async function readRules(): Promise<RulesReadResponse> {
-  const res = await fetch('/api/rules')
+  const res = await apiFetch('/api/rules')
   await _ensureOk(res)
   return (await res.json()) as RulesReadResponse
 }
 
 export async function writeRules(text: string): Promise<RulesWriteResponse> {
-  const res = await fetch('/api/rules', {
+  const res = await apiFetch('/api/rules', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text }),
@@ -347,19 +343,19 @@ export async function writeRules(text: string): Promise<RulesWriteResponse> {
 }
 
 export async function listSkills(): Promise<SkillsResponse> {
-  const res = await fetch('/api/skills')
+  const res = await apiFetch('/api/skills')
   await _ensureOk(res)
   return (await res.json()) as SkillsResponse
 }
 
 export async function reloadSkills(): Promise<SkillReloadResponse> {
-  const res = await fetch('/api/skills/reload', { method: 'POST' })
+  const res = await apiFetch('/api/skills/reload', { method: 'POST' })
   await _ensureOk(res)
   return (await res.json()) as SkillReloadResponse
 }
 
 export async function createSkill(req: SkillCreateRequest): Promise<SkillItem> {
-  const res = await fetch('/api/skills', {
+  const res = await apiFetch('/api/skills', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
@@ -369,7 +365,7 @@ export async function createSkill(req: SkillCreateRequest): Promise<SkillItem> {
 }
 
 export async function updateSkill(name: string, req: SkillUpdateRequest): Promise<SkillItem> {
-  const res = await fetch(`/api/skills/${encodeURIComponent(name)}`, {
+  const res = await apiFetch(`/api/skills/${encodeURIComponent(name)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
@@ -379,7 +375,7 @@ export async function updateSkill(name: string, req: SkillUpdateRequest): Promis
 }
 
 export async function deleteSkill(name: string): Promise<void> {
-  const res = await fetch(`/api/skills/${encodeURIComponent(name)}`, { method: 'DELETE' })
+  const res = await apiFetch(`/api/skills/${encodeURIComponent(name)}`, { method: 'DELETE' })
   await _ensureOk(res)
 }
 
@@ -387,7 +383,7 @@ export async function renameSkill(
   name: string,
   req: SkillRenameRequest,
 ): Promise<SkillItem> {
-  const res = await fetch(`/api/skills/${encodeURIComponent(name)}/rename`, {
+  const res = await apiFetch(`/api/skills/${encodeURIComponent(name)}/rename`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
@@ -397,7 +393,7 @@ export async function renameSkill(
 }
 
 export async function toggleSkill(name: string, enabled: boolean): Promise<SkillToggleResponse> {
-  const res = await fetch(`/api/skills/${encodeURIComponent(name)}/toggle`, {
+  const res = await apiFetch(`/api/skills/${encodeURIComponent(name)}/toggle`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ enabled }),
@@ -407,13 +403,13 @@ export async function toggleSkill(name: string, enabled: boolean): Promise<Skill
 }
 
 export async function listMCPServers(): Promise<MCPServer[]> {
-  const res = await fetch('/api/mcp/servers')
+  const res = await apiFetch('/api/mcp/servers')
   await _ensureOk(res)
   return ((await res.json()) as MCPServerListResponse).servers
 }
 
 export async function listMCPTools(): Promise<MCPTool[]> {
-  const res = await fetch('/api/mcp/tools')
+  const res = await apiFetch('/api/mcp/tools')
   await _ensureOk(res)
   return ((await res.json()) as MCPToolListResponse).tools
 }
@@ -421,7 +417,7 @@ export async function listMCPTools(): Promise<MCPTool[]> {
 export async function createMCPServer(
   req: MCPServerCreateRequest,
 ): Promise<MCPServer> {
-  const res = await fetch('/api/mcp/servers', {
+  const res = await apiFetch('/api/mcp/servers', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
@@ -434,7 +430,7 @@ export async function updateMCPServer(
   name: string,
   req: MCPServerUpdateRequest,
 ): Promise<MCPServer> {
-  const res = await fetch(`/api/mcp/servers/${encodeURIComponent(name)}`, {
+  const res = await apiFetch(`/api/mcp/servers/${encodeURIComponent(name)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
@@ -444,7 +440,7 @@ export async function updateMCPServer(
 }
 
 export async function deleteMCPServer(name: string): Promise<void> {
-  const res = await fetch(`/api/mcp/servers/${encodeURIComponent(name)}`, {
+  const res = await apiFetch(`/api/mcp/servers/${encodeURIComponent(name)}`, {
     method: 'DELETE',
   })
   await _ensureOk(res)
@@ -454,7 +450,7 @@ export async function renameMCPServer(
   name: string,
   req: MCPServerRenameRequest,
 ): Promise<MCPServer> {
-  const res = await fetch(
+  const res = await apiFetch(
     `/api/mcp/servers/${encodeURIComponent(name)}/rename`,
     {
       method: 'POST',
@@ -470,7 +466,7 @@ export async function toggleMCPServer(
   name: string,
   req: MCPServerToggleRequest,
 ): Promise<MCPServerToggleResponse> {
-  const res = await fetch(
+  const res = await apiFetch(
     `/api/mcp/servers/${encodeURIComponent(name)}/toggle`,
     {
       method: 'POST',
@@ -483,7 +479,7 @@ export async function toggleMCPServer(
 }
 
 export async function reloadMCPServers(): Promise<MCPReloadResponse> {
-  const res = await fetch('/api/mcp/reload', { method: 'POST' })
+  const res = await apiFetch('/api/mcp/reload', { method: 'POST' })
   await _ensureOk(res)
   return (await res.json()) as MCPReloadResponse
 }
@@ -491,13 +487,13 @@ export async function reloadMCPServers(): Promise<MCPReloadResponse> {
 // ─── Step 6：System Config ─────────────────────────────────────────────
 
 export async function getConfig(): Promise<ConfigResponse> {
-  const res = await fetch('/api/config')
+  const res = await apiFetch('/api/config')
   await _ensureOk(res)
   return (await res.json()) as ConfigResponse
 }
 
 export async function getModels(): Promise<ModelsResponse> {
-  const res = await fetch('/api/config/models')
+  const res = await apiFetch('/api/config/models')
   await _ensureOk(res)
   return (await res.json()) as ModelsResponse
 }
@@ -506,7 +502,7 @@ export async function patchConfig(
   key: string,
   value: unknown,
 ): Promise<ConfigItemView> {
-  const res = await fetch(`/api/config/${encodeURIComponent(key)}`, {
+  const res = await apiFetch(`/api/config/${encodeURIComponent(key)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ value }),
@@ -516,7 +512,7 @@ export async function patchConfig(
 }
 
 export async function resetConfig(key: string): Promise<ConfigItemView> {
-  const res = await fetch(`/api/config/${encodeURIComponent(key)}`, {
+  const res = await apiFetch(`/api/config/${encodeURIComponent(key)}`, {
     method: 'DELETE',
   })
   await _ensureOk(res)
@@ -524,7 +520,7 @@ export async function resetConfig(key: string): Promise<ConfigItemView> {
 }
 
 export async function reloadConfig(): Promise<ConfigReloadResponse> {
-  const res = await fetch('/api/config/reload', { method: 'POST' })
+  const res = await apiFetch('/api/config/reload', { method: 'POST' })
   await _ensureOk(res)
   return (await res.json()) as ConfigReloadResponse
 }
@@ -532,25 +528,25 @@ export async function reloadConfig(): Promise<ConfigReloadResponse> {
 // ─── Step 7：业务面板（plans / quizzes / srs） ─────────────────────────
 
 export async function listPlans(): Promise<PlanSummary[]> {
-  const res = await fetch('/api/plans')
+  const res = await apiFetch('/api/plans')
   await _ensureOk(res)
   return ((await res.json()) as PlanListResponse).plans
 }
 
 export async function getActivePlan(): Promise<Plan | null> {
-  const res = await fetch('/api/plans/active')
+  const res = await apiFetch('/api/plans/active')
   await _ensureOk(res)
   return (await res.json()) as Plan | null
 }
 
 export async function getPlan(planId: number): Promise<Plan> {
-  const res = await fetch(`/api/plans/${planId}`)
+  const res = await apiFetch(`/api/plans/${planId}`)
   await _ensureOk(res)
   return (await res.json()) as Plan
 }
 
 export async function createPlan(input: CreatePlanInput): Promise<Plan> {
-  const res = await fetch('/api/plans', {
+  const res = await apiFetch('/api/plans', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
@@ -565,7 +561,7 @@ export async function updatePlanTask(
   status: string,
   note = '',
 ): Promise<Plan> {
-  const res = await fetch(`/api/plans/${planId}/tasks/${taskId}`, {
+  const res = await apiFetch(`/api/plans/${planId}/tasks/${taskId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ status, note }),
@@ -575,25 +571,25 @@ export async function updatePlanTask(
 }
 
 export async function activatePlan(planId: number): Promise<Plan> {
-  const res = await fetch(`/api/plans/${planId}/activate`, { method: 'POST' })
+  const res = await apiFetch(`/api/plans/${planId}/activate`, { method: 'POST' })
   await _ensureOk(res)
   return (await res.json()) as Plan
 }
 
 export async function abandonPlan(planId: number): Promise<Plan> {
-  const res = await fetch(`/api/plans/${planId}/abandon`, { method: 'POST' })
+  const res = await apiFetch(`/api/plans/${planId}/abandon`, { method: 'POST' })
   await _ensureOk(res)
   return (await res.json()) as Plan
 }
 
 export async function listQuizzes(): Promise<QuizSetSummary[]> {
-  const res = await fetch('/api/quizzes')
+  const res = await apiFetch('/api/quizzes')
   await _ensureOk(res)
   return ((await res.json()) as QuizListResponse).quizzes
 }
 
 export async function getQuiz(quizSetId: number): Promise<QuizSet> {
-  const res = await fetch(`/api/quizzes/${quizSetId}`)
+  const res = await apiFetch(`/api/quizzes/${quizSetId}`)
   await _ensureOk(res)
   return (await res.json()) as QuizSet
 }
@@ -602,7 +598,7 @@ export async function submitQuiz(
   quizSetId: number,
   answers: QuizAnswerInput[],
 ): Promise<QuizSet> {
-  const res = await fetch(`/api/quizzes/${quizSetId}/submit`, {
+  const res = await apiFetch(`/api/quizzes/${quizSetId}/submit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ answers }),
@@ -612,26 +608,26 @@ export async function submitQuiz(
 }
 
 export async function archiveQuiz(quizSetId: number): Promise<QuizSet> {
-  const res = await fetch(`/api/quizzes/${quizSetId}/archive`, { method: 'POST' })
+  const res = await apiFetch(`/api/quizzes/${quizSetId}/archive`, { method: 'POST' })
   await _ensureOk(res)
   return (await res.json()) as QuizSet
 }
 
 export async function listSRSDue(limit?: number): Promise<SRSCard[]> {
   const url = limit ? `/api/srs/due?limit=${limit}` : '/api/srs/due'
-  const res = await fetch(url)
+  const res = await apiFetch(url)
   await _ensureOk(res)
   return ((await res.json()) as SRSCardListResponse).cards
 }
 
 export async function listSRSCards(): Promise<SRSCard[]> {
-  const res = await fetch('/api/srs/cards')
+  const res = await apiFetch('/api/srs/cards')
   await _ensureOk(res)
   return ((await res.json()) as SRSCardListResponse).cards
 }
 
 export async function getSRSCard(cardId: number): Promise<SRSCard> {
-  const res = await fetch(`/api/srs/cards/${cardId}`)
+  const res = await apiFetch(`/api/srs/cards/${cardId}`)
   await _ensureOk(res)
   return (await res.json()) as SRSCard
 }
@@ -641,7 +637,7 @@ export async function createSRSCard(input: {
   back: string
   note?: string
 }): Promise<SRSCard> {
-  const res = await fetch('/api/srs/cards', {
+  const res = await apiFetch('/api/srs/cards', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
@@ -654,7 +650,7 @@ export async function reviewSRSCard(
   cardId: number,
   rating: SRSRating,
 ): Promise<SRSCard> {
-  const res = await fetch(`/api/srs/cards/${cardId}/review`, {
+  const res = await apiFetch(`/api/srs/cards/${cardId}/review`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ rating }),
@@ -667,7 +663,7 @@ export async function setSRSCardStatus(
   cardId: number,
   action: 'suspend' | 'resume' | 'archive',
 ): Promise<SRSCard> {
-  const res = await fetch(`/api/srs/cards/${cardId}/${action}`, { method: 'POST' })
+  const res = await apiFetch(`/api/srs/cards/${cardId}/${action}`, { method: 'POST' })
   await _ensureOk(res)
   return (await res.json()) as SRSCard
 }
@@ -676,14 +672,14 @@ export async function setSRSCardStatus(
 
 /** 拉当前登录用户；未登录返回 null（不触发全局 401 跳转）。 */
 export async function getMe(): Promise<UserInfo | null> {
-  const res = await fetch('/api/auth/me')
+  const res = await apiFetch('/api/auth/me')
   if (res.status === 401) return null
   await _ensureOk(res)
   return (await res.json()) as UserInfo
 }
 
 export async function login(username: string, password: string): Promise<UserInfo> {
-  const res = await fetch('/api/auth/login', {
+  const res = await apiFetch('/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
@@ -693,7 +689,7 @@ export async function login(username: string, password: string): Promise<UserInf
 }
 
 export async function register(username: string, password: string): Promise<UserInfo> {
-  const res = await fetch('/api/auth/register', {
+  const res = await apiFetch('/api/auth/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
@@ -703,12 +699,12 @@ export async function register(username: string, password: string): Promise<User
 }
 
 export async function logout(): Promise<void> {
-  const res = await fetch('/api/auth/logout', { method: 'POST' })
+  const res = await apiFetch('/api/auth/logout', { method: 'POST' })
   await _ensureOk(res)
 }
 
 export async function updateUsername(username: string): Promise<UserInfo> {
-  const res = await fetch('/api/auth/username', {
+  const res = await apiFetch('/api/auth/username', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username }),
@@ -721,7 +717,7 @@ export async function changePassword(
   oldPassword: string,
   newPassword: string,
 ): Promise<void> {
-  const res = await fetch('/api/auth/password', {
+  const res = await apiFetch('/api/auth/password', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
@@ -730,29 +726,29 @@ export async function changePassword(
 }
 
 export async function listUsers(): Promise<UserInfo[]> {
-  const res = await fetch('/api/admin/users')
+  const res = await apiFetch('/api/admin/users')
   await _ensureOk(res)
   return ((await res.json()) as { users: UserInfo[] }).users
 }
 
 export async function deleteUser(userId: number): Promise<void> {
-  const res = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' })
+  const res = await apiFetch(`/api/admin/users/${userId}`, { method: 'DELETE' })
   await _ensureOk(res)
 }
 
 export async function deleteOwnAccount(): Promise<void> {
-  const res = await fetch('/api/auth/me', { method: 'DELETE' })
+  const res = await apiFetch('/api/auth/me', { method: 'DELETE' })
   await _ensureOk(res)
 }
 
 export async function getLlmPrefs(): Promise<LlmPrefs> {
-  const res = await fetch('/api/auth/llm-prefs')
+  const res = await apiFetch('/api/auth/llm-prefs')
   await _ensureOk(res)
   return (await res.json()) as LlmPrefs
 }
 
 export async function patchLlmPrefs(update: LlmPrefsUpdate): Promise<LlmPrefs> {
-  const res = await fetch('/api/auth/llm-prefs', {
+  const res = await apiFetch('/api/auth/llm-prefs', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(update),

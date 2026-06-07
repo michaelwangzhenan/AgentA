@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-import src.cli.skill_loader as skill_loader
+import src.skills.skill_loader as skill_loader
 import src.config as _cfg
 from src.api.deps import get_agent
 from src.api.main import app

@@ -1,5 +1,5 @@
 """
-CitationBuilder —— RAG 引用展示编排（Phase 1.4）
+CitationBuilder —— RAG 引用展示编排
 
 职责：
 - 在 RAG `search_knowledge` tool 调用时，把 Retriever 命中的 `Hit` 列表按
@@ -9,19 +9,19 @@ CitationBuilder —— RAG 引用展示编排（Phase 1.4）
   编号（防止 LLM 幻觉超出范围的引用）。
 - 把这些命中编号渲染成附加在 answer 末尾的 `— sources —` 块。
 
-设计契约（与 [docs/design.md §3.6 引用展示] 对齐）：
+设计约定：
 - 每轮 `Agent.run()` 实例化一次；不跨轮持有状态，编号从 `[1]` 起。
 - 跨同一轮内的多次 `search_knowledge` tool_call，编号**连续累计**（第一次
   tool_call 分到 [1][2]，第二次接着 [3][4]）。
 - 同 `(source, heading_path)` 视为同一引用条目；多 chunk 合并为一条，`chunks=N`
   在渲染时附注。
 - 用户写 rules.md 关掉引用（让 LLM 不写 `[n]`）时，本类不会产生任何 sources
-  块输出 —— 符合 §3.5.2 用户主权契约。
+  块输出 —— 符合用户主权约定。
 
 不做：
 - 不校验 LLM 是否真的引到了相关条目（程序后置生成 + 编号只从 builder 来，
   结构上规避假引用）。
-- 不跨轮累计编号（DD3 决策：每轮独立 [1] 起最直观）。
+- 不跨轮累计编号（每轮独立从 [1] 起最直观）。
 - 不为 page_no 做范围合并（合并条目时取首个 hit 的 page_no，简单稳定）。
 """
 

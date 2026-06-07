@@ -1,18 +1,18 @@
 """
-MCPManager —— MCP client 生命周期管理（Phase 3.3）
+MCPManager —— MCP client 生命周期管理
 
 把 [`MCP Python SDK`](https://github.com/modelcontextprotocol/python-sdk)
 （async-first）封装成**同步 API**，给 Python Agent 主流程使用。
 
 设计要点：
-- **D13 模块级单例**：`get_shared_manager()` 跨 helper 共享同一 manager；agent 启动一次性
+- **模块级单例**：`get_shared_manager()` 跨 helper 共享同一 manager；agent 启动一次性
   `start_all()`，进程退出 `shutdown()`，避免重复启子进程
-- **D14 后台 thread + 长驻 event loop**：MCP SDK 用 `async with`，session 必须持有在
+- **后台 thread + 长驻 event loop**：MCP SDK 用 `async with`，session 必须持有在
   同一个 event loop 内。主流程同步用 `asyncio.run_coroutine_threadsafe(...).result(timeout)`
   桥接，单线程跑所有 server 协程（loop 锁定在 worker thread）
-- **D7 启动失败不阻塞**：单个 server 启动 / handshake 失败 → 标 `status='failed'` + log
+- **启动失败不阻塞**：单个 server 启动 / handshake 失败 → 标 `status='failed'` + log
   warning + 不阻塞其它 server / Agent 主流程
-- **D6 namespace 强制前缀**：tool 对外暴露为 `<server>.<tool>`；call_tool 按 `.` 第一个
+- **namespace 强制前缀**：tool 对外暴露为 `<server>.<tool>`；call_tool 按 `.` 第一个
   分隔符拆，server 名禁含 `.`（由 mcp_config 守门）
 
 API 表面（同步）：
@@ -481,7 +481,7 @@ class MCPManager:
         return body
 
 
-# ── 模块级单例（D13） ────────────────────────────────────────────────────────
+# ── 模块级单例 ──────────────────────────────────────────────────────────────
 
 _shared_manager: MCPManager | None = None
 _shared_lock = threading.Lock()

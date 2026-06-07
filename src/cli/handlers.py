@@ -34,7 +34,7 @@ MEMORY_CATEGORY_ORDER: tuple[str, ...] = (
 
 if TYPE_CHECKING:
     from src.agent.agent import Agent, ThinkingConfig
-    from src.cli.skill_loader import SkillInfo
+    from src.skills.skill_loader import SkillInfo
 
 
 OutputFn = Callable[[str], None]
@@ -250,7 +250,7 @@ def _print_token_usage(agent: "Agent", out: OutputFn = _stdout) -> None:
         out(f"  📊 Token：输入 {u.prompt_tokens} + 输出 {u.completion_tokens} = 合计 {u.total_tokens}\n")
 
 
-# Phase 2.1 — plan step 状态对应的 CLI 渲染图标
+# plan step 状态对应的 CLI 渲染图标
 _PLAN_STATUS_ICONS: dict[str, str] = {"success": "✓", "failed": "✗", "skipped": "⏭"}
 
 
@@ -280,7 +280,7 @@ def run_query(agent: "Agent", question: str, out: OutputFn = _stdout) -> None:
     streamed = False
     header_printed = False
 
-    # Phase 3.1 thinking 渲染状态机（详 iter_2_agent.md §4.9.11 D5/D6/D7）：
+    # thinking 渲染状态机：
     # - thinking_round_idx：已开过的 thinking 段轮次，首段 chunk 到来时 += 1
     # - thinking_active：当前是否在 thinking 段（footer 未打 = True）
     # - thinking_at_line_start：下一字符是否在行首（决定是否注入 │ 前缀）
@@ -364,7 +364,7 @@ def run_query(agent: "Agent", question: str, out: OutputFn = _stdout) -> None:
     if set_event_cb is not None:
         set_event_cb(_event_router)
 
-    # Phase 3.2 plan 用户审批 mode：PLAN_PERMISSION_MODE=true 时 LLM 调 make_plan 后
+    # plan 用户审批 mode：PLAN_PERMISSION_MODE=true 时 LLM 调 make_plan 后
     # tool_call_engine 会经 agent.request_plan_approval 调到此 callback；用户回 no
     # 即抛 PlanAbortedByUser 由 agent.run 接住返回 cancel_msg。先 flush 已渲染的
     # plan tool 调用 + thinking 段，再问用户，避免提示行混入 plan checkbox 区。
@@ -452,8 +452,7 @@ def switch_session(
 ) -> "Agent | None":
     """切换到指定 session 并恢复上下文。
 
-    无参兜底 `/session` → list 已废弃；list 由 main.py 路由到独立的 `/sessions` 命令
-    （见 [iter_2_agent.md §4.9.1](../../docs/iter_2_agent.md#491-session-列表搜索恢复phase-11)），
+    无参兜底 `/session` → list 已废弃；list 由 main.py 路由到独立的 `/sessions` 命令，
     本函数保留对空 session_arg 的防御性返回 None，但不再回退到 list。
 
     Returns:
@@ -625,7 +624,7 @@ def handle_memory(
             out(_MEMORY_USAGE)
 
 
-# ── Phase 2.2 — /study 命令组 ────────────────────────────────────────────────
+# ── /study 命令组 ────────────────────────────────────────────────
 
 _STUDY_USAGE = (
     "⚠️  未知子命令。用法：\n"
@@ -809,7 +808,7 @@ def handle_study(
             out(_STUDY_USAGE)
 
 
-# ── Phase 2.3 — /quiz 命令组 ─────────────────────────────────────────────────
+# ── /quiz 命令组 ─────────────────────────────────────────────────
 
 _QUIZ_USAGE = (
     "⚠️  未知子命令。用法：\n"
@@ -979,7 +978,7 @@ def handle_quiz(
             out(_QUIZ_USAGE)
 
 
-# ── /srs 命令组（Phase 2.4 §4.9.9）─────────────────────────────────────────
+# ── /srs 命令组 ─────────────────────────────────────────
 
 _SRS_USAGE = (
     "⚠️  未知子命令。用法：\n"
@@ -1176,7 +1175,7 @@ def handle_srs(
             out(_SRS_USAGE)
 
 
-# ── /mcp 命令组（Phase 3.3） ──────────────────────────────────────────────────
+# ── /mcp 命令组 ──────────────────────────────────────────────────
 
 
 _MCP_USAGE = (

@@ -5,8 +5,7 @@
     1. split_text(text, size, overlap)
        — 类 LangChain RecursiveCharacterTextSplitter：按 \n\n → \n → 句号 → 空格 → 字符
        逐级回退切分；只把文本切到不超过 size 的"原子单元"，再贪心打包成 chunk，相邻
-       chunk 间保留 overlap 字符。无任何分隔符时退化为字符级切分（与 ingest.chunk_text
-       的旧字符切语义一致，保留对老测试的兼容）。
+       chunk 间保留 overlap 字符。无任何分隔符时退化为按字符等步长切分。
 
     2. split_structured(text, size, overlap)
        — 在 split_text 之上识别两类锚点并保留结构信息：
@@ -145,9 +144,9 @@ def split_text(text: str, chunk_size: int, overlap: int) -> list[str]:
     """
     递归字符分块（无结构识别）入口。
 
-    与旧 chunk_text 的"按字符等步长滑动"相比：
+    切分策略：
       - 优先在 \\n\\n / \\n / 句号 / 空格 处切分，避免在词中间断开；
-      - 仅当文本无任何分隔符时才退化为字符级切分（与旧实现一致，保留单测兼容）。
+      - 仅当文本无任何分隔符时才退化为按字符等步长切分。
     """
     if not text or not text.strip():
         return []

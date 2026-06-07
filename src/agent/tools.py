@@ -84,18 +84,18 @@ def get_tools(skill_bodies: dict[str, str] | None = None) -> list[dict[str, Any]
 
     永远包含：
       - 基础 3 tool（search_knowledge / web_search / fetch_url）
-      - Phase 2.1 plan-execute 3 tool（make_plan / update_step / abort_plan）
-      - Phase 2.2 学习计划业务 3 tool（create_study_plan / update_study_progress / query_study_status）
-      - Phase 2.3 Quiz 业务 3 tool（create_quiz / grade_quiz / query_quiz_history）
-      - Phase 2.4 SRS 业务 4 tool（add_to_srs / query_srs_due / review_srs_card / query_srs_stats）
+      - plan-execute 3 tool（make_plan / update_step / abort_plan）
+      - 学习计划业务 3 tool（create_study_plan / update_study_progress / query_study_status）
+      - Quiz 业务 3 tool（create_quiz / grade_quiz / query_quiz_history）
+      - SRS 业务 4 tool（add_to_srs / query_srs_due / review_srs_card / query_srs_stats）
     若传入 skill_bodies，再追加 load_skill 工具定义（name 字段限定为已有名称枚举）。
 
-    Phase 3.2：返回前过 security_filter.is_tool_allowed 名单门——按 SECURITY_MODE
+    返回前过 security_filter.is_tool_allowed 名单门——按 SECURITY_MODE
     切换 fail-open + BLOCKLIST 或 fail-close + ALLOWLIST。命中拒绝的 tool 静默跳过
     + log warning（已在 is_tool_allowed 内部 log）；execute_tool 入口同样 double-check。
 
-    Phase 3.3：合流 MCP server 暴露的 tool（带 `<server>.<tool>` namespace 前缀）。
-    D8 fallback：MCP `fetch` server 启动成功时屏蔽内置 `fetch_url`，让 LLM 只看到
+    合流 MCP server 暴露的 tool（带 `<server>.<tool>` namespace 前缀）。
+    MCP `fetch` server 启动成功时屏蔽内置 `fetch_url`，让 LLM 只看到
     `fetch.fetch`，避免功能重叠导致选择困难。
     """
     tools = (
@@ -108,7 +108,7 @@ def get_tools(skill_bodies: dict[str, str] | None = None) -> list[dict[str, Any]
 
     mcp_tools = _load_mcp_tools_safe()
     if mcp_tools:
-        # D8：fetch.* 接入成功时，从基础工具集移除 fetch_url
+        # fetch.* 接入成功时，从基础工具集移除 fetch_url
         if any(t.get("server") == "fetch" for t in mcp_tools):
             tools = [t for t in tools if t["function"]["name"] != "fetch_url"]
         for mt in mcp_tools:
@@ -267,7 +267,7 @@ TOOLS: list[dict[str, Any]] = [
 ]
 
 
-# ── Phase 2.1 — Plan-Execute 三 tool JSON Schema ─────────────────────────────
+# ── Plan-Execute 三 tool JSON Schema ─────────────────────────────────────────
 
 _PLAN_TOOLS: list[dict[str, Any]] = [
     {
@@ -350,7 +350,7 @@ _PLAN_TOOLS: list[dict[str, Any]] = [
 ]
 
 
-# ── Phase 2.2 — 学习计划业务三 tool JSON Schema ──────────────────────────────
+# ── 学习计划业务三 tool JSON Schema ──────────────────────────────────────────
 # 与 _PLAN_TOOLS（单次问答内"用完即弃"的执行计划）相对：本组 tool 操作的是
 # **跨 session 长期持久化的学习计划**（learning_plans / learning_tasks 表）。
 # 触发主路径见 [study-planner skill](../../.agenta/skills/study-planner/SKILL.md)。
@@ -534,9 +534,9 @@ def _tool_web_search(query: str, num: int = 5) -> ToolResult:
     if not organic:
         return ToolResult(status="empty", content="搜索未返回任何结果，请尝试换一种关键词。")
 
-    # Phase 3.2：web 搜索结果是"非用户主控"外部数据，进 LLM context 前过 security_filter：
+    # web 搜索结果是"非用户主控"外部数据，进 LLM context 前过 security_filter：
     # ① 每条 snippet 走 scrub_injection 段级删除已知注入模板；
-    # ② 整个返回值用 wrap_untrusted(kind="web") 包装。详 docs/iter_2_agent.md §4.9.12 D5。
+    # ② 整个返回值用 wrap_untrusted(kind="web") 包装。
     from src.agent.core.security_filter import scrub_injection, wrap_untrusted
 
     lines: list[str] = []
@@ -571,7 +571,7 @@ def _tool_search_knowledge(
         query:             检索查询语句。
         top_k:             返回的最大片段数（1~MAX_SEARCH_TOP_K，超出会截断）。
         where:             可选 metadata 过滤子句，透传给 retriever，支持 ChromaDB 等值/$in/$ne 算子。
-        citation_builder:  Phase 1.4 引用编排器；传入时把 hits 注册进去拿到
+        citation_builder:  引用编排器；传入时把 hits 注册进去拿到
                            跨 tool_call 累计的全局编号，并把这些编号写到给
                            LLM 看的格式化文本里（替代默认的 enumerate 1..N）。
                            不传则保持向后兼容行为。
@@ -609,7 +609,7 @@ def _tool_search_knowledge(
 
     hits = search(query, top_k=top_k, where=where, queries=expanded_queries)
 
-    # —— Phase 2.5 R1：critic 相关性过滤（D6 — 过滤 not_relevant，0 条返 empty 不重召回） ——
+    # —— critic 相关性过滤（过滤 not_relevant，0 条返 empty 不重召回） ——
     if hits and _cfg.HARNESS_RAG_ENABLED:
         try:
             from src.agent.core.harness_manager import get_harness_manager
@@ -618,7 +618,7 @@ def _tool_search_knowledge(
             logger.warning("[tool] search_knowledge: harness 过滤失败，保留原始 hits：%s", e)
 
     if hits:
-        # Phase 1.4：若上层传入 CitationBuilder，把 hits 注册进去拿到全局
+        # 若上层传入 CitationBuilder，把 hits 注册进去拿到全局
         # 编号，让 LLM 看到的 [n] 与最终 sources 块的 [n] 对齐
         citation_nums = (
             citation_builder.register(hits) if citation_builder is not None else None
@@ -754,7 +754,7 @@ def _tool_fetch_url(url: str, max_chars: int = 3000) -> ToolResult:
     """
     logger.info("[tool] fetch_url: url=%r, max_chars=%d", url, max_chars)
 
-    # Phase 3.3：SSRF 防御统一入口，拦 file:// / 内网 IP / 解析失败的域名
+    # SSRF 防御统一入口，拦 file:// / 内网 IP / 解析失败的域名
     from src.agent.core.url_guard import is_url_safe
     if not is_url_safe(url):
         return ToolResult(
@@ -775,7 +775,7 @@ def _tool_fetch_url(url: str, max_chars: int = 3000) -> ToolResult:
     if result.status in ("ok", "empty") and _is_likely_spa(result.content, raw.text):
         result = _fetch_via_jina(url, max_chars)
 
-    # Phase 3.2：fetch_url 返回正文是"非用户主控"外部数据，过 security_filter；
+    # fetch_url 返回正文是"非用户主控"外部数据，过 security_filter；
     # 仅 ok 状态 wrap（empty/error 的 content 是程序错误描述，不该 wrap）。
     if result.status == "ok":
         from src.agent.core.security_filter import scrub_injection, wrap_untrusted
@@ -787,14 +787,14 @@ def _tool_fetch_url(url: str, max_chars: int = 3000) -> ToolResult:
     return result
 
 
-# ── Phase 2.1 — Plan-Execute tool 实现 ───────────────────────────────────────
+# ── Plan-Execute tool 实现 ───────────────────────────────────────────────────
 
 
 def _tool_make_plan(
     steps: Any,
     messages: list[dict[str, Any]] | None = None,
 ) -> ToolResult:
-    """生成 plan。本轮仅记录步骤、不联动执行 step 1（D5 分轮执行 / two-stage）；下一轮 LLM 按 ack 指引推进。"""
+    """生成 plan。本轮仅记录步骤、不联动执行 step 1（分轮执行 / two-stage）；下一轮 LLM 按 ack 指引推进。"""
     if not isinstance(steps, list) or not steps:
         return ToolResult(
             status="error",
@@ -897,7 +897,7 @@ def _tool_abort_plan(
     )
 
 
-# ── Phase 2.2 — 学习计划业务 tool 实现 ───────────────────────────────────────
+# ── 学习计划业务 tool 实现 ───────────────────────────────────────────────────
 # 实现采用"按需 import + 复用共享 store"模式：避免 tools.py 顶层引入 store 后
 # 拖累冷启动 / 测试 mock 复杂度；进程内共享 `learning_plan_store.get_shared_store()`
 # 单例，与 agent.py 注入 system block 时读到的是同一实例 / 同一连接。
@@ -1125,7 +1125,7 @@ def _tool_query_study_status(
     return ToolResult(status="ok", content=_render_plan_summary(plan, include_tasks=detail))
 
 
-# ── Phase 2.3 — Quiz 业务三 tool JSON Schema ─────────────────────────────────
+# ── Quiz 业务三 tool JSON Schema ─────────────────────────────────────────────
 # 与 _STUDY_PLAN_TOOLS（学习计划长期跟踪）相对：本组 tool 操作的是**周期性
 # 自检练习 + 跨 session 复盘**（quiz_sets / quiz_questions 二表）。
 # 触发主路径见 [quiz-maker skill](../../.agenta/skills/quiz-maker/SKILL.md)。
@@ -1141,7 +1141,7 @@ _QUIZ_TOOLS: list[dict[str, Any]] = [
                 "『把 active 学习计划 stage 2 出成题』）。"
                 "**不要**直接用本 tool —— 应先按 quiz-maker skill 引导用 make_plan 拆解"
                 "（解析意图 → 查 KB → 出题 → 落库），落库即调本 tool。"
-                "题型按固定 60% MCQ + 40% 简答比例混合（D13）；总题数由 questions 列表长度决定，"
+                "题型按固定 60% MCQ + 40% 简答比例混合；总题数由 questions 列表长度决定，"
                 "用户未指定时建议 10 道。"
                 "至少传 topic 或 plan_id 之一；返回新 quiz_set_id 与题数。"
             ),
@@ -1281,8 +1281,8 @@ _QUIZ_TOOLS: list[dict[str, Any]] = [
 ]
 
 
-# ── Phase 2.3 — Quiz 业务 tool 实现 ──────────────────────────────────────────
-# 实现采用"按需 import + 复用共享 store"模式，与 §4.9.7 Phase 2.2 对齐。
+# ── Quiz 业务 tool 实现 ──────────────────────────────────────────────────────
+# 实现采用"按需 import + 复用共享 store"模式，与学习计划业务一致。
 
 
 def _get_quiz_store() -> Any:
@@ -1534,7 +1534,7 @@ def _tool_grade_quiz(
     if not ok:
         return ToolResult(status="error", content=f"持久化批改结果失败（quiz_set_id={quiz_set_id}）")
 
-    # —— Phase 2.5 Q1：critic 自检（仅 short_answer，MCQ 字符串比对是确定性的，跳过省 token） ——
+    # —— critic 自检（仅 short_answer，MCQ 字符串比对是确定性的，跳过省 token） ——
     harness_block = ""
     if _cfg.HARNESS_QUIZ_ENABLED:
         harness_block = _run_quiz_critic(quiz_set_id, questions, gradings, store)
@@ -1560,7 +1560,7 @@ def _run_quiz_critic(
     gradings: list[dict[str, Any]],
     store: Any,
 ) -> str:
-    """Phase 2.5 Q1：对简答题批改结果做 critic 自检；不达标的题落库 mark + 拼成 warning 块。
+    """对简答题批改结果做 critic 自检；不达标的题落库 mark + 拼成 warning 块。
 
     返回值：插入 grade_quiz 输出 head + body 后、tail 前的 harness_warning 段（含前导 `\\n\\n`）；
     无 flagged 题 / 全部 critic 失败 → 返回空串（不在输出里制造噪音）。
@@ -1610,7 +1610,7 @@ def _run_quiz_critic(
         reviewed, len(flagged_lines), quiz_set_id,
     )
     return (
-        f"\n\n⚠️ Agent 自检（Phase 2.5）：以下 {len(flagged_lines)} 题批改可能有偏，"
+        f"\n\n⚠️ Agent 自检：以下 {len(flagged_lines)} 题批改可能有偏，"
         f"建议人工复核：\n" + "\n".join(flagged_lines)
     )
 
@@ -1726,11 +1726,10 @@ def _tool_query_quiz_history(
     return ToolResult(status="ok", content="\n".join(lines))
 
 
-# ── Phase 2.4 — SRS 主动复习业务 tool 定义 ──────────────────────────────────
+# ── SRS 主动复习业务 tool 定义 ───────────────────────────────────────────────
 # 与 _QUIZ_TOOLS（周期性自检练习，一次性出题 + 批改）相对：本组 tool 操作的是
 # **跨 session 持久化的 SRS 队列**，按 SM-2 算法按"下次该复习的时刻"调度卡片，
 # 用户用 again / hard / good / easy 4 档自评后自动更新调度状态。
-# 详 docs/iter_2_agent.md §4.9.9 / docs/design.md §3.11 SRS 业务。
 
 _SRS_TOOLS: list[dict[str, Any]] = [
     {
@@ -1827,7 +1826,7 @@ _SRS_TOOLS: list[dict[str, Any]] = [
                     "rating": {
                         "type": "string",
                         "enum": ["again", "hard", "good", "easy"],
-                        "description": "用户 4 档自评（D4 Anki 风格）。",
+                        "description": "用户 4 档自评（Anki 风格）。",
                     },
                 },
                 "required": ["card_id", "rating"],
@@ -1853,7 +1852,7 @@ _SRS_TOOLS: list[dict[str, Any]] = [
 ]
 
 
-# ── Phase 2.4 — SRS 业务 tool 实现 ──────────────────────────────────────────
+# ── SRS 业务 tool 实现 ───────────────────────────────────────────────────────
 
 
 def _get_srs_store() -> Any:
@@ -2013,14 +2012,14 @@ def _tool_add_to_srs(
             ),
         )
 
-    # source_type == "quiz_question" 批量路径（D14）
+    # source_type == "quiz_question" 批量路径
     if not isinstance(question_ids, list) or not question_ids:
         return ToolResult(
             status="error",
             content="add_to_srs(source_type=quiz_question) 必须传非空 question_ids 整数数组。",
         )
 
-    # 从 QuizStore 拿题面 + 标答作为冗余存储（D8）
+    # 从 QuizStore 拿题面 + 标答作为冗余存储
     try:
         from src.memory.quiz_store import get_shared_store as _qz_store
         quiz_store = _qz_store()
@@ -2181,7 +2180,7 @@ def _tool_review_srs_card(
 
 
 def _tool_query_srs_stats() -> ToolResult:
-    """返回 SRS 队列摘要统计（D15）。"""
+    """返回 SRS 队列摘要统计。"""
     store = _get_srs_store()
     stats = store.stats()
     if stats["total_active"] == 0 and stats["total_suspended"] == 0 and stats["total_archived"] == 0:
@@ -2223,7 +2222,7 @@ def _tool_load_skill(name: str, skill_bodies: dict[str, str]) -> ToolResult:
     return ToolResult(status="ok", content=content)
 
 
-# ── MCP namespaced tool 转发（Phase 3.3） ────────────────────────────────────
+# ── MCP namespaced tool 转发 ─────────────────────────────────────────────────
 
 
 def _execute_mcp_tool(name: str, args: dict[str, Any]) -> ToolResult:
@@ -2270,7 +2269,7 @@ def execute_tool(
         name: 工具名称，对应 TOOLS / `_PLAN_TOOLS` 中的 function.name。
         args: 工具参数字典，由 LLM 的 tool_calls 解析而来。
         skill_bodies: {skill_name: body} 映射，供 load_skill 工具使用。
-        citation_builder: Phase 1.4 引用编排器；仅 search_knowledge 路径透传，
+        citation_builder: 引用编排器；仅 search_knowledge 路径透传，
                           其它工具无引用语义直接忽略。
         messages: 当前轮已累计的 messages（含本次 assistant tool_calls）；仅 plan
                   tools（update_step / abort_plan）用于 reconstruct plan 状态。
@@ -2282,7 +2281,7 @@ def execute_tool(
     """
     logger.info("执行工具: %s，参数: %s", name, json.dumps(args, ensure_ascii=False))
 
-    # Phase 3.2 双层保险：get_tools 已按名单门过滤掉被屏蔽 tool，但 LLM 可能因
+    # 双层保险：get_tools 已按名单门过滤掉被屏蔽 tool，但 LLM 可能因
     # context 缓存 / 历史 messages 含旧 tool name 仍发起调用；此处再 double-check
     # 命中即拒绝（status=error 让 tool_call_engine 引导 LLM 换工具），防绕过。
     from src.agent.core.security_filter import is_tool_allowed
@@ -2292,7 +2291,7 @@ def execute_tool(
             content=f"工具 {name!r} 当前被名单门拒绝（SECURITY_MODE / TOOL_BLOCKLIST / TOOL_ALLOWLIST）。请改用其它工具或如实告知用户当前无法获取该信息。",
         )
 
-    # Phase 3.3：namespaced tool 走 MCP 转发（D6 强制 "<server>.<tool>"）
+    # namespaced tool 走 MCP 转发（强制 "<server>.<tool>"）
     if "." in name:
         return _execute_mcp_tool(name, args)
 

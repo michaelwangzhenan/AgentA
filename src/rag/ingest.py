@@ -48,42 +48,6 @@ logger = logging.getLogger(__name__)
 _HNSW_SPACE: str = "cosine"
 
 
-def chunk_text(text: str, size: int = config.CHUNK_SIZE, overlap: int = config.CHUNK_OVERLAP) -> list[str]:
-    """
-    [向后兼容] 将文档文本按 size 字符分块，相邻块之间有 overlap 字符重叠。
-
-    本函数保留了"按字符等步长滑动"的语义，仅供老调用方与现有单元测试使用。
-    新代码（含 ingest_all 自身）请使用 src.rag.splitter.split_structured，
-    它能识别 [[PAGE:N]] 与 Markdown 标题，产出带 heading_path / page_no 的 Chunk。
-
-    Args:
-        text: 待分块的原始文本。
-        size: 每块最大字符数，默认 600。
-        overlap: 相邻块重叠字符数，默认 100。
-
-    Returns:
-        分块后的字符串列表，每块长度不超过 size。
-    """
-    if not text.strip():
-        return []
-
-    chunks: list[str] = []
-    start = 0
-    text_len = len(text)
-
-    while start < text_len:
-        end = min(start + size, text_len)
-        chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
-        # 若已到末尾则退出
-        if end >= text_len:
-            break
-        start += size - overlap
-
-    return chunks
-
-
 def _doc_id_from_relpath(rel_path: str) -> str:
     """基于（POSIX 化的）相对路径生成稳定 doc_id（SHA1 前 16 位）。"""
     norm = rel_path.replace("\\", "/")
@@ -254,18 +218,15 @@ def _ingest_one_file(
     # 同步写入 BM25 倒排索引（如启用）；与 Chroma 共享 ids 保证融合时可对齐
     if config.BM25_ENABLED:
         try:
-            from src.rag.bm25_index import (
-                BM25Index,
-                get_index_path,
-                save_index,
-            )
+            from src.rag.bm25_index import get_index, get_index_path, save_index
 
-            bm25_path = get_index_path(collection_name)
-            bm25 = BM25Index.load_or_new(collection_name, bm25_path)
+            # 用进程级共享索引（与 retriever.get_index 同一实例），改完即对检索可见；
+            # 不会出现"已写盘但检索端仍读旧缓存索引"的陈旧问题。
+            bm25 = get_index(collection_name)
             # 替换该 doc_id 下所有旧 chunk（先删后写）
             bm25.delete_by_doc_id(doc_id)
             bm25.upsert(ids=ids, documents=documents, metadatas=metadatas)
-            save_index(bm25, bm25_path)
+            save_index(bm25, get_index_path(collection_name))
             logger.info("  BM25 索引已更新: %s → %d 块", rel_path, len(documents))
         except Exception as e:  # 失败不影响 dense 入库主流程
             logger.warning("  BM25 索引更新失败（已跳过）: %s — %s", rel_path, e)
@@ -381,7 +342,7 @@ def ingest_all(
     )
 
 
-# ── Web UI 知识库管理辅助函数（Step 4） ─────────────────────────────────────
+# ── Web UI 知识库管理辅助函数 ───────────────────────────────────────────────
 
 def list_kb_documents(model: str = config.DEFAULT_EMBEDDING_ALIAS) -> list[dict]:
     """聚合指定 collection 内所有 chunks 的 metadata，按 doc_id 分组返回文档级清单。
@@ -470,16 +431,14 @@ def delete_kb_document(
     chunks_removed = len(existing_ids)
     logger.info("KB 删除文档 doc_id=%s → 移除 %d 个 chunks", doc_id, chunks_removed)
 
-    # 同步清 BM25 索引（不阻塞主流程）
+    # 同步清 BM25 索引（不阻塞主流程）；走共享缓存实例，删完即对检索可见
     if config.BM25_ENABLED:
         try:
-            from src.rag.bm25_index import BM25Index, get_index_path, save_index
+            from src.rag.bm25_index import get_index, get_index_path, save_index
 
-            bm25_path = get_index_path(collection_name)
-            if bm25_path.exists():
-                bm25 = BM25Index.load_or_new(collection_name, bm25_path)
-                bm25.delete_by_doc_id(doc_id)
-                save_index(bm25, bm25_path)
+            bm25 = get_index(collection_name)
+            if bm25.delete_by_doc_id(doc_id):
+                save_index(bm25, get_index_path(collection_name))
         except Exception as e:
             logger.warning("KB 删除文档 BM25 同步失败 doc_id=%s: %s", doc_id, e)
 
@@ -541,15 +500,16 @@ def delete_all_kb_documents(
     except Exception as e:
         logger.warning("KB 清空 Chroma collection 失败（已忽略继续）: %s", e)
 
-    # 2. 删 BM25 索引文件
+    # 2. 删 BM25 索引文件 + 清进程缓存（否则 retriever 仍持有旧索引实例）
     if config.BM25_ENABLED:
         try:
-            from src.rag.bm25_index import get_index_path
+            from src.rag.bm25_index import drop_index, get_index_path
 
             bm25_path = get_index_path(collection_name)
             if bm25_path.exists():
                 bm25_path.unlink()
                 logger.info("KB 清空 BM25 索引: %s", bm25_path)
+            drop_index(collection_name)
         except Exception as e:
             logger.warning("KB 清空 BM25 索引失败: %s", e)
 

@@ -1,4 +1,4 @@
-"""Chat 端点 —— 非流式（Step 1） + SSE 流式（Step 2）"""
+"""Chat 端点 —— 非流式 + SSE 流式"""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from sse_starlette.sse import EventSourceResponse
 
 import src.config as _cfg
 from src.agent.agent_api import AgentAPI
-from src.agent.core.user_context import use_user
+from src.core.user_context import use_user
 from src.api.deps import get_agent, get_chat_history, get_current_user, get_user_store
 from src.api.routes.auth import effective_llm_prefs
 from src.api.schemas.chat import ChatRequest, ChatResponse
@@ -40,7 +40,7 @@ def _check_session_owner(store: ChatHistoryStore, session_id: str | None, user_i
 _AGENT_LOCK = threading.Lock()
 
 
-# ─── Step 1：非流式（保留作为 fallback / 测试入口）─────────────────────────
+# ─── 非流式（保留作为 fallback / 测试入口）─────────────────────────
 
 @router.post("/chat", response_model=ChatResponse)
 def chat(
@@ -76,7 +76,7 @@ def chat(
     return ChatResponse(reply=reply, session_id=session_id)
 
 
-# ─── Step 2：SSE 流式 ────────────────────────────────────────────────────
+# ─── SSE 流式 ────────────────────────────────────────────────────
 
 _STREAM_SENTINEL: dict[str, Any] = {"__sentinel__": True}
 

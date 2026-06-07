@@ -55,7 +55,7 @@ class ToolCallEngine:
         skill_bodies:     已加载的 skill 正文映射，传给 execute_tool 用于 load_skill。
         verbose:          是否打印调用 / 结果预览（CLI 调试用）。
         events:           可选 EventBus；非 None 时发出 tool_call_start / tool_call_end 事件。
-        citation_builder: 可选 Phase 1.4 引用编排器；非 None 时透传给 execute_tool，
+        citation_builder: 可选引用编排器；非 None 时透传给 execute_tool，
                           仅 search_knowledge 路径会注册 hits、分配编号。
     """
 
@@ -75,7 +75,7 @@ class ToolCallEngine:
         self._verbose = verbose
         self._events = events
         self._citation_builder = citation_builder
-        # Phase 3.2：plan-execute 用户审批入口；非 None 时在 make_plan 后调用，
+        # plan-execute 用户审批入口；非 None 时在 make_plan 后调用，
         # 返 "no" 即抛 PlanAbortedByUser 让 agent.run 中止当前 query
         self._approval_fn = approval_fn
 
@@ -116,10 +116,10 @@ class ToolCallEngine:
 
             # 仅当持有 citation_builder 时才走 kwarg 路径，否则保持现有 3-arg
             # 签名调用，避免破坏外部 mock execute_tool 的测试 fixture。
-            # Phase 2.1: messages 透传给 plan tools（update_step / abort_plan）
+            # messages 透传给 plan tools（update_step / abort_plan）
             # 用于 reconstruct plan 状态；非 plan 工具忽略此参数。messages 此时
-            # 已含本轮 assistant tool_calls（line 81 已 append），plan tool 在
-            # 内部 reconstruct 时能看到自己刚发的 update_step / abort_plan 调用。
+            # 已含本轮 assistant tool_calls，plan tool 在内部 reconstruct 时
+            # 能看到自己刚发的 update_step / abort_plan 调用。
             if self._citation_builder is not None:
                 result: ToolResult = execute_tool(
                     tool_name, tool_args, self._skill_bodies,
@@ -144,7 +144,7 @@ class ToolCallEngine:
                 ))
 
             # DB 写入干净内容（无引导提示），避免污染历史。
-            # Phase 3.2：先写入 tool 结果再调 plan 审批 hook，保证 PlanAbortedByUser
+            # 先写入 tool 结果再调 plan 审批 hook，保证 PlanAbortedByUser
             # 抛出时 chat_history 一致性（assistant_msg 已写入 + tool_msg 已写入）。
             db_content = result.to_llm_str()
             db_msg: dict[str, Any] = {
@@ -164,11 +164,10 @@ class ToolCallEngine:
             live_msg: dict[str, Any] = {**db_msg, "content": llm_content}
             messages.append(live_msg)
 
-            # Phase 2.1：plan tool 调用成功后叠加发 plan_* 事件，供 CLI
+            # plan tool 调用成功后叠加发 plan_* 事件，供 CLI
             # 渲染 plan checkbox 进度。reconstruct_from_messages 此时 messages
-            # 已含本轮 assistant tool_calls（line 81），所以 update_step 状态
-            # 即得最新 plan 视图。
-            # Phase 3.2：make_plan 分支内会调 approval_fn，用户拒绝即抛 PlanAbortedByUser；
+            # 已含本轮 assistant tool_calls，所以 update_step 状态即得最新 plan 视图。
+            # make_plan 分支内会调 approval_fn，用户拒绝即抛 PlanAbortedByUser；
             # 此时 chat_history 已含 assistant_msg + tool_msg（一致性保住），让上游 agent.run
             # 接住异常后追加 cancel_msg 即可。
             if self._events is not None and result.status == "ok":
@@ -177,9 +176,9 @@ class ToolCallEngine:
     def _maybe_publish_plan_events(
         self, tool_name: str, tool_args: dict[str, Any], messages: list[dict[str, Any]],
     ) -> None:
-        """Phase 2.1：plan tool 调用成功后 publish 对应 plan_* 事件。
+        """plan tool 调用成功后 publish 对应 plan_* 事件。
 
-        Phase 3.2：make_plan 分支在 publish plan_created 前调用 approval_fn 询问用户；
+        make_plan 分支在 publish plan_created 前调用 approval_fn 询问用户；
         用户回 "no" → 抛 PlanAbortedByUser 让上游 agent.run 中止 query。
         """
         if self._events is None:

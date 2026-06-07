@@ -2,7 +2,6 @@
 测试：RAG 向量化入库 & 检索
 
 测试内容：
-    - rag/ingest.py：chunk_text() 分块逻辑
     - config.py：resolve_embedding() 多模型解析
     - rag/reranker.py：rerank() 精排逻辑（单元测试，不依赖向量数据库）
     - rag/retriever.py：search() 检索返回格式（集成，需要已完成入库）
@@ -11,46 +10,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 import src.config as config
-from src.rag.ingest import chunk_text
 from src.rag.retriever import Hit, search
-
-
-class TestChunkText:
-    """测试文本分块逻辑"""
-
-    def test_empty_text_returns_empty_list(self) -> None:
-        assert chunk_text("") == []
-        assert chunk_text("   ") == []
-
-    def test_short_text_returns_single_chunk(self) -> None:
-        result = chunk_text("短文本", size=600, overlap=100)
-        assert len(result) == 1
-        assert result[0] == "短文本"
-
-    def test_long_text_is_split_into_multiple_chunks(self) -> None:
-        text = "A" * 1500
-        result = chunk_text(text, size=600, overlap=100)
-        assert len(result) > 1
-
-    def test_chunk_size_not_exceeded(self) -> None:
-        text = "B" * 2000
-        chunks = chunk_text(text, size=600, overlap=100)
-        for chunk in chunks:
-            assert len(chunk) <= 600
-
-    def test_overlap_creates_shared_content(self) -> None:
-        """相邻块应有重叠内容"""
-        text = "X" * 700
-        chunks = chunk_text(text, size=600, overlap=100)
-        assert len(chunks) == 2
-        assert chunks[0][-100:] == chunks[1][:100]
-
-    def test_custom_size_and_overlap(self) -> None:
-        text = "C" * 300
-        chunks = chunk_text(text, size=100, overlap=20)
-        assert len(chunks) > 1
-        for chunk in chunks:
-            assert len(chunk) <= 100
 
 
 class TestResolveEmbedding:

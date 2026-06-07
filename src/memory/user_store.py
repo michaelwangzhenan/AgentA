@@ -170,18 +170,34 @@ class UserStore:
     # ── 登录态 ──────────────────────────────────────────────────────────────
 
     def create_session(self, user_id: int, ttl_days: int) -> str:
-        """为 user 新建登录态，返回 token（写进 cookie）。"""
+        """为 user 新建登录态，返回 token（写进 cookie）。
+
+        登录时顺带清理所有已过期的登录态行：惰性删除只在 token 被访问时触发，长期不再
+        登录的废 token 不会被回收，这里在每次新建时主动清一次。
+        """
         token = secrets.token_urlsafe(32)
         now = self._now()
         expires = now + timedelta(days=max(1, ttl_days))
+        now_str = now.isoformat(timespec="seconds")
         with self._lock, self._conn:
+            self._conn.execute(
+                "DELETE FROM auth_sessions WHERE expires_at < ?", (now_str,)
+            )
             self._conn.execute(
                 "INSERT INTO auth_sessions(token, user_id, created_at, expires_at) "
                 "VALUES (?, ?, ?, ?)",
-                (token, user_id, now.isoformat(timespec="seconds"),
-                 expires.isoformat(timespec="seconds")),
+                (token, user_id, now_str, expires.isoformat(timespec="seconds")),
             )
         return token
+
+    def purge_expired_sessions(self) -> int:
+        """删除所有已过期的登录态行，返回删除条数（供定时清理显式调用）。"""
+        now_str = self._now().isoformat(timespec="seconds")
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "DELETE FROM auth_sessions WHERE expires_at < ?", (now_str,)
+            )
+        return cur.rowcount
 
     def get_user_by_token(self, token: str) -> dict[str, Any] | None:
         """凭 token 取用户；token 无效 / 过期返回 None（过期顺手删除）。"""

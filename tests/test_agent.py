@@ -690,7 +690,7 @@ class TestActivateSkill:
 
     @staticmethod
     def _make_skill_info(name: str, desc: str, body: str) -> Any:
-        from src.cli.skill_loader import SkillInfo
+        from src.skills.skill_loader import SkillInfo
         from pathlib import Path
         return SkillInfo(name=name, description=desc,
                          location=Path(f"/fake/{name}/SKILL.md"), body=body)

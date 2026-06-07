@@ -22,7 +22,7 @@
         UNIQUE(category, key)           -- 同类同 key 自动覆盖旧值
     )
 
-source 字段来源（C 混合范式，详 iter_2_agent.md §4.9.2）：
+source 字段来源：
     - auto      MemoryManager.try_extract 在自动模式下提取（USER_MEMORY_AUTO_EXTRACT）
     - explicit  用户敲"请记住"/"remember" 等触发词后由 LLM 提取
     - manual    用户用 /memory add / /memory edit 显式写入
@@ -37,10 +37,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-# prompt injection 风险模式：物理位置统一在 src/agent/core/security_filter，
-# 本模块 import 复用（详 docs/iter_2_agent.md §4.9.12 D7）
+# prompt injection 风险模式：物理位置统一在 src/agent/core/security_filter，本模块 import 复用
 from src.agent.core.security_filter import _INJECTION_PATTERNS
-from src.agent.core.user_context import current_user_id
+from src.core.user_context import current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +76,7 @@ CATEGORY_LABELS: dict[str, str] = {
     "correction":  "纠错",
 }
 
-# 写入来源（详 iter_2_agent.md §4.9.2 C 混合范式）
+# 写入来源
 MEMORY_SOURCES: frozenset[str] = frozenset({"auto", "explicit", "manual"})
 SOURCE_LABELS: dict[str, str] = {
     "auto":     "自动",
@@ -256,7 +255,7 @@ class UserMemoryStore:
     def _create_tables(self) -> None:
         """创建 user_memories 表（幂等）+ fail-fast 检测旧 schema。
 
-        不做向后兼容 schema 迁移：从 pre-Phase 1.2 升级时请手动删除
+        不做向后兼容 schema 迁移：从旧 schema 升级时请手动删除
         `sqlite_db/user_memory.db` 重建（单用户场景损失可接受，避免引入迁移代码）。
         但裸的 `sqlite3.OperationalError` 对用户不友好，所以在表创建后做一次
         PRAGMA 自检，缺列时抛带操作指引的 RuntimeError。

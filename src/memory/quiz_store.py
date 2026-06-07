@@ -1,10 +1,9 @@
 """
-Quiz 出题持久化模块 —— SQLite 存储层（Phase 2.3 §4.9.8 D1 / D9 / D10）
+Quiz 出题持久化模块 —— SQLite 存储层
 
 将 Agent 给用户生成的 quiz_set + 每道 quiz_question 持久化到本地 SQLite
-（默认 ./sqlite_db/quiz.db）。区别于 [§4.9.7 学习计划](../../docs/iter_2_agent.md#497-学习计划生成-phase-22)
-的"周/月级长期目标跟踪"，本期是"周期性自检练习"：一次性出 5-15 题、用户作答后批改、
-跨 session 留档用于复盘 / 喂 Phase 2.4 SRS。
+（默认 ./sqlite_db/quiz.db）。区别于学习计划的"周/月级长期目标跟踪"，quiz 是"周期性
+自检练习"：一次性出 5-15 题、用户作答后批改、跨 session 留档用于复盘 / 喂 SRS 复习。
 
 表结构：
     quiz_sets(
@@ -31,7 +30,7 @@ Quiz 出题持久化模块 —— SQLite 存储层（Phase 2.3 §4.9.8 D1 / D9 /
         user_answer     TEXT    NOT NULL DEFAULT '',       -- 用户作答（批改时填）
         score           REAL    NOT NULL DEFAULT 0.0,      -- 单题得分 0.0-1.0（MCQ 整对 1.0 / 否则 0；简答按 LLM-judge）
         feedback        TEXT    NOT NULL DEFAULT '',       -- 批改反馈（string-match 简评 / LLM 反馈）
-        harness_flagged INTEGER NOT NULL DEFAULT 0         -- Phase 2.5：critic 自检判定本题批改可能有偏（0/1）
+        harness_flagged INTEGER NOT NULL DEFAULT 0         -- critic 自检判定本题批改可能有偏（0/1）
     )
 
 跨 session 复盘场景：用户重启 agent → 新 session 问"上次 quiz 哪些错了 / 列出我做过的 quiz"
@@ -43,12 +42,13 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import src.config as config
-from src.agent.core.user_context import current_user_id
+from src.core.user_context import current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ QUIZ_DB_PATH: str = config.QUIZ_DB_PATH
 
 # quiz_set 合法状态枚举
 _QUIZ_SET_STATUS: tuple[str, ...] = ("created", "graded", "archived")
-# quiz_question 合法题型枚举（D10）
+# quiz_question 合法题型枚举
 _QUESTION_TYPES: tuple[str, ...] = ("mcq_single", "mcq_multi", "short_answer")
 
 
@@ -69,17 +69,22 @@ class QuizStore:
     这些由 [quiz-maker skill](../../.agenta/skills/quiz-maker/SKILL.md)
     + [tools.py Quiz 业务 tool](../agent/tools.py) 在 Agent loop 内驱动。
 
-    命名约定（[agenta-conventions.mdc §2](../../.cursor/rules/agenta-conventions.mdc)）：
-    数据存储用 `*Store` 后缀，与 `*Manager` helper 区分。
+    命名约定：数据存储用 `*Store` 后缀，与 `*Manager` helper 区分。
+
+    线程安全：连接以 `check_same_thread=False` 跨线程共享，所有读写经 `threading.Lock`
+    串行化（与 `ChatHistoryStore` / `UserStore` 一致）。进程级共享单例在 Web 线程池里
+    被多请求并发访问时安全。
     """
 
     def __init__(self, db_path: str = QUIZ_DB_PATH) -> None:
-        """初始化存储，自动创建数据库文件和表结构。"""
+        """初始化存储，自动创建数据库文件和表结构（连接经 `self._lock` 串行化，多线程安全）。"""
         self._db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON;")
+        # 在建表前创建锁：_create_tables 也要用到（线程间串行化读写）
+        self._lock = threading.Lock()
         self._create_tables()
         logger.info("QuizStore 初始化完成: %s", db_path)
 
@@ -88,62 +93,63 @@ class QuizStore:
     def _create_tables(self) -> None:
         """创建 quiz_sets / quiz_questions 表（幂等）+ fail-fast 检测旧 schema。
 
-        Phase 2.5 起 quiz_questions 加 `harness_flagged` 列。沿用 [`UserMemoryStore`](user_memory.py)
+        quiz_questions 含 `harness_flagged` 列。沿用 [`UserMemoryStore`](user_memory.py)
         的 fail-fast 模式：旧 quiz.db 升级时不做 ALTER TABLE auto-migrate，PRAGMA 自检
         缺列直接抛 RuntimeError 提示删库重建（单用户 MVP 场景损失可接受，避免引入迁移代码）。
         """
         # 先只建表（IF NOT EXISTS）；引用 user_id 的索引放到 fail-fast 自检之后，
         # 否则旧库（缺 user_id）会在建索引时抛裸 OperationalError，盖过友好提示。
-        self._conn.executescript("""
-            CREATE TABLE IF NOT EXISTS quiz_sets (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id         INTEGER NOT NULL DEFAULT 1,
-                topic           TEXT    NOT NULL,
-                plan_id         INTEGER,
-                stage_idx       INTEGER,
-                num_questions   INTEGER NOT NULL,
-                status          TEXT    NOT NULL DEFAULT 'created',
-                total_score     REAL,
-                created_at      TEXT    NOT NULL,
-                graded_at       TEXT    NOT NULL DEFAULT '',
-                updated_at      TEXT    NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS quiz_questions (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                quiz_set_id     INTEGER NOT NULL REFERENCES quiz_sets(id) ON DELETE CASCADE,
-                order_idx       INTEGER NOT NULL,
-                q_type          TEXT    NOT NULL,
-                stem            TEXT    NOT NULL,
-                options         TEXT    NOT NULL DEFAULT '',
-                correct_answer  TEXT    NOT NULL,
-                explanation     TEXT    NOT NULL DEFAULT '',
-                user_answer     TEXT    NOT NULL DEFAULT '',
-                score           REAL    NOT NULL DEFAULT 0.0,
-                feedback        TEXT    NOT NULL DEFAULT '',
-                harness_flagged INTEGER NOT NULL DEFAULT 0
-            );
-        """)
-        self._conn.commit()
+        with self._lock:
+            with self._conn:
+                self._conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS quiz_sets (
+                        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id         INTEGER NOT NULL DEFAULT 1,
+                        topic           TEXT    NOT NULL,
+                        plan_id         INTEGER,
+                        stage_idx       INTEGER,
+                        num_questions   INTEGER NOT NULL,
+                        status          TEXT    NOT NULL DEFAULT 'created',
+                        total_score     REAL,
+                        created_at      TEXT    NOT NULL,
+                        graded_at       TEXT    NOT NULL DEFAULT '',
+                        updated_at      TEXT    NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS quiz_questions (
+                        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                        quiz_set_id     INTEGER NOT NULL REFERENCES quiz_sets(id) ON DELETE CASCADE,
+                        order_idx       INTEGER NOT NULL,
+                        q_type          TEXT    NOT NULL,
+                        stem            TEXT    NOT NULL,
+                        options         TEXT    NOT NULL DEFAULT '',
+                        correct_answer  TEXT    NOT NULL,
+                        explanation     TEXT    NOT NULL DEFAULT '',
+                        user_answer     TEXT    NOT NULL DEFAULT '',
+                        score           REAL    NOT NULL DEFAULT 0.0,
+                        feedback        TEXT    NOT NULL DEFAULT '',
+                        harness_flagged INTEGER NOT NULL DEFAULT 0
+                    );
+                """)
 
-        # fail-fast：旧 quiz.db 升级时 PRAGMA 自检缺列直接抛 RuntimeError 让用户删库重建
-        # （不走 ALTER TABLE auto-migrate）
-        set_cols = {row[1] for row in self._conn.execute("PRAGMA table_info(quiz_sets)")}
-        q_cols = {row[1] for row in self._conn.execute("PRAGMA table_info(quiz_questions)")}
-        if "user_id" not in set_cols or "harness_flagged" not in q_cols:
-            raise RuntimeError(
-                f"quiz.db schema 已过期（缺 user_id / harness_flagged 列）。\n"
-                f"请删除 {self._db_path} 后重启（单用户 MVP 不做向后兼容迁移）。"
-            )
+            # fail-fast：旧 quiz.db 升级时 PRAGMA 自检缺列直接抛 RuntimeError 让用户删库重建
+            # （不走 ALTER TABLE auto-migrate）
+            set_cols = {row[1] for row in self._conn.execute("PRAGMA table_info(quiz_sets)")}
+            q_cols = {row[1] for row in self._conn.execute("PRAGMA table_info(quiz_questions)")}
+            if "user_id" not in set_cols or "harness_flagged" not in q_cols:
+                raise RuntimeError(
+                    f"quiz.db schema 已过期（缺 user_id / harness_flagged 列）。\n"
+                    f"请删除 {self._db_path} 后重启（单用户 MVP 不做向后兼容迁移）。"
+                )
 
-        self._conn.executescript("""
-            CREATE INDEX IF NOT EXISTS idx_quiz_sets_status
-                ON quiz_sets(user_id, status);
-            CREATE INDEX IF NOT EXISTS idx_quiz_sets_plan
-                ON quiz_sets(plan_id);
-            CREATE INDEX IF NOT EXISTS idx_quiz_questions_set
-                ON quiz_questions(quiz_set_id, order_idx);
-        """)
-        self._conn.commit()
+            with self._conn:
+                self._conn.executescript("""
+                    CREATE INDEX IF NOT EXISTS idx_quiz_sets_status
+                        ON quiz_sets(user_id, status);
+                    CREATE INDEX IF NOT EXISTS idx_quiz_sets_plan
+                        ON quiz_sets(plan_id);
+                    CREATE INDEX IF NOT EXISTS idx_quiz_questions_set
+                        ON quiz_questions(quiz_set_id, order_idx);
+                """)
 
     # ── 内部 helper ───────────────────────────────────────────────────────────
 
@@ -224,7 +230,7 @@ class QuizStore:
 
         uid = user_id if user_id is not None else current_user_id()
         now = self._now()
-        with self._conn:
+        with self._lock, self._conn:
             cursor = self._conn.execute(
                 "INSERT INTO quiz_sets(user_id, topic, plan_id, stage_idx, num_questions, "
                 "status, created_at, updated_at) "
@@ -283,7 +289,7 @@ class QuizStore:
 
         if not rows:
             return 0
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.executemany(
                 "INSERT INTO quiz_questions(quiz_set_id, order_idx, q_type, "
                 "stem, options, correct_answer, explanation) "
@@ -300,9 +306,10 @@ class QuizStore:
     def get_quiz_set(self, quiz_set_id: int, user_id: int | None = None) -> dict[str, Any] | None:
         """读单个 quiz_set 元信息（不含 questions）；限本人，不属于该用户返回 None。"""
         uid = user_id if user_id is not None else current_user_id()
-        row = self._conn.execute(
-            "SELECT * FROM quiz_sets WHERE id = ? AND user_id = ?", (quiz_set_id, uid),
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM quiz_sets WHERE id = ? AND user_id = ?", (quiz_set_id, uid),
+            ).fetchone()
         return self._row_to_quiz_set(row) if row else None
 
     def get_quiz_with_questions(self, quiz_set_id: int, user_id: int | None = None) -> dict[str, Any] | None:
@@ -341,11 +348,12 @@ class QuizStore:
             params.append(plan_id)
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
-        # created_at DESC + id DESC：同秒新建时按"新→旧"稳定排（仿 §4.9.7 list_plans）
+        # created_at DESC + id DESC：同秒新建时按"新→旧"稳定排（仿 list_plans）
         sql += " ORDER BY created_at DESC, id DESC"
         if isinstance(limit, int) and limit > 0:
             sql += f" LIMIT {int(limit)}"
-        rows = self._conn.execute(sql, params).fetchall()
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
         return [self._row_to_quiz_set(r) for r in rows]
 
     # ── 批改 ─────────────────────────────────────────────────────────────────
@@ -382,34 +390,36 @@ class QuizStore:
         now = self._now()
         ts = max(0.0, min(100.0, float(total_score)))
 
-        # 收集 question_id → quiz_set_id 防止跨 set 误改
-        rows = self._conn.execute(
-            "SELECT id FROM quiz_questions WHERE quiz_set_id = ?", (quiz_set_id,),
-        ).fetchall()
-        valid_qids = {int(r["id"]) for r in rows}
+        # 读后写：先查合法 qid 再 UPDATE，整段用同一把锁保证原子性
+        with self._lock:
+            # 收集 question_id → quiz_set_id 防止跨 set 误改
+            rows = self._conn.execute(
+                "SELECT id FROM quiz_questions WHERE quiz_set_id = ?", (quiz_set_id,),
+            ).fetchall()
+            valid_qids = {int(r["id"]) for r in rows}
 
-        with self._conn:
-            for g in gradings:
-                qid = g.get("question_id")
-                if not isinstance(qid, int) or qid not in valid_qids:
-                    logger.warning(
-                        "update_grading: 跳过 question_id=%r（不属于 quiz_set=%d）",
-                        qid, quiz_set_id,
+            with self._conn:
+                for g in gradings:
+                    qid = g.get("question_id")
+                    if not isinstance(qid, int) or qid not in valid_qids:
+                        logger.warning(
+                            "update_grading: 跳过 question_id=%r（不属于 quiz_set=%d）",
+                            qid, quiz_set_id,
+                        )
+                        continue
+                    user_answer = str(g.get("user_answer") or "").strip()
+                    score = max(0.0, min(1.0, float(g.get("score") or 0.0)))
+                    feedback = str(g.get("feedback") or "").strip()[:500]
+                    self._conn.execute(
+                        "UPDATE quiz_questions SET user_answer = ?, score = ?, feedback = ? "
+                        "WHERE id = ?",
+                        (user_answer, score, feedback, qid),
                     )
-                    continue
-                user_answer = str(g.get("user_answer") or "").strip()
-                score = max(0.0, min(1.0, float(g.get("score") or 0.0)))
-                feedback = str(g.get("feedback") or "").strip()[:500]
                 self._conn.execute(
-                    "UPDATE quiz_questions SET user_answer = ?, score = ?, feedback = ? "
-                    "WHERE id = ?",
-                    (user_answer, score, feedback, qid),
+                    "UPDATE quiz_sets SET status = 'graded', total_score = ?, "
+                    "graded_at = ?, updated_at = ? WHERE id = ?",
+                    (ts, now, now, quiz_set_id),
                 )
-            self._conn.execute(
-                "UPDATE quiz_sets SET status = 'graded', total_score = ?, "
-                "graded_at = ?, updated_at = ? WHERE id = ?",
-                (ts, now, now, quiz_set_id),
-            )
         logger.info(
             "update_grading: quiz_set_id=%d, total=%.1f, updated %d gradings",
             quiz_set_id, ts, len(gradings),
@@ -419,12 +429,12 @@ class QuizStore:
     # ── 归档 / 删除 ──────────────────────────────────────────────────────────
 
     def mark_question_harness_flagged(self, question_id: int) -> bool:
-        """Phase 2.5：把指定题号的 `harness_flagged` 置 1（critic 自检判定批改可能有偏）。
+        """把指定题号的 `harness_flagged` 置 1（critic 自检判定批改可能有偏）。
 
         Returns:
             True 该题存在且更新成功；False 题不存在。
         """
-        with self._conn:
+        with self._lock, self._conn:
             cursor = self._conn.execute(
                 "UPDATE quiz_questions SET harness_flagged = 1 WHERE id = ?",
                 (question_id,),
@@ -445,7 +455,7 @@ class QuizStore:
         if quiz_set["status"] == "archived":
             return False
         now = self._now()
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute(
                 "UPDATE quiz_sets SET status = 'archived', updated_at = ? WHERE id = ? AND user_id = ?",
                 (now, quiz_set_id, uid),
@@ -460,7 +470,7 @@ class QuizStore:
         给 CLI `/quiz del` 与测试清理用；常规业务请用 archive_quiz_set。
         """
         uid = user_id if user_id is not None else current_user_id()
-        with self._conn:
+        with self._lock, self._conn:
             cursor = self._conn.execute(
                 "DELETE FROM quiz_sets WHERE id = ? AND user_id = ?", (quiz_set_id, uid),
             )
@@ -471,7 +481,7 @@ class QuizStore:
 
     def delete_all_for_user(self, user_id: int) -> None:
         """删除某用户的全部测验集及其题目（admin 删用户时级联清理）。"""
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute(
                 "DELETE FROM quiz_questions WHERE quiz_set_id IN "
                 "(SELECT id FROM quiz_sets WHERE user_id = ?)",
@@ -484,11 +494,12 @@ class QuizStore:
 
     def _get_questions(self, quiz_set_id: int) -> list[dict[str, Any]]:
         """读 quiz_set 全部 questions（按 order_idx 升序）。"""
-        rows = self._conn.execute(
-            "SELECT * FROM quiz_questions WHERE quiz_set_id = ? "
-            "ORDER BY order_idx ASC, id ASC",
-            (quiz_set_id,),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM quiz_questions WHERE quiz_set_id = ? "
+                "ORDER BY order_idx ASC, id ASC",
+                (quiz_set_id,),
+            ).fetchall()
         return [self._row_to_question(r) for r in rows]
 
     # ── 资源管理 ──────────────────────────────────────────────────────────────

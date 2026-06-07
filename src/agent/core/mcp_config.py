@@ -1,12 +1,12 @@
 """
-MCPConfig —— MCP server 清单加载（Phase 3.3）
+MCPConfig —— MCP server 清单加载
 
 读取项目根的 `.agenta/mcp/config.json`（路径可由 `config.MCP_CONFIG_FILE` 覆盖），
 启动时一次性加载，由 `MCPManager` 按清单拉起各 server 子进程。
 
 设计要点：
 - **配置驱动**：用户编辑一份 JSON 就能给 agent 加新 server，**无需改 agent 代码**
-- **缺失/空文件 graceful**：返回 `None`，Agent 跳过 MCP 初始化（验收 ⑦ 零侵入）
+- **缺失/空文件 graceful**：返回 `None`，Agent 跳过 MCP 初始化（零侵入）
 - **env 变量展开**：value 内 `${VAR}` 替换为 `os.environ['VAR']`；缺失保留原样
 - **schema 错误 fail-fast**：JSON 格式错 / 字段缺失 / 类型错 → log warning + 返回 `None`
   （不抛异常向上传播，避免阻塞 Agent 启动）

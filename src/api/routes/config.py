@@ -7,7 +7,7 @@
 - `POST /api/config/reload`：用户手动改了 overrides 文件后，把磁盘内容同步到 `_cfg` +
   触发变化项的副作用 hook（无需重启 uvicorn）
 
-**API key 等敏感字段不在 registry 中**，永不暴露 / 永不允许修改（详 docs/iter_4_UI2_plus.md §1.1.3）。
+**API key 等敏感字段不在 registry 中**，永不暴露 / 永不允许修改。
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status

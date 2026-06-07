@@ -105,7 +105,7 @@ for _noisy in ("httpx", "httpcore", "openai", "chromadb", "sentence_transformers
 # src.* 模块必须在 load_dotenv() 之后导入，确保 src.config 读取到 .env 的值
 from src.cli.ui import BANNER, HELP_TEXT
 from src.cli.tab_complete import make_completer
-from src.cli.skill_loader import scan_skills, SkillInfo, format_scan_banner
+from src.skills.skill_loader import scan_skills, SkillInfo, format_scan_banner
 from src.cli import handlers
 from src.memory.chat_history import ChatHistoryStore
 import src.config as config

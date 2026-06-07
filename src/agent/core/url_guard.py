@@ -1,5 +1,5 @@
 """
-URLGuard —— SSRF 防御（Phase 3.3 验收 ⑥）
+URLGuard —— SSRF 防御
 
 判定一个 URL 是否可被 `fetch_url` / `fetch.fetch` 这类外发请求安全访问：
 - 必须是 `http` / `https` scheme（`file://` / 自定义 scheme 一律拒）

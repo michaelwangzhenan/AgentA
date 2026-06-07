@@ -1,6 +1,6 @@
 """Knowledge Base 端点 —— 文档列表 / 拖拽上传 + ingest / 删除文档
 
-设计参考 docs/iter_4_UI.md §6.4.5。上传走 multipart/form-data；后端落盘到
+上传走 multipart/form-data；后端落盘到
 `config.WEB_UPLOAD_DIR` 后调用 `ingest_all` 复用既有幂等增量入库链路。
 """
 

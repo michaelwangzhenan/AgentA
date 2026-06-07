@@ -24,12 +24,13 @@
 import json
 import logging
 import sqlite3
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import src.config as config
-from src.agent.core.user_context import current_user_id
+from src.core.user_context import current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +48,10 @@ class ChatHistoryStore:
     不感知"轮（turn）/ skill_pair 完整性 / max_history_turns 截断"等 loop 语义 ——
     这些业务策略由 `src/agent/core/history_manager.py` 的 `HistoryManager` 封装。
 
-    命名约定（design.md §5）：数据存储用 `*Store` 后缀，区别于 `*Manager` helper。
+    命名约定：数据存储用 `*Store` 后缀，区别于 `*Manager` helper。
 
-    线程安全说明：每个实例持有独立连接，同一进程单实例使用即可。
+    线程安全：连接以 `check_same_thread=False` 跨线程共享，所有读写经 `threading.Lock`
+    串行化（与 `UserStore` 一致）。进程级单例在 Web 线程池里被多请求并发访问时安全。
     """
 
     def __init__(self, db_path: str = MEMORY_DB_PATH) -> None:
@@ -63,6 +65,7 @@ class ChatHistoryStore:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        self._lock = threading.Lock()
         self._create_tables()
         logger.info("ChatHistoryStore 初始化完成: %s", db_path)
 
@@ -70,7 +73,8 @@ class ChatHistoryStore:
 
     def _create_tables(self) -> None:
         """创建 messages 和 sessions 表（幂等，已存在则跳过）。"""
-        self._conn.executescript("""
+        with self._lock, self._conn:
+            self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS messages (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id   TEXT    NOT NULL,
@@ -90,8 +94,7 @@ class ChatHistoryStore:
                 first_user_msg TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
-        """)
-        self._conn.commit()
+            """)
 
     @staticmethod
     def _row_to_message(row: sqlite3.Row) -> dict[str, Any]:
@@ -129,7 +132,7 @@ class ChatHistoryStore:
         tool_call_id: str = msg.get("tool_call_id") or ""
         now = datetime.now().isoformat(timespec="seconds")
 
-        with self._conn:
+        with self._lock, self._conn:
             # 若 session 不存在，插入 session 记录
             existing = self._conn.execute(
                 "SELECT first_user_msg FROM sessions WHERE session_id = ?",
@@ -155,7 +158,7 @@ class ChatHistoryStore:
                 (session_id, role, content, tool_calls_json, tool_call_id, now),
             )
 
-    def load(self, session_id: str) -> list[dict[str, Any]]:
+    def load(self, session_id: str, user_id: int | None = None) -> list[dict[str, Any]]:
         """
         加载指定 session 的完整 messages 历史，按时间顺序排列。
 
@@ -163,22 +166,30 @@ class ChatHistoryStore:
 
         Args:
             session_id: 会话 ID。
+            user_id: 归属用户；None 取 current_user_id()。非本人 session 返回空列表
+                （纵深防御：即便上层漏调 owns_session 也不跨用户泄露）。
 
         Returns:
             messages list，可直接拼接到 Agent 的 messages 列表中。
-            若 session 不存在返回空列表。
+            若 session 不存在或不归属该用户返回空列表。
         """
-        rows = self._conn.execute(
-            """SELECT role, content, tool_calls, tool_call_id
-               FROM messages
-               WHERE session_id = ?
-               ORDER BY id ASC""",
-            (session_id,),
-        ).fetchall()
+        uid = user_id if user_id is not None else current_user_id()
+        with self._lock:
+            if not self._owns_unlocked(session_id, uid):
+                return []
+            rows = self._conn.execute(
+                """SELECT role, content, tool_calls, tool_call_id
+                   FROM messages
+                   WHERE session_id = ?
+                   ORDER BY id ASC""",
+                (session_id,),
+            ).fetchall()
 
         return [self._row_to_message(row) for row in rows]
 
-    def load_last_n_messages(self, session_id: str, n: int) -> list[dict[str, Any]]:
+    def load_last_n_messages(
+        self, session_id: str, n: int, user_id: int | None = None
+    ) -> list[dict[str, Any]]:
         """
         仅加载指定 session 最近 n 条消息，避免全量加载长历史 session 的 DB I/O 开销。
 
@@ -187,22 +198,29 @@ class ChatHistoryStore:
         Args:
             session_id: 会话 ID。
             n: 最多返回的消息条数。
+            user_id: 归属用户；None 取 current_user_id()。非本人 session 返回空列表。
 
         Returns:
             最近 n 条消息，时序升序，格式与 load() 相同。
         """
-        rows = self._conn.execute(
-            """SELECT role, content, tool_calls, tool_call_id
-               FROM messages
-               WHERE session_id = ?
-               ORDER BY id DESC
-               LIMIT ?""",
-            (session_id, n),
-        ).fetchall()
+        uid = user_id if user_id is not None else current_user_id()
+        with self._lock:
+            if not self._owns_unlocked(session_id, uid):
+                return []
+            rows = self._conn.execute(
+                """SELECT role, content, tool_calls, tool_call_id
+                   FROM messages
+                   WHERE session_id = ?
+                   ORDER BY id DESC
+                   LIMIT ?""",
+                (session_id, n),
+            ).fetchall()
 
         return [self._row_to_message(row) for row in reversed(rows)]
 
-    def truncate_from_user_message(self, session_id: str, user_index: int) -> int:
+    def truncate_from_user_message(
+        self, session_id: str, user_index: int, user_id: int | None = None
+    ) -> int:
         """删除从第 `user_index`（0 基）条 user 消息起（含）之后的全部消息。
 
         用于"编辑重发 / 重新生成"：丢弃某条用户消息及其后的所有回答与轮次，
@@ -214,38 +232,47 @@ class ChatHistoryStore:
         Args:
             session_id: 会话 ID。
             user_index: 第几条 user 消息（0 基）。越界（无对应 user 消息）则不删。
+            user_id: 归属用户；None 取 current_user_id()。非本人 session 不删、返回 0。
 
         Returns:
             实际删除的消息行数。
         """
-        rows = self._conn.execute(
-            """SELECT id FROM messages
-               WHERE session_id = ? AND role = 'user'
-               ORDER BY id ASC""",
-            (session_id,),
-        ).fetchall()
-        if user_index < 0 or user_index >= len(rows):
-            return 0
-        cutoff_id = rows[user_index]["id"]
-        with self._conn:
-            cur = self._conn.execute(
-                "DELETE FROM messages WHERE session_id = ? AND id >= ?",
-                (session_id, cutoff_id),
-            )
+        uid = user_id if user_id is not None else current_user_id()
+        with self._lock:
+            if not self._owns_unlocked(session_id, uid):
+                return 0
+            rows = self._conn.execute(
+                """SELECT id FROM messages
+                   WHERE session_id = ? AND role = 'user'
+                   ORDER BY id ASC""",
+                (session_id,),
+            ).fetchall()
+            if user_index < 0 or user_index >= len(rows):
+                return 0
+            cutoff_id = rows[user_index]["id"]
+            with self._conn:
+                cur = self._conn.execute(
+                    "DELETE FROM messages WHERE session_id = ? AND id >= ?",
+                    (session_id, cutoff_id),
+                )
         logger.info(
             "已截断 session %s：从第 %d 条 user 消息起删除 %d 行",
             session_id, user_index, cur.rowcount,
         )
         return cur.rowcount
 
-    def clear(self, session_id: str) -> None:
+    def clear(self, session_id: str, user_id: int | None = None) -> None:
         """
         清空指定 session 的所有消息记录（同时删除 session 元数据）。
 
         Args:
             session_id: 要清空的会话 ID。
+            user_id: 归属用户；None 取 current_user_id()。非本人 session 不做任何操作。
         """
-        with self._conn:
+        uid = user_id if user_id is not None else current_user_id()
+        with self._lock, self._conn:
+            if not self._owns_unlocked(session_id, uid):
+                return
             self._conn.execute(
                 "DELETE FROM messages WHERE session_id = ?", (session_id,)
             )
@@ -256,7 +283,7 @@ class ChatHistoryStore:
 
     def delete_all_for_user(self, user_id: int) -> None:
         """删除某用户的全部会话及其消息（admin 删用户时级联清理）。"""
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute(
                 "DELETE FROM messages WHERE session_id IN "
                 "(SELECT session_id FROM sessions WHERE user_id = ?)",
@@ -265,18 +292,23 @@ class ChatHistoryStore:
             self._conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
         logger.info("已删除 user=%d 的全部会话", user_id)
 
-    def rename_session(self, session_id: str, title: str) -> bool:
+    def rename_session(self, session_id: str, title: str, user_id: int | None = None) -> bool:
         """
         重命名 session（复用 `first_user_msg` 列存用户手动标题）。
 
         Args:
             session_id: 要改名的会话 ID。
             title:      新标题，会按 `_FIRST_MSG_PREVIEW_LEN` 截断。
+            user_id:    归属用户；None 取 current_user_id()。非本人 session 返回 False。
 
         Returns:
-            True 表示找到并改名；False 表示 session 不存在。
+            True 表示找到并改名；False 表示 session 不存在或不归属该用户。
         """
-        with self._conn:
+        uid = user_id if user_id is not None else current_user_id()
+        with self._lock, self._conn:
+            if not self._owns_unlocked(session_id, uid):
+                logger.info("rename_session: session 不存在或不归属用户，跳过: %s", session_id)
+                return False
             cur = self._conn.execute(
                 "UPDATE sessions SET first_user_msg = ? WHERE session_id = ?",
                 (title[:_FIRST_MSG_PREVIEW_LEN], session_id),
@@ -302,30 +334,39 @@ class ChatHistoryStore:
         """
         uid = user_id if user_id is not None else current_user_id()
         now = datetime.now().isoformat(timespec="seconds")
-        with self._conn:
+        with self._lock, self._conn:
             cur = self._conn.execute(
                 "INSERT OR IGNORE INTO sessions(session_id, user_id, created_at, first_user_msg) VALUES(?,?,?,?)",
                 (session_id, uid, now, title[:_FIRST_MSG_PREVIEW_LEN]),
             )
         return cur.rowcount > 0
 
-    def owns_session(self, session_id: str, user_id: int | None = None) -> bool:
-        """该 session 是否归属指定用户（用于 API 层鉴权）。session 不存在返回 False。"""
-        uid = user_id if user_id is not None else current_user_id()
+    def _owns_unlocked(self, session_id: str, uid: int) -> bool:
+        """锁内归属校验：session 归属 uid 返回 True；session 不存在视为不归属。
+
+        供已持锁的方法做纵深防御复用（不自行 acquire，避免非重入锁死锁）。
+        """
         row = self._conn.execute(
             "SELECT 1 FROM sessions WHERE session_id = ? AND user_id = ?",
             (session_id, uid),
         ).fetchone()
         return row is not None
 
+    def owns_session(self, session_id: str, user_id: int | None = None) -> bool:
+        """该 session 是否归属指定用户（用于 API 层鉴权）。session 不存在返回 False。"""
+        uid = user_id if user_id is not None else current_user_id()
+        with self._lock:
+            return self._owns_unlocked(session_id, uid)
+
     def get_session_owner(self, session_id: str) -> int | None:
         """返回 session 归属的 user_id；session 不存在返回 None。"""
-        row = self._conn.execute(
-            "SELECT user_id FROM sessions WHERE session_id = ?", (session_id,)
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT user_id FROM sessions WHERE session_id = ?", (session_id,)
+            ).fetchone()
         return int(row["user_id"]) if row else None
 
-    def delete_session(self, session_id: str) -> bool:
+    def delete_session(self, session_id: str, user_id: int | None = None) -> bool:
         """
         删除指定 session 的所有消息记录及元数据。
 
@@ -334,24 +375,24 @@ class ChatHistoryStore:
 
         Args:
             session_id: 要删除的会话 ID。
+            user_id: 归属用户；None 取 current_user_id()。非本人 session 不删、返回 False。
 
         Returns:
-            True 表示 session 存在并已删除；False 表示 session 不存在。
+            True 表示 session 存在且归属该用户并已删除；False 表示不存在或不归属。
         """
-        with self._conn:
-            existed = self._conn.execute(
-                "SELECT 1 FROM sessions WHERE session_id = ?", (session_id,)
-            ).fetchone() is not None
+        uid = user_id if user_id is not None else current_user_id()
+        with self._lock, self._conn:
+            existed = self._owns_unlocked(session_id, uid)
+            if not existed:
+                logger.info("delete_session: session 不存在或不归属用户，跳过: %s", session_id)
+                return False
             self._conn.execute(
                 "DELETE FROM messages WHERE session_id = ?", (session_id,)
             )
             self._conn.execute(
                 "DELETE FROM sessions WHERE session_id = ?", (session_id,)
             )
-        if existed:
-            logger.info("已删除 session: %s", session_id)
-        else:
-            logger.info("delete_session: session 不存在，跳过: %s", session_id)
+        logger.info("已删除 session: %s", session_id)
         return existed
 
     def clean_all_sessions(self) -> int:
@@ -361,7 +402,7 @@ class ChatHistoryStore:
         Returns:
             被删除的 session 数量。
         """
-        with self._conn:
+        with self._lock, self._conn:
             count: int = self._conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
             self._conn.execute("DELETE FROM messages")
             self._conn.execute("DELETE FROM sessions")
@@ -408,7 +449,8 @@ class ChatHistoryStore:
             sql += " LIMIT ?"
             params.append(limit)
 
-        rows = self._conn.execute(sql, params).fetchall()
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
         return [dict[str, Any](row) for row in rows]
 
     def close(self) -> None:

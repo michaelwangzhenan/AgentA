@@ -87,7 +87,7 @@ class MemoryManager:
 
         提取失败时静默吞掉，不影响主流程。
 
-        节流策略详见 iter_2_agent.md §4.9.2：避免每轮无脑调 LLM extract 浪费成本。
+        节流的目的：避免每轮都无脑调 LLM 提取记忆而浪费成本。
         """
         if self._user_memory is None:
             logger.debug("[MemoryManager] try_extract: user_memory 为 None，跳过")

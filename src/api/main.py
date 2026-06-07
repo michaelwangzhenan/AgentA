@@ -98,7 +98,7 @@ app = FastAPI(
 )
 
 # 开发期前端 dev server 跑在 :5173，跟后端 :8000 不同源，必须放开 CORS
-# 生产期靠 Nginx 反代同源、不走 CORS（详 docs/iter_4_UI.md §5.1.6）
+# 生产期靠 Nginx 反代同源、不走 CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],

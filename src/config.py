@@ -565,13 +565,13 @@ USER_MEMORY_AUTO_EXTRACT: bool = os.getenv("USER_MEMORY_AUTO_EXTRACT", "false").
 # 自动提取触发频率：每 N 轮 user 消息才触发一次（显式触发"请记住"不受此限）
 USER_MEMORY_EXTRACT_EVERY_N: int = int(os.getenv("USER_MEMORY_EXTRACT_EVERY_N", "5"))
 
-# ── 学习计划（Phase 2.2）配置 ────────────────────────────────────────────────
+# ── 学习计划配置 ────────────────────────────────────────────────
 # 学习计划 SQLite 数据库路径（与对话历史 / 用户记忆独立存储，便于单独 backup / migration）
 LEARNING_PLAN_DB_PATH: str = os.getenv("LEARNING_PLAN_DB_PATH", "./sqlite_db/learning.db")
 # 注入 system prompt 的 active 学习计划文本最大字符数（超出截断）
 LEARNING_PLAN_MAX_INJECT_CHARS: int = int(os.getenv("LEARNING_PLAN_MAX_INJECT_CHARS", "1500"))
 
-# ── Quiz 出题（Phase 2.3）配置 ───────────────────────────────────────────────
+# ── Quiz 出题配置 ───────────────────────────────────────────────
 # Quiz SQLite 路径（独立文件，便于单独 backup / migration）
 QUIZ_DB_PATH: str = os.getenv("QUIZ_DB_PATH", "./sqlite_db/quiz.db")
 # create_quiz 默认题数（未传 num_questions 时使用；可选值 5-15）
@@ -579,7 +579,7 @@ QUIZ_DEFAULT_NUM_QUESTIONS: int = int(os.getenv("QUIZ_DEFAULT_NUM_QUESTIONS", "1
 # /quiz list / query_quiz_history 默认返回条数上限
 QUIZ_HISTORY_LIST_LIMIT: int = int(os.getenv("QUIZ_HISTORY_LIST_LIMIT", "20"))
 
-# ── SRS 主动复习（Phase 2.4）配置 ────────────────────────────────────────────
+# ── SRS 主动复习配置 ────────────────────────────────────────────
 # SRS SQLite 路径（独立文件，单表 srs_cards）
 SRS_DB_PATH: str = os.getenv("SRS_DB_PATH", "./sqlite_db/srs.db")
 # /srs due / query_srs_due 默认返回条数上限
@@ -589,7 +589,7 @@ SRS_FIRST_INTERVAL_DAYS: int = int(os.getenv("SRS_FIRST_INTERVAL_DAYS", "1"))
 # SM-2 算法：repetitions=2 时的 interval（第二次复习答对的下次回炉天数）
 SRS_SECOND_INTERVAL_DAYS: int = int(os.getenv("SRS_SECOND_INTERVAL_DAYS", "6"))
 
-# ── Harness 自检（Phase 2.5）配置 ────────────────────────────────────────────
+# ── Harness 自检配置 ────────────────────────────────────────────
 # 是否对 grade_quiz 批改结果做自检（可选值：true / false）
 HARNESS_QUIZ_ENABLED: bool = os.getenv("HARNESS_QUIZ_ENABLED", "true").lower() == "true"
 # 是否对 search_knowledge 召回片段做相关性自检（可选值：true / false）
@@ -689,7 +689,7 @@ LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").upper()
 # 非法值降级 NONE 并 warn
 CLI_LOG_MODE: str = os.getenv("CLI_LOG_MODE", "NONE").upper()
 
-# ── 防 prompt injection（Phase 3.2）配置 ──────────────────────────────────────
+# ── 防 prompt injection 配置 ──────────────────────────────────────
 # tool 名单门工作模式（可选值：normal / strict）
 # normal：fail-open + TOOL_BLOCKLIST，不在黑名单即放行
 # strict：fail-close + TOOL_ALLOWLIST，必须在白名单才放行（空白名单 = 全拒）
@@ -702,7 +702,7 @@ TOOL_ALLOWLIST: str = os.getenv("TOOL_ALLOWLIST", "")
 # 开启后 LLM 调 make_plan 后 CLI 弹 yes/no 提问；no → 当前 query 中止
 PLAN_PERMISSION_MODE: bool = os.getenv("PLAN_PERMISSION_MODE", "false").lower() == "true"
 
-# ── MCP（Model Context Protocol）接入（Phase 3.3）配置 ────────────────────────
+# ── MCP（Model Context Protocol）接入配置 ────────────────────────
 # 是否启用 MCP 接入（可选值：true / false）
 # false 时跳过 MCP 初始化；true 但配置文件不存在/为空仍静默跳过
 MCP_ENABLED: bool = os.getenv("MCP_ENABLED", "true").lower() == "true"

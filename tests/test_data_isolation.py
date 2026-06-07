@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 import src.config as config
-from src.agent.core.user_context import current_user_id, use_user
+from src.core.user_context import current_user_id, use_user
 from src.memory.chat_history import ChatHistoryStore
 from src.memory.learning_plan_store import LearningPlanStore
 from src.memory.quiz_store import QuizStore

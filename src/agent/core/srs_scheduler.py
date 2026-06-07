@@ -1,5 +1,5 @@
 """
-SM-2 调度算法核心（Phase 2.4 §4.9.9 D1 + D4 + D11）
+SM-2 调度算法核心
 
 SuperMemo 2（Wozniak, 1987）是 Anki 默认调度器的算法祖先：每张卡按"答对/答错 +
 难度自评"动态调整 `ease_factor`（难度因子）、`interval_days`（下次回炉天数）、
@@ -7,7 +7,7 @@ SuperMemo 2（Wozniak, 1987）是 Anki 默认调度器的算法祖先：每张�
 来源 / UI；持久化由 [`src.memory.srs_store.SRSStore.update_review_state`]
 (../../memory/srs_store.py) 负责。
 
-Anki 4 档自评 → SM-2 公式 mapping（D4）：
+Anki 4 档自评 → SM-2 公式 mapping：
 
 | 用户自评 | 含义 | SM-2 q score | ease 变化 | interval 变化 |
 |---|---|---|---|---|
@@ -19,11 +19,10 @@ Anki 4 档自评 → SM-2 公式 mapping（D4）：
 公式参考：
 - 标准 SM-2 ease 更新公式（quality q ∈ {0..5}）：
     new_ease = old_ease + (0.1 - (5-q) * (0.08 + (5-q) * 0.02))
-- ease 下限 1.3（D11；SM-2 原版约定）；上限不强制（Anki 实践 ~2.5 常见，但
+- ease 下限 1.3（SM-2 原版约定）；上限不强制（Anki 实践 ~2.5 常见，但
   超过 2.5 也合法 — 用户连答 easy 时合理上扬）。
 
-本期不实现的高级特性（[§4.13.1 #22](../../../docs/iter_2_agent.md#4131-deferred-backlog暂时不做)
-留 FSRS 升级时考虑）：
+暂不实现的高级特性（留待 FSRS 升级时考虑）：
 - 学习阶段 learning_steps（Anki 新卡前几次 review 走分钟级别 graduated steps）
 - 模糊间隔 fuzz（避免大量卡片同一天 due）
 - 同卡当天连续多次 review 的 lapses 计数策略
@@ -39,7 +38,7 @@ from typing import Literal
 import src.config as config
 
 
-# ── 公式常量（D1 + D11） ──────────────────────────────────────────────────────
+# ── 公式常量 ──────────────────────────────────────────────────────────────────
 
 # ease 下限：SM-2 原版约定，低于此值卡片"无法再变难"
 EASE_FACTOR_MIN: float = 1.3
@@ -54,11 +53,11 @@ HARD_INTERVAL_MULTIPLIER: float = 0.8
 EASY_INTERVAL_MULTIPLIER: float = 1.3
 
 
-# ── 4 档评分（D4） ────────────────────────────────────────────────────────────
+# ── 4 档评分 ──────────────────────────────────────────────────────────────────
 
 
 class Rating(str, Enum):
-    """Anki 4 档用户自评（D4）。"""
+    """Anki 4 档用户自评。"""
 
     AGAIN = "again"
     HARD = "hard"
@@ -66,7 +65,7 @@ class Rating(str, Enum):
     EASY = "easy"
 
 
-# 4 档 → SM-2 q score（D4 mapping 表）
+# 4 档 → SM-2 q score（mapping 表）
 _RATING_QUALITY: dict[Rating, int] = {
     Rating.AGAIN: 1,
     Rating.HARD: 3,

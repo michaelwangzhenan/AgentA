@@ -11,6 +11,7 @@ Agent 主控逻辑 —— ReAct（Reason + Act）循环
 """
 
 import logging
+import threading
 import uuid
 from collections.abc import Callable
 from typing import Any, NamedTuple
@@ -33,7 +34,7 @@ from src.agent.core.rules_loader import build_rules_block
 from src.agent.core.thinking_policy import ThinkingConfig, ThinkingPolicy  # noqa: F401 — re-export
 from src.agent.core.tool_call_engine import ToolCallEngine
 from src.agent.tools import get_tools
-from src.cli.skill_loader import SkillInfo, build_skill_catalog
+from src.skills.skill_loader import SkillInfo, build_skill_catalog
 from src.llm.provider import chat, call_with_thinking
 from src.memory.chat_history import ChatHistoryStore
 from src.memory.learning_plan_store import get_shared_store as _get_shared_learning_plan_store
@@ -50,22 +51,25 @@ class TokenUsage(NamedTuple):
     total_tokens: int
 
 
-# 模块级共享 ChatHistoryStore 实例（单进程内所有 Agent 共享同一个 DB 连接）
+# 模块级共享 ChatHistoryStore 实例（单进程内所有 Agent 共享同一个 DB 连接，双检锁保护）
 _chat_history: ChatHistoryStore | None = None
+_chat_history_lock = threading.Lock()
 
 # 模块级共享 UserMemoryStore 实例（双检锁保护）
 _shared_user_memory: UserMemoryStore | None = None
-_shared_user_memory_lock = __import__("threading").Lock()
+_shared_user_memory_lock = threading.Lock()
 
 # 多用户：rules 改为按用户独享，存 UserStore（auth.db 的 user_rules 表）。
 # 不再用进程级缓存的项目文件 —— 每轮按 current_user_id() 读当前用户的 rules。
 
 
 def _get_shared_chat_history() -> ChatHistoryStore:
-    """获取模块级共享 ChatHistoryStore，首次调用时懒加载初始化。"""
+    """获取模块级共享 ChatHistoryStore（双检锁，线程安全懒加载）。"""
     global _chat_history
     if _chat_history is None:
-        _chat_history = ChatHistoryStore()
+        with _chat_history_lock:
+            if _chat_history is None:
+                _chat_history = ChatHistoryStore()
     return _chat_history
 
 
@@ -93,7 +97,7 @@ def _get_active_rules() -> str | None:
     if not _cfg.USER_RULES_ENABLED:
         return None
     try:
-        from src.agent.core.user_context import current_user_id
+        from src.core.user_context import current_user_id
         from src.memory.user_store import get_shared_store as _get_user_store
         text = _get_user_store().get_rules(current_user_id())
     except Exception as exc:
@@ -105,7 +109,7 @@ def _get_active_rules() -> str | None:
 
 def build_active_study_plan_block(session_id: str, max_chars: int | None = None) -> str:
     """
-    Phase 2.2 G4：把**当前 session 已手动 `/study load` 的** learning_plan 渲染成
+    把**当前 session 已手动 `/study load` 的** learning_plan 渲染成
     `<active_study_plan>` system block。
 
     行为对标 Agent Skills 的 load_skill：默认**不注入**（即使 DB 里有 active plan），
@@ -117,7 +121,7 @@ def build_active_study_plan_block(session_id: str, max_chars: int | None = None)
     - 已 load 的 plan 被 abandon / delete（store.get_loaded 内部自动 stale 清理）
     - 渲染 / store 异常（记 warning 后软返回空串，不阻断 Agent）
 
-    设计取舍详 design.md §3.9.4 "可见性"路线 C。
+    这样设计是为了让"可见性"由用户掌控，而不是默认把所有 active plan 塞进 context。
 
     Args:
         session_id: 当前 session id；决定是否注入（按 session 隔离）。
@@ -215,16 +219,16 @@ plan 规范：
 MAX_TOOL_ROUNDS: int = 8
 # 含最终回答在内的总推理轮次上限（baseline）
 MAX_TOTAL_ROUNDS: int = 12
-# Phase 2.1 plan-aware 硬上限：plan 步数自适应放大也不超此值，防极端
+# plan-aware 硬上限：plan 步数自适应放大也不超此值，防极端
 MAX_HARD_CAP_ROUNDS: int = 50
-# Phase 2.1 plan 步预算：每步预留 N 次 tool 调用（含业务 tool + update_step）
+# plan 步预算：每步预留 N 次 tool 调用（含业务 tool + update_step）
 _PLAN_ROUNDS_PER_STEP: int = 4
 # Plan-aware total 上限相对 tool 上限的额外余量（含 make_plan + final answer）
 _PLAN_TOTAL_HEADROOM: int = 4
 
 
 class PlanAbortedByUser(Exception):
-    """Phase 3.2：用户在 plan 审批 mode 下选择 no 时抛出，agent.run 接住 break loop。"""
+    """用户在 plan 审批 mode 下选择 no 时抛出，agent.run 接住 break loop。"""
 
 
 class Agent:
@@ -280,18 +284,18 @@ class Agent:
         self._user_memory: UserMemoryStore | None = (
             user_memory if user_memory is not None else _get_shared_user_memory()
         )
-        # Phase 3.2 plan 用户审批 mode：CLI 等 UI 端通过此回调挂自身交互逻辑
+        # plan 用户审批 mode：CLI 等 UI 端通过此回调挂自身交互逻辑
         # （CLI 走 input()）；callback 应返 "yes"/"no"
         self.approval_callback: Callable[[dict[str, Any]], str] | None = approval_callback
 
     def request_plan_approval(self, plan_payload: dict[str, Any]) -> str:
         """
-        Phase 3.2：plan-execute 用户审批入口（make_plan 调用成功后由 tool_call_engine 调用）。
+        plan-execute 用户审批入口（make_plan 调用成功后由 tool_call_engine 调用）。
 
         触发条件需同时满足：
           - cfg.PLAN_PERMISSION_MODE=true
           - self.approval_callback is not None
-        任一不满足 → 直接返 "yes"（保持 Phase 2.1 默认行为）。
+        任一不满足 → 直接返 "yes"（保持默认放行行为）。
 
         Returns:
             str：callback 返回值；约定 "yes" 放行 / "no" 由调用方抛 PlanAbortedByUser。
@@ -357,11 +361,11 @@ class Agent:
         history = history_mgr.load_truncated()
 
         # 构建 system 消息：base → <project_rules>（静态偏好）→ <user_context>（动态记忆）
-        #                  → <active_study_plan>（Phase 2.2 G4：当前 session 已 `/study load` 的学习计划）
+        #                  → <active_study_plan>（当前 session 已 `/study load` 的学习计划）
         # 顺序原则：稳定基础在前 / 动态状态在后 —— 后注入的内容更易被 LLM 记住，
         # 学习计划与"下一步"决策强相关，放最末贴近 user 消息。
         # 注意：学习计划默认**不**注入，必须用户用 CLI `/study load [id]` 显式激活；
-        # 对标 Agent Skills 的 load_skill 生命周期。详 design.md §3.9.4。
+        # 对标 Agent Skills 的 load_skill 生命周期。
         memory_mgr = MemoryManager(self._user_memory, self._chat_history, self.session_id, chat)
         base_with_rules = self.system_prompt + build_rules_block(_get_active_rules())
         system_content = memory_mgr.build_system_prompt(base_with_rules)
@@ -382,7 +386,7 @@ class Agent:
 
         tool_rounds = 0  # 已消耗的工具调用轮次计数
         _prompt_tokens = _comp_tokens = 0  # 本次 run() 各轮累计 token
-        # Phase 1.4：每轮 new CitationBuilder，跨同轮多次 search_knowledge 累计编号
+        # 每轮 new CitationBuilder，跨同轮多次 search_knowledge 累计编号
         citation_builder = CitationBuilder()
         tool_engine = ToolCallEngine(
             self._chat_history, self.session_id, self._skill_bodies,
@@ -417,7 +421,7 @@ class Agent:
             logger.warning("[Agent] 当前模型不支持工具调用，本轮降级为纯聊天（不启用 tools）")
 
         for iteration in range(1, MAX_HARD_CAP_ROUNDS + 1):
-            # Phase 2.1 — 每轮按 active plan 步数重算 tool/total 上限（无 plan 退化为 baseline）
+            # 每轮按 active plan 步数重算 tool/total 上限（无 plan 退化为 baseline）
             eff_tool_max, eff_total_max = self._compute_effective_caps(messages)
             if iteration > eff_total_max:
                 break  # 下方 fallback 路径处理"达最大迭代次数"
@@ -487,7 +491,7 @@ class Agent:
             final_answer = message.content or ""
             if final_answer.strip():
                 logger.info("[Agent] 第 %d 轮得到最终回答，退出循环", iteration)
-                # Phase 1.4：扫 LLM 正文实际引到的 [n]，按 builder 已注册的编号
+                # 扫 LLM 正文实际引到的 [n]，按 builder 已注册的编号
                 # 渲染 sources 块并拼到 answer 末尾；无引用时 sources_block 为空，
                 # 答案保持原样（用户写 rules 禁引时的合法输出）
                 final_answer = final_answer.strip()
@@ -577,7 +581,7 @@ class Agent:
 
     def _compute_effective_caps(self, messages: list[dict[str, Any]]) -> tuple[int, int]:
         """
-        Phase 2.1 plan-aware：按当前 active plan 步数动态扩展 round 上限。
+        plan-aware：按当前 active plan 步数动态扩展 round 上限。
 
         无 active plan / plan 已完结 → 退化为 baseline（`MAX_TOOL_ROUNDS`/`self.max_iterations`）。
         active plan N 步 → 按 N × `_PLAN_ROUNDS_PER_STEP` 估算 tool 预算，加 baseline 取大；

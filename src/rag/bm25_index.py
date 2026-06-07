@@ -13,7 +13,7 @@ BM25 倒排索引（自实现，零外部依赖）
     - 分词器：英文走 whitespace + lowercase；中文走 bigram（连续 2 字符）；混合自动并行。
 
 不做什么：
-    - 不做拼写纠错 / 同义词扩展；这一层留给上游 query 改写（Iter-3）。
+    - 不做拼写纠错 / 同义词扩展；这一层留给上游 query 改写。
 """
 
 from __future__ import annotations
@@ -26,7 +26,6 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock
-from typing import Any
 
 import src.config as config
 
@@ -316,13 +315,11 @@ def get_index(collection_name: str) -> BM25Index:
         return idx
 
 
-def reload_index(collection_name: str) -> BM25Index:
-    """绕过缓存强制从磁盘重新加载（ingest 流程结束后由 retriever 显式触发）。"""
+def drop_index(collection_name: str) -> None:
+    """从进程缓存移除指定 collection 的索引。
+
+    底层 pkl 被整体删除 / 重建后调用，下次 `get_index` 会按磁盘最新状态重新加载，
+    避免检索端继续持有已失效的索引实例。
+    """
     with _cache_lock:
-        idx = BM25Index.load_or_new(collection_name, get_index_path(collection_name))
-        _index_cache[collection_name] = idx
-        return idx
-
-
-# silence unused-import warning for type checkers; Any kept for future where-typing
-_ = Any
+        _index_cache.pop(collection_name, None)

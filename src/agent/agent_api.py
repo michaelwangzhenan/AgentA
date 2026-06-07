@@ -1,5 +1,5 @@
 """
-AgentAPI —— 表现层 ↔ Agent core 的对外契约（design.md §1.3 / §3.1）
+AgentAPI —— 表现层 ↔ Agent core 的对外契约
 
 设计意图：
 - 表现层（CLI / 未来 Web UI / SDK）调用 Agent 只依赖本契约
@@ -9,9 +9,8 @@ AgentAPI —— 表现层 ↔ Agent core 的对外契约（design.md §1.3 / §3
   不存在父类关系；runtime_checkable 让 isinstance 校验可用
 
 命名说明：
-- 此处的 `AgentAPI` 对应 design.md §1.2 架构图中 `AAPI` 节点（"表现层 ↔ Agent core" 边界）
-- 历史上叫过 `BaseAgent`，但 "BaseAgent" 容易与"loop ↔ 公共层"的内部契约混淆，
-  §4.5.4 后改名为 `AgentAPI` 与 design.md 严格对齐
+- 此处的 `AgentAPI` 即架构图里"表现层 ↔ Agent core"边界上的那个节点
+- 历史上叫过 `BaseAgent`，但容易与"loop ↔ 公共层"的内部契约混淆，故改名为 `AgentAPI`
 - 文件名 `agent_api.py` 与项目内 `*_agent.py / *_history.py / *_provider.py`
   命名 pattern 一致，避免与笼统的 `api.py` 混淆
 

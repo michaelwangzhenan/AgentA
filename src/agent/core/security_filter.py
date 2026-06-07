@@ -7,12 +7,10 @@ security_filter —— Prompt Injection 防御工具集（Helper 层）
 - tool 调用名单门判定（fail-open + BLOCKLIST 默认；fail-close + ALLOWLIST 严格模式）
 
 不做：
-- LLM 分类器 / 语义级判定（cost 翻倍单用户场景动机弱，详 §4.13.1 #34）
-- system prompt 泄露 fingerprint 检测（详 §4.13.2 #37，SaaS 才需要）
+- LLM 分类器 / 语义级判定（cost 翻倍，单用户场景动机弱）
+- system prompt 泄露 fingerprint 检测（SaaS 才需要）
 
-SSRF 防御 / URL 校验由 [`url_guard`](./url_guard.py) 单独承担（Phase 3.3）。
-
-详见 docs/iter_2_agent.md §4.9.12 / docs/knowlege.md §7。
+SSRF 防御 / URL 校验由 [`url_guard`](./url_guard.py) 单独承担。
 """
 from __future__ import annotations
 
@@ -55,7 +53,7 @@ _INJECTION_PATTERNS: list[re.Pattern[str]] = [
 # wrap_untrusted 支持的"不可信数据"类别。新增类别请同时更新 SYSTEM_PROMPT 数据隔离原则段。
 # - doc：RAG 召回的本地知识库片段
 # - web：内置 web_search / fetch_url 返回
-# - tool：MCP server 返回（Phase 3.3；通用 tool 返回标签，含未来其它第三方 tool）
+# - tool：MCP server 返回（通用 tool 返回标签，含未来其它第三方 tool）
 _WRAP_KINDS: frozenset[str] = frozenset({"doc", "web", "tool"})
 
 

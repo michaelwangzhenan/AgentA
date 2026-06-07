@@ -9,7 +9,7 @@
    SQLite 文件级锁保证安全，多 connection 串行写不会损坏数据。
 
 两套并存的历史原因：plan / quiz / srs 的 store 早期就提供了 `get_shared_store()`
-便于 LLM 工具复用；chat_history / user_memory 没有，本期不动以减少 ripple。
+便于 LLM 工具复用；chat_history / user_memory 没有，暂不改动以缩小影响面。
 未来可统一为 shared，但代价是 Agent 构造路径也要改。
 """
 
@@ -46,7 +46,7 @@ def get_agent() -> AgentAPI:
 
     返回 `AgentAPI` 契约类型，调用方不绑定具体实现。
     """
-    from src.cli.skill_loader import scan_skills
+    from src.skills.skill_loader import scan_skills
     skills_map = scan_skills().loaded
     return Agent(verbose=False, skills=skills_map or None)
 

@@ -44,12 +44,14 @@ _BGE_ZH_QUERY_PREFIX: str = "为这个句子生成表示以用于检索相关文
 _BGE_EN_QUERY_PREFIX: str = "Represent this sentence for searching relevant passages: "
 
 
+# bge-m3 与 bge-*-v1.5 系列检索时不需要 query 前缀（命中任一子串即跳过）
+_BGE_NO_PREFIX_MARKERS: tuple[str, ...] = ("bge-m3", "v1.5")
+
+
 def _query_prefix_for(model_name: str) -> str:
     """根据 embedding 模型名返回非对称检索的 query 前缀；不需要时返回空字符串。"""
     name = model_name.lower()
-    if "bge-m3" in name or "bge-large-en-v1.5" in name or "bge-base-en-v1.5" in name \
-            or "bge-small-en-v1.5" in name or "bge-large-zh-v1.5" in name \
-            or "bge-base-zh-v1.5" in name or "bge-small-zh-v1.5" in name:
+    if any(marker in name for marker in _BGE_NO_PREFIX_MARKERS):
         return ""
     if "bge" in name and "zh" in name:
         return _BGE_ZH_QUERY_PREFIX
@@ -74,6 +76,21 @@ def _get_embedding_fn(model_name: str) -> SentenceTransformerEmbeddingFunction:
             fn = SentenceTransformerEmbeddingFunction(model_name=model_name)
             _embedding_fn_cache[model_name] = fn
     return fn
+
+
+# ── ChromaDB 客户端进程级缓存 ─────────────────────────────────────────────────
+_chroma_client: Any = None
+_chroma_client_lock = threading.Lock()
+
+
+def _get_chroma_client() -> Any:
+    """懒加载并复用进程级 `PersistentClient`，避免每次 `search` 都重建（双检锁）。"""
+    global _chroma_client
+    if _chroma_client is None:
+        with _chroma_client_lock:
+            if _chroma_client is None:
+                _chroma_client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
+    return _chroma_client
 
 
 def warm_up() -> None:
@@ -331,8 +348,8 @@ def search(
     Returns:
         Hit 列表，按融合后/精排后 score 降序，长度 ≤ top_k；空列表表示无命中。
     """
-    # 初始化 chromadb 客户端
-    client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
+    # 复用进程级 chromadb 客户端（不再每次 search 重建）
+    client = _get_chroma_client()
 
     # 是否启用 rerank：参数 > 全局 config
     use_rerank = config.RERANKER_ENABLED if rerank is None else bool(rerank)
@@ -510,8 +527,8 @@ def format_search_results(
     Args:
         hits:          search() 返回的命中列表，为空时返回提示文本。
         citation_nums: 可选编号列表，长度与 `hits` 等长；传入时第 i 段前缀
-                       使用 `[citation_nums[i]]`（用于 Phase 1.4 跨 tool_call
-                       的全局编号）；不传则退化为 1..N 局部 enumerate。
+                       使用 `[citation_nums[i]]`（用于跨 tool_call 的全局编号）；
+                       不传则退化为 1..N 局部 enumerate。
 
     Returns:
         格式化文本，每条独立一段，段间用 "---" 分隔。
@@ -524,11 +541,11 @@ def format_search_results(
             "  python -m src.rag.ingest -m zh   # 中文文档"
         )
 
-    # Phase 3.2：RAG 召回内容是"非用户主控"外部数据，进 LLM context 前过 security_filter：
+    # RAG 召回内容是"非用户主控"外部数据，进 LLM context 前过 security_filter：
     # ① 每条 hit.document 走 scrub_injection 段级删除已知注入模板；
     # ② 命中 injection 时段头追加 "[⚠️ 已清洗]" 提示给 LLM；
     # ③ 整个返回值用 wrap_untrusted(kind="doc") 包装，配合 SYSTEM_PROMPT 数据隔离原则段
-    # 让 LLM 把标签内的"指令"识别为数据。详 docs/iter_2_agent.md §4.9.12 D5 + D6。
+    # 让 LLM 把标签内的"指令"识别为数据。
     from src.agent.core.security_filter import scrub_injection, wrap_untrusted
 
     parts: list[str] = []
@@ -548,7 +565,7 @@ def format_search_results(
             loc_bits.append(f"页={meta['page_no']}")
         loc_str = ("，" + "，".join(loc_bits)) if loc_bits else ""
 
-        # Phase 1.4：传入 citation_nums 时改用 builder 分配的全局编号，
+        # 传入 citation_nums 时改用 builder 分配的全局编号，
         # 让 LLM 的引用编号与 Agent.run() 末尾渲染的 sources 块对齐
         n = citation_nums[i - 1] if citation_nums is not None else i
 

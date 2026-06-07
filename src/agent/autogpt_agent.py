@@ -39,7 +39,7 @@ from src.agent.core.event_bus import (
     EventBus,
 )
 from src.agent.tools import get_tools, execute_tool, ToolResult
-from src.cli.skill_loader import SkillInfo, build_skill_catalog
+from src.skills.skill_loader import SkillInfo, build_skill_catalog
 from src.llm.provider import chat
 from src.memory.chat_history import ChatHistoryStore
 from src.memory.user_memory import UserMemoryStore
