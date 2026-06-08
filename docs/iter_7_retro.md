@@ -55,7 +55,7 @@ Review 方式讨论:
 
 > 范围：本期只审主实现 `agent.py` 线；`langchain_agent.py` / `autogpt_agent.py` 及其专用 provider / tools / history 是初始框架，当期问题留待 iter_a / iter_b。
 
-### 1.3.0. 整体扫描（依赖方向）
+### 1.3.1. 整体扫描（依赖方向）
 
 | 编号 | 优先级 | 位置 | 问题 | 建议 |
 |---|---|---|---|---|
@@ -63,7 +63,7 @@ Review 方式讨论:
 | G2 | P1 ✅已修复 | `chat_history` / `user_memory` / `learning_plan_store` / `quiz_store` / `srs_store` import `src.agent.core.user_context` | 依赖层（`*Store`）反向感知 helper 层，方向倒置 | `user_context.py` 迁至新建 `src/core/`（最底层共享原语层），5 个 store + `chat.py` + `agent.py` 改引 `src.core.user_context`。复查：`src/memory` 下已无 `src.agent.core.user_context` import（仅余 G3 的 `security_filter`，属 P2） |
 | G3 | P2 | `user_memory.py:42` import `security_filter._INJECTION_PATTERNS` | 跨模块 import 私有符号（下划线开头） | `security_filter` 暴露公开接口（如 `contains_injection()`），调用方不碰私有变量 |
 
-### 1.3.1. src/llm
+### 1.3.2. src/llm
 
 主出口 `provider.py` 整体扎实（function name sanitize/restore、流式 usage、claude/openai 双分支、thinking 分发都处理得细）。
 
@@ -73,7 +73,7 @@ Review 方式讨论:
 
 > `langchain_provider.py` 的若干问题（未用 `force_temperature`、`httpx.Client` 无人关闭、缺 docstring 等）属 langchain 实现线，本期不计入，留待 iter_a。
 
-### 1.3.2. src/rag
+### 1.3.3. src/rag
 
 主流程（`retriever` / `ingest` / `bm25_index` / `splitter` / `reranker`）实现细致、降级处理到位。核心问题是 BM25 缓存陈旧。
 
@@ -86,7 +86,7 @@ Review 方式讨论:
 | R5 | P2 ✅已修复 | `retriever.py` `_query_prefix_for` | 用长 OR 列表枚举"不需要前缀"的模型，可读性差 | 改为 `any(marker in name ...)` 子串成员判定（`bge-m3` / `v1.5` 两个标记覆盖原列表） |
 | R6 | P2 ✅已修复 | `bm25_index.py` | 末尾 `_ = Any` 仅为消除 unused-import 警告 | 删掉 `_ = Any` 与未使用的 `from typing import Any` |
 
-### 1.3.3. src/memory
+### 1.3.4. src/memory
 
 `user_store`（密码 pbkdf2 + salt + 常量时间比较、大小写不敏感、级联删除）与各业务 store 的 `user_id` 过滤都做得对。最大问题是线程安全不一致。
 
@@ -97,7 +97,7 @@ Review 方式讨论:
 | M3 | P2 ⏸本期不动 | `user_store.set_settings` | 用 `COALESCE`，传 `None` 保持原值，因此设过的偏好无法再清回「用全局默认」 | 用户决定本期不做（重置偏好属新增小功能，需求不迫切） |
 | M4 | P2 ✅已修复 | `user_store` 登录态 | 过期 session 仅在被访问时惰性删除，长期登录的废 token 会堆积 | `create_session` 每次登录顺带 `DELETE ... WHERE expires_at < now`，并暴露 `purge_expired_sessions()` 供定时清理显式调用 |
 
-### 1.3.4. src/agent + core
+### 1.3.5. src/agent + core
 
 `agent.py`（ReAct 主循环、plan 自适应轮次上限、引用渲染、错误事件）、`tool_call_engine`、`security_filter`、`tools.py` 实现成熟。**安全层确认无空挂**：`get_tools` 用 `is_tool_allowed` 过滤、`execute_tool` 入口再次 double-check、`fetch_url` 走 `url_guard.is_url_safe`、web / MCP / RAG 外部数据统一 `scrub_injection` + `wrap_untrusted`。
 
@@ -109,13 +109,13 @@ Review 方式讨论:
 
 > 说明：core 下其余 helper（`history_manager` / `plan_manager` / `srs_scheduler` / `harness_manager` / `mcp_manager` / `citation_builder` / `event_bus` / `thinking_policy` / `url_guard`）做了结构与关键路径抽查，未见 P0/P1；细节问题并入 §1.3.7 横切。
 
-### 1.3.7. 横切问题（跨模块）
+### 1.3.6. 横切问题（跨模块）
 
 | 编号 | 优先级 | 范围 | 问题 | 建议 |
 |---|---|---|---|---|
 | X1 | P2 ✅已修复 | 主实现线约 25 个源文件 | 注释 / docstring 里残留 `Phase x` / `Step x` / `iter_x` / `§4.9.x` / `D5` 等代号与时效标记 | 删时效标记；保留设计依据的改为自洽大白话表述，不再引外部文档章节号。`tools.py` 三处 LLM / 用户可见字符串里的 `（Phase 2.5）` / `（D13）` / `（D4 ...）` 也一并清理。`langchain_agent.py` / `autogpt_agent.py` 按既定范围不动，留待 iter_a / iter_b |
 
-### 1.3.5. src/api
+### 1.3.7. src/api
 
 `deps.py` 依赖注入清晰；`sessions.py` 每个端点都做归属校验（`owns_session` / `get_session_owner`，404 不泄露存在性）；`chat.py` 用全局 `_AGENT_LOCK` 串行化共享 agent 单例、`use_user` / `use_llm_prefs` 在 executor 线程内设置并复位——并发安全到位。所有路由文件都挂了 `get_current_user` / `require_admin`。
 
@@ -124,7 +124,7 @@ Review 方式讨论:
 | API1 | P2 ⏸本期不动 | `chat.py:40` `_AGENT_LOCK` | 进程级单例 Agent + 全局锁 → 所有 chat 请求全局串行，多用户无法并发对话（已在注释中标为已知取舍） | 用户决定本期不动：个人项目可接受；若要多用户并发，需让 Agent 实例可按请求构造（去单例可变状态） |
 | API2 | P2 ⏸本期不动 | `deps.py:1-14` 自述 | store 共享两套策略（shared singleton vs 独立 connection）并存，属技术债 | 并发正确性已随 M1 解决（见 §1.3.4 A3）；两套策略是否收敛为单一，用户决定本期不动 |
 
-### 1.3.6. src/cli
+### 1.3.8. src/cli
 
 `skill_loader`（扫描 / 解析 / CRUD / 原子写 disabled.json / 孤儿自愈 / catalog 渲染）实现完善，`html.escape` 防 prompt 注入到位——本期已随 C1 迁出到 `src/skills/`。命令处理（`handlers` / `ui` / `tab_complete`）按 dev/headless 定位组织，未见 P0/P1。
 
@@ -132,7 +132,7 @@ Review 方式讨论:
 |---|---|---|---|---|
 | C1 | P1 ✅已修复 | `skill_loader.py` 位置 | 该模块同时被 Agent core（`agent.py` 导 `SkillInfo` / `build_skill_catalog`）与 API（`skills.py` 用 CRUD）使用，却放在 `src/cli/` —— 命名与归属错位（即 §1.3.0 G1 的落点） | 随 G1 一并迁到新建 `src/skills/skill_loader.py`，cli / agent / api 都向它依赖 |
 
-### 1.3.8. frontend
+### 1.3.9. frontend
 
 `api/client.ts` 结构清晰（统一 `_ensureOk` + 全局 401 跳登录回调 + SSE 主动 abort 不重试处理）。重点审查了 API client 层；各 React 组件做了结构性抽查，未见 P0/P1。
 
@@ -141,7 +141,7 @@ Review 方式讨论:
 | F1 | P2 ✅已修复 | `client.ts` 全部 `fetch` / `fetchEventSource` | 未显式设 `credentials: 'include'`，靠同源默认带 cookie。与 iter_6 §3.6 设计描述不符；一旦前后端跨域部署会丢登录态 | 加 `apiFetch` 包装统一带 `credentials: 'include'`，66 处 `fetch` 改走它；`fetchEventSource` 也补 `credentials` |
 | F2 | P2 ✅已修复 | `client.ts` `postChat` | 自带一套错误解析（前缀 `HTTP 401:`），与 `_ensureOk` 风格不一致（`postChat` 是非流式 fallback） | 改走统一的 `_ensureOk` |
 
-### 1.3.9. 汇总与修复优先级
+### 1.3.10. 汇总与修复优先级
 
 未发现 P0。整体结论：**功能正确、安全层（多用户隔离 / tool 名单门 / SSRF / injection 清洗）接通无空挂**；问题集中在架构耦合、并发一致性、注释清理三类。
 
@@ -170,28 +170,106 @@ P2 进度：
 
 # 2. 定位再思考
 
-1. 回顾 iter_2, 看看 Agent 的能力可能提升哪些
-2. 在“学习计划”这个业务之外，AgentA 能够增加哪些新业务
+本节盘点接下来值得做的方向，按四个维度评估：**实用性 / 可展示性（作品集、demo 是否吸睛）/ 跟进 AI 潮流 / 求职加分**。
 
-补充——**Agent 能力候选**（从 iter_2 §4.6 清单里挑契合"个人学习助手"定位的，不是全都做）：
+## 2.1. 一个判断
+**求职场景下，工程成熟度比再加业务更值钱**
+
+面试 LLM 应用 / Agent / RAG 岗时，"做过一个问答机器人"几乎人人都能说，拉不开差距。真正稀缺的是这句话：**能度量一个 LLM 系统好不好，并能系统性地把它改好、守住、压成本。**
+
+所以跳出业务看，加分项分三层，从纵向加深，比横向再铺一个业务更打动人：
+
+| 层 | 解决什么 | 对应方向（见 §2.3） |
+|---|---|---|
+| 可度量 | 改动有没有变好，靠数据说话 | 评估 + 可观测闭环 |
+| 可信赖 | 被攻击 / 异常时守得住 | AI 安全 / 红队 |
+| 有亮点 | 一个能"哇"住人的 demo，蹭上潮流 | Deep Research / 浏览器代理 / 语音 |
+
+一句话叙事目标：**"一个带评估闭环和安全防护的多代理 RAG 平台，能度量、能守住、还能自主深度研究。"**
+
+## 2.2. 候选 A：仍在"个人学习助手"范畴内
+
+复用现有 RAG / Agent / 存储，铺面积、风险低，但求职差异化一般。
+
+**Agent 能力候选**（挑契合"个人学习助手"定位的，不是全做）：
 
 | 候选 | 价值 | 大致成本 |
 |---|---|---|
-| 深度研究模式（Deep Research） | 多步检索 + web + 综述，直接强化"主动学新东西"这条主线 | 中-高（要多轮规划 + 结果汇总） |
+| 深度研究模式（Deep Research） | 多步检索 + web + 综述，强化"主动学新东西"主线 | 中-高（多轮规划 + 结果汇总） |
 | 子代理（SubAgent） | 把出题 / 复习 / 研究拆成专职子代理，可并行、各自独立上下文 | 中（已有 EventBus / tool 基础） |
-| 长程上下文压缩 / 记忆整合 | 长对话或长研究时省 token、防上下文污染（§4.6 E 类） | 中 |
+| 长程上下文压缩 / 记忆整合 | 长对话 / 长研究时省 token、防上下文污染 | 中 |
 | 事件钩子（Hooks） | 在 SRS 触发复习、plan 完成等节点挂动作（通知 / 自动出题） | 低-中 |
 | 自定义 Workflow | 用户声明式编排自己的学习流程 | 高（偏锦上添花） |
 
-补充——**新业务候选**（仍在"个人学习助手"定位之内，复用现有 RAG / Agent / 存储）：
+**新业务候选**（仍在定位之内）：
 
 | 候选 | 说明 | 复用程度 |
 |---|---|---|
-| 深度调研 / 综述助手 | 针对知识库 + web 产出结构化报告（与上面深度研究能力同源） | 高 |
+| 深度调研 / 综述助手 | 针对知识库 + web 产出结构化报告（与上面深度研究同源） | 高 |
 | 阅读精读助手 | 论文 / 书籍逐章摘要 + 提问 + 自动生成复习卡 | 高（接 quiz / srs） |
 | 笔记整理与关联 | 自动归类、关联、去重个人笔记，沉淀成知识结构 | 中 |
 | 周期性知识简报 | 按兴趣主动推送知识库新增 / 待复习摘要 | 中（接 SRS scheduler） |
 | 技术写作助手 | 基于知识库辅助写博客 / 文档 | 中 |
-| 企业内 Q&A | 已在 iter_2 §5.1 Future 登记，会让定位偏移，列此备查 | 高 |
+| 企业内 Q&A | 会让定位偏移，列此备查 | 高 |
 
+## 2.3. 候选 B：跳出业务的方向
 
+LLMOps（LLM 运维：把评估 / 监控 / 成本治理工程化）、GraphRAG（基于知识图谱的检索）、computer-use（让模型直接操作浏览器 / 电脑）这类是 2026 仍在涨的方向。
+
+| 方向 | 一句话 | 做了有啥用 | 加分 | 成本 | 复用现有 |
+|---|---|---|---|---|---|
+| 评估 + 可观测闭环（LLMOps） | golden 数据集 + RAG/Agent 指标（recall@k 前 k 召回率、MRR 平均倒数排名、faithfulness 答案忠实度、answer-relevance 答案相关度、tool 成功率）+ CI 回归门禁 + trace / 成本看板 | 改动好不好用数据说话，回归能被拦住；线上耗时 / 成本 / 错误看得见、可定位 | ★★★★★ | 中 | 已有 `tools/agent_eval/` 脚手架 |
+| Deep Research 多代理 | planner + 子代理并行查（KB+web）+ 反思 + 带引用的结构化报告 | 一句话换回一篇跨多源查证的带引用调研报告 | ★★★★ | 中-高 | EventBus / tools / RAG |
+| Agentic RAG / GraphRAG | 抽实体-关系建图、多跳检索、查询规划、按需检索 | 能答多跳 / 关系类难题，减少单次检索漏召 | ★★★★ | 中-高 | 向量库 / 检索层 |
+| 浏览器 computer-use 代理 | 让 agent 真去操作浏览器取数、填表、截图核对 | 能处理没有 API 的网页场景，真正"替你动手" | ★★★ | 中 | 已有 MCP / 浏览器 MCP |
+| AI 安全 / 红队模块 | 把现有注入防御扩成可跑的红队测试集 + guardrail（护栏）评分报告 | 量化防御有效性，回归防住注入，证明系统抗攻击 | ★★★★ | 中 | 已有 prompt injection 防御 |
+| 模型路由 + 语义缓存 + 降本 | 按难度 / 成本路由模型、语义缓存、降本看板 | 自动用更便宜的模型 + 命中缓存，直接降延迟和成本 | ★★★ | 中 | 已有 provider 抽象 |
+| 语音 / 实时多模态 tutor | 实时语音问答、截图讲解 | 能开口对话、对截图讲解，交互更自然 | ★★★ | 中-高 | 需接 ASR/TTS（语音识别 / 合成），复用低 |
+| 代码 / SWE 助手 | 仓库问答 + 改 bug + 跑测试（SWE：软件工程） | 能对着仓库问答、自动改 bug 并跑测试验证 | ★★★ | 高 | 复用一般 |
+
+## 2.4. 选定Feature
+
+| Feature 名 | 功能 | side effect |
+|---|---|---|
+| 评估 + 可观测闭环 | golden 数据集 + RAG/Agent 指标 + CI 回归门禁 + trace / 成本看板 | 引入结构化指标库（与"报告强制 Markdown"红线需职责分离）；埋点轻微侵入主链路（须软失败不阻断）；LLM judge 评估耗 token |
+| 模型路由 + 语义缓存 + 降本 | 按难度 / 成本路由模型 + 语义缓存命中 + 降本看板 | 缓存可能返回过期 / 不精确结果（需失效策略）；路由判断本身有开销、可能选错模型；多一层逻辑增加复杂度 |
+| Deep Research | planner + 子代理并行查（KB+web）+ 反思 + 带引用的结构化报告 | 更慢、更贵（多轮 LLM + 多路检索）；复杂度高；可能放大幻觉 / 跑题，需约束 |
+| AI 安全 / 红队模块 | 红队攻击测试集 + guardrail 评分 + CI 拦截率门禁 | 误杀（FPR）可能挡正常输入；红队样本要持续维护；评测耗 token；用户无感、不增体验 |
+
+# 3. 需求定义
+
+## 3.1. 评估 + 可观测闭环
+
+**目标**：质量能用数据度量，线上运行能看见。
+
+- 离线评估：统一 golden 数据集 + 指标（检索 recall@k / MRR、RAG faithfulness / 相关度、Agent 成功率、安全拦截率），出 Markdown 报告，进 CI 回归门禁。
+- 在线可观测：每次 chat 埋 trace（检索 / LLM / tool 各阶段耗时、token、成本），落结构化指标库（与 Markdown 报告职责分离）。
+- 看板：概览 + 单请求 trace 瀑布 + 成本 / 延迟。
+- 分档：最小（离线 + CI）→ 进阶（+ trace + 看板）→ 完整（+ 趋势 / 告警）。
+
+## 3.2. 模型路由 + 语义缓存 + 降本
+
+**目标**：降对话 / RAG 的延迟与成本。
+
+- 路由：按问题难度 / 类型选模型，简单问走小而便宜的模型。
+- 语义缓存：相近 query 命中历史结果，跳过重复检索 / 生成。
+- 降本看板：复用 §3.1 的成本数据，展示节省效果。
+- 验收：常见重复问法延迟 / 成本明显下降，质量不退。
+
+## 3.3. Deep Research
+
+**目标**：一句话换回一篇带引用的调研报告。
+
+- 规划：planner 把问题拆成子问题。
+- 并行检索：子代理各自查 KB + web，复用现有 RAG / tools / EventBus。
+- 综述：反思去重，产出分节、带引用的结构化报告。
+- 边界：限轮数 / 来源数防失控；定位"重质量不重速度"。
+
+## 3.4. AI 安全 / 红队模块
+
+**目标**：把已有防御从"写了"变成"可证明有效、能回归守住"。
+
+- 红队测试集：直接 / 间接注入、越权调用、SSRF、信息泄露、越狱等分类样本。
+- 评分：逐类拦截率 + 误杀率（FPR），出报告并进 CI 门禁。
+- 被测对象：复用现有 `security_filter` / `url_guard`。
+- 定位：用户无感的"隐形护栏"，价值在可信度与面试差异化。
