@@ -666,11 +666,7 @@ class TestMakeAgentFactory:
         try:
             with patch("src.agent.langchain_agent.build_chat_model", return_value=MagicMock()), \
                  patch("src.agent.langchain_agent.build_langchain_tools", return_value=[]), \
-                 patch("src.agent.langchain_agent.SQLiteChatMessageHistory") as mock_h, \
-                 patch("src.agent.langchain_agent.create_tool_calling_agent", return_value=MagicMock()), \
-                 patch("src.agent.langchain_agent.AgentExecutor") as mock_exec:
-                mock_h.return_value = MagicMock(messages=[])
-                mock_exec.return_value = MagicMock()
+                 patch("src.agent.langchain_agent.get_shared_chat_history", return_value=MagicMock()):
                 ag = make_agent(**self._build_factory_args(tmp_path))
             assert isinstance(ag, LangChainAgent)
         finally:
@@ -719,11 +715,7 @@ class TestMakeAgentFactory:
         try:
             with patch("src.agent.langchain_agent.build_chat_model", return_value=MagicMock()), \
                  patch("src.agent.langchain_agent.build_langchain_tools", return_value=[]), \
-                 patch("src.agent.langchain_agent.SQLiteChatMessageHistory") as mock_h, \
-                 patch("src.agent.langchain_agent.create_tool_calling_agent", return_value=MagicMock()), \
-                 patch("src.agent.langchain_agent.AgentExecutor") as mock_exec:
-                mock_h.return_value = MagicMock(messages=[])
-                mock_exec.return_value = MagicMock()
+                 patch("src.agent.langchain_agent.get_shared_chat_history", return_value=MagicMock()):
                 ag = make_agent(**self._build_factory_args(tmp_path))
             assert hasattr(ag, "run")
             assert hasattr(ag, "session_id")

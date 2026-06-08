@@ -1698,6 +1698,19 @@ src/agent/core/
 
 ## LangChain
 
+LangChain 实现把 loop 交给 `AgentExecutor`，只在适配层把公共层接上去。详见 [iter_a_LangChain.md](./iter_a_LangChain.md)。
+
+| 维度 | 落点 | 说明 |
+|---|---|---|
+| 工具 | `src/agent/langchain_tools.py` | 遍历 `get_tools()` 的 JSON schema 动态包装为 `StructuredTool`，路由 `execute_tool`——全 17+ 工具与 Python / AutoGPT 单一真相源一致（含 MCP 合流、名单门、security / harness） |
+| 四层 prompt | `src/agent/langchain_agent.py · run()` | base(+skill catalog) → `<project_rules>` → `<user_context>` → `<active_study_plan>`，每轮重建 executor |
+| 事件流 | `_EventBridgeHandler`(BaseCallbackHandler) | token_chunk / tool_call_start / tool_call_end / plan_*（plan 为 best-effort，详 iter_a §4） |
+| 引用 | per-run `CitationBuilder` 经 `citation_getter` 透传 | RAG 回答带 `[n]` 与末尾 `— sources —` 块 |
+| 记忆 | `MemoryManager.try_extract` | 与 Python 同源的自动 / 显式提取 |
+| API 形态 | `create_tool_calling_agent + AgentExecutor`（legacy） | 本迭代不切 LangChain 1.0 `create_agent`，留独立任务（iter_a §2.3） |
+
+**已知限制**：thinking 流不发；plan 进度 reconstruct 在 legacy AgentExecutor 下保真度有限。
+
 ## AutoGPT
 
 # A. Debugging
