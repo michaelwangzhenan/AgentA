@@ -164,6 +164,15 @@ REGISTRY: list[ConfigItem] = [
         detail="开启后用 Cross-Encoder 对 Bi-Encoder 召回结果二阶段精排，提高最终相关性。",
     ),
     ConfigItem(
+        key="RERANKER_RECALL_MULTIPLIER",
+        group="rag",
+        type=ItemType.INT,
+        brief="精排召回倍数",
+        detail="精排前取 top_k × 该倍数 条候选送 Cross-Encoder；调小（如 3→2）候选变少、精排明显更快，略降召回。",
+        min=1,
+        max=10,
+    ),
+    ConfigItem(
         key="RERANKER_MODEL",
         group="rag",
         type=ItemType.STRING,
@@ -177,6 +186,22 @@ REGISTRY: list[ConfigItem] = [
         type=ItemType.BOOL,
         brief="Query 改写",
         detail="开启后 LLM 对用户 query 生成多条同义改写一起检索，命中率更高，但每次多 1 次 LLM 调用。",
+    ),
+    ConfigItem(
+        key="RAG_REWRITE_MAX_QUERIES",
+        group="rag",
+        type=ItemType.INT,
+        brief="改写条数上限",
+        detail="开启 Query 改写时单次最多生成几条同义改写（不含原 query）；调小可减少 LLM 与多路检索开销。",
+        min=1,
+        max=5,
+    ),
+    ConfigItem(
+        key="RAG_TRANSLATE_QUERY_ENABLED",
+        group="rag",
+        type=ItemType.BOOL,
+        brief="翻译轴改写",
+        detail="开启后额外把 query 翻译成另一语言一起检索（中→英 / 英→中），跨语种召回更好，但每次多 1 次 LLM 调用。",
     ),
     ConfigItem(
         key="RAG_OCR_FALLBACK_ENABLED",
@@ -204,6 +229,22 @@ REGISTRY: list[ConfigItem] = [
         min=0,
         max=2000,
         side_effect_hint="仅影响新入库文档",
+    ),
+    ConfigItem(
+        key="HARNESS_RAG_ENABLED",
+        group="rag",
+        type=ItemType.BOOL,
+        brief="RAG 召回自检",
+        detail="开启后每次 search_knowledge 用 LLM 对召回片段做相关性自检；多一次 LLM 调用，超时则放行原结果。关掉可省这次开销。",
+    ),
+    ConfigItem(
+        key="HARNESS_LLM_TIMEOUT_SEC",
+        group="rag",
+        type=ItemType.FLOAT,
+        brief="自检超时(秒)",
+        detail="RAG / Quiz 自检单次 LLM 调用超时秒数，超时静默降级放行；调小可减少自检拖慢检索的最坏耗时。",
+        min=1,
+        max=60,
     ),
     # ─── Memory ───────────────────────────────────────────────────────────
     ConfigItem(

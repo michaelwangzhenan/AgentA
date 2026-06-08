@@ -77,24 +77,50 @@
 - `approval_callback`（plan 审批）仍是实例字段，CLI 单线程没问题；API 当前不设它（默认放行）。将来 API 要支持 plan 审批，需同样改成 per-run 传入。
 - `on_thinking_chunk` 构造参数订阅在 `self.events` 上；它只服务 CLI 单实例路径，API 走 per-run bus 不依赖它，二者不重叠。
 
-# 2. search_knwoledge 优化
+# 2. search_knowledge 召回慢
+
 ## 2.1. 现状
-！！search_knwoledge 特别慢
 
-根因：慢在 CPU 推理（无 GPU 放大），不是向量检索本身。耗时大头排序：
-1. **Cross-Encoder 精排**：`bge-reranker-base` 对 `recall_mult(3)×top_k(8)≈24` 个候选逐对打分 —— 最大头。
-2. **Query 改写**：`RAG_QUERY_REWRITE_ENABLED` 默认开，每次多 1 次 LLM 调用 + 改写条数×多路检索。
-3. **Query embedding**：SentenceTransformer 在 CPU 前向，按改写条数翻倍。
-4. dense / BM25 检索本身很快，非瓶颈。
+`search_knowledge` 一次约 100 秒，慢得离谱。
 
-## 2.2. 优化方向
-- 感知延迟：SSE 加阶段状态（检索中 / 精排中 / 生成中）。
-- 精排：`RERANKER_RECALL_MULTIPLIER` 3→2 / 换更小或 ONNX 量化 reranker / 条件性精排（候选少时跳过）。
-- 改写：按需触发，别每次都改。
-- embedding：小模型 / ONNX / 查询级缓存；叠加语义缓存。
-- 釜底抽薪：embedding+rerank 移到托管 API 或 GPU 机（provider 抽象已具备条件）。
-- 方法论：先埋点量各阶段耗时，确认大头再调。
+数据口径：取一次真实调用（query="RAG 技术趋势 市场前景 应用场景"）的逐段时间戳。采样时有两个会话并发、CPU 与 LLM 有争用，绝对值偏高；单用户会更快，但各段相对大小成立。
+
+各段耗时（从大到小）：
+
+| 段 | 耗时 | 性质 | 说明 |
+|---|---|---|---|
+| query 改写（多条改写 + 翻译） | ~37s | LLM 调用 | 检索前先让 LLM 生成改写，串行挡住后面所有步骤 |
+| dense + BM25 检索（3 条 query） | ~23s | CPU 编码 | 慢在 `bge-m3`（1024 维）对 3 条 query 逐条 CPU 编码；向量 / BM25 查询本身很快 |
+| Cross-Encoder 精排（24 候选） | ~21s | CPU 推理 | `bge-reranker-base` 对 `RERANKER_RECALL_MULTIPLIER(3)×top_k(8)≈24` 个候选逐对打分 |
+| RAG critic（harness 采点） | ~15s | LLM 调用 | `HARNESS_RAG_ENABLED` 默认开，每次都超时后放行原始结果，对质量零增益、纯浪费 |
+| reranker 模型加载 | ~2s | 一次性 | 仅首次检索触发，之后命中缓存 |
+
+纠正一个常见误判：最大头不是精排，而是 query 改写（LLM）和 CPU 编码；"向量检索很快"只指查到候选这一步，但其中的 embedding 编码并不快。
+
+## 2.2. 优化方向（按性价比，先做省得多又改得少的）
+
+| 编号 | 优先级 | 项 | 做法 |
+|---|---|---|---|
+| 1 | P0 | 关 / 异步化 RAG critic | 默认关 `HARNESS_RAG_ENABLED`，或调小 timeout / 改成不挡检索返回。改一行配置省 ~15s |
+| 2 | P0 | query 改写按需触发 | 短 / 明确的 query 跳过改写；翻译与多条改写拆开按需用；改写本身换更快的小模型 |
+| 3 | P1 | 降精排候选数 | `RERANKER_RECALL_MULTIPLIER` 3→2（候选 24→16）；候选少时跳过精排；换 ONNX 量化 reranker |
+| 4 | P1 | embedding 提速 | query 级缓存 + 改写条数设上限；小 embedding 模型 / ONNX 量化 |
+| 5 | P2 | 感知延迟 | SSE 补阶段状态（检索中 / 精排中 / 生成中），让等待可感知 |
+| 6 | P2 | 釜底抽薪（不做） | embedding + rerank 移到 GPU 机或托管 API（provider 抽象已具备条件） |
+
+方法论：先埋点量各段耗时，确认大头再调，别凭感觉。
 
 
-# 3. log 分析
-分析 logs/uvicorn.log 文件，列出当前系统的瓶颈点，并给出优化建议
+# 3. log 分析（RAG 召回以外的性能问题）
+
+范围：RAG 召回慢见第 2 节，这里只看其余的耗时点。从 `logs/uvicorn.log` 看，除 RAG 外还有这些：
+
+| 优先级 | 瓶颈 | 现象（实测） | 建议 |
+|---|---|---|---|
+| P0 | agent 工具循环串行 | 一次问答里每轮 = 1 次 LLM + 工具执行，逐轮串行累加。web 类问答实测 ~40~75 秒（de4ad2af 7 轮 ~43s；676b 5 轮 ~75s） | 用 prompt 引导减少轮数（一轮多查、别反复试）；轮次上限按场景调（已可配 / UI 可改） |
+| P0 | 同一轮多个工具调用仍串行 | 一轮要抓多个 URL 时逐个 `fetch` 串行（每个几秒） | 同一轮的多个工具调用并行执行（`web_search` + 多个 `fetch` 可并发） |
+| P1 | 开 thinking 时单轮变慢 | 单轮推理思考 ~28~32 秒才出内容（676b 第 6 轮 15:37:50→15:38:22） | thinking 默认关 / 按场景调档；简单问答不开 |
+| P1 | 空内容重试多花一轮 | 模型把答案塞进思考、正文留空时，会去 tools 重试一轮（多一次完整 LLM 调用） | 鲁棒性换来的延迟，可接受；注意别让它频繁触发（属模型问题） |
+| P2 | 开发态热重载 + MCP 重连 | 改一次文件 uvicorn 反复重启，每次重连 MCP server ~6 秒（16:08~16:10 多次 reload） | 仅开发态影响；部署用 `--no-reload` 即可消除 |
+
+方法论：同 RAG，先在 agent 循环与工具执行处埋点量耗时，确认大头（大概率是工具循环串行）再动手。
