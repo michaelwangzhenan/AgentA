@@ -53,23 +53,50 @@ if (-not (Test-Path $VenvPython)) {
 }
 
 # 服务配置
+#   LogFile        ：`logs` 命令 tail 的目标（干净的业务/访问日志）
+#   Redirect       ：包装脚本 stdout+stderr 重定向到的文件
+#   ArchiveOnStart ：启动时把旧 Redirect 文件归档（保留最近 3 份）而非清空
+#   Env            ：写进包装脚本的环境变量行
+# uvicorn 走 `python -m src.api.run`：日志由后端 RotatingFileHandler 直接写 uvicorn.log
+#   （带 [APP]/[ACCESS] 前缀、按大小滚动、跨启动追加），不靠 shell 重定向。包装脚本的
+#   stdout+stderr 另存 uvicorn.boot.log，只兜底捕获早期崩溃 / MCP 子进程裸输出。
 $Services = [ordered]@{
     uvicorn = @{
-        Port    = 8000
-        Url     = 'http://localhost:8000/docs'
-        PidFile = Join-Path $RunDir 'uvicorn.pid'
-        LogFile = Join-Path $LogDir 'uvicorn.log'
-        CmdLine = "`"$VenvPython`" -m uvicorn src.api.main:app --reload --reload-dir src --port 8000"
-        Cwd     = $ProjectRoot
+        Port           = 8000
+        Url            = 'http://localhost:8000/docs'
+        PidFile        = Join-Path $RunDir 'uvicorn.pid'
+        LogFile        = Join-Path $LogDir 'uvicorn.log'
+        Redirect       = Join-Path $LogDir 'uvicorn.boot.log'
+        ArchiveOnStart = $false
+        Env            = @('set PYTHONIOENCODING=utf-8')
+        CmdLine        = "`"$VenvPython`" -m src.api.run"
+        Cwd            = $ProjectRoot
     }
     vite = @{
-        Port    = 5173
-        Url     = 'http://localhost:5173/'
-        PidFile = Join-Path $RunDir 'vite.pid'
-        LogFile = Join-Path $LogDir 'vite.log'
-        CmdLine = 'npm.cmd run dev'
-        Cwd     = $FrontendDir
+        Port           = 5173
+        Url            = 'http://localhost:5173/'
+        PidFile        = Join-Path $RunDir 'vite.pid'
+        LogFile        = Join-Path $LogDir 'vite.log'
+        Redirect       = Join-Path $LogDir 'vite.log'
+        ArchiveOnStart = $true
+        # FORCE_COLOR=0 / NO_COLOR=1：让 vite 不输出 ANSI 颜色码，避免日志文件里全是转义序列（F4）
+        Env            = @('set FORCE_COLOR=0', 'set NO_COLOR=1')
+        CmdLine        = 'npm.cmd run dev'
+        Cwd            = $FrontendDir
     }
+}
+
+function Rotate-LogOnStart {
+    param([string]$Path, [int]$Keep = 3)
+    if (-not (Test-Path $Path)) { return }
+    if ((Get-Item $Path).Length -eq 0) { return }  # 空文件不归档
+    $oldest = "$Path.$Keep"
+    if (Test-Path $oldest) { Remove-Item $oldest -Force -ErrorAction SilentlyContinue }
+    for ($i = $Keep - 1; $i -ge 1; $i--) {
+        $src = "$Path.$i"
+        if (Test-Path $src) { Move-Item $src "$Path.$($i + 1)" -Force -ErrorAction SilentlyContinue }
+    }
+    Move-Item $Path "$Path.1" -Force -ErrorAction SilentlyContinue
 }
 
 function Get-State {
@@ -113,19 +140,22 @@ function Start-One {
     }
 
     # 用 .cmd 包装：避开 PowerShell -> cmd.exe 的引号转义陷阱（路径含空格也安全）
-    $wrapper = Join-Path $RunDir "$Name.cmd"
-    # PYTHONIOENCODING=utf-8：Windows 中文系统下 Python 重定向输出默认走 GBK，
-    # 写进日志文件后编辑器按 UTF-8 读会乱码；强制 stdio 用 UTF-8 即可。
+    $wrapper  = Join-Path $RunDir "$Name.cmd"
+    $redirect = if ($Svc.Redirect) { $Svc.Redirect } else { $Svc.LogFile }
+    $envLines = ($Svc.Env -join "`r`n")
     $wrapperContent = @"
 @echo off
 cd /d "$($Svc.Cwd)"
-set PYTHONIOENCODING=utf-8
-$($Svc.CmdLine) > "$($Svc.LogFile)" 2>&1
+$envLines
+$($Svc.CmdLine) > "$redirect" 2>&1
 "@
     Set-Content -Path $wrapper -Value $wrapperContent -Encoding ascii
 
-    # 清空旧日志（避免新启动跟历史日志混在一起）
-    Set-Content -Path $Svc.LogFile -Value '' -Encoding utf8 -NoNewline
+    # F3：启动时归档旧日志（保留最近 3 份）而非清空。
+    # uvicorn.log 由后端 RotatingFileHandler 自管（跨启动追加 + 按大小滚动），不在此处理。
+    if ($Svc.ArchiveOnStart) {
+        Rotate-LogOnStart $redirect 3
+    }
 
     $proc = Start-Process -FilePath 'cmd.exe' `
         -ArgumentList '/c', $wrapper `
@@ -142,7 +172,7 @@ $($Svc.CmdLine) > "$($Svc.LogFile)" 2>&1
         Write-Host "  Log : $($Svc.LogFile)"
     }
     else {
-        Write-Host "[$Name] failed to start. See log: $($Svc.LogFile)" -ForegroundColor Red
+        Write-Host "[$Name] failed to start. See log: $redirect" -ForegroundColor Red
         Remove-Item $Svc.PidFile -ErrorAction SilentlyContinue
     }
 }

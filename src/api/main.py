@@ -12,25 +12,21 @@ load_dotenv(override=True)
 import atexit  # noqa: E402
 import logging  # noqa: E402
 import os  # noqa: E402
+import uuid  # noqa: E402
 from contextlib import asynccontextmanager  # noqa: E402
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
-# uvicorn 默认只配自己的 uvicorn.* logger，不给 root 加 handler，src.* 的 INFO 日志会被
-# lastResort handler（WARNING 级）吞掉。这里跟 CLI 入口 main.py 对齐配一次 root，让 agent
-# 业务日志按 LOG_LEVEL 全量进 logs/uvicorn.log（ui.ps1 把进程 stdout+stderr 重定向到那）。
-_LOG_LEVEL_NAME = os.getenv("LOG_LEVEL", "INFO").upper()
-_log_level = getattr(logging, _LOG_LEVEL_NAME, None)
-if not isinstance(_log_level, int):
-    _log_level = logging.INFO
-logging.basicConfig(
-    level=_log_level,
-    format="%(asctime)s [%(levelname)s] %(filename)s:%(lineno)d - %(message)s",
-    datefmt="%H:%M:%S",
-)
-for _noisy in ("httpx", "httpcore", "openai", "chromadb", "sentence_transformers"):
-    logging.getLogger(_noisy).setLevel(logging.WARNING)
+# 经 src.api.run 启动时，uvicorn 已用 build_uvicorn_log_config 把 root 挂上文件 handler，
+# 这里检测到 root 已有 handler 就不再重配（否则会冲掉文件 handler）；只有在被直接
+# `uvicorn src.api.main:app` 拉起（root 无 handler）时，才补一套终端 logging 兜底。
+from src import log_setup  # noqa: E402
+
+if not logging.getLogger().handlers:
+    log_setup.setup_cli_logging(os.getenv("LOG_LEVEL"))
+else:
+    log_setup.quiet_noisy_loggers()
 
 import src.config as _cfg  # noqa: E402
 from src.api import config_overrides as _config_overrides  # noqa: E402
@@ -96,6 +92,16 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# 给每个请求生成短 request_id 写进日志上下文，使该请求处理期间的日志带 r:<id>
+@app.middleware("http")
+async def _request_id_middleware(request, call_next):
+    log_setup.set_request_id(uuid.uuid4().hex[:8])
+    try:
+        return await call_next(request)
+    finally:
+        log_setup.set_request_id(None)
+
 
 # 开发期前端 dev server 跑在 :5173，跟后端 :8000 不同源，必须放开 CORS
 # 生产期靠 Nginx 反代同源、不走 CORS

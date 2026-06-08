@@ -19,6 +19,7 @@ from src.api.routes.auth import effective_llm_prefs
 from src.api.schemas.chat import ChatRequest, ChatResponse
 from src.memory.chat_history import ChatHistoryStore
 from src.memory.user_store import UserStore
+from src.log_setup import set_session_id
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +145,8 @@ async def chat_stream(
         ):
             if req.session_id:
                 agent.session_id = req.session_id
+            # 把当前 session 写进日志上下文，使本次 agent.run 期间的日志带 s:<session>
+            set_session_id(agent.session_id)
             agent.set_event_callback(_on_event)
             try:
                 agent.run(req.message)

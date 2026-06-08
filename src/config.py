@@ -688,7 +688,7 @@ AUTOGPT_MAX_TASK_TOOL_ROUNDS: int = int(os.getenv('AUTOGPT_MAX_TASK_TOOL_ROUNDS'
 SERPAPI_API_KEY: str = os.getenv('SERPAPI_API_KEY', '')
 
 # logger 输出级别（可选值：DEBUG / INFO / WARNING / ERROR / CRITICAL）
-# 同时应用于终端 stderr 输出与 CLI_LOG_TO_FILE 落盘文件；非法值降级 INFO 并 warn
+# 同时应用于终端 stderr 输出与日志文件；非法值降级 INFO 并 warn
 LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").upper()
 
 # CLI 终端输出落盘模式（可选值：NONE / SINGLE / MULTI；大小写不敏感）
@@ -697,6 +697,12 @@ LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").upper()
 # MULTI  每次启动新建 ./logs/agenta-YYYYMMDD-HHMMSS.log（write 覆盖）
 # 非法值降级 NONE 并 warn
 CLI_LOG_MODE: str = os.getenv("CLI_LOG_MODE", "NONE").upper()
+
+# 单个日志文件大小上限（字节），超过即滚动成新文件；默认 5MB。0 表示不限
+LOG_MAX_BYTES: int = int(os.getenv("LOG_MAX_BYTES", str(5 * 1024 * 1024)))
+
+# 日志滚动 / 归档保留的备份份数（不含当前文件）；默认 3
+LOG_BACKUP_COUNT: int = int(os.getenv("LOG_BACKUP_COUNT", "3"))
 
 # ── 防 prompt injection 配置 ──────────────────────────────────────
 # tool 名单门工作模式（可选值：normal / strict）

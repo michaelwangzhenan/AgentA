@@ -296,7 +296,9 @@ def scan_skills(
         except OSError as e:
             logger.warning("[SkillLoader] 清理 disabled 孤儿失败：%s", e)
 
-    logger.info(
+    # 每个 API 请求都会触发一次扫描，用 INFO 会刷屏（一次运行几十条）。降到 DEBUG，
+    # 平时不打；CLI 启动用 format_scan_banner 单独打到 stdout，不依赖这条日志。
+    logger.debug(
         "[SkillLoader] 发现 %d 个 skill: 启用 %s, 禁用 %s（失败 %d 个）",
         len(parsed_skills),
         list(result.loaded.keys()),

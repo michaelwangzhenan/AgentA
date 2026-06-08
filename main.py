@@ -9,6 +9,7 @@ CLI 入口 —— 私有知识库 Agent 对话界面
 import logging
 import os
 import sys
+import threading
 import warnings
 from datetime import datetime
 from pathlib import Path
@@ -30,18 +31,64 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
 
-class _Tee:
-    """把写入同时转发给原 stream 和日志文件；其余属性（isatty/fileno/encoding 等）透传给原 stream，避免破坏 prompt_toolkit 的 TTY 检测。"""
+class _LogFile:
+    """CLI 共享日志文件：stdout / stderr 两个 _Tee 都写它；写满按大小滚动并保留备份。
 
-    def __init__(self, original, file):
+    单一写入口（带锁）便于在 write 里统一判断体积并滚动，避免两个 _Tee 各持句柄打架。
+    """
+
+    def __init__(self, path: Path, mode: str, max_bytes: int, backup_count: int):
+        self._path = path
+        self._max_bytes = max_bytes
+        self._backup_count = backup_count
+        self._lock = threading.Lock()
+        # buffering=1 → 行缓冲，进程异常退出也不丢日志
+        self._fh = open(path, mode, encoding="utf-8", buffering=1)
+        self._size = self._fh.tell()  # append 模式从当前文件尾算起
+
+    def write(self, s: str) -> None:
+        with self._lock:
+            self._fh.write(s)
+            self._size += len(s.encode("utf-8", "replace"))
+            if self._max_bytes and self._size >= self._max_bytes:
+                self._rollover()
+
+    def flush(self) -> None:
+        with self._lock:
+            try:
+                self._fh.flush()
+            except Exception:
+                pass
+
+    def _rollover(self) -> None:
+        try:
+            self._fh.close()
+            oldest = Path(f"{self._path}.{self._backup_count}")
+            if oldest.exists():
+                oldest.unlink()
+            for i in range(self._backup_count - 1, 0, -1):
+                src = Path(f"{self._path}.{i}")
+                if src.exists():
+                    src.replace(Path(f"{self._path}.{i + 1}"))
+            if self._path.exists():
+                self._path.replace(Path(f"{self._path}.1"))
+        except OSError:
+            pass
+        self._fh = open(self._path, "w", encoding="utf-8", buffering=1)
+        self._size = 0
+
+
+class _Tee:
+    """把写入同时转发给原 stream 和共享日志文件；其余属性（isatty/fileno/encoding 等）透传给原 stream，避免破坏 prompt_toolkit 的 TTY 检测。"""
+
+    def __init__(self, original, logfile: "_LogFile"):
         self._original = original
-        self._file = file
+        self._logfile = logfile
 
     def write(self, s):
         n = self._original.write(s)
         try:
-            self._file.write(s)
-            self._file.flush()
+            self._logfile.write(s)
         except Exception:
             # 文件突发不可写（磁盘满 / 句柄关闭）不影响终端输出
             pass
@@ -49,19 +96,37 @@ class _Tee:
 
     def flush(self):
         self._original.flush()
-        try:
-            self._file.flush()
-        except Exception:
-            pass
+        self._logfile.flush()
 
     def __getattr__(self, name):
         return getattr(self._original, name)
 
 
-# CLI 终端输出落盘开关 —— 必须在 logging.basicConfig 之前完成 stream 包装，
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _prune_multi_logs(log_dir: Path, keep: int) -> None:
+    """MULTI 模式启动时清理旧 agenta-*.log，只保留最近 keep 份（不含将新建的当前份）。"""
+    try:
+        files = sorted(
+            log_dir.glob("agenta-*.log"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for old in files[keep:]:
+            old.unlink()
+    except OSError:
+        pass
+
+
+# CLI 终端输出落盘开关 —— 必须在配置 logging 之前完成 stream 包装，
 # 否则 StreamHandler 在构造时已绑定到未包装的 sys.stderr，logger 输出进不了文件。
 # 三种模式：NONE 不写；SINGLE 固定 ./logs/agenta.log 跨启动追加；MULTI 每次新建带时间戳文件。
-_CLI_LOG_FILE = None
+_CLI_LOG_FILE: "_LogFile | None" = None
 _CLI_LOG_PATH: Path | None = None
 _CLI_LOG_MODE = os.getenv("CLI_LOG_MODE", "NONE").upper()
 if _CLI_LOG_MODE not in ("NONE", "SINGLE", "MULTI"):
@@ -71,14 +136,17 @@ if _CLI_LOG_MODE != "NONE":
     try:
         _log_dir = Path("./logs")
         _log_dir.mkdir(parents=True, exist_ok=True)
+        _max_bytes = _int_env("LOG_MAX_BYTES", 5 * 1024 * 1024)
+        _backup_count = _int_env("LOG_BACKUP_COUNT", 3)
         if _CLI_LOG_MODE == "SINGLE":
+            # 跨启动追加（不删旧 = F3）；体积靠按大小滚动控制（F8）
             _CLI_LOG_PATH = _log_dir / "agenta.log"
             _open_mode = "a"
         else:  # MULTI
             _CLI_LOG_PATH = _log_dir / f"agenta-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
             _open_mode = "w"
-        # buffering=1 → 行缓冲，每条 \n 立即刷盘，进程异常退出也不丢日志
-        _CLI_LOG_FILE = open(_CLI_LOG_PATH, _open_mode, encoding="utf-8", buffering=1)
+            _prune_multi_logs(_log_dir, keep=_backup_count)  # 留最近 N 份历史（F3）
+        _CLI_LOG_FILE = _LogFile(_CLI_LOG_PATH, _open_mode, _max_bytes, _backup_count)
         sys.stdout = _Tee(sys.stdout, _CLI_LOG_FILE)
         sys.stderr = _Tee(sys.stderr, _CLI_LOG_FILE)
     except OSError as e:
@@ -86,21 +154,11 @@ if _CLI_LOG_MODE != "NONE":
         _CLI_LOG_FILE = None
         _CLI_LOG_PATH = None
 
-# logger 级别：从 LOG_LEVEL 解析；非法名降级 INFO 并 warn 一次
-_LOG_LEVEL_NAME = os.getenv("LOG_LEVEL", "INFO").upper()
-_log_level = getattr(logging, _LOG_LEVEL_NAME, None)
-if not isinstance(_log_level, int):
-    print(f"[WARN] 未知 LOG_LEVEL '{_LOG_LEVEL_NAME}'，降级使用 INFO（可选值：DEBUG / INFO / WARNING / ERROR / CRITICAL）")
-    _log_level = logging.INFO
-logging.basicConfig(
-    level=_log_level,
-    format="%(asctime)s [%(levelname)s] %(filename)s:%(lineno)d - %(message)s",
-    datefmt="%H:%M:%S",
-)
+# logger 配置（必须在 _Tee 包装之后，handler 才绑定到 tee → 日志进文件）。
+# 格式 / 级别 / 上下文注入统一收口到 src.log_setup。
+from src import log_setup  # noqa: E402
 
-# 关闭第三方库的冗余日志
-for _noisy in ("httpx", "httpcore", "openai", "chromadb", "sentence_transformers"):
-    logging.getLogger(_noisy).setLevel(logging.WARNING)
+log_setup.setup_cli_logging(os.getenv("LOG_LEVEL"))
 
 # src.* 模块必须在 load_dotenv() 之后导入，确保 src.config 读取到 .env 的值
 from src.cli.ui import BANNER, HELP_TEXT
@@ -221,6 +279,9 @@ def main() -> None:
             
         if not user_input:
             continue
+
+        # 把当前 session 写进日志上下文，使本轮日志带 s:<session>
+        log_setup.set_session_id(agent.session_id)
 
         # 用户输入只走 TTY 回显，不经 Python stdout —— 若开了文件日志需手动补写一笔，
         # 文件里才能完整还原"我问了啥 → Agent 答了啥"
