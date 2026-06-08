@@ -93,6 +93,33 @@ REGISTRY: list[ConfigItem] = [
         max=64000,
         hidden=True,
     ),
+    ConfigItem(
+        key="MAX_TOOL_ROUNDS",
+        group="llm",
+        type=ItemType.INT,
+        brief="工具调用最大次数",
+        detail="单次问答调用工具最大次数。",
+        min=1,
+        max=50,
+    ),
+    ConfigItem(
+        key="MAX_TOTAL_ROUNDS",
+        group="llm",
+        type=ItemType.INT,
+        brief="总推理次数",
+        detail="单次问答的总推理最大次数。",
+        min=1,
+        max=60,
+    ),
+    ConfigItem(
+        key="MAX_HARD_CAP_ROUNDS",
+        group="llm",
+        type=ItemType.INT,
+        brief="最大推理次数",
+        detail="plan模式下自适应放大后的最大推理次数。",
+        min=1,
+        max=200,
+    ),
     # ─── RAG ──────────────────────────────────────────────────────────────
     ConfigItem(
         key="RAG_TOP_K",

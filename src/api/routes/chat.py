@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import threading
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -34,11 +35,10 @@ def _check_session_owner(store: ChatHistoryStore, session_id: str | None, user_i
     if owner is not None and owner != user_id:
         raise HTTPException(status_code=403, detail="无权访问该会话")
 
-# 进程级 Agent 单例共享 session_id / event_callback 等可变属性；并发请求
-# 必须串行化进入 agent.run（含前后 set_event_callback / 设 session_id），
-# 否则后到的请求会覆盖前一个还在跑的属性，导致 user_input 写错 session 等。
-# 单用户场景几乎无感；牺牲并发换 thread-safety。
-_AGENT_LOCK = threading.Lock()
+# 进程级 Agent 单例可被多请求并发调用：session_id / 事件回调都改为 agent.run 的
+# per-run 入参（不再写共享实例属性），所以无需串行化。仅用信号量限制同时在跑的
+# run 数，避免并发把 LLM 配额 / CPU（含 search_knowledge 精排）打满；超出的请求排队。
+_AGENT_SEMAPHORE = threading.BoundedSemaphore(_cfg.MAX_CONCURRENT_AGENT_RUNS)
 
 
 # ─── 非流式（保留作为 fallback / 测试入口）─────────────────────────
@@ -53,26 +53,26 @@ def chat(
 ) -> ChatResponse:
     """单轮聊天：转发用户消息给 Agent.run、返回完整答案。
 
-    同步路由（不加 async）—— FastAPI 会自动把它扔到 thread pool 跑，
-    不阻塞 event loop。`_AGENT_LOCK` 保证并发请求按到达顺序串行化执行。
+    同步路由（不加 async）—— FastAPI 会自动把它扔到 thread pool 跑，不阻塞 event loop。
+    session_id 由调用方生成并作为 per-run 入参传给 agent.run，单例 Agent 不被写脏，
+    并发请求互不串台；`_AGENT_SEMAPHORE` 仅做并发数限流。
     """
     _check_session_owner(history, req.session_id, user["id"])
     prefs = effective_llm_prefs(users, user["id"])
-    # use_user 在锁内设当前用户（让 tools 调 store 落到本人数据），退出时复位，
-    # 避免线程复用导致 user_id 残留到下个请求。use_llm_prefs 把该用户选的
-    # 模型 / thinking 压进 contextvar，多用户互不干扰。
-    with _AGENT_LOCK, use_user(user["id"]), _cfg.use_llm_prefs(
+    # 调用方生成 session_id（空则新建 uuid），不再回读 agent.session_id —— 既避免并发
+    # 串台，也修掉"新会话复用单例构造期 uuid"的旧隐患。
+    session_id = req.session_id or str(uuid.uuid4())
+    # use_user 设当前用户（让 tools 调 store 落到本人数据），退出时复位，避免线程复用
+    # 导致 user_id 残留到下个请求。use_llm_prefs 把该用户选的模型 / thinking 压进
+    # contextvar，多用户互不干扰。
+    with _AGENT_SEMAPHORE, use_user(user["id"]), _cfg.use_llm_prefs(
         prefs.active_model, prefs.thinking_enabled, prefs.thinking_budget
     ):
-        if req.session_id:
-            agent.session_id = req.session_id
         try:
-            reply = agent.run(req.message)
+            reply = agent.run(req.message, session_id=session_id)
         except Exception as exc:
             logger.exception("[/api/chat] agent.run 抛异常")
             raise HTTPException(status_code=500, detail=f"agent error: {exc}") from exc
-        # 在锁内读 session_id，避免下一请求改 agent.session_id 后读到错值
-        session_id = agent.session_id
 
     return ChatResponse(reply=reply, session_id=session_id)
 
@@ -118,6 +118,8 @@ async def chat_stream(
     _check_session_owner(history, req.session_id, user["id"])
     # 在请求线程算好该用户生效偏好，闭包带进 executor 线程内设置 contextvar
     prefs = effective_llm_prefs(users, user["id"])
+    # 调用方生成 session_id（空则新建 uuid），作为 per-run 入参传给 agent.run
+    session_id = req.session_id or str(uuid.uuid4())
 
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
@@ -135,23 +137,18 @@ async def chat_stream(
             return
         loop.call_soon_threadsafe(queue.put_nowait, frame)
 
-    # 整段 agent 交互（设 session_id / 装 callback / run / 卸 callback）必须在锁内
-    # 一次完成，避免被其他并发请求穿插覆盖 agent 共享属性。
+    # session_id 与事件回调都作为 per-run 入参传进 agent.run（不写共享实例属性），
+    # 多请求并发互不串台；信号量仅限流。
     def _sync_run() -> None:
         # contextvar 不随 run_in_executor 传播，必须在 executor 线程内重设；
         # use_user / use_llm_prefs 退出时复位，避免值残留到复用该线程的下个请求。
-        with _AGENT_LOCK, use_user(user["id"]), _cfg.use_llm_prefs(
+        with _AGENT_SEMAPHORE, use_user(user["id"]), _cfg.use_llm_prefs(
             prefs.active_model, prefs.thinking_enabled, prefs.thinking_budget
         ):
-            if req.session_id:
-                agent.session_id = req.session_id
-            # 把当前 session 写进日志上下文，使本次 agent.run 期间的日志带 s:<session>
-            set_session_id(agent.session_id)
-            agent.set_event_callback(_on_event)
-            try:
-                agent.run(req.message)
-            finally:
-                agent.set_event_callback(None)
+            # 把当前 session 写进日志上下文（ContextVar，线程内有效），
+            # 使本次 agent.run 期间的日志带 s:<session>
+            set_session_id(session_id)
+            agent.run(req.message, session_id=session_id, event_callback=_on_event)
 
     async def _drive_agent() -> None:
         try:
@@ -183,7 +180,7 @@ async def chat_stream(
                 }
         finally:
             # cancel 仅取消 asyncio 包装层；executor 里同步的 agent.run 不会真停，
-            # 仍持有锁直到自然结束。callback 解绑已由 _sync_run finally 兜底。
+            # 会自然跑完并释放信号量。事件回调是本次 run 的局部 bus，run 结束即失效。
             if not run_task.done():
                 run_task.cancel()
 

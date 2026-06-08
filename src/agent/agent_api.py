@@ -46,8 +46,19 @@ class AgentAPI(Protocol):
     thinking_cfg: Any  # ThinkingConfig | None；同上
     events: EventBus
 
-    def run(self, user_input: str) -> str:
-        """执行一轮推理，返回 LLM 最终回答。失败时返回 'Error: <msg>' 而非抛异常。"""
+    def run(
+        self,
+        user_input: str,
+        *,
+        session_id: str | None = None,
+        event_callback: Callable[[AgentEvent], None] | None = None,
+    ) -> str:
+        """执行一轮推理，返回 LLM 最终回答。失败时返回 'Error: <msg>' 而非抛异常。
+
+        session_id / event_callback 为可选 per-run 入参：传入时只作用于本次调用、不写回
+        实例字段，使进程级单例 Agent 能被多请求并发调用而互不串台（默认 Python Agent
+        实现真正隔离；CLI 等单实例场景可不传，沿用实例的 session_id / events）。
+        """
         ...
 
     def activate_skill(self, name: str, body: str) -> bool:

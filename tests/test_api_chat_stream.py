@@ -37,13 +37,23 @@ class FakeAgent:
         self._events_to_emit = events_to_emit or []
         self._run_raises = run_raises
         self._final_reply = final_reply
+        self.last_session_id: str | None = None
 
-    def run(self, user_input: str) -> str:
+    def run(
+        self,
+        user_input: str,
+        *,
+        session_id: str | None = None,
+        event_callback=None,
+    ) -> str:
+        # 新契约：session_id / event_callback 作为 per-run 入参传入，不再走实例字段
+        self.last_session_id = session_id
+        cb = event_callback if event_callback is not None else self._callback
         if self._run_raises is not None:
             raise self._run_raises
         for ev in self._events_to_emit:
-            if self._callback is not None:
-                self._callback(ev)
+            if cb is not None:
+                cb(ev)
         return self._final_reply
 
     def activate_skill(self, name: str, body: str) -> bool:
@@ -171,8 +181,8 @@ def test_stream_empty_message_returns_422():
     assert r.status_code == 422
 
 
-def test_stream_with_session_id_switches_agent_session():
-    """带 session_id 时，路由先把 agent.session_id 改成请求里的值再 run。"""
+def test_stream_with_session_id_passes_it_to_run():
+    """带 session_id 时，路由把它作为 per-run 入参传给 run，不写脏单例实例字段。"""
     fake = FakeAgent(events_to_emit=[
         AgentEvent(type="final_answer", payload={"text": "ok", "usage": None}),
     ])
@@ -188,7 +198,9 @@ def test_stream_with_session_id_switches_agent_session():
         for _ in r.iter_text():
             pass
 
-    assert fake.session_id == "target-uuid"
+    # 不再 mutate 实例字段；session_id 作为 per-run 入参传入
+    assert fake.session_id == "default-uuid"
+    assert fake.last_session_id == "target-uuid"
 
 
 def test_stream_sanitizes_namedtuple_payload():

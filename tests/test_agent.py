@@ -17,7 +17,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.agent.agent import Agent, MAX_TOOL_ROUNDS, MAX_TOTAL_ROUNDS, SYSTEM_PROMPT
+from src.agent.agent import Agent, SYSTEM_PROMPT
+from src.config import MAX_TOTAL_ROUNDS
 from src.agent.core.tool_call_engine import TOOL_EMPTY_HINT
 from src.agent.tools import ToolResult
 

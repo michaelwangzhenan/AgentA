@@ -187,16 +187,32 @@ class AutoGPTAgent:
 
     # ── 公共接口 ──────────────────────────────────────────────────────────────
 
-    def run(self, user_input: str) -> str:
+    def run(
+        self,
+        user_input: str,
+        *,
+        session_id: str | None = None,
+        event_callback: Callable[[AgentEvent], None] | None = None,
+    ) -> str:
         """
         执行完整的 Plan → Execute → Review 循环，返回最终回答文本。
 
         Args:
             user_input: 用户的自然语言目标/问题。
+            session_id: 本次运行会话 ID（接口对齐 Python Agent）。
+            event_callback: 本次运行事件回调（接口对齐 Python Agent）。
 
         Returns:
             综合各子任务结果后生成的最终回答。
+
+        Note: AutoGPT 仅 CLI 单实例使用，不在 Web 并发路径（API 固定用 Python Agent）。
+        per-run kwargs 在此折叠回实例状态即满足签名一致与 CLI 正确性；真正的并发隔离
+        在默认 `Agent.run` 内实现。
         """
+        if session_id is not None:
+            self.session_id = session_id
+        if event_callback is not None:
+            self.set_event_callback(event_callback)
         self._prompt_tokens = 0
         self._comp_tokens = 0
 

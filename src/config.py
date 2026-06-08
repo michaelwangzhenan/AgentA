@@ -380,6 +380,19 @@ AUTH_COOKIE_NAME: str = os.getenv("AUTH_COOKIE_NAME", "agenta_session")
 # CLI / 测试 / 关认证时使用的用户 id
 DEFAULT_USER_ID: int = int(os.getenv("DEFAULT_USER_ID", "1"))
 
+# 同时在跑的 agent.run 并发上限（信号量）；超出的请求排队等待，
+# 防止并发把 LLM 配额 / CPU（含 search_knowledge 精排）打满。
+MAX_CONCURRENT_AGENT_RUNS: int = int(os.getenv("MAX_CONCURRENT_AGENT_RUNS", "4"))
+
+# 单次问答里最多调几轮工具（baseline，无 active plan 时用），防止 LLM 工具调用死循环
+MAX_TOOL_ROUNDS: int = int(os.getenv("MAX_TOOL_ROUNDS", "8"))
+
+# 单次问答的总推理轮次上限（含工具调用 + 最终回答，baseline），超出强制兜底回答
+MAX_TOTAL_ROUNDS: int = int(os.getenv("MAX_TOTAL_ROUNDS", "12"))
+
+# plan 自适应放大后的硬上限：再多步的 plan 也不超此值，防极端
+MAX_HARD_CAP_ROUNDS: int = int(os.getenv("MAX_HARD_CAP_ROUNDS", "50"))
+
 # ── Embedding 模型配置 ────────────────────────────────────────────────────────
 # 预定义的 embedding 模型别名，每个别名绑定一个独立的 ChromaDB collection，
 # 不同模型向量维度不同（MiniLM=384, bge-small-zh=512, bge-m3=1024），必须分开存储。

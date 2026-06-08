@@ -145,6 +145,25 @@ class TestEmptyResponseEventFlow:
         assert captured[1].payload.get("phase") == "empty_response"
         assert captured[2].payload.get("text") == answer
 
+    def test_empty_then_content_recovers_without_error(self) -> None:
+        """首轮空 content → 去 tools 重试一轮拿到正文 → 正常返回，不发 error。"""
+        agent = _mk_agent()
+        captured: list[AgentEvent] = []
+        agent.set_event_callback(captured.append)
+
+        # 第一次返回空（触发重试），第二次返回真正答案
+        responses = [_text_response(""), _text_response("真正的答案")]
+        with patch("src.agent.agent.chat", side_effect=responses) as mock_chat:
+            answer = agent.run("hi")
+
+        assert answer == "真正的答案"
+        assert mock_chat.call_count == 2
+        # 重试轮必须不带 tools（强制逼出正文）
+        assert mock_chat.call_args_list[1].kwargs.get("tools") is None
+        types = [e.type for e in captured]
+        assert EVENT_ERROR not in types
+        assert types[-1] == EVENT_FINAL_ANSWER
+
 
 # ── activate_skill：info ───────────────────────────────────────────────────
 
@@ -363,14 +382,14 @@ class TestPlanAwareCaps:
     """`_compute_effective_caps` 在不同 plan 状态下应给出预期上限。"""
 
     def test_no_plan_uses_baseline_caps(self) -> None:
-        from src.agent.agent import MAX_TOOL_ROUNDS
+        from src.config import MAX_TOOL_ROUNDS
         agent = _mk_agent()
         eff_tool, eff_total = agent._compute_effective_caps([])
         assert eff_tool == MAX_TOOL_ROUNDS
         assert eff_total == agent.max_iterations
 
     def test_active_plan_expands_caps_proportional_to_steps(self) -> None:
-        from src.agent.agent import MAX_HARD_CAP_ROUNDS, MAX_TOOL_ROUNDS
+        from src.config import MAX_HARD_CAP_ROUNDS, MAX_TOOL_ROUNDS
         agent = _mk_agent()
         msgs = [
             _mk_assistant_make_plan(["s1", "s2", "s3", "s4", "s5"], call_id="mp1"),
@@ -382,7 +401,7 @@ class TestPlanAwareCaps:
         assert eff_tool <= MAX_HARD_CAP_ROUNDS
 
     def test_completed_plan_falls_back_to_baseline(self) -> None:
-        from src.agent.agent import MAX_TOOL_ROUNDS
+        from src.config import MAX_TOOL_ROUNDS
         agent = _mk_agent()
         # 2 步 plan，两步都标 success → is_complete()，上限退回 baseline
         msgs = [
@@ -395,7 +414,7 @@ class TestPlanAwareCaps:
         assert eff_total == agent.max_iterations
 
     def test_aborted_plan_falls_back_to_baseline(self) -> None:
-        from src.agent.agent import MAX_TOOL_ROUNDS
+        from src.config import MAX_TOOL_ROUNDS
         agent = _mk_agent()
         msgs = [
             _mk_assistant_make_plan(["a", "b", "c"], call_id="mp1"),

@@ -88,13 +88,28 @@ class LangChainAgent:
     def session_id(self) -> str:
         return self._session_id
 
-    def run(self, user_input: str) -> str:
+    def run(
+        self,
+        user_input: str,
+        *,
+        session_id: str | None = None,
+        event_callback: Callable[[AgentEvent], None] | None = None,
+    ) -> str:
         """
         执行一次 ReAct 推理：拉历史 → 调 AgentExecutor → 写回历史。
 
         失败时不抛异常向上，返回 `Error: <message>` 字符串（与原实现一致）；
         失败前会发出 EVENT_ERROR 事件。无论成功失败都会发出 EVENT_FINAL_ANSWER。
+
+        session_id / event_callback 为接口对齐 Python Agent 的可选入参。LangChain 实现
+        仅 CLI 单实例使用、不在 Web 并发路径，这里折叠回实例状态即可；真正的并发隔离在
+        默认 `Agent.run` 内实现。
         """
+        if session_id is not None and session_id != self._session_id:
+            self._session_id = session_id
+            self._history = SQLiteChatMessageHistory(session_id)
+        if event_callback is not None:
+            self.set_event_callback(event_callback)
         chat_history = self._history.messages  # 不含本轮 user
         try:
             result = self._executor.invoke({

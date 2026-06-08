@@ -15,7 +15,9 @@ type Props = {
 
 export function ThinkingBlock({ text, thinkingMs, streaming }: Props) {
   const [open, setOpen] = useState(false)
-  if (!text) return null
+  // 只有空白（换行 / 空格）的思考段也不显示 —— 部分模型在快速决定调工具的轮次只吐
+  // 极少量空白 reasoning，渲染出来是个展开后为空的折叠框，纯噪声。
+  if (!text.trim()) return null
 
   const seconds = thinkingMs != null ? Math.max(1, Math.round(thinkingMs / 1000)) : null
   const summary =
