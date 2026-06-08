@@ -97,7 +97,7 @@ export function ToolBlock({ call, planTotal }: Props) {
         <span className="ml-auto flex items-center gap-1 text-muted-foreground">
           <StatusIcon status={call.status} />
           {call.status === 'running'
-            ? '进行中'
+            ? call.stage ?? '进行中'
             : call.status === 'error'
               ? '失败'
               : call.status === 'empty'

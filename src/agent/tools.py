@@ -585,10 +585,13 @@ def _tool_search_knowledge(
         logger.warning("[tool] search_knowledge: where 非 dict，已忽略：%r", where)
         where = None
 
+    from src.agent.core.event_bus import publish_tool_progress
+
     # query 三轴扩展（multi-query / HyDE / 翻译）。失败时 expand_queries 退化为 [query]。
     expanded_queries: list[str]
     try:
         from src.rag.query_rewriter import expand_queries
+        publish_tool_progress("rewriting", "改写中")
         expanded_queries = expand_queries(query)
     except Exception as e:
         logger.warning("[tool] search_knowledge: query 扩展失败，已降级为单 query — %s", e)
@@ -607,12 +610,14 @@ def _tool_search_knowledge(
             query, top_k, where or "{}",
         )
 
+    publish_tool_progress("retrieving", "检索中")
     hits = search(query, top_k=top_k, where=where, queries=expanded_queries)
 
     # —— critic 相关性过滤（过滤 not_relevant，0 条返 empty 不重召回） ——
     if hits and _cfg.HARNESS_RAG_ENABLED:
         try:
             from src.agent.core.harness_manager import get_harness_manager
+            publish_tool_progress("checking", "校验中")
             hits = get_harness_manager().filter_chunks(query=query, hits=hits)
         except Exception as e:  # noqa: BLE001 — critic 异常一律软放行原始 hits
             logger.warning("[tool] search_knowledge: harness 过滤失败，保留原始 hits：%s", e)

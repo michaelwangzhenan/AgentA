@@ -28,6 +28,8 @@ EVENT_THINKING_CHUNK = "thinking_chunk"
 EVENT_TOKEN_CHUNK = "token_chunk"
 EVENT_TOOL_CALL_START = "tool_call_start"
 EVENT_TOOL_CALL_END = "tool_call_end"
+# 工具内部阶段进度（如 search_knowledge 的 改写中/检索中/校验中），仅用于 UI 感知
+EVENT_TOOL_PROGRESS = "tool_progress"
 EVENT_FINAL_ANSWER = "final_answer"
 EVENT_ERROR = "error"
 EVENT_INFO = "info"
@@ -41,6 +43,7 @@ ALL_EVENT_TYPES: tuple[str, ...] = (
     EVENT_TOKEN_CHUNK,
     EVENT_TOOL_CALL_START,
     EVENT_TOOL_CALL_END,
+    EVENT_TOOL_PROGRESS,
     EVENT_FINAL_ANSWER,
     EVENT_ERROR,
     EVENT_INFO,
@@ -132,3 +135,39 @@ class EventBus:
                     "[EventBus] 订阅者抛异常已隔离: event=%s handler=%r exc=%s",
                     event.type, handler, exc,
                 )
+
+
+# ── 工具阶段进度（contextvar 透传，避免改一长串工具函数签名） ──────────────────
+import contextlib  # noqa: E402
+from contextvars import ContextVar  # noqa: E402
+
+# 当前工具调用的 (bus, call_id)；仅在 tool_call_engine 执行某个 tool 期间有值。
+# 线程内有效，并发各 run 互不串台（每个 run 在自己的 executor 线程）。
+_tool_progress_ctx: "ContextVar[tuple[EventBus, str] | None]" = ContextVar(
+    "tool_progress_ctx", default=None
+)
+
+
+@contextlib.contextmanager
+def tool_progress_scope(bus: "EventBus | None", call_id: str):
+    """在执行单个工具期间绑定 (bus, call_id)，供工具内部用 publish_tool_progress 发阶段事件。"""
+    if bus is None:
+        yield
+        return
+    token = _tool_progress_ctx.set((bus, call_id))
+    try:
+        yield
+    finally:
+        _tool_progress_ctx.reset(token)
+
+
+def publish_tool_progress(stage: str, label: str) -> None:
+    """工具内部发一条阶段进度事件（如 检索中）；不在工具调用上下文内时静默忽略。"""
+    ctx = _tool_progress_ctx.get()
+    if ctx is None:
+        return
+    bus, call_id = ctx
+    bus.publish(AgentEvent(
+        type=EVENT_TOOL_PROGRESS,
+        payload={"call_id": call_id, "stage": stage, "label": label},
+    ))

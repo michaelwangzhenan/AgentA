@@ -46,6 +46,46 @@ class TestResolveEmbedding:
         assert config.CHROMA_COLLECTION == config.DEFAULT_COLLECTION
 
 
+class TestQueryRewriteOnDemand:
+    """按需触发：短 / 精确 query 跳过 multi-query / HyDE 改写（省 LLM 调用）。"""
+
+    def test_short_query_skips_multi_query(self) -> None:
+        from src.rag import query_rewriter
+
+        called = {"n": 0}
+
+        def _fake_llm(_prompt: str) -> str:
+            called["n"] += 1
+            return "改写1\n改写2"
+
+        with patch.object(config, "RAG_QUERY_REWRITE_ENABLED", True), \
+             patch.object(config, "RAG_REWRITE_MIN_QUERY_LEN", 6), \
+             patch.object(query_rewriter, "_call_llm", _fake_llm):
+            query_rewriter.clear_cache()
+            # "gNB" 仅 3 字 < 6 → 跳过，不触发 LLM
+            assert query_rewriter.multi_query("gNB") == []
+            assert called["n"] == 0
+
+    def test_long_query_triggers_multi_query(self) -> None:
+        from src.rag import query_rewriter
+
+        with patch.object(config, "RAG_QUERY_REWRITE_ENABLED", True), \
+             patch.object(config, "RAG_REWRITE_MIN_QUERY_LEN", 6), \
+             patch.object(query_rewriter, "_call_llm", lambda _p: "改写A\n改写B"):
+            query_rewriter.clear_cache()
+            out = query_rewriter.multi_query("gNB 随机接入完整流程是什么")
+            assert out == ["改写A", "改写B"]
+
+    def test_threshold_zero_never_skips(self) -> None:
+        from src.rag import query_rewriter
+
+        with patch.object(config, "RAG_QUERY_REWRITE_ENABLED", True), \
+             patch.object(config, "RAG_REWRITE_MIN_QUERY_LEN", 0), \
+             patch.object(query_rewriter, "_call_llm", lambda _p: "x\ny"):
+            query_rewriter.clear_cache()
+            assert query_rewriter.multi_query("ab") == ["x", "y"]
+
+
 class TestSearch:
     """测试向量检索（需要已完成入库，标记为 integration）"""
 
@@ -131,15 +171,28 @@ class TestSplitterRecursion:
 class TestReranker:
     """测试 src/rag/reranker.rerank() 精排逻辑（纯单元测试，不依赖向量数据库）"""
 
-    def test_rerank_passthrough_when_candidates_le_top_k(self) -> None:
-        """候选数量 ≤ top_k 时直接原样返回，不加载 CrossEncoder。"""
+    def test_rerank_passthrough_only_when_single_candidate(self) -> None:
+        """仅候选 ≤ 1 时透传、不加载 CrossEncoder（一条无需排序）。"""
         from src.rag import reranker
 
-        hits = _make_hits(3)
+        hits = _make_hits(1)
         with patch("src.rag.reranker._get_cross_encoder") as mock_ce:
             result = reranker.rerank(query="测试", hits=hits, top_k=5)
         mock_ce.assert_not_called()
-        assert result is hits  # 直接返回同一对象（passthrough）
+        assert result is hits
+
+    def test_rerank_scores_even_when_candidates_le_top_k(self) -> None:
+        """候选 ≥ 2 且 ≤ top_k 时仍精排打分并标 reranked，避免下游用 RRF 小分误删。"""
+        from src.rag import reranker
+
+        hits = _make_hits(3)
+        mock_model = MagicMock()
+        mock_model.predict.return_value = [0.9, 0.8, 0.7]
+        with patch("src.rag.reranker._get_cross_encoder", return_value=mock_model):
+            result = reranker.rerank(query="测试", hits=hits, top_k=5)
+        mock_model.predict.assert_called_once()
+        assert len(result) == 3
+        assert all(h.reranked for h in result)
 
     def test_rerank_returns_top_k_count(self) -> None:
         """精排后返回的条数恰好等于 top_k。"""

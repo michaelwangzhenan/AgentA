@@ -82,19 +82,20 @@ def _normalize_score(raw: float) -> float:
 def rerank(query: str, hits: "list[Hit]", top_k: int) -> "list[Hit]":
     """
     使用 Cross-Encoder 对候选 hits 重新打分并按相关性降序排列。
-    若候选数 ≤ top_k，直接透传原列表。
+    只有候选 ≤ 1 时才透传（一条无需排序）；候选 ≥ 2 一律精排，避免
+    "候选不够多就不打分、score 仍是 RRF 小分"被下游精排阈值误删。
 
     Args:
         query:  用户的自然语言问题。
         hits:   Dense + BM25 召回的候选 Hit 列表。
-        top_k:  最终期望返回的条数。
+        top_k:  精排后截取的条数上限（保留 buffer 供下游去重）。
 
     Returns:
         经 Cross-Encoder 重新排序并截取的 top_k 条 Hit 列表（分数越高越靠前）。
-        每条 Hit 的 .score 字段会被覆盖为归一化后的精排分。
+        每条 Hit 的 .score 被覆盖为归一化精排分、.reranked 置 True。
     """
-    if len(hits) <= top_k:
-        logger.info("[Reranker] 候选数 %d ≤ top_k %d，跳过精排直接透传", len(hits), top_k)
+    if len(hits) <= 1:
+        logger.info("[Reranker] 候选数 %d ≤ 1，无需精排直接透传", len(hits))
         return hits
 
     # 优雅降级：模型加载失败（本地无缓存 + TRANSFORMERS_OFFLINE=1 / 网络不可达 / 模型名错误）
@@ -127,7 +128,8 @@ def rerank(query: str, hits: "list[Hit]", top_k: int) -> "list[Hit]":
     result: list["Hit"] = []
     for norm, _raw, hit in indexed[:top_k]:
         # dataclass replace 保持向后兼容：旧消费方读 distance 仍 OK
-        result.append(replace(hit, score=norm))
+        # reranked=True 标记本条已带精排分，下游精排阈值才对它生效
+        result.append(replace(hit, score=norm, reranked=True))
 
     logger.info(
         "[Reranker] 从 %d 候选精排至 %d 条，最高分: %.4f，最低分: %.4f（已归一化到 [0,1]）",

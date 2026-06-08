@@ -494,8 +494,8 @@ RERANKER_MODEL: str = os.getenv(
 )
 # true 开启二阶段精排；false 跳过精排，直接使用 round-robin 结果（向后兼容）
 RERANKER_ENABLED: bool = os.getenv("RERANKER_ENABLED", "true").lower() == "true"
-# 召回窗口倍数：精排前取 top_k × N 条候选，默认 3
-RERANKER_RECALL_MULTIPLIER: int = int(os.getenv("RERANKER_RECALL_MULTIPLIER", "3"))
+# 召回窗口倍数：精排前取 top_k × N 条候选；调大召回更全但精排更慢，默认 2
+RERANKER_RECALL_MULTIPLIER: int = int(os.getenv("RERANKER_RECALL_MULTIPLIER", "2"))
 
 # ── RAG 召回质量阈值 ─────────────────────────────────────────────────────────
 # Dense 检索后按 cosine 相似度（= 1 - distance，cosine 空间下 ∈ [-1, 1]）过滤；
@@ -558,6 +558,8 @@ RAG_OCR_DPI: int = int(os.getenv("RAG_OCR_DPI", "200"))
 RAG_QUERY_REWRITE_ENABLED: bool = os.getenv("RAG_QUERY_REWRITE_ENABLED", "true").lower() == "true"
 # 单次 multi-query 最多生成几条改写（不含原 query），1~5；上调会增加 LLM token 与延迟
 RAG_REWRITE_MAX_QUERIES: int = int(os.getenv("RAG_REWRITE_MAX_QUERIES", "3"))
+# query 字符数 < 该值时跳过 multi-query / HyDE 改写（短/精确 query 改写收益低且费时）；0 表示不跳过
+RAG_REWRITE_MIN_QUERY_LEN: int = int(os.getenv("RAG_REWRITE_MIN_QUERY_LEN", "6"))
 # 开启 HyDE：让 LLM 先产出"假设性答案"，把答案也作为 embedding 检索 query；
 # 适合 query 与文档词汇分布差异大的场景（口语 → 文档术语），但每轮多花 1 次 LLM 调用，默认关。
 RAG_HYDE_ENABLED: bool = os.getenv("RAG_HYDE_ENABLED", "false").lower() == "true"
@@ -614,8 +616,9 @@ SRS_SECOND_INTERVAL_DAYS: int = int(os.getenv("SRS_SECOND_INTERVAL_DAYS", "6"))
 # ── Harness 自检配置 ────────────────────────────────────────────
 # 是否对 grade_quiz 批改结果做自检（可选值：true / false）
 HARNESS_QUIZ_ENABLED: bool = os.getenv("HARNESS_QUIZ_ENABLED", "true").lower() == "true"
-# 是否对 search_knowledge 召回片段做相关性自检（可选值：true / false）
-HARNESS_RAG_ENABLED: bool = os.getenv("HARNESS_RAG_ENABLED", "true").lower() == "true"
+# 是否对 search_knowledge 召回片段做相关性自检（可选值：true / false）；
+# 开启会多 1 次 LLM 调用（超时阈值见 HARNESS_LLM_TIMEOUT_SEC），默认关以降低召回延迟
+HARNESS_RAG_ENABLED: bool = os.getenv("HARNESS_RAG_ENABLED", "false").lower() == "true"
 # critic 单次 LLM 调用超时（秒），超时静默降级
 HARNESS_LLM_TIMEOUT_SEC: float = float(os.getenv("HARNESS_LLM_TIMEOUT_SEC", "15"))
 # Q1 quiz 批改自检阈值（critic 总分 < 该值标 harness_flagged，0-5 分）

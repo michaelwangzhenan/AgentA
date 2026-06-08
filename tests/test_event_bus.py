@@ -237,3 +237,55 @@ class TestPlanEventTypes:
         bus.subscribe(EVENT_PLAN_CREATED, good.append)
         bus.publish(AgentEvent(type=EVENT_PLAN_CREATED, payload={"steps": []}))
         assert good == [{"steps": []}]
+
+
+class TestToolProgress:
+    """工具阶段进度事件（contextvar 透传，供工具内部发「检索中」等阶段）。"""
+
+    def test_progress_in_ALL_EVENT_TYPES(self) -> None:
+        """tool_progress 必须在 ALL_EVENT_TYPES 里，才能被 _bind_callback 转发到 SSE。"""
+        from src.agent.core.event_bus import EVENT_TOOL_PROGRESS
+        assert EVENT_TOOL_PROGRESS in ALL_EVENT_TYPES
+
+    def test_publish_outside_scope_is_noop(self) -> None:
+        """不在工具调用上下文内调用 publish_tool_progress 应静默忽略，不抛异常。"""
+        from src.agent.core.event_bus import publish_tool_progress
+        publish_tool_progress("retrieving", "检索中")  # 不抛即通过
+
+    def test_publish_inside_scope_emits_event(self) -> None:
+        """scope 内发阶段事件 → 订阅者收到带 call_id / stage / label 的 payload。"""
+        from src.agent.core.event_bus import (
+            EVENT_TOOL_PROGRESS,
+            publish_tool_progress,
+            tool_progress_scope,
+        )
+        bus = EventBus()
+        captured: list[dict] = []
+        bus.subscribe(EVENT_TOOL_PROGRESS, captured.append)
+
+        with tool_progress_scope(bus, "call-1"):
+            publish_tool_progress("retrieving", "检索中")
+
+        assert captured == [{"call_id": "call-1", "stage": "retrieving", "label": "检索中"}]
+
+    def test_scope_resets_after_exit(self) -> None:
+        """退出 scope 后 contextvar 复位，再发进度应回到 no-op（不串到旧 bus）。"""
+        from src.agent.core.event_bus import (
+            EVENT_TOOL_PROGRESS,
+            publish_tool_progress,
+            tool_progress_scope,
+        )
+        bus = EventBus()
+        captured: list[dict] = []
+        bus.subscribe(EVENT_TOOL_PROGRESS, captured.append)
+
+        with tool_progress_scope(bus, "call-1"):
+            pass
+        publish_tool_progress("retrieving", "检索中")
+        assert captured == []
+
+    def test_scope_with_none_bus_is_noop(self) -> None:
+        """bus 为 None（无事件回调场景）时 scope 不绑定，发进度静默。"""
+        from src.agent.core.event_bus import publish_tool_progress, tool_progress_scope
+        with tool_progress_scope(None, "call-1"):
+            publish_tool_progress("retrieving", "检索中")  # 不抛即通过

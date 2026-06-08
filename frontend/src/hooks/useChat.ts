@@ -201,6 +201,16 @@ export function useChat({ sessionId, onSettled }: Options) {
                     ],
                   }))
                   break
+                case 'tool_progress':
+                  update((m) => ({
+                    ...m,
+                    timeline: m.timeline.map((it) =>
+                      it.kind === 'tool' && it.call.call_id === ev.payload.call_id
+                        ? { ...it, call: { ...it.call, stage: ev.payload.label } }
+                        : it,
+                    ),
+                  }))
+                  break
                 case 'tool_call_end':
                   update((m) => ({
                     ...m,
@@ -213,6 +223,7 @@ export function useChat({ sessionId, onSettled }: Options) {
                               status:
                                 (ev.payload.status as ToolCallState['status']) ?? 'ok',
                               preview: ev.payload.preview,
+                              stage: undefined,
                             },
                           }
                         : it,

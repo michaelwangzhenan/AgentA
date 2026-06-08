@@ -60,6 +60,20 @@ _TRANSLATE_PROMPT = (
 )
 
 
+# ── 按需触发判定 ─────────────────────────────────────────────────────────────
+
+
+def _is_short_query(query: str) -> bool:
+    """query 太短（多为精确术语/缩写）时跳过 multi-query/HyDE，省 LLM 调用与延迟。
+
+    阈值由 config.RAG_REWRITE_MIN_QUERY_LEN 控制，设 0 表示从不跳过。
+    """
+    threshold = config.RAG_REWRITE_MIN_QUERY_LEN
+    if threshold <= 0:
+        return False
+    return len(query.strip()) < threshold
+
+
 # ── LLM 调用封装 ─────────────────────────────────────────────────────────────
 
 
@@ -138,6 +152,8 @@ def multi_query(query: str, n: int | None = None) -> list[str]:
         return []
     if not query or not query.strip():
         return []
+    if _is_short_query(query):
+        return []
     n_final = n if n is not None else config.RAG_REWRITE_MAX_QUERIES
     n_final = max(1, min(int(n_final), 5))
     return list(_cached_multi_query(query.strip(), n_final))
@@ -161,6 +177,8 @@ def hyde_query(query: str) -> str:
     if not config.RAG_HYDE_ENABLED:
         return ""
     if not query or not query.strip():
+        return ""
+    if _is_short_query(query):
         return ""
     return _cached_hyde(query.strip())
 

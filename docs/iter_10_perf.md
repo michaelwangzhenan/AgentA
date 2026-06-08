@@ -99,16 +99,16 @@
 
 ## 2.2. 优化方向（按性价比，先做省得多又改得少的）
 
-| 编号 | 优先级 | 项 | 做法 |
-|---|---|---|---|
-| 1 | P0 | 关 / 异步化 RAG critic | 默认关 `HARNESS_RAG_ENABLED`，或调小 timeout / 改成不挡检索返回。改一行配置省 ~15s |
-| 2 | P0 | query 改写按需触发 | 短 / 明确的 query 跳过改写；翻译与多条改写拆开按需用；改写本身换更快的小模型 |
-| 3 | P1 | 降精排候选数 | `RERANKER_RECALL_MULTIPLIER` 3→2（候选 24→16）；候选少时跳过精排；换 ONNX 量化 reranker |
-| 4 | P1 | embedding 提速 | query 级缓存 + 改写条数设上限；小 embedding 模型 / ONNX 量化 |
-| 5 | P2 | 感知延迟 | SSE 补阶段状态（检索中 / 精排中 / 生成中），让等待可感知 |
-| 6 | P2 | 釜底抽薪（不做） | embedding + rerank 移到 GPU 机或托管 API（provider 抽象已具备条件） |
+| 编号 | 优先级 | 项 | 做法 | 状态 |
+|---|---|---|---|---|
+| 1 | P0 | 关 RAG critic | `HARNESS_RAG_ENABLED` 默认改为关（每次都超时放行、零增益）；想用的人 UI 可开 | ✅ 已做 |
+| 2 | P0 | query 改写按需触发 | 新增 `RAG_REWRITE_MIN_QUERY_LEN`（默认 6）：query 太短（多为精确术语）时跳过 multi-query / HyDE 改写 | ✅ 已做 |
+| 3 | P1 | 降精排候选数 | `RERANKER_RECALL_MULTIPLIER` 默认保持 2（更快）。配 2 原会触发既有 bug 召回归零（精排「候选≤top_k×2 跳过打分」后，min_score 仍按 RRF 小分过滤把结果全删）。已治本：精排门槛改为候选≥2 即打分；精排阈值只对真正精排过的 hit 生效（`Hit.reranked` 标记），未精排的放行 | ✅ 已做 |
+| 4 | P1 | embedding 提速 | query 编码按 (模型, 文本) 做进程级 LRU 缓存，重复 / 改写命中相同文本零编码 | ✅ 已做 |
+| 5 | P2 | 感知延迟 | 新增 `tool_progress` 事件，检索工具运行中在 UI 显示「改写中 / 检索中 / 校验中」 | ✅ 已做 |
+| 6 | P2 | 釜底抽薪（不做） | embedding + rerank 移到 GPU 机或托管 API（provider 抽象已具备条件） | — |
 
-方法论：先埋点量各段耗时，确认大头再调，别凭感觉。
+涉及配置项均已在「系统配置 → RAG」UI 暴露，可不重启动态调。换更快小模型 / ONNX 量化 / GPU 留待后续。
 
 
 # 3. log 分析（RAG 召回以外的性能问题）

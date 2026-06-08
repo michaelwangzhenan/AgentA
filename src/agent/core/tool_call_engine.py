@@ -24,6 +24,7 @@ from src.agent.core.event_bus import (
     EVENT_TOOL_CALL_START,
     AgentEvent,
     EventBus,
+    tool_progress_scope,
 )
 from src.agent.tools import execute_tool, ToolResult
 from src.memory.chat_history import ChatHistoryStore
@@ -120,17 +121,20 @@ class ToolCallEngine:
             # 用于 reconstruct plan 状态；非 plan 工具忽略此参数。messages 此时
             # 已含本轮 assistant tool_calls，plan tool 在内部 reconstruct 时
             # 能看到自己刚发的 update_step / abort_plan 调用。
-            if self._citation_builder is not None:
-                result: ToolResult = execute_tool(
-                    tool_name, tool_args, self._skill_bodies,
-                    citation_builder=self._citation_builder,
-                    messages=messages,
-                )
-            else:
-                result = execute_tool(
-                    tool_name, tool_args, self._skill_bodies,
-                    messages=messages,
-                )
+            # 绑定 (bus, call_id) 到 contextvar，使工具内部（如 search_knowledge）
+            # 能发阶段进度事件，且无需逐层透传 bus/call_id。
+            with tool_progress_scope(self._events, tool_call.id):
+                if self._citation_builder is not None:
+                    result: ToolResult = execute_tool(
+                        tool_name, tool_args, self._skill_bodies,
+                        citation_builder=self._citation_builder,
+                        messages=messages,
+                    )
+                else:
+                    result = execute_tool(
+                        tool_name, tool_args, self._skill_bodies,
+                        messages=messages,
+                    )
 
             if self._verbose:
                 preview = result.content[:_TOOL_PREVIEW_LEN].replace("\n", " ").replace("\r", " ")

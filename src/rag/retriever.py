@@ -28,6 +28,7 @@ for _key in ("HF_ENDPOINT", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE"):
 import logging
 import threading
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any
 
 import chromadb
@@ -76,6 +77,18 @@ def _get_embedding_fn(model_name: str) -> SentenceTransformerEmbeddingFunction:
             fn = SentenceTransformerEmbeddingFunction(model_name=model_name)
             _embedding_fn_cache[model_name] = fn
     return fn
+
+
+@lru_cache(maxsize=512)
+def _embed_query_cached(model_name: str, text: str) -> tuple[float, ...]:
+    """编码单条 query 为向量并按 (model, text) 缓存。
+
+    同一 query 重复检索（含多路改写命中相同文本）时零编码开销 —— query 编码是
+    CPU 密集的耗时项。返回 tuple 以满足 lru_cache 不可变要求。
+    """
+    fn = _get_embedding_fn(model_name)
+    vec = fn([text])[0]
+    return tuple(float(x) for x in vec)
 
 
 # ── ChromaDB 客户端进程级缓存 ─────────────────────────────────────────────────
@@ -133,6 +146,8 @@ class Hit:
         id:         chunk 唯一 ID（与 chroma 的 ids 对齐），用于跨检索器融合去重。
         retrievers: 该 Hit 被哪些检索器召回，如 ["dense", "bm25"]，便于排查与阈值策略。
         metadata:   完整 metadata 字典（含 doc_id / lang / page_no / heading_path 等）。
+        reranked:   是否经过 cross-encoder 精排打分（True 时 score 才是精排分）；
+                    未精排（候选≤1 / 模型降级）的 hit 不应被精排阈值过滤。
     """
     source: str
     document: str
@@ -142,6 +157,7 @@ class Hit:
     id: str = ""
     retrievers: list[str] = field(default_factory=list)
     metadata: dict[str, Any] | None = None
+    reranked: bool = False
 
 
 # ── Dense 召回 ───────────────────────────────────────────────────────────────
@@ -180,8 +196,9 @@ def _query_collection(
     prefix = _query_prefix_for(model_name)
     effective_query = (prefix + query) if prefix else query
 
+    # 自己编码 query（带缓存）并以 query_embeddings 传入，避免 chroma 每次重复编码
     query_kwargs: dict[str, Any] = {
-        "query_texts": [effective_query],
+        "query_embeddings": [list(_embed_query_cached(model_name, effective_query))],
         "n_results": min(top_k, count),
         "include": ["documents", "metadatas", "distances"],
     }
@@ -480,19 +497,24 @@ def search(
             cands_in, len(top_hits),
         )
 
-        # 精排后 min_score 阈值过滤
+        # 精排后 min_score 阈值过滤：只过滤真正经过精排打分（reranked=True）的 hit。
+        # 未精排的 hit（候选≤1 / 模型降级）其 score 仍是召回阶段 RRF 小分，
+        # 用精排阈值过滤会把它们全删（曾导致 multiplier=2 时召回归零），故放行。
         min_rerank = config.RAG_RERANK_MIN_SCORE
-        if min_rerank > 0 and len(candidates) > top_k:
+        if min_rerank > 0:
             before = len(top_hits)
-            top_hits = [h for h in top_hits if (h.score or 0.0) >= min_rerank]
+            top_hits = [
+                h for h in top_hits
+                if (not h.reranked) or (h.score or 0.0) >= min_rerank
+            ]
             logger.info(
                 "[search] rerank min_score filter: %d → %d (min=%.3f)",
                 before, len(top_hits), min_rerank,
             )
         else:
             logger.info(
-                "[search] rerank min_score filter: skipped (min=%.3f, cands=%d)",
-                min_rerank, len(candidates),
+                "[search] rerank min_score filter: skipped (min=%.3f)",
+                min_rerank,
             )
     else:
         top_hits = candidates

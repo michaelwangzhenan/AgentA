@@ -31,6 +31,10 @@ export type AgentStreamEvent =
       payload: { call_id: string; status: string; preview: string }
     }
   | {
+      type: 'tool_progress'
+      payload: { call_id: string; stage: string; label: string }
+    }
+  | {
       type: 'plan_created'
       payload: { steps: { id: number; text: string }[]; [k: string]: unknown }
     }
@@ -80,6 +84,8 @@ export type ToolCallState = {
   args: Record<string, unknown>
   status: 'running' | 'ok' | 'error' | 'empty'
   preview?: string
+  /** 工具运行中的阶段标签（如 检索中），来自 tool_progress 事件；结束后清空 */
+  stage?: string
 }
 
 /** 一段 thinking（对应 agent 一次循环的推理）；每次循环单独成段 */
