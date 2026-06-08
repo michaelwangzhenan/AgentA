@@ -17,8 +17,10 @@ from functools import lru_cache
 from typing import Any
 
 from fastapi import Depends, HTTPException, Request, status
+from fastapi.concurrency import run_in_threadpool
 
 import src.config as _cfg
+from src.core.user_context import set_current_user
 from src.agent.agent import Agent
 from src.agent.agent_api import AgentAPI
 from src.agent.core.mcp_manager import MCPManager, get_shared_manager
@@ -105,11 +107,8 @@ _ANON_USER: dict[str, Any] = {
 }
 
 
-def get_current_user(
-    request: Request,
-    store: UserStore = Depends(get_user_store),
-) -> dict[str, Any]:
-    """解析当前登录用户：读 cookie token → 查 auth_sessions → 取 user。
+def _resolve_current_user(request: Request, store: UserStore) -> dict[str, Any]:
+    """同步解析登录用户（读 cookie token → 查 auth_sessions → 取 user），不碰 contextvar。
 
     `AUTH_ENABLED=false` 时跳过校验，回落到默认用户（id=DEFAULT_USER_ID，admin）。
     未登录 / token 失效 → 401。
@@ -122,6 +121,26 @@ def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录或登录已过期"
         )
+    return user
+
+
+async def get_current_user(
+    request: Request,
+    store: UserStore = Depends(get_user_store),
+) -> dict[str, Any]:
+    """解析当前登录用户，并把 user_id 绑定到请求级 contextvar。
+
+    必须是 async：FastAPI 同步路由跑在线程池里，依赖在同步线程内 set 的 contextvar
+    不会传到路由（线程池只拿当前 context 的一份拷贝，改动随即丢弃）。只有在请求的
+    async 上下文里 set，run_in_threadpool 才会把它一并拷进路由线程，让路由内任何漏传
+    user_id、回落到 current_user_id() 的 store 调用都落到本人，而不是静默回落到
+    DEFAULT_USER_ID（曾导致非 1 号用户读不到自己的会话历史）。
+
+    DB 查询仍丢到线程池，避免阻塞 event loop（与全 app 同步路由的设计一致）。
+    每个请求是独立 asyncio task、有独立 context 拷贝，故 set 无需 reset、不跨请求泄漏。
+    """
+    user = await run_in_threadpool(_resolve_current_user, request, store)
+    set_current_user(user["id"])
     return user
 
 

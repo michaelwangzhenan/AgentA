@@ -85,7 +85,7 @@ def rename_session(
 ) -> SessionInfo:
     """重命名 session。404 if 不存在或非本人所有。"""
     _require_owned(store, session_id, user["id"])
-    ok = store.rename_session(session_id, req.title)
+    ok = store.rename_session(session_id, req.title, user_id=user["id"])
     if not ok:
         raise HTTPException(status_code=404, detail=f"session not found: {session_id}")
     for r in store.list_sessions(user_id=user["id"]):
@@ -103,7 +103,7 @@ def delete_session(
     """硬删 session（级联清 messages + sessions 表）；非本人所有返回 deleted=False。"""
     if not store.owns_session(session_id, user["id"]):
         return SessionDeleteResponse(deleted=False)
-    return SessionDeleteResponse(deleted=store.delete_session(session_id))
+    return SessionDeleteResponse(deleted=store.delete_session(session_id, user_id=user["id"]))
 
 
 @router.post(
@@ -121,7 +121,9 @@ def truncate_session(
     截断后调用方再发 `POST /api/chat/stream`，Agent.run 会重新追加用户消息 + 新回答。
     """
     _require_owned(store, session_id, user["id"])
-    deleted = store.truncate_from_user_message(session_id, req.user_message_index)
+    deleted = store.truncate_from_user_message(
+        session_id, req.user_message_index, user_id=user["id"]
+    )
     return SessionTruncateResponse(deleted=deleted)
 
 
@@ -141,5 +143,7 @@ def get_session_messages(
     owner = store.get_session_owner(session_id)
     if owner is not None and owner != user["id"]:
         raise HTTPException(status_code=404, detail=f"session not found: {session_id}")
-    messages = store.load(session_id)
+    # 必须显式传 user_id：本路由不设 current_user contextvar，load() 缺省会回落到
+    # DEFAULT_USER_ID(1) 再做一次归属校验，非 1 号用户的 session 会被误判为不归属而返回空。
+    messages = store.load(session_id, user_id=user["id"])
     return SessionMessagesResponse(messages=messages)

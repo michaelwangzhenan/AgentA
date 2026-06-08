@@ -81,7 +81,7 @@ Review 方式讨论:
 |---|---|---|---|---|
 | R1 | P1 ✅已修复 | `bm25_index.py` `reload_index` | 该函数全仓无人调用（死代码）。后果：`ingest_one`（Web 上传）/ `delete_kb_document` 写盘后，`retriever` 的 `get_index` 进程级缓存不刷新，长驻服务里上传/删除文档后 BM25 召回仍是旧索引（dense 每次新建 PersistentClient 读盘，不受影响） | 根因解法：`ingest_one` / `delete_kb_document` 改用 retriever 同一个 `get_index` 共享实例（写完即对检索可见，不存在双实例陈旧）；`delete_all_kb_documents` 删 pkl 后调新增的 `drop_index` 清进程缓存。死函数 `reload_index` 删除，由 `drop_index` 取代 |
 | R2 | P2 ✅已修复 | `ingest.py` `chunk_text` | 标注「向后兼容」，仅老调用方 / 测试用 | 确认生产已无调用（`split_structured` 全面取代），删函数 + `test_rag.py` 的 `TestChunkText` 测试类，并清掉 `splitter.py` 注释里对它的引用 |
-| R3 | P2 | `ingest.py` `_open_collection` | 每次新建 `SentenceTransformerEmbeddingFunction`，未复用 `retriever._get_embedding_fn` 缓存；`ingest_one` 逐次上传有模型加载开销 | 复用统一的 embedding function 缓存 |
+| R3 | P2 ✅已修复 | `ingest.py` `_open_collection` | 每次新建 `SentenceTransformerEmbeddingFunction`，未复用 `retriever._get_embedding_fn` 缓存；`ingest_one` 逐次上传有模型加载开销 | 改调 `retriever._get_embedding_fn`（进程级缓存，函数内懒导入避免循环依赖），ingest 与检索端共用同一实例；删掉 `ingest.py` 不再使用的 `SentenceTransformerEmbeddingFunction` import |
 | R4 | P2 ✅已修复 | `retriever.py` `search` | 每次调用新建 `chromadb.PersistentClient`，未缓存 | 加 `_get_chroma_client()` 进程级缓存（双检锁），`search` 复用 |
 | R5 | P2 ✅已修复 | `retriever.py` `_query_prefix_for` | 用长 OR 列表枚举"不需要前缀"的模型，可读性差 | 改为 `any(marker in name ...)` 子串成员判定（`bge-m3` / `v1.5` 两个标记覆盖原列表） |
 | R6 | P2 ✅已修复 | `bm25_index.py` | 末尾 `_ = Any` 仅为消除 unused-import 警告 | 删掉 `_ = Any` 与未使用的 `from typing import Any` |
@@ -158,7 +158,7 @@ P1（本期已全部修完 ✅）：
 
 P2 进度：
 - ✅ 第一批（无行为变更、低风险）：L1（claude 分支也清空名 tool_call）、R4（chroma client 缓存）、R5（前缀判定改集合成员）、R6（删死 import）、A1（去 `__import__` 黑魔法）、A2（chat_history 懒加载补双检锁）、F1（`apiFetch` 统一带 cookie）、F2（postChat 走 `_ensureOk`）。
-- ✅ 第二批（用户拍板后做）：R2（删 `chunk_text` 死函数 + 对应测试类）、M4（登录时主动清过期 session + 暴露 `purge_expired_sessions`）、M2（chat_history 会话级方法补 `user_id` 纵深防御，非本人 session 读空 / 写 no-op）、X1（约 25 个源文件注释时效标记清理）。
+- ✅ 第二批（用户拍板后做）：R2（删 `chunk_text` 死函数 + 对应测试类）、R3（`_open_collection` 复用 retriever 的 embedding function 缓存）、M4（登录时主动清过期 session + 暴露 `purge_expired_sessions`）、M2（chat_history 会话级方法补 `user_id` 纵深防御，非本人 session 读空 / 写 no-op）、X1（约 25 个源文件注释时效标记清理）。
 - ⏸ 用户决定本期不动：M3（偏好重置路径）、API1/API2（Agent 去单例 / store 策略收敛 —— 个人项目当前可接受）。
 - 验证：fast UT `1335 passed`（R2 移除 6 个 `chunk_text` 测试），前端 `tsc --noEmit` 通过。
 
@@ -169,8 +169,6 @@ P2 进度：
 - M1：4 个 store 补 `threading.Lock`，与 `user_store` 对齐；非重入死锁逐一核对规避。
 
 # 2. 定位再思考
-
-> 本期聚焦 Code Review（§1），定位再思考延后；以下为候选清单，待圈定方向后推进。
 
 1. 回顾 iter_2, 看看 Agent 的能力可能提升哪些
 2. 在“学习计划”这个业务之外，AgentA 能够增加哪些新业务
@@ -196,5 +194,4 @@ P2 进度：
 | 技术写作助手 | 基于知识库辅助写博客 / 文档 | 中 |
 | 企业内 Q&A | 已在 iter_2 §5.1 Future 登记，会让定位偏移，列此备查 | 高 |
 
-> 上面两组都是候选清单，不是建议全做。需要你圈定本期想推进的方向，见对话末尾。
 

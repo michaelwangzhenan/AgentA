@@ -249,6 +249,15 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
         ),
         tier="medium",
     ),
+    "glm-4.6": ModelConfig(
+        provider="glm", model_id="glm-4.6", label="GLM-4.6",
+        # 默认不思考；开启时加 thinking.type=enabled（GLM 思考开关）
+        thinking=ThinkingSpec(
+            kind="openai_reasoning",
+            enable_extra_body={"thinking": {"type": "enabled"}},
+        ),
+        tier="high",
+    ),
     "glm-5.1": ModelConfig(
         provider="glm", model_id="glm-5.1", label="GLM-5.1",
         thinking=ThinkingSpec(

@@ -34,7 +34,6 @@ import time
 from pathlib import Path
 
 import chromadb
-from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
 import src.config as config
 from src.rag.parser import SUPPORTED_EXTENSIONS, parse_file
@@ -92,7 +91,9 @@ def _open_collection(client, model_name: str, collection_name: str):
         因为 ingest 本来就要重写数据，这里顺便修正空间。用户保留的旧 chunks 会丢失，
         但下面会重新写入，整体语义不受损。
     """
-    embedding_fn = SentenceTransformerEmbeddingFunction(model_name=model_name)
+    # 复用 retriever 的进程级缓存：同名模型只加载一次，ingest 与检索端共用同一实例
+    from src.rag.retriever import _get_embedding_fn
+    embedding_fn = _get_embedding_fn(model_name)
 
     existing = None
     try:
