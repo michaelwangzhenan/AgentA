@@ -17,7 +17,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -761,10 +761,21 @@ class TestMakeAgentFactory:
         finally:
             cfg.IMP_METHOD = "PYTHON"
 
-    # NOTE: LangChain 工厂用例（test_make_agent_langchain / _interface）已移除：
-    # 共享 venv 为 langchain 1.x（langchain.agents 无旧 AgentExecutor API），
-    # 旧 langchain_agent.py 无法 import。LangChain 实现与其测试归 langchain 分支负责，
-    # 不在 AutoGPT 分支范围内。
+    def test_make_agent_langchain(self, tmp_path):
+        import src.agent.langchain_agent  # ensure module is importable before patching
+        from src.cli.handlers import make_agent
+        from src.agent.langchain_agent import LangChainAgent
+        import src.config as cfg
+        orig = cfg.IMP_METHOD
+        cfg.IMP_METHOD = "LANGCHAIN"
+        try:
+            with patch("src.agent.langchain_agent.build_chat_model", return_value=MagicMock()), \
+                 patch("src.agent.langchain_agent.build_langchain_tools", return_value=[]), \
+                 patch("src.agent.langchain_agent.get_shared_chat_history", return_value=MagicMock()):
+                ag = make_agent(**self._build_factory_args(tmp_path))
+            assert isinstance(ag, LangChainAgent)
+        finally:
+            cfg.IMP_METHOD = orig
 
     def test_make_agent_autogpt_interface(self, tmp_path):
         """AutoGPTAgent 应暴露与其他实现相同的 duck-typed 接口属性。"""
@@ -790,6 +801,27 @@ class TestMakeAgentFactory:
         cfg.IMP_METHOD = "PYTHON"
         try:
             ag = make_agent(**self._build_factory_args(tmp_path))
+            assert hasattr(ag, "run")
+            assert hasattr(ag, "session_id")
+            assert hasattr(ag, "activate_skill")
+            assert hasattr(ag, "last_usage")
+            assert hasattr(ag, "verbose")
+            assert hasattr(ag, "thinking_cfg")
+        finally:
+            cfg.IMP_METHOD = orig
+
+    def test_make_agent_langchain_interface(self, tmp_path):
+        """LangChainAgent 应暴露相同的 duck-typed 接口属性。"""
+        import src.agent.langchain_agent  # ensure module is importable before patching
+        from src.cli.handlers import make_agent
+        import src.config as cfg
+        orig = cfg.IMP_METHOD
+        cfg.IMP_METHOD = "LANGCHAIN"
+        try:
+            with patch("src.agent.langchain_agent.build_chat_model", return_value=MagicMock()), \
+                 patch("src.agent.langchain_agent.build_langchain_tools", return_value=[]), \
+                 patch("src.agent.langchain_agent.get_shared_chat_history", return_value=MagicMock()):
+                ag = make_agent(**self._build_factory_args(tmp_path))
             assert hasattr(ag, "run")
             assert hasattr(ag, "session_id")
             assert hasattr(ag, "activate_skill")

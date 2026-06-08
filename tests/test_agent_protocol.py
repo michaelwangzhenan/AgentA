@@ -142,12 +142,10 @@ class TestEventBusInstanceContract:
             pytest.skip("LangChainAgent 未导入（环境未装 langchain）")
         from unittest.mock import patch
         from src.agent.core.event_bus import EventBus
-        # 全 mock 掉 LLM / tools / SQLite / agent / executor，避免真实 langchain 调用
+        # 全 mock 掉 LLM / tools / 共享 ChatHistory，避免真实 langchain 调用与磁盘读写
         with patch("src.agent.langchain_agent.build_chat_model"), \
              patch("src.agent.langchain_agent.build_langchain_tools", return_value=[]), \
-             patch("src.agent.langchain_agent.SQLiteChatMessageHistory"), \
-             patch("src.agent.langchain_agent.create_tool_calling_agent"), \
-             patch("src.agent.langchain_agent.AgentExecutor"):
+             patch("src.agent.langchain_agent.get_shared_chat_history"):
             a = LangChainAgent(session_id="x", verbose=False)
         assert isinstance(a.events, EventBus)
 
@@ -180,8 +178,6 @@ class TestAgentAPIIsInstance:
         from unittest.mock import patch
         with patch("src.agent.langchain_agent.build_chat_model"), \
              patch("src.agent.langchain_agent.build_langchain_tools", return_value=[]), \
-             patch("src.agent.langchain_agent.SQLiteChatMessageHistory"), \
-             patch("src.agent.langchain_agent.create_tool_calling_agent"), \
-             patch("src.agent.langchain_agent.AgentExecutor"):
+             patch("src.agent.langchain_agent.get_shared_chat_history"):
             a = LangChainAgent(session_id="x", verbose=False)
         assert isinstance(a, AgentAPI)

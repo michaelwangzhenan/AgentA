@@ -19,6 +19,8 @@ load_dotenv(override=True)
 import pytest
 
 import src.agent.agent as _agent_module
+# _chat_history 单例已抽到公共层 agent_commons（三实现共享）；隔离需 patch 这里。
+import src.agent.core.agent_commons as _commons_module
 
 
 @pytest.fixture(autouse=True)
@@ -72,9 +74,9 @@ def _isolated_agent_memory(tmp_path, _neutralize_runtime_overrides):
     from src.memory.chat_history import ChatHistoryStore
 
     # ── 对话历史隔离 ──────────────────────────────────────────────────────────
-    _orig_mem = _agent_module._chat_history
+    _orig_mem = _commons_module._chat_history
     mem = ChatHistoryStore(db_path=str(tmp_path / "agent_test.db"))
-    _agent_module._chat_history = mem
+    _commons_module._chat_history = mem
 
     # ── 用户记忆隔离 ──────────────────────────────────────────────────────────
     _orig_user_mem = _agent_module._shared_user_memory
@@ -87,7 +89,7 @@ def _isolated_agent_memory(tmp_path, _neutralize_runtime_overrides):
     yield
 
     # ── 恢复原始状态 ──────────────────────────────────────────────────────────
-    _agent_module._chat_history = _orig_mem
+    _commons_module._chat_history = _orig_mem
     _agent_module._shared_user_memory = _orig_user_mem
     _agent_module._cfg.USER_MEMORY_ENABLED = _orig_enabled
     _agent_module._cfg.USER_MEMORY_AUTO_EXTRACT = _orig_auto
