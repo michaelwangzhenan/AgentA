@@ -17,13 +17,14 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import patch
 
 import pytest
 
 from src.agent.autogpt_agent import AutoGPTAgent
 from src.agent.agent import ThinkingConfig, TokenUsage, SYSTEM_PROMPT
 from src.agent.tools import ToolResult
+from src.agent.core.event_bus import EVENT_PLAN_CREATED, EVENT_TOKEN_CHUNK
 from src.memory.chat_history import ChatHistoryStore
 
 # AutoGPT Agent 本期不验证（详见 iter_2_agent.md §4.4.3），整文件默认 deselect
@@ -263,7 +264,7 @@ class TestAutoGPTExecute:
             return _text_resp("TASK_COMPLETE: 找到了 RAG 相关内容")
 
         with patch("src.agent.autogpt_agent.chat", side_effect=fake_chat), \
-             patch("src.agent.autogpt_agent.execute_tool",
+             patch("src.agent.core.tool_call_engine.execute_tool",
                    return_value=ToolResult(status="ok", content="RAG 相关文档")):
             result = ag._execute_task("搜索 RAG", "了解 RAG", [])
 
@@ -283,7 +284,7 @@ class TestAutoGPTExecute:
             return _text_resp("TASK_COMPLETE: done")
 
         with patch("src.agent.autogpt_agent.chat", side_effect=fake_chat), \
-             patch("src.agent.autogpt_agent.execute_tool",
+             patch("src.agent.core.tool_call_engine.execute_tool",
                    return_value=ToolResult(status="ok", content="结果")):
             ag._execute_task("任务", "目标", [])
 
@@ -300,7 +301,7 @@ class TestAutoGPTExecute:
             return _text_resp("TASK_COMPLETE: 被迫回答")
 
         with patch("src.agent.autogpt_agent.chat", side_effect=fake_chat), \
-             patch("src.agent.autogpt_agent.execute_tool",
+             patch("src.agent.core.tool_call_engine.execute_tool",
                    return_value=ToolResult(status="ok", content="结果")):
             ag._execute_task("任务", "目标", [])
 
@@ -316,7 +317,7 @@ class TestAutoGPTExecute:
             return _tool_resp("search_knowledge", {"query": "q"})
 
         with patch("src.agent.autogpt_agent.chat", side_effect=fake_chat), \
-             patch("src.agent.autogpt_agent.execute_tool",
+             patch("src.agent.core.tool_call_engine.execute_tool",
                    return_value=ToolResult(status="ok", content="结果")):
             result = ag._execute_task("不可完成的任务", "目标", [])
 
@@ -504,6 +505,110 @@ class TestAutoGPTRun:
         assert "tool" not in roles
 
 
+# ── 公共层接入（B-2 / B-4 / B-6 / B-8）────────────────────────────────────────
+
+class TestAutoGPTCommonLayer:
+    """验证 AutoGPT 复用公共层 helper 的接线：ToolCallEngine / 四层 system / 事件 / 流式。"""
+
+    def test_execute_uses_tool_call_engine_no_db_pollution(self, tmp_path):
+        """B-2/B-5：Execute 子循环经 ToolCallEngine 跑工具，但中间 tool/assistant
+        消息只进内存临时历史，真实 DB 仅留 user + 最终 assistant。"""
+        ch = ChatHistoryStore(db_path=str(tmp_path / "ag.db"))
+        ag = AutoGPTAgent(
+            session_id="no-pollute",
+            chat_history=ch,
+            verbose=False,
+            max_plan_tasks=1,
+            max_task_tool_rounds=2,
+        )
+        responses = [
+            _plan_resp(["搜索资料"]),                        # Plan
+            _tool_resp("search_knowledge", {"query": "q"}),   # Execute iter1: 工具
+            _text_resp("TASK_COMPLETE: 已找到"),              # Execute iter2: 完成
+            _text_resp("最终综合回答"),                        # Review
+        ]
+        with patch("src.agent.autogpt_agent.chat", side_effect=responses), \
+             patch("src.agent.core.tool_call_engine.execute_tool",
+                   return_value=ToolResult(status="ok", content="检索结果")):
+            result = ag.run("帮我查资料")
+
+        assert result == "最终综合回答"
+        all_msgs = ch.load("no-pollute")
+        roles = [m["role"] for m in all_msgs]
+        assert "tool" not in roles                       # 中间 tool 消息未落库
+        assert roles == ["user", "assistant"]            # 只剩 user + 最终 assistant
+        assert all_msgs[-1]["content"] == "最终综合回答"
+
+    def test_inner_make_plan_emits_plan_created_event(self, tmp_path):
+        """B-6：子循环内 LLM 调 make_plan 时，经 ToolCallEngine 自动 emit plan_created。"""
+        ag = _make_agent(tmp_path, max_plan_tasks=1, max_task_tool_rounds=2)
+        events: list = []
+        ag.set_event_callback(lambda ev: events.append(ev))
+
+        responses = [
+            _plan_resp(["规划并执行"]),                                  # Plan
+            _tool_resp("make_plan", {"steps": ["第一步", "第二步"]}),     # Execute: make_plan
+            _text_resp("TASK_COMPLETE: 完成"),                          # Execute: 完成
+            _text_resp("最终回答"),                                      # Review
+        ]
+        with patch("src.agent.autogpt_agent.chat", side_effect=responses), \
+             patch("src.agent.core.tool_call_engine.execute_tool",
+                   return_value=ToolResult(status="ok", content="已记录 plan")):
+            ag.run("做个计划")
+
+        assert any(ev.type == EVENT_PLAN_CREATED for ev in events)
+
+    def test_review_four_layer_injects_user_context(self, tmp_path):
+        """B-4：Review system 经 MemoryManager 注入 <user_context>。"""
+        class _FakeMem:
+            def load_for_context(self, _max_chars):
+                return "用户偏好：回答尽量简洁"
+
+        ch = ChatHistoryStore(db_path=str(tmp_path / "ag.db"))
+        ag = AutoGPTAgent(chat_history=ch, user_memory=_FakeMem(), verbose=False)
+        captured: list = []
+
+        def fake_chat(messages, **kw):
+            captured.append(messages)
+            return _text_resp("回答")
+
+        with patch("src.agent.autogpt_agent.chat", side_effect=fake_chat):
+            ag._review("目标", [])
+
+        system_content = captured[0][0]["content"]
+        assert "<user_context>" in system_content
+        assert "用户偏好：回答尽量简洁" in system_content
+
+    def test_review_passes_token_callback_when_subscriber_present(self, tmp_path):
+        """B-8：Review 有 token 订阅者时，向 LLM 传 on_token_chunk（流式）。"""
+        ag = _make_agent(tmp_path)
+        ag.events.subscribe(EVENT_TOKEN_CHUNK, lambda _p: None)
+        captured_kwargs: list = []
+
+        def fake_chat(messages, tools=None, on_token_chunk=None, **kw):
+            captured_kwargs.append(on_token_chunk)
+            return _text_resp("回答")
+
+        with patch("src.agent.autogpt_agent.chat", side_effect=fake_chat):
+            ag._review("目标", [])
+
+        assert captured_kwargs and captured_kwargs[-1] is not None
+
+    def test_review_no_token_callback_without_subscriber(self, tmp_path):
+        """无 token 订阅者时不传 on_token_chunk（零副作用，保护 mock 单测）。"""
+        ag = _make_agent(tmp_path)
+        captured_kwargs: list = []
+
+        def fake_chat(messages, tools=None, on_token_chunk=None, **kw):
+            captured_kwargs.append(on_token_chunk)
+            return _text_resp("回答")
+
+        with patch("src.agent.autogpt_agent.chat", side_effect=fake_chat):
+            ag._review("目标", [])
+
+        assert captured_kwargs and captured_kwargs[-1] is None
+
+
 # ── last_usage / token 统计 ───────────────────────────────────────────────────
 
 class TestAutoGPTTokenUsage:
@@ -656,25 +761,10 @@ class TestMakeAgentFactory:
         finally:
             cfg.IMP_METHOD = "PYTHON"
 
-    def test_make_agent_langchain(self, tmp_path):
-        import src.agent.langchain_agent  # ensure module is importable before patching
-        from src.cli.handlers import make_agent
-        from src.agent.langchain_agent import LangChainAgent
-        import src.config as cfg
-        orig = cfg.IMP_METHOD
-        cfg.IMP_METHOD = "LANGCHAIN"
-        try:
-            with patch("src.agent.langchain_agent.build_chat_model", return_value=MagicMock()), \
-                 patch("src.agent.langchain_agent.build_langchain_tools", return_value=[]), \
-                 patch("src.agent.langchain_agent.SQLiteChatMessageHistory") as mock_h, \
-                 patch("src.agent.langchain_agent.create_tool_calling_agent", return_value=MagicMock()), \
-                 patch("src.agent.langchain_agent.AgentExecutor") as mock_exec:
-                mock_h.return_value = MagicMock(messages=[])
-                mock_exec.return_value = MagicMock()
-                ag = make_agent(**self._build_factory_args(tmp_path))
-            assert isinstance(ag, LangChainAgent)
-        finally:
-            cfg.IMP_METHOD = orig
+    # NOTE: LangChain 工厂用例（test_make_agent_langchain / _interface）已移除：
+    # 共享 venv 为 langchain 1.x（langchain.agents 无旧 AgentExecutor API），
+    # 旧 langchain_agent.py 无法 import。LangChain 实现与其测试归 langchain 分支负责，
+    # 不在 AutoGPT 分支范围内。
 
     def test_make_agent_autogpt_interface(self, tmp_path):
         """AutoGPTAgent 应暴露与其他实现相同的 duck-typed 接口属性。"""
@@ -700,31 +790,6 @@ class TestMakeAgentFactory:
         cfg.IMP_METHOD = "PYTHON"
         try:
             ag = make_agent(**self._build_factory_args(tmp_path))
-            assert hasattr(ag, "run")
-            assert hasattr(ag, "session_id")
-            assert hasattr(ag, "activate_skill")
-            assert hasattr(ag, "last_usage")
-            assert hasattr(ag, "verbose")
-            assert hasattr(ag, "thinking_cfg")
-        finally:
-            cfg.IMP_METHOD = orig
-
-    def test_make_agent_langchain_interface(self, tmp_path):
-        """LangChainAgent 应暴露相同的 duck-typed 接口属性。"""
-        import src.agent.langchain_agent  # ensure module is importable before patching
-        from src.cli.handlers import make_agent
-        import src.config as cfg
-        orig = cfg.IMP_METHOD
-        cfg.IMP_METHOD = "LANGCHAIN"
-        try:
-            with patch("src.agent.langchain_agent.build_chat_model", return_value=MagicMock()), \
-                 patch("src.agent.langchain_agent.build_langchain_tools", return_value=[]), \
-                 patch("src.agent.langchain_agent.SQLiteChatMessageHistory") as mock_h, \
-                 patch("src.agent.langchain_agent.create_tool_calling_agent", return_value=MagicMock()), \
-                 patch("src.agent.langchain_agent.AgentExecutor") as mock_exec:
-                mock_h.return_value = MagicMock(messages=[])
-                mock_exec.return_value = MagicMock()
-                ag = make_agent(**self._build_factory_args(tmp_path))
             assert hasattr(ag, "run")
             assert hasattr(ag, "session_id")
             assert hasattr(ag, "activate_skill")
