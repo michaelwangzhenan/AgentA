@@ -1,4 +1,4 @@
-import { Monitor, Moon, Sun } from 'lucide-react'
+import { Coffee, Flame, Monitor, Moon, Sun, Sunrise, Sunset } from 'lucide-react'
 
 import {
   DropdownMenu,
@@ -13,12 +13,18 @@ type Option = { value: Theme; label: string; icon: React.ReactNode }
 const OPTIONS: Option[] = [
   { value: 'light', label: '浅色', icon: <Sun className="h-4 w-4" /> },
   { value: 'dark', label: '深色', icon: <Moon className="h-4 w-4" /> },
+  { value: 'warm-light', label: '暖色·浅', icon: <Coffee className="h-4 w-4" /> },
+  { value: 'warm-dark', label: '暖色·深', icon: <Flame className="h-4 w-4" /> },
+  { value: 'amber-light', label: '橙调·浅', icon: <Sunrise className="h-4 w-4" /> },
+  { value: 'amber-dark', label: '橙调·深', icon: <Sunset className="h-4 w-4" /> },
   { value: 'system', label: '跟随系统', icon: <Monitor className="h-4 w-4" /> },
 ]
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme()
-  const current = OPTIONS.find((o) => o.value === theme) ?? OPTIONS[2]
+  const current =
+    OPTIONS.find((o) => o.value === theme) ??
+    OPTIONS[OPTIONS.length - 1]
 
   return (
     <DropdownMenu>

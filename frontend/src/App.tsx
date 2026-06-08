@@ -174,7 +174,13 @@ function App() {
       <Toaster
         position="bottom-right"
         richColors
-        theme={theme === 'system' ? undefined : theme}
+        theme={
+          theme === 'system'
+            ? undefined
+            : theme === 'dark' || theme.endsWith('-dark')
+              ? 'dark'
+              : 'light'
+        }
       />
     </div>
   )

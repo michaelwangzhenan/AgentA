@@ -1,9 +1,11 @@
 /**
- * 主题状态管理 —— 3 态：'light' | 'dark' | 'system'。
+ * 主题状态管理。
  *
- * - 'system' 跟随 `prefers-color-scheme` media query
+ * - 内置 'light' / 'dark' / 'system'（system 跟随 `prefers-color-scheme`）
+ * - 皮肤形如 `<名>-light` / `<名>-deep`，用 `data-theme` 覆写一套语义色（见 index.css）；
+ *   凡深色基底的皮肤（值里含 `-dark`）额外挂 `.dark`，让硬编码的 `dark:` 类、
+ *   CodeMirror、Toaster 都走深色逻辑（浅色皮肤不挂，走浅色逻辑）
  * - 持久化到 `localStorage` key `agenta-theme`
- * - 切换时给 `<html>` 加 / 减 `.dark` class（CSS 已就绪：index.css 里的 `.dark` 选择器）
  *
  * 用 React Context 共享 —— 否则 ThemeToggle 改主题时 App.tsx 拿到的 theme 不会
  * 同步更新，导致 Toaster 等 root 组件不及时响应（同一 hook 调两次是两份 state）。
@@ -18,12 +20,32 @@ import {
   type ReactNode,
 } from 'react'
 
-export type Theme = 'light' | 'dark' | 'system'
+export type Theme =
+  | 'light'
+  | 'dark'
+  | 'warm-light'
+  | 'warm-dark'
+  | 'amber-light'
+  | 'amber-dark'
+  | 'system'
+
+/** 实际生效的渲染主题（'system' 解析后会落到 light / dark）。 */
+type EffectiveTheme = Exclude<Theme, 'system'>
 
 const STORAGE_KEY = 'agenta-theme'
 
+const THEMES: readonly Theme[] = [
+  'light',
+  'dark',
+  'warm-light',
+  'warm-dark',
+  'amber-light',
+  'amber-dark',
+  'system',
+]
+
 function isTheme(v: unknown): v is Theme {
-  return v === 'light' || v === 'dark' || v === 'system'
+  return typeof v === 'string' && (THEMES as readonly string[]).includes(v)
 }
 
 function readStored(): Theme {
@@ -36,7 +58,7 @@ function readStored(): Theme {
   return 'system'
 }
 
-function resolveEffective(theme: Theme): 'light' | 'dark' {
+function resolveEffective(theme: Theme): EffectiveTheme {
   if (theme === 'system') {
     return window.matchMedia('(prefers-color-scheme: dark)').matches
       ? 'dark'
@@ -45,12 +67,18 @@ function resolveEffective(theme: Theme): 'light' | 'dark' {
   return theme
 }
 
-function applyClass(effective: 'light' | 'dark'): void {
+function applyClass(effective: EffectiveTheme): void {
   const root = document.documentElement
-  if (effective === 'dark') {
-    root.classList.add('dark')
+  // 深色基底（dark 及任何 *-dark 皮肤）挂 `.dark`，让 dark: 类、CodeMirror、Toaster 走深色逻辑
+  root.classList.toggle(
+    'dark',
+    effective === 'dark' || effective.endsWith('-dark'),
+  )
+  // 皮肤用 data-theme 标记触发 index.css 覆写层；内置 light/dark 不带标记
+  if (effective === 'light' || effective === 'dark') {
+    delete root.dataset.theme
   } else {
-    root.classList.remove('dark')
+    root.dataset.theme = effective
   }
 }
 

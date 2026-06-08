@@ -142,7 +142,7 @@ function UserBubble({
       {attachments.length > 0 ? <AttachmentCards items={attachments} /> : null}
       {message.content ? (
         <div className={cn(
-          'rounded-2xl bg-primary px-4 py-2 text-sm break-words whitespace-pre-wrap text-primary-foreground',
+          'rounded-2xl bg-user-bubble px-4 py-2 text-sm break-words whitespace-pre-wrap text-user-bubble-foreground',
           cb.compact ? 'max-w-[92%]' : 'max-w-[80%]',
         )}>
           {message.content}

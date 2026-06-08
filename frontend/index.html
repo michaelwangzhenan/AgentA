@@ -7,12 +7,15 @@
     <title>AgentA</title>
     <script>
       // 提前 apply dark class，避免 React 渲染后才切换造成的"白屏闪一下"
+      // 皮肤（非 light/dark/system）用 data-theme 标记；深色基底（*-dark）额外挂 .dark
       (function () {
         try {
           var t = localStorage.getItem('agenta-theme') || 'system';
-          var dark = t === 'dark' || (t === 'system' &&
+          var dark = t === 'dark' || t.indexOf('-dark') !== -1 || (t === 'system' &&
             window.matchMedia('(prefers-color-scheme: dark)').matches);
           if (dark) document.documentElement.classList.add('dark');
+          if (t !== 'light' && t !== 'dark' && t !== 'system')
+            document.documentElement.dataset.theme = t;
         } catch (e) { /* localStorage 不可用：默认浅色 */ }
       })();
     </script>
