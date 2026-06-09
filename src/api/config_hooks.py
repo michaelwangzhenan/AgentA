@@ -46,6 +46,20 @@ def _on_thinking_changed(_old: Any, _new: Any) -> None:
         logger.warning("[config] 同步 thinking 到 agent 失败: %s", e)
 
 
+def _on_imp_method_changed(_old: Any, new: Any) -> None:
+    """IMP_METHOD 改后清掉 agent 单例缓存，下一次请求按新实现重建。
+
+    agent 单例在 `get_agent()` 里按 `IMP_METHOD` 选实现且 `lru_cache` 缓存，不清缓存
+    则一直复用旧实现。清后下一轮对话即用新实现（会重开 sub-store 连接，可接受）。
+    """
+    try:
+        from src.api.deps import get_agent
+        get_agent.cache_clear()
+        logger.info("[config] IMP_METHOD → %s，agent 单例已失效将重建", str(new).upper())
+    except Exception as e:
+        logger.warning("[config] 切换 IMP_METHOD 失败: %s", e)
+
+
 def _on_mcp_changed(_old: Any, _new: Any) -> None:
     """MCP_ENABLED / MCP_CONFIG_FILE 改后重载 MCP manager。"""
     try:
@@ -65,6 +79,7 @@ def _on_mcp_changed(_old: Any, _new: Any) -> None:
 
 _HOOKS: dict[str, Callable[[Any, Any], None]] = {
     "LOG_LEVEL": _on_log_level_changed,
+    "IMP_METHOD": _on_imp_method_changed,
     "MCP_ENABLED": _on_mcp_changed,
     "MCP_CONFIG_FILE": _on_mcp_changed,
     "THINKING_ENABLED": _on_thinking_changed,

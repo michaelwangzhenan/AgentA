@@ -242,9 +242,11 @@ class AutoGPTAgent:
         Returns:
             综合各子任务结果后生成的最终回答。
 
-        Note: AutoGPT 仅 CLI 单实例使用，不在 Web 并发路径（API 固定用 Python Agent）。
-        per-run kwargs 在此折叠回实例状态即满足签名一致与 CLI 正确性；真正的并发隔离
-        在默认 `Agent.run` 内实现。
+        并发警告：本实现只支持单用户。Web 端 `get_agent()` 可经 `IMP_METHOD=AUTOGPT`
+        路由到这里，但 run() 把 per-run kwargs 折叠回共享实例状态（self.session_id /
+        self.events / self._prompt_tokens / self._citation_builder），多用户并发会互相
+        覆盖 → 会话串台、事件发错流、token 与引用编号错乱。真正的 per-request 并发隔离
+        只在默认 `Agent.run`（PYTHON）内实现；并发场景请用 PYTHON。
         """
         if session_id is not None:
             self.session_id = session_id
@@ -263,16 +265,15 @@ class AutoGPTAgent:
         ))
 
         # Phase 1: Plan
-        if self.verbose:
-            logger.info("[AutoGPT] Phase 1: Planning for goal: %r", user_input[:80])
+        logger.info("[AutoGPT] Phase 1: Planning for goal: %r", user_input[:80])
         tasks = self._plan(user_input, history_summary)
         # 外层任务列表用 info 事件上报（B-6 外层；不复用 plan_*，避免与内层 make_plan 打架）
         self.events.publish(AgentEvent(
             type=EVENT_INFO,
             payload={"message": "autogpt.plan", "tasks": list(tasks)},
         ))
+        logger.info("[AutoGPT] 生成 %d 个子任务: %s", len(tasks), tasks)
         if self.verbose:
-            logger.info("[AutoGPT] 生成 %d 个子任务: %s", len(tasks), tasks)
             print(f"\n[AutoGPT] 规划完成，共 {len(tasks)} 个子任务：")
             for i, t in enumerate(tasks, 1):
                 print(f"  {i}. {t}")
@@ -298,8 +299,8 @@ class AutoGPTAgent:
                 logger.info("[AutoGPT] 子任务 %d 完成: %s...", i, preview)
 
         # Phase 3: Review & synthesize
+        logger.info("[AutoGPT] Phase 3: Reviewing and synthesizing final answer")
         if self.verbose:
-            logger.info("[AutoGPT] Phase 3: Reviewing and synthesizing final answer")
             print("[AutoGPT] 综合子任务结果，生成最终回答...\n")
         final_answer = self._review(user_input, task_results)
 

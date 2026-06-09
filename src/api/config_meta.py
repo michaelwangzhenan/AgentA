@@ -122,6 +122,15 @@ REGISTRY: list[ConfigItem] = [
         min=1,
         max=200,
     ),
+    ConfigItem(
+        key="IMP_METHOD",
+        group="llm",
+        type=ItemType.ENUM_STR,
+        brief="Agent 实现",
+        detail="底层 Agent 实现：PYTHON（手写 ReAct，最稳，唯一做了多用户并发隔离）/ LANGCHAIN（create_agent 驱动）/ AUTOGPT（先规划子任务再逐个执行）。注意：LANGCHAIN / AUTOGPT 未做 per-request 隔离，多用户并发会串台，仅建议单用户使用。",
+        options=("PYTHON", "LANGCHAIN", "AUTOGPT"),
+        side_effect_hint="改后下一次对话即按新实现重建，无需重启",
+    ),
     # ─── RAG ──────────────────────────────────────────────────────────────
     # —— 索引与切块（文档入库阶段）——
     ConfigItem(

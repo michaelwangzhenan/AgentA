@@ -13,6 +13,7 @@
 未来可统一为 shared，但代价是 Agent 构造路径也要改。
 """
 
+import logging
 from functools import lru_cache
 from typing import Any
 
@@ -35,6 +36,8 @@ from src.memory.user_memory import UserMemoryStore
 from src.memory.user_store import ROLE_ADMIN, UserStore
 from src.memory.user_store import get_shared_store as _get_shared_user_store
 
+logger = logging.getLogger(__name__)
+
 
 @lru_cache(maxsize=1)
 def get_agent() -> AgentAPI:
@@ -47,10 +50,23 @@ def get_agent() -> AgentAPI:
     sub-store 连接，但下一轮对话立即看到新 catalog）。
 
     返回 `AgentAPI` 契约类型，调用方不绑定具体实现。
+
+    按 `IMP_METHOD` 选实现（PYTHON / LANGCHAIN / AUTOGPT），与 CLI 的 `make_agent`
+    同源。改 `IMP_METHOD` 后由 config hook 清本缓存，下一次请求重建生效。
+    注意：LANGCHAIN / AUTOGPT 两套实现未做 per-request 事件隔离，多用户并发会串台，
+    仅适合单用户使用 / 横向对比。
     """
     from src.skills.skill_loader import scan_skills
-    skills_map = scan_skills().loaded
-    return Agent(verbose=False, skills=skills_map or None)
+    skills_map = scan_skills().loaded or None
+    imp = (_cfg.IMP_METHOD or "PYTHON").upper()
+    logger.info("[get_agent] 构造 Agent 实例，IMP_METHOD=%s", imp)
+    if imp == "LANGCHAIN":
+        from src.agent.langchain_agent import LangChainAgent
+        return LangChainAgent(verbose=False, skills=skills_map)
+    if imp == "AUTOGPT":
+        from src.agent.autogpt_agent import AutoGPTAgent
+        return AutoGPTAgent(verbose=False, skills=skills_map)
+    return Agent(verbose=False, skills=skills_map)
 
 
 @lru_cache(maxsize=1)

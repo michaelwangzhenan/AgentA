@@ -21,3 +21,9 @@ readme
 skill os
 
 
+# 5. 待修 bug
+## 5.1. AutoGPT Plan 阶段 JSON 解析失败
+`autogpt_agent.py::_plan` 直接 `json.loads(raw)`，模型若把 JSON 包在 ```json 代码围栏里就解析失败，
+每次都回退成单任务，AutoGPT 的多任务分解失效。修法：解析前剥掉 markdown 代码围栏（再容错取首个 `{...}`）。
+
+
