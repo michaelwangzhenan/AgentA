@@ -679,7 +679,7 @@ HARNESS_RAG_ENABLED: bool = os.getenv("HARNESS_RAG_ENABLED", "false").lower() ==
 HARNESS_LLM_TIMEOUT_SEC: float = float(os.getenv("HARNESS_LLM_TIMEOUT_SEC", "15"))
 # Q1 quiz 批改自检阈值（critic 总分 < 该值标 harness_flagged，0-5 分）
 HARNESS_GRADING_THRESHOLD: float = float(os.getenv("HARNESS_GRADING_THRESHOLD", "3.5"))
-# 用户输入短于此字符数不触发自动提取（显式触发不受此限；设为 0 禁用）
+# 自动提取到点后，最近窗口里需至少有一条 ≥此字符数的 user 消息才触发（整窗都是寒暄则跳过；设为 0 禁用此过滤）
 USER_MEMORY_EXTRACT_MIN_INPUT_LEN: int = int(os.getenv("USER_MEMORY_EXTRACT_MIN_INPUT_LEN", "20"))
 # 记忆总条数软上限（提示 LLM 合并时控制规模，超出时合并 / 删除最旧条目）
 USER_MEMORY_MAX_ENTRIES: int = int(os.getenv("USER_MEMORY_MAX_ENTRIES", "30"))

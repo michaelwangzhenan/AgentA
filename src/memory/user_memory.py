@@ -115,8 +115,9 @@ def should_extract_immediately(user_text: str) -> bool:
 
 # 不同触发模式下的策略行（拼进 system prompt）
 _MODE_AUTO = (
-    "当前是自动维护：只在对话里出现**明确的**用户长期信息（偏好、背景、持久指令、"
-    "需要纠正的错误）时才改动；泛泛而谈、一次性内容一律忽略，没有就返回 []。"
+    "当前是自动维护：把对话里体现的用户**长期信息**记下来——兴趣爱好、好恶、技能与背景、"
+    "学习 / 工作目标、持久偏好、需纠正的错误，都值得 ADD / UPDATE；只忽略一次性、"
+    "与用户本人无关的内容（当天天气、纯知识问答、临时任务），没有就返回 []。"
 )
 _MODE_EXPLICIT = (
     "用户明确要求记住当前对话，请**积极**维护：讨论结论、关注的技术方向、待办、"
@@ -168,6 +169,7 @@ def extract_memory_ops(
     *,
     existing: list[dict[str, Any]] | None = None,
     context_history: str = "",
+    is_explicit: bool = False,
     max_entries: int = 30,
 ) -> list[dict[str, Any]]:
     """
@@ -178,7 +180,9 @@ def extract_memory_ops(
         agent_reply:      Agent 回答。
         llm_chat_fn:      LLM chat 函数（签名同 provider.chat）。
         existing:         该用户现有记忆（含 id / text），供 LLM 去重去矛盾。
-        context_history:  非空表示显式触发（"请记住"），附最近若干轮历史 + 用宽松策略。
+        context_history:  最近若干轮历史；非空就拼进对话。auto / explicit 都会带，
+                          仅用来给 LLM 更多上下文，不再决定提取模式。
+        is_explicit:      True=显式触发（"请记住"）更积极；False=自动维护（收长期信息、丢一次性内容）。
         max_entries:      记忆总条数软上限，提示 LLM 合并时控制规模。
 
     Returns:
@@ -186,7 +190,6 @@ def extract_memory_ops(
         / {"op": "DELETE", "id": n}。最多 _MAX_OPS_PER_CALL 条；失败或无改动返回 []。
     """
     existing = existing or []
-    is_explicit = bool(context_history)
     mode_line = _MODE_EXPLICIT if is_explicit else _MODE_AUTO
     system_prompt = _build_merge_system_prompt(max_entries, mode_line)
 

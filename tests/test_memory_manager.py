@@ -14,8 +14,9 @@
   · 调用 load_for_context 时使用 config.USER_MEMORY_MAX_CHARS
 - `try_extract`
   · user_memory=None → 直接 skip
-  · is_explicit=True → 调 extract_memory_ops，传非空 context_history
-  · AUTO_EXTRACT=true & is_explicit=False → 调 extract，但 context_history=""
+  · is_explicit=True → 调 extract_memory_ops，传 is_explicit=True + 窗口 context_history
+  · AUTO_EXTRACT=true & is_explicit=False → 到点后同样带窗口 context_history，传 is_explicit=False
+  · auto 的 min_len 改为整窗过滤：本轮输入短但窗口里有长消息 → 仍触发
   · 都不满足 → 直接 skip
   · extract 抛异常 → 静默吞掉
   · 有 ops 时调 apply_ops 应用操作
@@ -190,20 +191,21 @@ class TestTryExtract:
         args = mock_extract.call_args.args
         assert args[0] == "请记住我喜欢简洁"
         assert args[1] == "好的"
-        # context_history 现为 kwarg，应包含前一轮内容
+        # context_history 现为 kwarg，应包含前一轮内容；is_explicit=True
         ctx = mock_extract.call_args.kwargs["context_history"]
         assert "前一轮问题" in ctx or "前一轮回答" in ctx
+        assert mock_extract.call_args.kwargs["is_explicit"] is True
         um.apply_ops.assert_called_once_with(fake_ops, source="explicit", user_id=_UID)
 
-    def test_auto_extract_passes_empty_context(self) -> None:
-        """AUTO_EXTRACT 路径：context_history 必须为 ""（用严格 prompt）。
+    def test_auto_extract_passes_window_context(self) -> None:
+        """AUTO_EXTRACT 路径：到点后同样带最近窗口 context_history，且 is_explicit=False。
 
         every_n=1 + min_len=0 + msg_count=1 等价于"每轮触发"。
         """
         um = MagicMock()
         recent = [
-            {"role": "user", "content": "x"},
-            {"role": "assistant", "content": "y"},
+            {"role": "user", "content": "窗口里的问题"},
+            {"role": "assistant", "content": "窗口里的回答"},
         ]
         mgr = _mk_mgr(user_memory=um, recent_messages=recent, user_msg_count=1)
         with (
@@ -215,7 +217,9 @@ class TestTryExtract:
         ):
             _run(mgr, "普通问题", "普通回答")
         mock_extract.assert_called_once()
-        assert mock_extract.call_args.kwargs["context_history"] == ""
+        ctx = mock_extract.call_args.kwargs["context_history"]
+        assert "窗口里的问题" in ctx or "窗口里的回答" in ctx
+        assert mock_extract.call_args.kwargs["is_explicit"] is False
 
     def test_existing_memories_passed_to_extractor(self) -> None:
         """提取时把已有记忆作为 existing 传给 extractor（去重去矛盾依据）。"""
@@ -278,10 +282,13 @@ class TestExtractTriggerPolicy:
     """
 
     @staticmethod
-    def _auto_triggered(input_str: str, every_n: int, min_len: int, *, msg_count: int) -> bool:
+    def _auto_triggered(
+        input_str: str, every_n: int, min_len: int, *,
+        msg_count: int, recent_messages=None,
+    ) -> bool:
         """给定累计消息数 msg_count，跑一次 auto try_extract，返回是否触发提取。"""
         um = MagicMock()
-        mgr = _mk_mgr(user_memory=um, user_msg_count=msg_count)
+        mgr = _mk_mgr(user_memory=um, user_msg_count=msg_count, recent_messages=recent_messages)
         with (
             patch("src.agent.core.memory_manager.should_extract_immediately", return_value=False),
             patch("src.agent.core.memory_manager._cfg.USER_MEMORY_AUTO_EXTRACT", True),
@@ -311,8 +318,22 @@ class TestExtractTriggerPolicy:
         assert self._auto_triggered("x" * 100, every_n=5, min_len=0, msg_count=0) is False
 
     def test_auto_min_len_skips_short_input(self) -> None:
-        """短输入 < min_len 时即使到了 N 的整数倍也不触发。"""
+        """到点后，本轮输入短且窗口里也没有任何 ≥min_len 的实质消息 → 不触发。"""
         assert self._auto_triggered("短", every_n=1, min_len=20, msg_count=5) is False
+
+    def test_auto_min_len_triggers_when_window_has_long_msg(self) -> None:
+        """关键修复：本轮输入短，但最近窗口里有一条 ≥min_len 的长消息 → 仍触发。
+
+        修复前：min_len 只看触发那一条短消息，整窗有干货也被丢掉。
+        修复后：min_len 改为整窗过滤，窗口里任一条实质消息即可触发。
+        """
+        recent = [
+            {"role": "user", "content": "我是 5G 协议工程师，最近在深入学习 RAG 检索增强"},
+            {"role": "assistant", "content": "好的"},
+        ]
+        assert self._auto_triggered(
+            "嗯", every_n=1, min_len=20, msg_count=5, recent_messages=recent,
+        ) is True
 
     def test_auto_min_len_zero_disables_length_filter(self) -> None:
         """min_len=0 时长度过滤被禁用。"""

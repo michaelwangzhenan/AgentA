@@ -492,31 +492,46 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 
 **混合范式**（参考 ChatGPT / Cursor Memories）：三种写入路径共存于同一记忆池，`source` 字段标记来源便于审计与排错。
 
-| source | 触发 | 是否调 LLM |
+| source | 触发条件 | 是否调 LLM |
 |---|---|---|
-| `auto` | `USER_MEMORY_AUTO_EXTRACT=true` 时由 `MemoryManager.try_extract` 自动跑 | ✅ |
-| `explicit` | 用户输入命中显式触发词（"请记住"等）立即触发，附最近若干轮历史作为 context | ✅ |
-| `manual` | `/memory add` / `/memory edit` CLI 命令 | ❌ |
+| `explicit` | 用户本轮输入命中显式触发词（"请记住" / "记住这个" / "remember this" / "keep in mind" 等，大小写不敏感、子串匹配）；附最近若干轮历史作为 context | ✅ |
+| `auto` | `USER_MEMORY_AUTO_EXTRACT=true`、本轮**未**命中触发词、且过节流闸（详 §3.4.3） | ✅ |
+| `manual` | `/memory add` / `/memory edit` CLI、前端「用户记忆」页、API POST/PATCH | ❌ |
+
+**判定时机与优先级**：每轮对话结束后由 `MemoryManager.try_extract(user_input, agent_reply)` 统一判定，`explicit` 与 `auto` 互斥、`explicit` 优先。命中触发词即走 `explicit`——**不受节流限制、也不依赖 `USER_MEMORY_AUTO_EXTRACT` 开关**（自动提取关着，说"请记住"照样触发）；只有未命中且开了 `AUTO_EXTRACT` 才考虑 `auto`。两条路径都把提取派发到后台线程、**都带最近若干轮窗口**作为上下文，区别仅在 `source` 与 prompt 策略（`auto` 收长期信息、丢一次性内容；`explicit` 更积极）。`manual` 不走 `try_extract`，直接写库。
 
 **去重 / 去矛盾（LLM 全列表合并）**：自动 / 显式提取时，把该用户**全部**现有记忆（带编号）+ 本轮对话一次性喂给 LLM，让它输出对列表的**操作**而非新条目——`ADD`（新增）/ `UPDATE id`（同主题改写）/ `DELETE id`（作废旧条目）。同主题的旧记忆被改写或删除，天然实现去重去矛盾。这只是把原来那次提取调用的输出改聪明，**不增加 LLM 调用次数**。
 
 操作应用规则：`UPDATE` / `DELETE` 校验 `id` 存在且属当前用户，非法 id 忽略；单次操作数设上限防 LLM 异常输出搅乱整库；总条数有软上限 `USER_MEMORY_MAX_ENTRIES`，prompt 提示 LLM 超限时合并 / 删最不重要的。`manual` 路径不走合并，直接 `add(text)`。
 
-### 3.4.3 触发节流
+### 3.4.3 触发节流（仅 auto）
 
-避免每轮 `auto` 路径频繁调 LLM 提取，两个配置项节流：
+避免 `auto` 路径每轮都调 LLM 提取，分两步（`explicit` 不受此限）：
+
+1. **到点闸**：本 session 累计 user 消息数大于 0 且为 `EVERY_N` 的整数倍，才到提取点。
+2. **整窗实质性过滤**：到点后看最近窗口（含本轮输入），只要有一条 ≥ `MIN_INPUT_LEN` 的 user 消息就触发；整窗都是寒暄（"嗯""好的"）则跳过，省一次调用。
+
+`MIN_INPUT_LEN` 早期是"只看触发那一条消息的长度"，会出现"恰好落在 N 倍数那条很短、旁边几轮的干货被整轮丢掉"的漏记。现改为**整窗过滤**：到点后 `auto` 也把最近窗口喂给 LLM（与 `explicit` 一致），长度判定也落在整窗而非单条，窗口里任一条实质消息都能被提取。
 
 | config | 默认 | 含义 |
 |---|---|---|
-| `USER_MEMORY_EXTRACT_EVERY_N` | 5 | 本 session 累计用户消息数为 N 的整数倍时才触发一次自动提取 |
-| `USER_MEMORY_EXTRACT_MIN_INPUT_LEN` | 20 | 用户输入字符数低于阈值不触发（短问无个人信息可提） |
+| `USER_MEMORY_EXTRACT_EVERY_N` | 5 | 本 session 累计用户消息数为 N 的整数倍时才到提取点 |
+| `USER_MEMORY_EXTRACT_MIN_INPUT_LEN` | 20 | 到点后最近窗口里需至少有一条 ≥此长度的 user 消息才触发；设 0 禁用此过滤 |
 | `USER_MEMORY_MAX_ENTRIES` | 30 | 记忆总条数软上限，提示 LLM 合并时控制规模 |
 
-节流判定是**无状态**的：每轮直接数本 session 的 user 消息条数取模，不依赖跨轮内存计数器（`MemoryManager` 每轮新建，内存计数器会被归零）。**显式触发不受此限**，命中触发词立即提取。
+节流判定是**无状态**的：每轮直接数本 session 的 user 消息条数取模，不依赖跨轮内存计数器（`MemoryManager` 每轮新建，内存计数器会被归零）。
 
-实际的 LLM 提取在**后台线程**异步执行，不阻塞本轮回答收尾。
+### 3.4.4 后台异步执行（用户无感）
 
-### 3.4.4 注入 system_prompt
+`auto` / `explicit` 触发的提取合并，是一次**独立于对话回复的、专门维护记忆的 LLM 调用**（自己的 prompt、只输出操作 JSON），在 daemon 后台线程 fire-and-forget 跑，前台用户不感知：
+
+- 不阻塞本轮回答：答复照常先返回，记忆调用在其后台进行。
+- 写入可能滞后：记忆晚于本轮回答入库，本轮刚说的内容偶尔下一轮才生效，属正常。
+- 失败静默：后台调用失败 / 坏 JSON 直接吞掉，不影响主对话、不报错给用户。
+- 成本：开 `AUTO_EXTRACT` 后到节流点会多一次 LLM 调用（花 token），故默认关闭、靠节流控频；`manual` 不走这次调用。
+- 实现：`contextvar` 取不到子线程，故主线程先取出用户 id 再显式下传给所有 DB 调用。
+
+### 3.4.5 注入 system_prompt
 
 每轮把记忆**全量按序注入** `<user_context>`（非按当前问题做相关性检索），格式为扁平自然语言 bullet（`- {text}`）：`manual` / `explicit`（用户手写）优先于 `auto`（自动提取），同级按 `updated_at` 倒序，累计超 `USER_MEMORY_MAX_CHARS` 截断。被动注入不刷新时间戳，避免门内条目永久占位、门外条目饥饿。拼接顺序参考 [§3.5.2 四层注入顺序](#352-四层注入顺序)。
 
