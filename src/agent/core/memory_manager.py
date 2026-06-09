@@ -9,9 +9,11 @@ UserMemoryStore 本身只做 CRUD（upsert / load_all / load_for_context），�
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, Callable
 
 import src.config as _cfg
+from src.core.user_context import current_user_id
 from src.memory.chat_history import ChatHistoryStore
 from src.memory.user_memory import (
     UserMemoryStore,
@@ -44,9 +46,6 @@ class MemoryManager:
         self._chat_history = chat_history
         self._session_id = session_id
         self._llm_chat = llm_chat
-        # 自动模式触发节流：累计 user 消息计数；每 USER_MEMORY_EXTRACT_EVERY_N 次触发一次。
-        # 显式触发（"请记住"）不消耗也不重置此计数。
-        self._auto_extract_turn_counter: int = 0
 
     # ── system_prompt 注入 ─────────────────────────────────────────────────
 
@@ -71,7 +70,7 @@ class MemoryManager:
 
     # ── 触发判定 + 抽取 + 持久化 ────────────────────────────────────────────
 
-    def try_extract(self, user_input: str, agent_reply: str) -> None:
+    def try_extract(self, user_input: str, agent_reply: str) -> threading.Thread | None:
         """
         尝试从本轮对话提取用户记忆并写入 UserMemoryStore。
 
@@ -80,68 +79,89 @@ class MemoryManager:
              → 立即触发；附带最近 10 条历史作为上下文（宽松 prompt）
              → source='explicit'；**不受 N 轮/min_len 限制**
           2. **自动提取** `USER_MEMORY_AUTO_EXTRACT=true`
-             → 节流判定：每 `USER_MEMORY_EXTRACT_EVERY_N` 轮（默认 5）+
-                user_input 长度 ≥ `USER_MEMORY_EXTRACT_MIN_INPUT_LEN`（默认 20）才触发
+             → 节流判定：本 session 累计 user 消息数是 `USER_MEMORY_EXTRACT_EVERY_N`（默认 5）
+                的整数倍 + user_input 长度 ≥ `USER_MEMORY_EXTRACT_MIN_INPUT_LEN`（默认 20）才触发
              → 不附带历史上下文（严格 prompt，仅判断单轮）
              → source='auto'
 
-        提取失败时静默吞掉，不影响主流程。
+        节流改为**无状态**：直接数本 session 的 user 消息条数取模判定，不再用实例计数器
+        （manager 每轮新建，实例计数器会每轮归零导致自动提取永不触发）。
 
-        节流的目的：避免每轮都无脑调 LLM 提取记忆而浪费成本。
+        实际的 LLM 提取在**后台线程** fire-and-forget，不阻塞本轮收尾；提取失败静默吞掉。
+        触发条件判定与历史上下文拼接仍在主线程完成（依赖 current_user_id 这个 contextvar，
+        子线程取不到，故在主线程取出 uid 后显式传入）。
+
+        Returns:
+            已派发提取任务时返回后台 Thread（便于测试 join）；被节流 / 未触发返回 None。
         """
         if self._user_memory is None:
             logger.debug("[MemoryManager] try_extract: user_memory 为 None，跳过")
-            return
+            return None
         is_explicit = should_extract_immediately(user_input)
         if not (is_explicit or _cfg.USER_MEMORY_AUTO_EXTRACT):
-            return
+            return None
 
-        # 自动模式节流：N 轮 + min_len 双闸；显式触发不受限
+        # contextvar 不会传到子线程，主线程先取出当前用户 id，后续显式传给 store
+        uid = current_user_id()
+
+        # 自动模式节流：消息数取模 + min_len 双闸；显式触发不受限
         if not is_explicit:
-            self._auto_extract_turn_counter += 1
             every_n = max(1, _cfg.USER_MEMORY_EXTRACT_EVERY_N)
             min_len = max(0, _cfg.USER_MEMORY_EXTRACT_MIN_INPUT_LEN)
-            if self._auto_extract_turn_counter < every_n:
+            msg_count = self._chat_history.count_user_messages(self._session_id, user_id=uid)
+            if msg_count == 0 or msg_count % every_n != 0:
                 logger.debug(
-                    "[MemoryManager] auto-extract 节流：%d/%d 轮，跳过",
-                    self._auto_extract_turn_counter, every_n,
+                    "[MemoryManager] auto-extract 节流：累计 user 消息 %d 非 %d 的整数倍，跳过",
+                    msg_count, every_n,
                 )
-                return
+                return None
             if len(user_input.strip()) < min_len:
                 logger.debug(
                     "[MemoryManager] auto-extract 节流：输入长度 %d < min_len %d，跳过",
                     len(user_input.strip()), min_len,
                 )
-                return
-            # 触发后重置计数，进入下一个 N 轮窗口
-            self._auto_extract_turn_counter = 0
+                return None
 
         # 显式触发时拼接最近若干轮历史；AUTO_EXTRACT 路径用严格 prompt（不带历史）
-        context_history = self._build_context_history() if is_explicit else ""
+        context_history = self._build_context_history(uid) if is_explicit else ""
         source = "explicit" if is_explicit else "auto"
 
+        thread = threading.Thread(
+            target=self._extract_and_store,
+            args=(user_input, agent_reply, context_history, source, uid),
+            name="user-memory-extract",
+            daemon=True,
+        )
+        thread.start()
+        return thread
+
+    # ── 内部 ────────────────────────────────────────────────────────────────
+
+    def _extract_and_store(
+        self, user_input: str, agent_reply: str, context_history: str, source: str, uid: int,
+    ) -> None:
+        """后台线程体：调 LLM 提取 → 复用 key 去重写入。所有 DB 调用显式带 uid。"""
         try:
-            entries = extract_memories(user_input, agent_reply, self._llm_chat, context_history)
+            existing = self._user_memory.load_all(user_id=uid)
+            entries = extract_memories(
+                user_input, agent_reply, self._llm_chat, context_history,
+                existing_memories=existing,
+            )
             for entry in entries:
                 self._user_memory.upsert(
-                    entry["category"], entry["key"], entry["value"], source=source,
+                    entry["category"], entry["key"], entry["value"],
+                    source=source, user_id=uid,
                 )
             if entries:
                 logger.info("[MemoryManager] 已提取 %d 条用户记忆 (source=%s)", len(entries), source)
             else:
-                logger.info(
-                    "[MemoryManager] 记忆提取完成，未发现值得保存的内容（is_explicit=%s, auto=%s）",
-                    is_explicit,
-                    _cfg.USER_MEMORY_AUTO_EXTRACT,
-                )
+                logger.info("[MemoryManager] 记忆提取完成，未发现值得保存的内容 (source=%s)", source)
         except Exception as exc:
             logger.warning("[MemoryManager] 记忆提取出现异常: %s", exc)
 
-    # ── 内部 ────────────────────────────────────────────────────────────────
-
-    def _build_context_history(self) -> str:
+    def _build_context_history(self, uid: int) -> str:
         """加载最近 10 条 user/assistant 消息，拼成"角色：内容"形式供 extractor 使用。"""
-        recent = self._chat_history.load_last_n_messages(self._session_id, n=10)
+        recent = self._chat_history.load_last_n_messages(self._session_id, n=10, user_id=uid)
         turns = [
             m for m in recent
             if m.get("role") in ("user", "assistant") and m.get("content")

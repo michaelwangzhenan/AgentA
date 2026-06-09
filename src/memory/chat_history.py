@@ -218,6 +218,21 @@ class ChatHistoryStore:
 
         return [self._row_to_message(row) for row in reversed(rows)]
 
+    def count_user_messages(self, session_id: str, user_id: int | None = None) -> int:
+        """统计某 session 内 role='user' 的消息条数（用于记忆提取的无状态节流判定）。
+
+        非本人 session 返回 0（纵深防御，同 load）。
+        """
+        uid = user_id if user_id is not None else current_user_id()
+        with self._lock:
+            if not self._owns_unlocked(session_id, uid):
+                return 0
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE session_id = ? AND role = 'user'",
+                (session_id,),
+            ).fetchone()
+        return int(row[0]) if row else 0
+
     def truncate_from_user_message(
         self, session_id: str, user_index: int, user_id: int | None = None
     ) -> int:

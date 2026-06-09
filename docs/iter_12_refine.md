@@ -30,6 +30,19 @@ key 存在独立文件 `.agenta/api_keys.json`（gitignore），没复用 `confi
 
 > 实施注意（#4 + #6 共用）：后台线程里所有 DB 调用都要显式带 `user_id`，不能依赖 `current_user_id()`。
 
+## 2.2 验收
+
+改动文件：`src/memory/chat_history.py`（新增 `count_user_messages`）、`src/memory/user_memory.py`（`extract_memories` 加 `existing_memories` + `load_for_context` 排序改造）、`src/agent/core/memory_manager.py`（无状态节流 + 后台线程提取）、`docs/design.md`（§3.4 改写）。
+
+| No | 达标标准 | 验收方式 | 结果 |
+|---|---|---|---|
+|1|auto 模式按"累计 user 消息数 % N"触发，不再每轮归零|`TestExtractTriggerPolicy`：count 非整数倍不触发 / 整数倍触发 / 0 不触发 / N=1 每轮触发|✅|
+|2|`manual`/`explicit` 排在 `auto` 前；注入不刷新 `accessed_at`|`test_manual_explicit_ranked_before_auto`、`test_load_for_context_does_not_touch_accessed_at`|✅|
+|4|提取把已有条目喂 extractor 且提示复用 key|`test_existing_memories_passed_to_extractor`、`test_existing_memories_included_in_prompt`|✅|
+|6|提取在后台线程跑、不阻塞；DB 调用显式带 `user_id`|`try_extract` 返回 Thread；`test_*` 断言 `upsert(..., user_id=_UID)`、`load_all(user_id=_UID)`|✅|
+
+测试：`tests/test_memory_manager.py` + `tests/test_user_memory.py` + `tests/test_memory.py` 全过；全量 `pytest -q` **1407 passed, 0 failed**。
+
 # 3. 规则优化
 AgentA "规则" 属于 design.md 的 3.5 Prompt 管理 一部分。
 

@@ -74,6 +74,14 @@ class TestAppendLoad:
         assert len(store.load("session-B")) == 1
         assert store.load("session-A")[0]["content"] == "A的消息"
 
+    def test_count_user_messages_counts_only_user_role(self, store: ChatHistoryStore) -> None:
+        """count_user_messages 只数 role='user'，用于记忆提取的无状态节流。"""
+        assert store.count_user_messages(SESSION) == 0
+        store.append(SESSION, {"role": "user", "content": "Q1"})
+        store.append(SESSION, {"role": "assistant", "content": "A1"})
+        store.append(SESSION, {"role": "user", "content": "Q2"})
+        assert store.count_user_messages(SESSION) == 2
+
 
 # ── 单元测试：tool_calls 序列化 ───────────────────────────────────────────────
 

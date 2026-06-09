@@ -501,19 +501,24 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 
 三者底层都走 `UserMemoryStore.upsert(category, key, value, source=...)`。
 
+**去重 / 去矛盾**：提取时把该用户已有条目（category / key / value）一并喂给 extractor，提示它"同主题复用已有 key"；靠 `upsert` 对同 `(category, key)` 覆盖，自然实现去重并用新值替换旧值（不做过期、不主动删除矛盾旧条目）。
+
 ### 3.4.3 触发节流
 
 避免每轮 `auto` 路径频繁调 LLM 提取，两个配置项节流：
 
 | config | 默认 | 含义 |
 |---|---|---|
-| `USER_MEMORY_EXTRACT_EVERY_N` | 5 | 每 N 轮用户消息才触发一次自动提取 |
+| `USER_MEMORY_EXTRACT_EVERY_N` | 5 | 本 session 累计用户消息数为 N 的整数倍时才触发一次自动提取 |
 | `USER_MEMORY_EXTRACT_MIN_INPUT_LEN` | 20 | 用户输入字符数低于阈值不触发（短问无个人信息可提） |
 
-**显式触发不受此限**，且不消耗也不重置 auto 计数器 — 两条流水线相互独立。
+节流判定是**无状态**的：每轮直接数本 session 的 user 消息条数取模，不依赖跨轮内存计数器（`MemoryManager` 每轮新建，内存计数器会被归零）。**显式触发不受此限**，命中触发词立即提取。
+
+实际的 LLM 提取在**后台线程**异步执行，不阻塞本轮回答收尾。
 
 ### 3.4.4 注入 system_prompt
-参考 [§3.5.2 四层注入顺序](#352-四层注入顺序)。
+
+每轮把记忆**全量按序注入** `<user_context>`（非按当前问题做相关性检索）：`manual` / `explicit`（用户手写）优先于 `auto`（自动提取），同级按写入时间倒序，累计超 `USER_MEMORY_MAX_CHARS` 截断。被动注入不刷新 `accessed_at`，避免门内条目永久占位、门外条目饥饿。拼接顺序参考 [§3.5.2 四层注入顺序](#352-四层注入顺序)。
 
 
 ## 3.5 Prompt 管理

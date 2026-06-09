@@ -250,6 +250,26 @@ class TestLoadForContext:
         text = store.load_for_context(max_chars=1500)
         assert "Python 工程师" in text
 
+    def test_manual_explicit_ranked_before_auto(self, store: UserMemoryStore) -> None:
+        """排序：manual / explicit（用户手写）排在 auto（自动提取）之前。"""
+        store.upsert("preference", "auto_key", "自动内容", source="auto")
+        store.upsert("preference", "manual_key", "手写内容", source="manual")
+        store.upsert("background", "explicit_key", "请记住内容", source="explicit")
+        text = store.load_for_context(max_chars=1500)
+        idx_manual = text.index("手写内容")
+        idx_explicit = text.index("请记住内容")
+        idx_auto = text.index("自动内容")
+        assert idx_manual < idx_auto
+        assert idx_explicit < idx_auto
+
+    def test_load_for_context_does_not_touch_accessed_at(self, store: UserMemoryStore) -> None:
+        """被动注入不刷新 accessed_at（避免门内条目永久占位）。"""
+        store.upsert("preference", "k", "v", source="auto")
+        before = store.load_all()[0]["accessed_at"]
+        store.load_for_context(max_chars=1500)
+        after = store.load_all()[0]["accessed_at"]
+        assert before == after
+
 
 # ── UserMemoryStore.delete / clear ────────────────────────────────────────────
 
@@ -368,6 +388,23 @@ class TestExtractMemories:
         result = extract_memories("x", "y", mock_fn)
         assert len(result) == 1
         assert len(result[0]["key"]) <= 30
+
+    def test_existing_memories_included_in_prompt(self) -> None:
+        """existing_memories 非空时，已有条目 + 复用 key 提示拼进 user message。"""
+        mock_fn = MagicMock(return_value=_llm_response("[]"))
+        existing = [{"category": "preference", "key": "语言", "value": "中文"}]
+        extract_memories("我改用英文", "好", mock_fn, existing_memories=existing)
+        content = mock_fn.call_args[0][0][1]["content"]
+        assert "已有的记忆条目" in content
+        assert "category=preference key=语言" in content
+        assert "复用" in content
+
+    def test_no_existing_memories_omits_block(self) -> None:
+        """existing_memories 为 None / 空时不拼"已有记忆"块。"""
+        mock_fn = MagicMock(return_value=_llm_response("[]"))
+        extract_memories("普通输入", "回答", mock_fn, existing_memories=[])
+        content = mock_fn.call_args[0][0][1]["content"]
+        assert "已有的记忆条目" not in content
 
 
 # ── 上下文管理器 ──────────────────────────────────────────────────────────────

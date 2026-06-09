@@ -173,20 +173,36 @@ _EXTRACT_SYSTEM_PROMPT_EXPLICIT = """\
 """
 
 
+def _format_existing_memories(existing: list[dict[str, Any]]) -> str:
+    """把已有记忆条目排成 `category=.. key=.. value=..` 列表，供提取时提示复用 key。
+
+    用 raw category（非中文标签）让 LLM 能原样复用，避免造近义新 key。
+    """
+    lines = [
+        f"- category={m.get('category', '')} key={m.get('key', '')} value={m.get('value', '')}"
+        for m in existing
+        if m.get("category") and m.get("key")
+    ]
+    return "\n".join(lines)
+
+
 def extract_memories(
     user_input: str,
     agent_reply: str,
     llm_chat_fn: LlmChatFn,
     context_history: str = "",
+    existing_memories: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
     """
     调用 LLM 从一轮对话中提取值得记忆的用户信息。
 
     Args:
-        user_input:       用户的原始输入。
-        agent_reply:      Agent 的回答。
-        llm_chat_fn:      可调用的 LLM chat 函数（签名与 provider.chat 相同）。
-        context_history:  可选，最近几轮对话的文本（用于"记住这个"等指代性触发词的场景）。
+        user_input:        用户的原始输入。
+        agent_reply:       Agent 的回答。
+        llm_chat_fn:       可调用的 LLM chat 函数（签名与 provider.chat 相同）。
+        context_history:   可选，最近几轮对话的文本（用于"记住这个"等指代性触发词的场景）。
+        existing_memories: 可选，该用户已有记忆条目。非空时提示 LLM 同主题复用已有 key，
+                           靠 upsert 对同 (category, key) 覆盖实现去重 / 去矛盾。
 
     Returns:
         list of {category, key, value}，可直接传给 UserMemoryStore.upsert()。
@@ -203,6 +219,14 @@ def extract_memories(
     else:
         system_prompt = _EXTRACT_SYSTEM_PROMPT
         conversation = f"用户：{user_input}\n\nAgent：{agent_reply}"
+    if existing_memories:
+        existing_block = _format_existing_memories(existing_memories)
+        if existing_block:
+            conversation += (
+                "\n\n【该用户已有的记忆条目】\n" + existing_block
+                + "\n\n若你要提取的信息与上面某条是同一主题，请复用它的 category 和 key"
+                "（系统会更新而非新增），不要新造近义 key。"
+            )
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": conversation},
@@ -390,8 +414,9 @@ class UserMemoryStore:
         """
         加载记忆并格式化为可注入 system prompt 的文本块。
 
-        按 accessed_at 倒序（最近访问的优先），超出 max_chars 时截断。
-        同时更新所有已加载条目的 accessed_at（标记为"已使用"）。
+        排序：用户手写的 manual / explicit 优先于 auto 自动提取，同级再按 created_at 倒序
+        （新写入优先）；超出 max_chars 时截断。注入是被动读取，不刷新 accessed_at——
+        避免"塞进上限的那批永远刷新、永远靠前"导致门外条目饥饿。
 
         Returns:
             格式化后的记忆文本，无记忆时返回空字符串。
@@ -402,16 +427,18 @@ class UserMemoryStore:
                 """SELECT id, category, key, value
                    FROM user_memories
                    WHERE user_id = ?
-                   ORDER BY accessed_at DESC, created_at DESC""",
+                   ORDER BY CASE source
+                                WHEN 'manual'   THEN 0
+                                WHEN 'explicit' THEN 1
+                                ELSE 2
+                            END,
+                            created_at DESC""",
                 (uid,),
             ).fetchall()
         if not rows:
             return ""
 
-        now = datetime.now().isoformat(timespec="seconds")
         lines: list[str] = []
-        ids_to_update: list[int] = []
-
         for row in rows:
             label = CATEGORY_LABELS.get(row["category"], row["category"])
             line = f"- [{label}] {row['key']}：{row['value']}"
@@ -419,18 +446,6 @@ class UserMemoryStore:
             if len(candidate) > max_chars:
                 break
             lines.append(line)
-            ids_to_update.append(row["id"])
-
-        if not lines:
-            return ""
-
-        # 批量更新访问时间
-        placeholders = ",".join("?" * len(ids_to_update))
-        with self._lock, self._conn:
-            self._conn.execute(
-                f"UPDATE user_memories SET accessed_at = ? WHERE id IN ({placeholders})",
-                [now, *ids_to_update],
-            )
 
         return "\n".join(lines)
 
