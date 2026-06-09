@@ -380,15 +380,13 @@ AUTH_COOKIE_NAME: str = os.getenv("AUTH_COOKIE_NAME", "agenta_session")
 # CLI / 测试 / 关认证时使用的用户 id
 DEFAULT_USER_ID: int = int(os.getenv("DEFAULT_USER_ID", "1"))
 
-# ── Token 用量统计（iter_11）────────────────────────────────────────────────
-# 每用户独立的 token 用量记录数据库（与其它库分开，便于单独备份 / 清理）
+# ── Token 用量统计 ──────────────────────────────────────────────────────────
+# token 用量记录数据库路径
 USAGE_DB_PATH: str = os.getenv("USAGE_DB_PATH", "./sqlite_db/usage.db")
-# 估算成本展示用的币种符号（默认美元；国产厂商默认单价已折算成 USD）
+# 估算成本展示用的币种符号（可选值：任意符号，如 $ / ¥）
 USAGE_CURRENCY: str = os.getenv("USAGE_CURRENCY", "$")
-# 估算用的内置默认单价（每 1M token 的 (输入价, 输出价)，币种见 USAGE_CURRENCY）。
-# admin 可在「用量 → 单价配置」里覆盖（落 usage.db 的 model_pricing 表），读取时
-# 默认 ← 覆盖 合并。未列出的模型成本计 0（仍照常统计 token）。
-# 数据为 2026-06 各厂商公开 API 价快照；国产厂商按 ¥ 公布价折算（≈¥7.1/$）。
+# 内置默认单价 {model_id: (输入价, 输出价)}，单位：每 1M token，币种见 USAGE_CURRENCY。
+# 未列出的模型按 0 计成本（token 仍照常统计）。
 MODEL_PRICING_DEFAULTS: dict[str, tuple[float, float]] = {
     # Moonshot Kimi（官网 ¥ 折算）
     "kimi-k2.5": (0.55, 2.95),
