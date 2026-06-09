@@ -380,6 +380,64 @@ AUTH_COOKIE_NAME: str = os.getenv("AUTH_COOKIE_NAME", "agenta_session")
 # CLI / 测试 / 关认证时使用的用户 id
 DEFAULT_USER_ID: int = int(os.getenv("DEFAULT_USER_ID", "1"))
 
+# ── Token 用量统计（iter_11）────────────────────────────────────────────────
+# 每用户独立的 token 用量记录数据库（与其它库分开，便于单独备份 / 清理）
+USAGE_DB_PATH: str = os.getenv("USAGE_DB_PATH", "./sqlite_db/usage.db")
+# 估算成本展示用的币种符号（默认美元；国产厂商默认单价已折算成 USD）
+USAGE_CURRENCY: str = os.getenv("USAGE_CURRENCY", "$")
+# 估算用的内置默认单价（每 1M token 的 (输入价, 输出价)，币种见 USAGE_CURRENCY）。
+# admin 可在「用量 → 单价配置」里覆盖（落 usage.db 的 model_pricing 表），读取时
+# 默认 ← 覆盖 合并。未列出的模型成本计 0（仍照常统计 token）。
+# 数据为 2026-06 各厂商公开 API 价快照；国产厂商按 ¥ 公布价折算（≈¥7.1/$）。
+MODEL_PRICING_DEFAULTS: dict[str, tuple[float, float]] = {
+    # Moonshot Kimi（官网 ¥ 折算）
+    "kimi-k2.5": (0.55, 2.95),
+    "kimi-k2.6": (0.95, 4.00),
+    # 通义千问（阶梯价取低档；部分为估算）
+    "qwen3.5-flash": (0.05, 0.40),
+    "qwen3.5-flash-2026-02-23": (0.05, 0.40),
+    "qwen3.5-plus-2026-04-20": (0.12, 0.69),
+    "qwen3.5-plus-2026-02-15": (0.12, 0.69),
+    "qwen3.5-27b": (0.10, 0.40),
+    "qwen3.5-35b-a3b": (0.10, 0.40),
+    "qwen3.5-122b-a10b": (0.20, 0.80),
+    "qwen3.5-397b-a17b": (0.40, 1.20),
+    # DeepSeek（v4-pro 为促销价；deepseek-chat 现映射 V4 Flash）
+    "deepseek-v4-flash": (0.14, 0.28),
+    "deepseek-chat": (0.14, 0.28),
+    "deepseek-v4-pro": (0.44, 0.87),
+    # 智谱 GLM（Flash 系列免费；其余 ¥ 折算 / 估算）
+    "glm-4-flash": (0.0, 0.0),
+    "glm-4.5-flash": (0.0, 0.0),
+    "glm-4.7-flash": (0.0, 0.0),
+    "glm-4.5": (0.30, 0.30),
+    "glm-4.6": (0.70, 0.70),
+    "glm-5.1": (0.70, 2.00),
+    # MiniMax（highspeed 翻倍；部分估算）
+    "MiniMax-Text-01": (0.20, 1.10),
+    "MiniMax-M2": (0.30, 1.20),
+    "MiniMax-M2.7-highspeed": (0.60, 2.40),
+    "MiniMax-M3": (0.30, 1.20),
+    # Anthropic Claude
+    "claude-sonnet-4-5": (3.00, 15.00),
+    "claude-sonnet-4-6": (3.00, 15.00),
+    "claude-opus-4-7": (5.00, 25.00),
+    "claude-opus-4-8": (5.00, 25.00),
+    # OpenAI
+    "gpt-4o": (2.50, 10.00),
+    "gpt-5.3-codex": (1.75, 14.00),
+    "gpt-5.4": (2.50, 15.00),
+    # Google Gemini（标 free，给付费档参考价；走免费额度可在 UI 改 0）
+    "gemini-2.5-flash-lite": (0.10, 0.40),
+    "gemini-2.5-flash": (0.30, 2.50),
+    "gemini-3.1-flash-lite": (0.25, 1.50),
+    "gemini-3.5-flash": (0.50, 3.00),
+    # xAI Grok（grok-3 已退役，现价随 4.3）
+    "grok-3-latest": (1.25, 2.50),
+    # Ollama 本地（无 API 费）
+    "qwen2.5:7b": (0.0, 0.0),
+}
+
 # 同时在跑的 agent.run 并发上限（信号量）；超出的请求排队等待，
 # 防止并发把 LLM 配额 / CPU（含 search_knowledge 精排）打满。
 MAX_CONCURRENT_AGENT_RUNS: int = int(os.getenv("MAX_CONCURRENT_AGENT_RUNS", "4"))

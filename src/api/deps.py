@@ -33,6 +33,8 @@ from src.memory.quiz_store import get_shared_store as _get_shared_quiz_store
 from src.memory.srs_store import SRSStore
 from src.memory.srs_store import get_shared_store as _get_shared_srs_store
 from src.memory.user_memory import UserMemoryStore
+from src.memory.usage_store import UsageStore
+from src.memory.usage_store import get_shared_store as _get_shared_usage_store
 from src.memory.user_store import ROLE_ADMIN, UserStore
 from src.memory.user_store import get_shared_store as _get_shared_user_store
 
@@ -112,6 +114,11 @@ def get_srs_store() -> SRSStore:
 def get_user_store() -> UserStore:
     """复用 user_store 进程内共享单例（账号 / 登录态 / 每用户 rules）。"""
     return _get_shared_user_store()
+
+
+def get_usage_store() -> UsageStore:
+    """复用 usage_store 进程内共享单例（token 用量记录 + 单价覆盖）。"""
+    return _get_shared_usage_store()
 
 
 # 关认证时回落到的默认用户（CLI / 单机自用）；admin 角色让 admin 门也能过

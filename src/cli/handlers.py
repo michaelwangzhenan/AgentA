@@ -250,6 +250,23 @@ def _print_token_usage(agent: "Agent", out: OutputFn = _stdout) -> None:
         out(f"  📊 Token：输入 {u.prompt_tokens} + 输出 {u.completion_tokens} = 合计 {u.total_tokens}\n")
 
 
+def _record_cli_usage(agent: "Agent") -> None:
+    """把 CLI 单轮对话的 per-run 用量落库（公共采集点之一，iter_11 §4.1）。
+
+    CLI 不传 session_id / event_callback，agent 自管 state，故 ``last_usage`` 即本轮
+    用量。落到 DEFAULT_USER_ID（CLI 即单机自用）。旁路，record_usage 内部已吞异常。
+    """
+    import src.config as _cfg
+    from src.memory.usage_store import record_usage
+
+    record_usage(
+        user_id=_cfg.DEFAULT_USER_ID,
+        model_id=_cfg.current_active_model(),
+        thinking=bool(_cfg.THINKING_ENABLED),
+        usage=getattr(agent, "last_usage", None),
+    )
+
+
 # plan step 状态对应的 CLI 渲染图标
 _PLAN_STATUS_ICONS: dict[str, str] = {"success": "✓", "failed": "✗", "skipped": "⏭"}
 
@@ -400,6 +417,7 @@ def run_query(agent: "Agent", question: str, out: OutputFn = _stdout) -> None:
         else:
             out("Agent: （无文本输出）\n")
         _print_token_usage(agent, out)
+        _record_cli_usage(agent)
     except KeyboardInterrupt:
         out("\n⚠️  已中断当前回答。\n")
     except Exception as e:

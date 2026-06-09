@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { useState } from 'react'
 import {
+  BarChart3,
   BookOpen,
   Brain,
   ChevronDown,
@@ -59,6 +60,7 @@ export type ViewKind =
   | 'skills'
   | 'mcp'
   | 'mastery'
+  | 'usage'
   | 'settings'
 
 export type SidebarProps = {
@@ -205,6 +207,12 @@ export function Sidebar(props: SidebarProps) {
           label="学而时习"
           active={activeView === 'mastery'}
           onClick={() => onSwitchView('mastery')}
+        />
+        <ViewNavButton
+          icon={<BarChart3 className="h-4 w-4" />}
+          label="用量"
+          active={activeView === 'usage'}
+          onClick={() => onSwitchView('usage')}
         />
       </div>
 

@@ -18,7 +18,9 @@ from src.core.user_context import use_user
 from src.api.deps import get_agent, get_chat_history, get_current_user, get_user_store
 from src.api.routes.auth import effective_llm_prefs
 from src.api.schemas.chat import ChatRequest, ChatResponse
+from src.api.schemas.auth import LlmPrefs
 from src.memory.chat_history import ChatHistoryStore
+from src.memory.usage_store import record_usage
 from src.memory.user_store import UserStore
 from src.log_setup import set_session_id
 
@@ -39,6 +41,35 @@ def _check_session_owner(store: ChatHistoryStore, session_id: str | None, user_i
 # per-run 入参（不再写共享实例属性），所以无需串行化。仅用信号量限制同时在跑的
 # run 数，避免并发把 LLM 配额 / CPU（含 search_knowledge 精排）打满；超出的请求排队。
 _AGENT_SEMAPHORE = threading.BoundedSemaphore(_cfg.MAX_CONCURRENT_AGENT_RUNS)
+
+
+def _make_usage_capture() -> tuple[dict[str, Any], Any]:
+    """返回 (holder, callback)：callback 抓 final_answer 事件里的 per-run TokenUsage。
+
+    这是 iter_11 §4.1 的"公共采集点"——只认 AgentAPI 的 final_answer 事件契约，
+    三种实现（PYTHON / LANGCHAIN / AUTOGPT）都满足，故对实现零侵入。
+    """
+    holder: dict[str, Any] = {}
+
+    def _capture(event: Any) -> None:
+        if getattr(event, "type", None) == "final_answer":
+            payload = getattr(event, "payload", None) or {}
+            holder["usage"] = payload.get("usage")
+
+    return holder, _capture
+
+
+def _record_run_usage(
+    user_id: int, prefs: LlmPrefs, usage: Any, session_id: str
+) -> None:
+    """把本次 run 的用量落库（旁路，record_usage 内部已吞异常）。"""
+    record_usage(
+        user_id=user_id,
+        model_id=prefs.active_model,
+        thinking=prefs.thinking_enabled,
+        usage=usage,
+        session_id=session_id,
+    )
 
 
 # ─── 非流式（保留作为 fallback / 测试入口）─────────────────────────
@@ -65,15 +96,18 @@ def chat(
     # use_user 设当前用户（让 tools 调 store 落到本人数据），退出时复位，避免线程复用
     # 导致 user_id 残留到下个请求。use_llm_prefs 把该用户选的模型 / thinking 压进
     # contextvar，多用户互不干扰。
+    # 通过 final_answer 事件抓 per-run usage（公共采集点，三实现通用）
+    usage_holder, usage_cb = _make_usage_capture()
     with _AGENT_SEMAPHORE, use_user(user["id"]), _cfg.use_llm_prefs(
         prefs.active_model, prefs.thinking_enabled, prefs.thinking_budget
     ):
         try:
-            reply = agent.run(req.message, session_id=session_id)
+            reply = agent.run(req.message, session_id=session_id, event_callback=usage_cb)
         except Exception as exc:
             logger.exception("[/api/chat] agent.run 抛异常")
             raise HTTPException(status_code=500, detail=f"agent error: {exc}") from exc
 
+    _record_run_usage(user["id"], prefs, usage_holder.get("usage"), session_id)
     return ChatResponse(reply=reply, session_id=session_id)
 
 
@@ -126,7 +160,13 @@ async def chat_stream(
 
     # 同步事件回调（运行在 executor 线程）→ 经 call_soon_threadsafe 转回主 loop 入队
     # asyncio.Queue 非线程安全，必须 call_soon_threadsafe 调度 put_nowait
+    # 顺带抓 per-run usage（final_answer 事件），run 结束后落库（公共采集点）
+    usage_holder: dict[str, Any] = {}
+
     def _on_event(event: Any) -> None:
+        if getattr(event, "type", None) == "final_answer":
+            payload = getattr(event, "payload", None) or {}
+            usage_holder["usage"] = payload.get("usage")
         try:
             frame = {
                 "type": event.type,
@@ -164,6 +204,8 @@ async def chat_stream(
                 },
             })
         finally:
+            # run 结束（含异常）后落库本次 usage；usage 缺失则内部跳过
+            _record_run_usage(user["id"], prefs, usage_holder.get("usage"), session_id)
             await queue.put(_STREAM_SENTINEL)
 
     run_task = asyncio.create_task(_drive_agent())

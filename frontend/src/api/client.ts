@@ -60,6 +60,14 @@ import type {
   SRSRating,
 } from '@/types/business'
 import type { AuthResponse, LlmPrefs, LlmPrefsUpdate, UserInfo } from '@/types/auth'
+import type {
+  PricingResponse,
+  PricingUpdateItem,
+  UsageEvents,
+  UsageSeries,
+  UsageSummary,
+  UserUsageList,
+} from '@/types/usage'
 
 // ─── 401 全局处理 ──────────────────────────────────────────────────────
 // 登录态失效时，由 AuthProvider 注册回调把界面切回登录页。
@@ -755,4 +763,80 @@ export async function patchLlmPrefs(update: LlmPrefsUpdate): Promise<LlmPrefs> {
   })
   await _ensureOk(res)
   return (await res.json()) as LlmPrefs
+}
+
+// ─── Step 9：Token 用量统计（iter_11） ─────────────────────────────────────
+// scope='mine' 走本人端点；scope='all' 走 admin 全员端点（仅 admin 可见）。
+
+type UsageScope = 'mine' | 'all'
+
+function _usagePrefix(scope: UsageScope): string {
+  return scope === 'all' ? '/api/usage/admin' : '/api/usage'
+}
+
+export async function getUsageSummary(
+  range: string,
+  scope: UsageScope = 'mine',
+): Promise<UsageSummary> {
+  const res = await apiFetch(`${_usagePrefix(scope)}/summary?range=${range}`)
+  await _ensureOk(res)
+  return (await res.json()) as UsageSummary
+}
+
+export async function getUsageSeries(
+  range: string,
+  groupBy: string,
+  scope: UsageScope = 'mine',
+): Promise<UsageSeries> {
+  const res = await apiFetch(
+    `${_usagePrefix(scope)}/series?range=${range}&group_by=${groupBy}`,
+  )
+  await _ensureOk(res)
+  return (await res.json()) as UsageSeries
+}
+
+export async function getUsageEvents(
+  range: string,
+  opts: { scope?: UsageScope; modelId?: string; userId?: number; limit?: number; offset?: number } = {},
+): Promise<UsageEvents> {
+  const { scope = 'mine', modelId, userId, limit = 50, offset = 0 } = opts
+  const params = new URLSearchParams({ range, limit: String(limit), offset: String(offset) })
+  if (modelId) params.set('model_id', modelId)
+  if (userId != null) params.set('user_id', String(userId))
+  const res = await apiFetch(`${_usagePrefix(scope)}/events?${params.toString()}`)
+  await _ensureOk(res)
+  return (await res.json()) as UsageEvents
+}
+
+export function usageEventsCsvUrl(
+  range: string,
+  opts: { scope?: UsageScope; modelId?: string; userId?: number } = {},
+): string {
+  const { scope = 'mine', modelId, userId } = opts
+  const params = new URLSearchParams({ range })
+  if (modelId) params.set('model_id', modelId)
+  if (userId != null) params.set('user_id', String(userId))
+  return `${_usagePrefix(scope)}/events.csv?${params.toString()}`
+}
+
+export async function getUsageUsers(range: string): Promise<UserUsageList> {
+  const res = await apiFetch(`/api/usage/admin/users?range=${range}`)
+  await _ensureOk(res)
+  return (await res.json()) as UserUsageList
+}
+
+export async function getPricing(): Promise<PricingResponse> {
+  const res = await apiFetch('/api/usage/pricing')
+  await _ensureOk(res)
+  return (await res.json()) as PricingResponse
+}
+
+export async function putPricing(items: PricingUpdateItem[]): Promise<PricingResponse> {
+  const res = await apiFetch('/api/usage/pricing', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items }),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as PricingResponse
 }
