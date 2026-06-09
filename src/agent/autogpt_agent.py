@@ -29,6 +29,7 @@ Auto-GPT 风格 Agent —— Plan → Execute → Review 三阶段循环
 
 import json
 import logging
+import re
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -64,6 +65,33 @@ from src.memory.user_memory import UserMemoryStore
 import src.config as _cfg
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_plan_json(raw: str) -> dict[str, Any]:
+    """从 LLM 输出解析 plan JSON，容忍 markdown 代码围栏包裹。
+
+    模型常把 JSON 包进 ```json ... ``` 围栏，直接 json.loads 会失败。依次尝试：
+    ① 原文直接解析；② 剥掉首尾代码围栏后解析；③ 退而取首个 `{` 到末个 `}` 的子串解析。
+    任一得到 dict 即返回；全失败抛 ValueError。
+    """
+    candidates = [raw]
+    fenced = raw.strip()
+    if fenced.startswith("```"):
+        inner = re.sub(r"^```[^\n]*\n?", "", fenced)
+        inner = re.sub(r"\n?```$", "", inner).strip()
+        candidates.append(inner)
+    start, end = raw.find("{"), raw.rfind("}")
+    if start != -1 and end > start:
+        candidates.append(raw[start : end + 1])
+    for cand in candidates:
+        try:
+            obj = json.loads(cand)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(obj, dict):
+            return obj
+    raise ValueError("未找到有效 JSON 对象")
+
 
 # ── 默认限制（可通过 config 覆盖）────────────────────────────────────────────
 _DEFAULT_MAX_PLAN_TASKS: int = 6
@@ -393,13 +421,13 @@ class AutoGPTAgent:
         raw = (response.choices[0].message.content or "").strip()
 
         try:
-            data = json.loads(raw)
+            data = _parse_plan_json(raw)
             tasks: list[str] = data.get("tasks", [])
             if tasks and isinstance(tasks, list):
                 # 截断到最大数量，过滤空字符串
                 tasks = [str(t).strip() for t in tasks if str(t).strip()]
                 return tasks[: self._max_plan_tasks]
-        except (json.JSONDecodeError, AttributeError, TypeError):
+        except (ValueError, AttributeError, TypeError):
             logger.warning("[AutoGPT] Plan 阶段 JSON 解析失败，回退为单任务。raw=%r", raw[:200])
 
         # Fallback：直接以用户目标作为单个任务

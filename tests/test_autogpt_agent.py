@@ -170,6 +170,24 @@ class TestAutoGPTPlan:
             result = ag._plan("目标", "")
         assert result == tasks_expected
 
+    def test_plan_parses_fenced_json(self, tmp_path):
+        """模型把 JSON 包进 ```json 代码围栏时也能解析（修 iter_99 §5.1）。"""
+        ag = _make_agent(tmp_path)
+        inner = json.dumps({"tasks": ["搜索", "总结"], "reasoning": "x"}, ensure_ascii=False)
+        raw = f"```json\n{inner}\n```"
+        with patch("src.agent.autogpt_agent.chat", return_value=_text_resp(raw)):
+            result = ag._plan("目标", "")
+        assert result == ["搜索", "总结"]
+
+    def test_plan_parses_json_with_prose_around(self, tmp_path):
+        """JSON 前后夹着说明文字时，靠首个 {…} 兜底也能解析。"""
+        ag = _make_agent(tmp_path)
+        inner = json.dumps({"tasks": ["a", "b"], "reasoning": "x"}, ensure_ascii=False)
+        raw = f"好的，计划如下：\n{inner}\n以上。"
+        with patch("src.agent.autogpt_agent.chat", return_value=_text_resp(raw)):
+            result = ag._plan("目标", "")
+        assert result == ["a", "b"]
+
     def test_plan_strips_empty_tasks(self, tmp_path):
         ag = _make_agent(tmp_path)
         raw = json.dumps({"tasks": ["任务1", "", "  ", "任务2"], "reasoning": "x"})
