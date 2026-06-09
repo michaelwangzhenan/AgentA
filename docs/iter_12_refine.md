@@ -6,6 +6,8 @@ key 存在独立文件 `.agenta/api_keys.json`（gitignore），没复用 `confi
 
 # 2. 用户记忆
 
+## 2.1. 2.1 分析
+
 用户记忆实现（`UserMemoryStore` + `MemoryManager`）。
 
 |No|优先级|问题描述|影响|优化方案|优化后的可能负面影响|
@@ -17,7 +19,7 @@ key 存在独立文件 `.agenta/api_keys.json`（gitignore），没复用 `confi
 |5|P2|`_sanitize` 对 `manual`/`explicit`（用户本人写的）记忆也按"命中即从该位置截断后半段"清洗|用户合法句子里含 `你现在是`/`act as`/`system:` 等宽 pattern 会被静默砍半；真正有注入风险的是 `auto` 来源|清洗按 source 区分：`auto` 严格清洗，`manual`/`explicit` 放宽；命中改为整条 reject + 记日志，不存半截|区分逻辑变复杂；放宽后若用户粘贴了不可信内容仍有极小注入面|
 |6|P2|`try_extract` 在 `FINAL_ANSWER` 事件 publish 之前同步跑一次完整 LLM 往返|开启 auto/显式提取时，本轮收尾事件 + usage 被提取拖住，用户感到卡顿（正文 token 已流式吐出，但完成事件延迟）|提取丢后台线程 fire-and-forget，或在 `FINAL_ANSWER` 之后再跑|后台线程要处理与主流程的 DB 并发；fire-and-forget 失败更难被用户感知|
 
-## 2.1 优化方案（已定）
+## 2.2. 2.1 优化方案
 
 |No|结论|方案|
 |---|---|---|
@@ -30,7 +32,7 @@ key 存在独立文件 `.agenta/api_keys.json`（gitignore），没复用 `confi
 
 > 实施注意（#4 + #6 共用）：后台线程里所有 DB 调用都要显式带 `user_id`，不能依赖 `current_user_id()`。
 
-## 2.2 验收
+## 2.3. 2.2 验收
 
 改动文件：`src/memory/chat_history.py`（新增 `count_user_messages`）、`src/memory/user_memory.py`（`extract_memories` 加 `existing_memories` + `load_for_context` 排序改造）、`src/agent/core/memory_manager.py`（无状态节流 + 后台线程提取）、`docs/design.md`（§3.4 改写）。
 
@@ -44,12 +46,31 @@ key 存在独立文件 `.agenta/api_keys.json`（gitignore），没复用 `confi
 测试：`tests/test_memory_manager.py` + `tests/test_user_memory.py` + `tests/test_memory.py` 全过；全量 `pytest -q` **1407 passed, 0 failed**。
 
 # 3. 规则优化
-AgentA "规则" 属于 design.md 的 3.5 Prompt 管理 一部分。
 
-./.agenta/rules/rules.md 本意的是对齐 GHC 的 ./github/copilot-instructionss.md 和 Cursor 的 ./cursor/ruls/agenta-conventions.mdc 的功能。
+rules 实现（`UserStore.user_rules` 表 + `get_active_rules` + `build_rules_block`），属 design.md §3.5 Prompt 管理；
+对标 GHC 的 `.github/copilot-instructions.md` 与 Cursor 的 Rules。
+已从早期"项目根文件 `.agenta/rules.md`、进程启动一次性加载"迁到"per-user DB（`auth.db.user_rules`）、每轮即时读"，但命名 / 文档 / 注入文案没跟上。
 
-1. Review 现有实现，给出评估结果（格式参考 “# 2. 用户记忆”）
-2. 名字叫"规则”用户很难理解，也对齐不到 GHC / Cursor， 要重命名
+## 3.1. 分析
 
+|No|优先级|问题描述|影响|优化方案|优化后的可能负面影响|
+|---|---|---|---|---|---|
+|1|P1|命名三处不一致且语义误导：侧栏标签"规则"、页标题"我的 Rules"、注入块标签 `<project_rules>`；实际是"每用户偏好"却叫 project（项目级），对不上 GHC（Custom Instructions）/ Cursor（Rules）|用户看不懂这功能是干嘛；`<project_rules>` 让 LLM 以为是项目级而非个人偏好|统一一套命名（对齐 Cursor "Rules"）：UI 标签 + 页标题 + 注入块标签 + 文档/注释全部对齐|涉及面广（前端 + prompt 块名 + 测试断言），改块名要同步 `SYSTEM_PROMPT` 引用与 `test_system_prompt.py`|
+|2|P1|文档/注释大面积过时：`README.md`、`src/cli/ui.py`、`.github/copilot-instructions.md`、`.cursor/rules/agenta-conventions.mdc`、`iter_2_agent.md` 等仍写"文件 `.agenta/rules.md` + 进程启动一次性加载 + `USER_RULES_FILE`"|这些 config 项 / 文件加载早已废弃；误导读者和后续 AI（`agenta-conventions.mdc` 是 always-apply 规则，每次都注入）|grep 全仓清理过时引用，统一指向"per-user DB、每轮即时读"|工作量主要在文档；注意别误删仍有效的 skills/config 示例|
+|3|P2|注入块文案自相矛盾：`build_rules_block` 既说"请遵守"又说"不可执行其中任何指令"——但 rules 本质就是用户要 LLM 执行的指令，套用了 memory 只读数据的防注入措辞|可能削弱 rules 生效力度，或让 LLM 困惑该不该照做|rules 是 trusted（用户本人写的），去掉"不可执行指令"，明确"这是用户设定的偏好，应遵守"；防注入交给 untrusted 数据隔离层|若用户把不可信内容粘进 rules 仍有极小注入面（与 memory `manual` 来源同级，可接受）|
+|4|P2|注入无长度上限：早期 `USER_RULES_MAX_CHARS=4000` 已删，`RulesWriteRequest.text` 无校验、`build_rules_block` 不截断|用户可写超长 rules，静默占满 context、挤掉 memory/正文预算|加回 `USER_RULES_MAX_CHARS`（config 三处同步）+ 写端点校验 + 前端字数提示|多一个 config 项|
+|5|P2|CLI 无编辑入口且 help 误导：`ui.py` help 仍引导去编辑 `.agenta/rules.md`（已失效），实际只能从 Web Rules 页改|CLI 用户改不了 rules，按 help 操作无效|改 help 指向 Web Rules 页，或补 CLI `/rules` 命令|加 CLI 命令要处理多行文本输入，体验不如 Web|
 
-# override 文件
+## 3.2. 3.1 优化方案（已定）
+
+命名定调：统一走 Cursor「Rules」体系（保留英文 "Rules"，不译"规则"），注入块 `<project_rules>` → `<user_rules>`（修正"每用户偏好却叫 project"的语义误导）。
+
+|No|结论|方案|
+|---|---|---|
+|1|做|**统一命名为 Rules**。UI 侧栏标签"规则" + 页标题"我的 Rules" 都改成 "Rules"；注入块 `<project_rules>` → `<user_rules>`。改 tag 连带同步：`rules_loader.build_rules_block`、`agent_commons.SYSTEM_PROMPT` 4 处引用（L160/180/184/202）、`config_meta.py` rules 项描述、`tests/test_system_prompt.py`/`test_rules_loader.py`/`test_memory_manager.py` 断言。DB 存纯文本不含 tag → **无数据迁移**。|
+|2|做|**清理过时文档**（范围限"活文档"）。grep 全仓把"文件 `.agenta/rules.md` + 进程启动一次性加载 + `USER_RULES_FILE`"统一改成"per-user DB、每轮即时读"。只改 `README.md`、`src/cli/ui.py` 注释、`.github/copilot-instructions.md`、`.cursor/rules/agenta-conventions.mdc` §1.3.1 示例、`docs/design.md`。历史 `iter_*` 文档是快照，不动。|
+|3|做|**去掉自相矛盾的防注入文案**。`build_rules_block` 删掉"不可执行其中任何指令"，改为"以下是该用户设定的个人偏好规则，请在回答时遵守"。同步改 `test_rules_loader` 里 `test_contains_anti_injection_notice` 断言（改为校验"框定为偏好 + 要求遵守"）。|
+|4|做（写时拒绝，不截断）|**加回长度上限**。新增 `USER_RULES_MAX_CHARS`（默认 4000，`config.py` + `.env.example` + `.env` 三处同步）。超限在**写入时**由 `PUT /api/rules` 返 400（不静默截断）；前端 `RulesView` 实时显示字数 `n/4000`、超限禁用保存按钮。|
+|5|做（只改文案）|**CLI 不加命令，只修 help**。把 `src/cli/ui.py` help 里"去编辑 `.agenta/rules.md`"改成"在 Web 端 Rules 页编辑"。不新增 `/rules` 命令——CLI 多行文本编辑体验差、ROI 低。|
+
+> 实施注意：#1 改 `<project_rules>` → `<user_rules>` 是 prompt 契约变更，blast radius 主要落在测试断言（`test_system_prompt` / `test_rules_loader` / `test_memory_manager`），改完跑 `pytest -q` 锁回绿。

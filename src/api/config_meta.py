@@ -45,8 +45,7 @@ class ConfigItem:
     side_effect_hint: str | None = None
     danger: bool = False
     editable: bool = True
-    # 仍参与 /api/config 读写（聊天页 Composer 通过本接口切模型 / 推理档位），
-    # 但不在设置面板渲染 —— 避免与聊天页控件重复
+    # 仍参与 /api/config 读写，但不在设置面板渲染 —— 避免与聊天页控件重复
     hidden: bool = False
     options_provider: Callable[[], list[str]] | None = None
 
@@ -67,7 +66,8 @@ REGISTRY: list[ConfigItem] = [
         brief="HTTP 代理",
         detail="仅对国外 provider（openai / grok / claude / gemini）生效；国内 provider 始终直连。留空则不走代理（电脑已有 VPN 时留空即可）。格式：http://host:port",
     ),
-    # 以下 3 项由聊天页 Composer 通过 /api/config 读写，hidden 不在设置面板重复展示
+    # 以下 3 项是 LLM 偏好的全局默认；聊天页 Composer 走 per-用户 /api/auth/llm-prefs，
+    # 未设置时回落到此。hidden 不在设置面板渲染，避免与聊天页控件重复。
     ConfigItem(
         key="ACTIVE_MODEL",
         group="llm",
