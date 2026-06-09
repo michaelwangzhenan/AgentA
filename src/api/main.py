@@ -29,15 +29,19 @@ else:
     log_setup.quiet_noisy_loggers()
 
 import src.config as _cfg  # noqa: E402
+from src.api import api_keys as _api_keys  # noqa: E402
 from src.api import config_overrides as _config_overrides  # noqa: E402
 
 # 加载 .agenta/config_overrides.json，覆盖 _cfg 模块属性。
 # 必须在 _bootstrap_mcp / 路由首次读 _cfg 之前 —— 这里是 import-time，
 # uvicorn 启动 lifespan 时已经生效。
 _config_overrides.apply_overrides()
+# 加载 .agenta/api_keys.json，把 admin 在 UI 配的 key 覆盖到 PROVIDER_CONFIGS / 标量
+_api_keys.apply_overrides()
 
 from src.api.routes import (  # noqa: E402
     admin,
+    api_keys as api_keys_route,
     auth,
     chat,
     config as config_route,
@@ -125,6 +129,7 @@ app.include_router(rules.router, prefix="/api", tags=["rules"])
 app.include_router(skills.router, prefix="/api", tags=["skills"])
 app.include_router(mcp.router, prefix="/api", tags=["mcp"])
 app.include_router(config_route.router, prefix="/api", tags=["config"])
+app.include_router(api_keys_route.router, prefix="/api", tags=["api-keys"])
 app.include_router(plans.router, prefix="/api", tags=["plans"])
 app.include_router(quizzes.router, prefix="/api", tags=["quizzes"])
 app.include_router(srs.router, prefix="/api", tags=["srs"])

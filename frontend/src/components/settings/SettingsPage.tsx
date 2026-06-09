@@ -1,15 +1,16 @@
 import { useState } from 'react'
-import { KeyRound, SlidersHorizontal, User, Users, UserX } from 'lucide-react'
+import { KeyRound, KeySquare, SlidersHorizontal, User, Users, UserX } from 'lucide-react'
 
 import { ProfileSettings } from '@/components/settings/ProfileSettings'
 import { PasswordSettings } from '@/components/settings/PasswordSettings'
 import { AccountDeletion } from '@/components/settings/AccountDeletion'
+import { ApiKeysConfig } from '@/components/settings/ApiKeysConfig'
 import { SettingsView } from '@/components/settings/SettingsView'
 import { UserManagement } from '@/components/settings/UserManagement'
 import { useAuth } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 
-type Section = 'profile' | 'password' | 'system' | 'users' | 'account'
+type Section = 'profile' | 'password' | 'system' | 'apikeys' | 'users' | 'account'
 
 type NavItem = {
   id: Section
@@ -22,6 +23,7 @@ const NAV: NavItem[] = [
   { id: 'profile', label: '个人信息', icon: User },
   { id: 'password', label: '修改密码', icon: KeyRound },
   { id: 'system', label: '系统配置', icon: SlidersHorizontal, adminOnly: true },
+  { id: 'apikeys', label: 'API 密钥', icon: KeySquare, adminOnly: true },
   { id: 'users', label: '用户管理', icon: Users, adminOnly: true },
   { id: 'account', label: '注销账号', icon: UserX },
 ]
@@ -82,6 +84,11 @@ export function SettingsPage() {
           {section === 'system' && isAdmin && (
             <div className="mx-auto flex h-full max-w-4xl flex-col">
               <SettingsView embedded />
+            </div>
+          )}
+          {section === 'apikeys' && isAdmin && (
+            <div className="mx-auto max-w-2xl">
+              <ApiKeysConfig />
             </div>
           )}
           {section === 'users' && isAdmin && (

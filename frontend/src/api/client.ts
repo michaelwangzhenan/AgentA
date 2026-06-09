@@ -59,6 +59,7 @@ import type {
   SRSCardListResponse,
   SRSRating,
 } from '@/types/business'
+import type { ApiKeyView, ApiKeysResponse } from '@/types/apiKeys'
 import type { AuthResponse, LlmPrefs, LlmPrefsUpdate, UserInfo } from '@/types/auth'
 import type {
   PricingResponse,
@@ -531,6 +532,32 @@ export async function reloadConfig(): Promise<ConfigReloadResponse> {
   const res = await apiFetch('/api/config/reload', { method: 'POST' })
   await _ensureOk(res)
   return (await res.json()) as ConfigReloadResponse
+}
+
+// ─── API Keys（仅 admin；后端永不返回明文）─────────────────────────────
+
+export async function getApiKeys(): Promise<ApiKeyView[]> {
+  const res = await apiFetch('/api/api-keys')
+  await _ensureOk(res)
+  return ((await res.json()) as ApiKeysResponse).items
+}
+
+export async function updateApiKey(id: string, value: string): Promise<ApiKeyView> {
+  const res = await apiFetch(`/api/api-keys/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ value }),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as ApiKeyView
+}
+
+export async function resetApiKey(id: string): Promise<ApiKeyView> {
+  const res = await apiFetch(`/api/api-keys/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
+  await _ensureOk(res)
+  return (await res.json()) as ApiKeyView
 }
 
 // ─── Step 7：业务面板（plans / quizzes / srs） ─────────────────────────
