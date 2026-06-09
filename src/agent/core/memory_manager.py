@@ -2,7 +2,7 @@
 MemoryManager —— UserMemory 注入与提取策略（Helper 层）
 
 职责：封装"何时读 user_memory、怎么注入 system_prompt、何时提取新记忆"的业务策略。
-UserMemoryStore 本身只做 CRUD（upsert / load_all / load_for_context），不感知触发时机。
+UserMemoryStore 本身只做 CRUD（add / load_all / load_for_context / apply_ops），不感知触发时机。
 
 被三种 Agent 实现共享：Python / LangChain / AutoGPT。
 """
@@ -17,7 +17,7 @@ from src.core.user_context import current_user_id
 from src.memory.chat_history import ChatHistoryStore
 from src.memory.user_memory import (
     UserMemoryStore,
-    extract_memories,
+    extract_memory_ops,
     should_extract_immediately,
 )
 
@@ -140,22 +140,23 @@ class MemoryManager:
     def _extract_and_store(
         self, user_input: str, agent_reply: str, context_history: str, source: str, uid: int,
     ) -> None:
-        """后台线程体：调 LLM 提取 → 复用 key 去重写入。所有 DB 调用显式带 uid。"""
+        """后台线程体：调 LLM 提取合并 → 应用 ADD/UPDATE/DELETE。所有 DB 调用显式带 uid。"""
         try:
             existing = self._user_memory.load_all(user_id=uid)
-            entries = extract_memories(
-                user_input, agent_reply, self._llm_chat, context_history,
-                existing_memories=existing,
+            ops = extract_memory_ops(
+                user_input, agent_reply, self._llm_chat,
+                existing=existing,
+                context_history=context_history,
+                max_entries=_cfg.USER_MEMORY_MAX_ENTRIES,
             )
-            for entry in entries:
-                self._user_memory.upsert(
-                    entry["category"], entry["key"], entry["value"],
-                    source=source, user_id=uid,
+            if ops:
+                stats = self._user_memory.apply_ops(ops, source=source, user_id=uid)
+                logger.info(
+                    "[MemoryManager] 记忆已更新 (source=%s): +%d ~%d -%d",
+                    source, stats["added"], stats["updated"], stats["deleted"],
                 )
-            if entries:
-                logger.info("[MemoryManager] 已提取 %d 条用户记忆 (source=%s)", len(entries), source)
             else:
-                logger.info("[MemoryManager] 记忆提取完成，未发现值得保存的内容 (source=%s)", source)
+                logger.info("[MemoryManager] 记忆提取完成，未发现值得改动的内容 (source=%s)", source)
         except Exception as exc:
             logger.warning("[MemoryManager] 记忆提取出现异常: %s", exc)
 

@@ -295,16 +295,14 @@ export async function listMemories(): Promise<MemoryItem[]> {
   return ((await res.json()) as MemoryListResponse).memories
 }
 
-export async function upsertMemory(
-  category: string,
-  key: string,
-  value: string,
+export async function createMemory(
+  text: string,
   source: string = 'manual',
 ): Promise<MemoryItem> {
   const res = await apiFetch('/api/memory', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ category, key, value, source }),
+    body: JSON.stringify({ text, source }),
   })
   await _ensureOk(res)
   return (await res.json()) as MemoryItem
@@ -312,12 +310,12 @@ export async function upsertMemory(
 
 export async function patchMemory(
   id: number,
-  value: string,
+  text: string,
 ): Promise<{ updated: boolean }> {
   const res = await apiFetch(`/api/memory/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ value }),
+    body: JSON.stringify({ text }),
   })
   await _ensureOk(res)
   return (await res.json()) as { updated: boolean }

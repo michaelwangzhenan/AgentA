@@ -2,12 +2,10 @@
 
 export type MemoryItem = {
   id: number
-  category: string
-  key: string
-  value: string
+  text: string
   source: string
   created_at: string
-  accessed_at: string
+  updated_at: string
 }
 
 export type MemoryListResponse = {
@@ -130,15 +128,7 @@ export type MCPReloadResponse = {
   failed: number
 }
 
-// memory 类别中文 label（跟后端 src/memory/user_memory.py CATEGORY_LABELS 对齐）
-export const CATEGORY_LABELS: Record<string, string> = {
-  preference: '偏好',
-  background: '背景',
-  instruction: '指令',
-  task: '任务',
-  correction: '纠错',
-}
-
+// memory 写入来源中文 label（跟后端 src/memory/user_memory.py SOURCE_LABELS 对齐）
 export const SOURCE_LABELS: Record<string, string> = {
   auto: '自动',
   explicit: '请记住',

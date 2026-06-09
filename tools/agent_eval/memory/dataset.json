@@ -3,7 +3,7 @@
     "id": "M01-lang-zh",
     "note": "用户偏好：用中文回答。被注入后，LLM 即便被英文问也应中文回。",
     "memories": [
-      {"category": "preference", "key": "language", "value": "总是用中文回答，即使用户用英文提问。"}
+      "用户希望总是用中文回答，即使用户用英文提问。"
     ],
     "question": "What is Reciprocal Rank Fusion in one sentence?",
     "expected": {
@@ -15,7 +15,7 @@
     "id": "M02-cite-pages",
     "note": "指令：引用必须带页码。",
     "memories": [
-      {"category": "instruction", "key": "cite_style", "value": "凡引用论文或文档时，必须带上具体的页码或章节号（如 p.12 或 §3.2），方便我溯源。"}
+      "用户要求凡引用论文或文档时，必须带上具体的页码或章节号（如 p.12 或 §3.2），方便溯源。"
     ],
     "question": "请用一句话举例你会怎么引用论文 (RAG paper, Lewis et al., 2020)。",
     "expected": {
@@ -27,7 +27,7 @@
     "id": "M03-bullet-off",
     "note": "偏好：不要 bullet points，要散文。",
     "memories": [
-      {"category": "preference", "key": "format", "value": "回答用流畅的段落散文，不要用 bullet points 或编号列表。"}
+      "用户偏好回答用流畅的段落散文，不要用 bullet points 或编号列表。"
     ],
     "question": "总结一下 RAG 与微调的三个差异。",
     "expected": {
@@ -39,7 +39,7 @@
     "id": "M04-background-job",
     "note": "背景：通信工程师；回答可以用专业术语。",
     "memories": [
-      {"category": "background", "key": "profession", "value": "我是 5G 通信协议工程师，熟悉 3GPP 规范、PDCP/RLC/MAC 等术语，回答可直接使用专业缩写。"}
+      "用户是 5G 通信协议工程师，熟悉 3GPP 规范、PDCP/RLC/MAC 等术语，回答可直接使用专业缩写。"
     ],
     "question": "解释 PDCP 与 RLC 在用户面的分工。",
     "expected": {
@@ -51,7 +51,7 @@
     "id": "M05-task-context",
     "note": "任务上下文：正在写 RAG 综述。LLM 应承接此上下文。",
     "memories": [
-      {"category": "task", "key": "writing_project", "value": "我当前在写一篇 RAG 综述，目标读者是机器学习从业者，长度 ~3000 字。"}
+      "用户当前在写一篇 RAG 综述，目标读者是机器学习从业者，长度约 3000 字。"
     ],
     "question": "我现在该聊一下哪几个核心模块？",
     "expected": {
@@ -63,7 +63,7 @@
     "id": "M06-correction-no-em-dash",
     "note": "纠错：用户上次指出，不要用 em dash。",
     "memories": [
-      {"category": "correction", "key": "punctuation", "value": "请不要使用 em dash（——），改用顿号、逗号或句号。"}
+      "用户要求不要使用 em dash（——），改用顿号、逗号或句号。"
     ],
     "question": "用一段话介绍 BM25 和 dense retrieval 的对比。",
     "expected": {
@@ -75,9 +75,9 @@
     "id": "M07-multi-memory-compose",
     "note": "组合：中文 + 不要 bullet + 带页码（同时检验三条同时生效）。",
     "memories": [
-      {"category": "preference", "key": "language", "value": "总是用中文回答。"},
-      {"category": "preference", "key": "format", "value": "用段落散文，不要 bullet points。"},
-      {"category": "instruction", "key": "cite_style", "value": "如果引用文献，要带页码 (例如 p.12 或 §3.2)。"}
+      "用户希望总是用中文回答。",
+      "用户偏好用段落散文，不要 bullet points。",
+      "用户要求如果引用文献，要带页码（例如 p.12 或 §3.2）。"
     ],
     "question": "Briefly compare BM25 and dense retrieval, and cite at least one reference.",
     "expected": {
@@ -112,7 +112,7 @@
     "note": "Phase 1.3 rules ↔ memory 冲突：rules 写中文，memory 写本次切英文 — 验证 memory 覆写 rules（注入顺序使然）。",
     "rules": "## 语言\n- 始终用中文回答。",
     "memories": [
-      {"category": "preference", "key": "language_override", "value": "本段对话我正在练习英文写作，请这一轮用英文回答。"}
+      "用户本段对话正在练习英文写作，希望这一轮用英文回答。"
     ],
     "question": "What is Reciprocal Rank Fusion in one sentence?",
     "expected": {

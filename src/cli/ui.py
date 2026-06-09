@@ -27,9 +27,9 @@ HELP_TEXT = """
   /thinking                  查看 Extended Thinking 状态
   /thinking on/off           开启/关闭 Extended Thinking（claude/qwen/kimi/deepseek/glm/minimax 有效，其余降级）
   /thinking budget <N>       手动设置 thinking budget tokens（仅 claude/qwen 生效，默认 8000）
-  /memory                    展示跨 session 用户记忆（按类别分组）
-  /memory add <类别> <key> <value>  手动追加（类别：preference/background/instruction/task/correction）
-  /memory edit <id> <新内容>        修正指定记忆条目的内容
+  /memory                    展示跨 session 用户记忆（扁平自然语言列表）
+  /memory add <内容...>      手动追加一条记忆（一句自然语言）
+  /memory edit <id> <新内容> 改写指定记忆条目的内容
   /memory del <id>           删除指定记忆条目
   /memory clear              清空全部用户记忆
   /study                     列出全部学习计划（▶ 标记 active）

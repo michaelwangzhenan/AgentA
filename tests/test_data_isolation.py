@@ -82,18 +82,18 @@ class TestChatHistoryIsolation:
 class TestUserMemoryIsolation:
     def test_memories_scoped_by_user(self, tmp_path: Path) -> None:
         store = UserMemoryStore(db_path=str(tmp_path / "mem.db"))
-        store.upsert("preference", "lang", "中文", user_id=1)
-        store.upsert("preference", "lang", "English", user_id=2)
+        store.add("用户A说中文", user_id=1)
+        store.add("用户B说英文", user_id=2)
 
         a = store.load_all(user_id=1)
         b = store.load_all(user_id=2)
-        assert len(a) == 1 and a[0]["value"] == "中文"
-        assert len(b) == 1 and b[0]["value"] == "English"
+        assert len(a) == 1 and a[0]["text"] == "用户A说中文"
+        assert len(b) == 1 and b[0]["text"] == "用户B说英文"
         store.close()
 
     def test_delete_scoped(self, tmp_path: Path) -> None:
         store = UserMemoryStore(db_path=str(tmp_path / "mem.db"))
-        mid = store.upsert("preference", "k", "v", user_id=1)
+        mid = store.add("一条记忆", user_id=1)
         # 用户 2 删不掉用户 1 的条目
         assert store.delete(mid, user_id=2) is False
         assert store.delete(mid, user_id=1) is True

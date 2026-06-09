@@ -5,27 +5,23 @@ from pydantic import BaseModel, Field
 
 class MemoryItem(BaseModel):
     id: int
-    category: str
-    key: str
-    value: str
+    text: str
     source: str
     created_at: str
-    accessed_at: str
+    updated_at: str
 
 
 class MemoryListResponse(BaseModel):
     memories: list[MemoryItem]
 
 
-class MemoryUpsertRequest(BaseModel):
-    category: str = Field(..., min_length=1)
-    key: str = Field(..., min_length=1)
-    value: str = Field(..., min_length=1)
+class MemoryCreateRequest(BaseModel):
+    text: str = Field(..., min_length=1)
     source: str = Field("manual", description="auto / explicit / manual；未知降级为 auto")
 
 
 class MemoryPatchRequest(BaseModel):
-    value: str = Field(..., min_length=1)
+    text: str = Field(..., min_length=1)
 
 
 class MemoryDeleteResponse(BaseModel):

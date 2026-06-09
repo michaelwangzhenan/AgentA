@@ -14,11 +14,11 @@
   · 调用 load_for_context 时使用 config.USER_MEMORY_MAX_CHARS
 - `try_extract`
   · user_memory=None → 直接 skip
-  · is_explicit=True → 调 extract_memories，传非空 context_history
+  · is_explicit=True → 调 extract_memory_ops，传非空 context_history
   · AUTO_EXTRACT=true & is_explicit=False → 调 extract，但 context_history=""
   · 都不满足 → 直接 skip
   · extract 抛异常 → 静默吞掉
-  · 多 entries 全部 upsert
+  · 有 ops 时调 apply_ops 应用操作
 """
 from __future__ import annotations
 
@@ -152,7 +152,7 @@ class TestTryExtract:
 
     def test_no_user_memory_skips_extraction(self) -> None:
         mgr = _mk_mgr(user_memory=None)
-        with patch("src.agent.core.memory_manager.extract_memories") as mock_extract:
+        with patch("src.agent.core.memory_manager.extract_memory_ops") as mock_extract:
             t = _run(mgr, "用户输入", "Agent 回答")
         assert t is None
         mock_extract.assert_not_called()
@@ -163,25 +163,26 @@ class TestTryExtract:
         with (
             patch("src.agent.core.memory_manager.should_extract_immediately", return_value=False),
             patch("src.agent.core.memory_manager._cfg.USER_MEMORY_AUTO_EXTRACT", False),
-            patch("src.agent.core.memory_manager.extract_memories") as mock_extract,
+            patch("src.agent.core.memory_manager.extract_memory_ops") as mock_extract,
         ):
             t = _run(mgr, "普通对话", "普通回答")
         assert t is None
         mock_extract.assert_not_called()
-        um.upsert.assert_not_called()
+        um.apply_ops.assert_not_called()
 
     def test_explicit_trigger_extracts_with_context(self) -> None:
         """显式触发时，附带最近若干轮历史作为 context_history。"""
         um = MagicMock()
+        um.apply_ops.return_value = {"added": 1, "updated": 0, "deleted": 0}
         recent = [
             {"role": "user", "content": "前一轮问题"},
             {"role": "assistant", "content": "前一轮回答"},
         ]
         mgr = _mk_mgr(user_memory=um, recent_messages=recent)
-        fake_entries = [{"category": "preference", "key": "k", "value": "v"}]
+        fake_ops = [{"op": "ADD", "text": "用户喜欢简洁"}]
         with (
             patch("src.agent.core.memory_manager.should_extract_immediately", return_value=True),
-            patch("src.agent.core.memory_manager.extract_memories", return_value=fake_entries) as mock_extract,
+            patch("src.agent.core.memory_manager.extract_memory_ops", return_value=fake_ops) as mock_extract,
         ):
             _run(mgr, "请记住我喜欢简洁", "好的")
 
@@ -189,9 +190,10 @@ class TestTryExtract:
         args = mock_extract.call_args.args
         assert args[0] == "请记住我喜欢简洁"
         assert args[1] == "好的"
-        # 第 4 个参数是 context_history，应包含前一轮内容
-        assert "前一轮问题" in args[3] or "前一轮回答" in args[3]
-        um.upsert.assert_called_once_with("preference", "k", "v", source="explicit", user_id=_UID)
+        # context_history 现为 kwarg，应包含前一轮内容
+        ctx = mock_extract.call_args.kwargs["context_history"]
+        assert "前一轮问题" in ctx or "前一轮回答" in ctx
+        um.apply_ops.assert_called_once_with(fake_ops, source="explicit", user_id=_UID)
 
     def test_auto_extract_passes_empty_context(self) -> None:
         """AUTO_EXTRACT 路径：context_history 必须为 ""（用严格 prompt）。
@@ -209,51 +211,61 @@ class TestTryExtract:
             patch("src.agent.core.memory_manager._cfg.USER_MEMORY_AUTO_EXTRACT", True),
             patch("src.agent.core.memory_manager._cfg.USER_MEMORY_EXTRACT_EVERY_N", 1),
             patch("src.agent.core.memory_manager._cfg.USER_MEMORY_EXTRACT_MIN_INPUT_LEN", 0),
-            patch("src.agent.core.memory_manager.extract_memories", return_value=[]) as mock_extract,
+            patch("src.agent.core.memory_manager.extract_memory_ops", return_value=[]) as mock_extract,
         ):
             _run(mgr, "普通问题", "普通回答")
         mock_extract.assert_called_once()
-        assert mock_extract.call_args.args[3] == ""
+        assert mock_extract.call_args.kwargs["context_history"] == ""
 
     def test_existing_memories_passed_to_extractor(self) -> None:
-        """提取时把已有记忆作为 existing_memories 传给 extractor（去重去矛盾依据）。"""
+        """提取时把已有记忆作为 existing 传给 extractor（去重去矛盾依据）。"""
         um = MagicMock()
-        existing = [{"category": "preference", "key": "语言", "value": "中文"}]
+        existing = [{"id": 1, "text": "用户用中文"}]
         um.load_all.return_value = existing
         mgr = _mk_mgr(user_memory=um)
         with (
             patch("src.agent.core.memory_manager.should_extract_immediately", return_value=True),
-            patch("src.agent.core.memory_manager.extract_memories", return_value=[]) as mock_extract,
+            patch("src.agent.core.memory_manager.extract_memory_ops", return_value=[]) as mock_extract,
         ):
             _run(mgr, "请记住我用英文", "好")
         um.load_all.assert_called_once_with(user_id=_UID)
-        assert mock_extract.call_args.kwargs.get("existing_memories") == existing
+        assert mock_extract.call_args.kwargs.get("existing") == existing
 
     def test_extract_exception_swallowed(self) -> None:
         um = MagicMock()
         mgr = _mk_mgr(user_memory=um)
         with (
             patch("src.agent.core.memory_manager.should_extract_immediately", return_value=True),
-            patch("src.agent.core.memory_manager.extract_memories", side_effect=RuntimeError("LLM 挂了")),
+            patch("src.agent.core.memory_manager.extract_memory_ops", side_effect=RuntimeError("LLM 挂了")),
         ):
             _run(mgr, "请记住 X", "好的")  # 不应抛异常
-        um.upsert.assert_not_called()
+        um.apply_ops.assert_not_called()
 
-    def test_multiple_entries_all_upserted(self) -> None:
+    def test_empty_ops_does_not_call_apply(self) -> None:
+        """提取返回空操作列表时不调 apply_ops。"""
         um = MagicMock()
         mgr = _mk_mgr(user_memory=um)
-        entries = [
-            {"category": "preference", "key": "a", "value": "1"},
-            {"category": "background", "key": "b", "value": "2"},
+        with (
+            patch("src.agent.core.memory_manager.should_extract_immediately", return_value=True),
+            patch("src.agent.core.memory_manager.extract_memory_ops", return_value=[]),
+        ):
+            _run(mgr, "请记住", "好")
+        um.apply_ops.assert_not_called()
+
+    def test_ops_applied_via_apply_ops(self) -> None:
+        um = MagicMock()
+        um.apply_ops.return_value = {"added": 1, "updated": 1, "deleted": 0}
+        mgr = _mk_mgr(user_memory=um)
+        ops = [
+            {"op": "ADD", "text": "用户用 Python"},
+            {"op": "UPDATE", "id": 2, "text": "用户改用英文"},
         ]
         with (
             patch("src.agent.core.memory_manager.should_extract_immediately", return_value=True),
-            patch("src.agent.core.memory_manager.extract_memories", return_value=entries),
+            patch("src.agent.core.memory_manager.extract_memory_ops", return_value=ops),
         ):
             _run(mgr, "请记住", "好")
-        assert um.upsert.call_count == 2
-        um.upsert.assert_any_call("preference", "a", "1", source="explicit", user_id=_UID)
-        um.upsert.assert_any_call("background", "b", "2", source="explicit", user_id=_UID)
+        um.apply_ops.assert_called_once_with(ops, source="explicit", user_id=_UID)
 
 
 # ── 无状态触发节流策略（iter_12_refine.md §2.1 #1） ───────────────────────────
@@ -275,7 +287,7 @@ class TestExtractTriggerPolicy:
             patch("src.agent.core.memory_manager._cfg.USER_MEMORY_AUTO_EXTRACT", True),
             patch("src.agent.core.memory_manager._cfg.USER_MEMORY_EXTRACT_EVERY_N", every_n),
             patch("src.agent.core.memory_manager._cfg.USER_MEMORY_EXTRACT_MIN_INPUT_LEN", min_len),
-            patch("src.agent.core.memory_manager.extract_memories", return_value=[]) as mock_extract,
+            patch("src.agent.core.memory_manager.extract_memory_ops", return_value=[]) as mock_extract,
         ):
             t = mgr.try_extract(input_str, "reply")
             if t is not None:
@@ -320,7 +332,7 @@ class TestExtractTriggerPolicy:
             patch("src.agent.core.memory_manager.should_extract_immediately", return_value=True),
             patch("src.agent.core.memory_manager._cfg.USER_MEMORY_EXTRACT_EVERY_N", 999),
             patch("src.agent.core.memory_manager._cfg.USER_MEMORY_EXTRACT_MIN_INPUT_LEN", 999),
-            patch("src.agent.core.memory_manager.extract_memories", return_value=[]) as mock_extract,
+            patch("src.agent.core.memory_manager.extract_memory_ops", return_value=[]) as mock_extract,
         ):
             _run(mgr, "短", "reply")
         mock_extract.assert_called_once()
@@ -331,17 +343,18 @@ class TestExtractTriggerPolicy:
         mgr = _mk_mgr(user_memory=um, user_msg_count=3)
         with (
             patch("src.agent.core.memory_manager.should_extract_immediately", return_value=True),
-            patch("src.agent.core.memory_manager.extract_memories", return_value=[]) as mock_extract,
+            patch("src.agent.core.memory_manager.extract_memory_ops", return_value=[]) as mock_extract,
         ):
             _run(mgr, "请记住这个", "r")
         mock_extract.assert_called_once()
         mgr._chat_history.count_user_messages.assert_not_called()
 
-    def test_source_field_in_upsert(self) -> None:
+    def test_source_field_in_apply_ops(self) -> None:
         """auto 路径传 source='auto'，explicit 路径传 source='explicit'（均带 user_id）。"""
         um = MagicMock()
+        um.apply_ops.return_value = {"added": 1, "updated": 0, "deleted": 0}
         mgr = _mk_mgr(user_memory=um, user_msg_count=1)
-        entries = [{"category": "preference", "key": "k", "value": "v"}]
+        ops = [{"op": "ADD", "text": "用户用 Python"}]
 
         # auto
         with (
@@ -349,16 +362,17 @@ class TestExtractTriggerPolicy:
             patch("src.agent.core.memory_manager._cfg.USER_MEMORY_AUTO_EXTRACT", True),
             patch("src.agent.core.memory_manager._cfg.USER_MEMORY_EXTRACT_EVERY_N", 1),
             patch("src.agent.core.memory_manager._cfg.USER_MEMORY_EXTRACT_MIN_INPUT_LEN", 0),
-            patch("src.agent.core.memory_manager.extract_memories", return_value=entries),
+            patch("src.agent.core.memory_manager.extract_memory_ops", return_value=ops),
         ):
             _run(mgr, "hello world", "r")
-        um.upsert.assert_called_with("preference", "k", "v", source="auto", user_id=_UID)
+        um.apply_ops.assert_called_with(ops, source="auto", user_id=_UID)
 
         # explicit
         um.reset_mock()
+        um.apply_ops.return_value = {"added": 1, "updated": 0, "deleted": 0}
         with (
             patch("src.agent.core.memory_manager.should_extract_immediately", return_value=True),
-            patch("src.agent.core.memory_manager.extract_memories", return_value=entries),
+            patch("src.agent.core.memory_manager.extract_memory_ops", return_value=ops),
         ):
             _run(mgr, "请记住 X", "r")
-        um.upsert.assert_called_with("preference", "k", "v", source="explicit", user_id=_UID)
+        um.apply_ops.assert_called_with(ops, source="explicit", user_id=_UID)

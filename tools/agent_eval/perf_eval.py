@@ -28,9 +28,9 @@ Phase 1 性能基准（session + memory 合二为一）
     size           本次跑的记忆条数
     load_all       UserMemoryStore.load_all() 全量返回            —— 查询类
     load_ctx       UserMemoryStore.load_for_context(max_chars=1500) —— 注入路径
-    upsert         单次 upsert（新 key）                          —— 写入类
-    update_value   按 id 修改 value                                —— /memory edit 路径
-    render-list    cli.handlers._print_memory_list 全量打印       —— 渲染类（分组 + source + 时间）
+    add            单次 add（新条目）                             —— 写入类
+    update_text    按 id 修改 text                                 —— /memory edit 路径
+    render-list    cli.handlers._print_memory_list 全量打印       —— 渲染类（扁平列表 + source + 时间）
 
 判据（用最大 size 行对照；不达标考虑加索引 / FTS5 / 分页）：
 
@@ -179,12 +179,12 @@ def _render_memory_md(rows: list[dict], env: dict[str, str]) -> str:
     lines.append("")
     lines.append("每个数字 = 5 次中位数（单位 ms）。")
     lines.append("")
-    lines.append("| size | load_all | load_ctx | upsert | update_value | render-list |")
+    lines.append("| size | load_all | load_ctx | add | update_text | render-list |")
     lines.append("|---:|---:|---:|---:|---:|---:|")
     for r in rows:
         lines.append(
             f"| {r['size']} | {r['load_all_ms']:.2f} | {r['load_ctx_ms']:.2f} | "
-            f"{r['upsert_ms']:.2f} | {r['update_value_ms']:.2f} | {r['render_list_ms']:.2f} |"
+            f"{r['add_ms']:.2f} | {r['update_text_ms']:.2f} | {r['render_list_ms']:.2f} |"
         )
     lines.append("")
 
@@ -197,8 +197,8 @@ def _render_memory_md(rows: list[dict], env: dict[str, str]) -> str:
     checks = [
         ("load_all < 20 ms",        last["load_all_ms"] < 20,     f"实测 {last['load_all_ms']:.2f} ms"),
         ("load_ctx < 30 ms",        last["load_ctx_ms"] < 30,     f"实测 {last['load_ctx_ms']:.2f} ms"),
-        ("upsert < 10 ms",          last["upsert_ms"] < 10,       f"实测 {last['upsert_ms']:.2f} ms"),
-        ("update_value < 10 ms",    last["update_value_ms"] < 10, f"实测 {last['update_value_ms']:.2f} ms"),
+        ("add < 10 ms",             last["add_ms"] < 10,          f"实测 {last['add_ms']:.2f} ms"),
+        ("update_text < 10 ms",     last["update_text_ms"] < 10,  f"实测 {last['update_text_ms']:.2f} ms"),
         ("render-list < 100 ms",    last["render_list_ms"] < 100, f"实测 {last['render_list_ms']:.2f} ms"),
     ]
     lines.append(f"以最大 size={last['size']} 行对照（实际单用户场景 ≤ 100 条，留余量）：")
@@ -286,18 +286,11 @@ def _print_session_table(rows: list[dict]) -> None:
 
 # ── target: memory ─────────────────────────────────────────────────────────
 
-# 5 个固定 category，确保种子数据均匀
-_MEM_CATEGORIES = ["preference", "background", "instruction", "task", "correction"]
-
-
 def _seed_memories(store: UserMemoryStore, n: int) -> None:
-    """生成 n 条记忆，cat 轮转，key 唯一（保证 UNIQUE 不冲突）。"""
+    """生成 n 条自然语言记忆，source 轮转。"""
     for i in range(n):
-        cat = _MEM_CATEGORIES[i % len(_MEM_CATEGORIES)]
-        store.upsert(
-            cat,
-            f"key_{i:06d}",
-            f"value for entry {i}, used to test render and load_for_context",
+        store.add(
+            f"记忆条目 {i}：用于测试 render 和 load_for_context 的自然语言陈述",
             source="auto" if i % 3 else "manual",
         )
 
@@ -314,23 +307,17 @@ def _bench_memory_size(size: int) -> dict[str, float]:
             row["load_all_ms"] = _time_ms(lambda: store.load_all())
             row["load_ctx_ms"] = _time_ms(lambda: store.load_for_context(max_chars=1500))
 
-            # upsert / update 用专门的 size+1 / 选第一个 id 避免污染统计
-            next_idx = size
-            row["upsert_ms"] = _time_ms(
-                lambda i=[next_idx]: (
-                    store.upsert(
-                        "preference",
-                        f"key_{i[0]:06d}",
-                        "perf write",
-                        source="manual",
-                    ),
-                    i.__setitem__(0, i[0] + 1),
+            # add / update 用独立计数避免污染统计
+            row["add_ms"] = _time_ms(
+                lambda c=[0]: (
+                    store.add(f"perf write {c[0]}", source="manual"),
+                    c.__setitem__(0, c[0] + 1),
                 )[0]
             )
             first_id = store.load_all()[0]["id"]
-            row["update_value_ms"] = _time_ms(
+            row["update_text_ms"] = _time_ms(
                 lambda c=[0]: (
-                    store.update_value(first_id, f"perf updated {c[0]}"),
+                    store.update_text(first_id, f"perf updated {c[0]}"),
                     c.__setitem__(0, c[0] + 1),
                 )[0]
             )
@@ -347,8 +334,8 @@ def _bench_memory_size(size: int) -> dict[str, float]:
 def _print_memory_table(rows: list[dict]) -> None:
     print("\n[memory] /memory 性能基准（每个测量 5 次中位数）\n")
     header = (
-        f"{'size':>6}  {'load_all':>11}  {'load_ctx':>11}  {'upsert':>11}  "
-        f"{'update_val':>11}  {'render-list':>13}"
+        f"{'size':>6}  {'load_all':>11}  {'load_ctx':>11}  {'add':>11}  "
+        f"{'update_text':>11}  {'render-list':>13}"
     )
     print(header)
     print("-" * len(header))
@@ -357,16 +344,16 @@ def _print_memory_table(rows: list[dict]) -> None:
             f"{r['size']:>6}  "
             f"{r['load_all_ms']:>9.2f}ms  "
             f"{r['load_ctx_ms']:>9.2f}ms  "
-            f"{r['upsert_ms']:>9.2f}ms  "
-            f"{r['update_value_ms']:>9.2f}ms  "
+            f"{r['add_ms']:>9.2f}ms  "
+            f"{r['update_text_ms']:>9.2f}ms  "
             f"{r['render_list_ms']:>11.2f}ms"
         )
     print(
         "\n判据（以最大 size 行对照；实际单用户场景 ≤ 100 条）：\n"
         "  - load_all < 20ms      —— SQL 全量直读\n"
         "  - load_ctx < 30ms      —— 含 _sanitize + 截断\n"
-        "  - upsert/update < 10ms —— 单行写\n"
-        "  - render-list < 100ms  —— 分组 + 多行打印\n"
+        "  - add/update < 10ms    —— 单行写\n"
+        "  - render-list < 100ms  —— 多行打印\n"
     )
 
 

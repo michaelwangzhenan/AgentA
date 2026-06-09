@@ -69,7 +69,7 @@ def _isolated_agent_memory(tmp_path, _neutralize_runtime_overrides):
 
     - 替换 _chat_history：隔离对话历史 DB
     - 替换 _shared_user_memory 为 None，并临时关闭 USER_MEMORY_ENABLED：
-      防止 _try_extract_memories 向真实 DB 写入、或额外调用 LLM 干扰 mock 计数
+      防止 MemoryManager.try_extract 向真实 DB 写入、或额外调用 LLM 干扰 mock 计数
     """
     from src.memory.chat_history import ChatHistoryStore
 

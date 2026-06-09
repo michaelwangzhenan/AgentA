@@ -319,6 +319,15 @@ REGISTRY: list[ConfigItem] = [
         min=100,
         max=10000,
     ),
+    ConfigItem(
+        key="USER_MEMORY_MAX_ENTRIES",
+        group="memory",
+        type=ItemType.INT,
+        brief="记忆条数上限",
+        detail="记忆总条数软上限；提示 LLM 合并时控制规模，超出时合并 / 删除最旧条目。",
+        min=5,
+        max=200,
+    ),
     # ─── Rules ────────────────────────────────────────────────────────────
     ConfigItem(
         key="USER_RULES_ENABLED",

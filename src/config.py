@@ -681,6 +681,8 @@ HARNESS_LLM_TIMEOUT_SEC: float = float(os.getenv("HARNESS_LLM_TIMEOUT_SEC", "15"
 HARNESS_GRADING_THRESHOLD: float = float(os.getenv("HARNESS_GRADING_THRESHOLD", "3.5"))
 # 用户输入短于此字符数不触发自动提取（显式触发不受此限；设为 0 禁用）
 USER_MEMORY_EXTRACT_MIN_INPUT_LEN: int = int(os.getenv("USER_MEMORY_EXTRACT_MIN_INPUT_LEN", "20"))
+# 记忆总条数软上限（提示 LLM 合并时控制规模，超出时合并 / 删除最旧条目）
+USER_MEMORY_MAX_ENTRIES: int = int(os.getenv("USER_MEMORY_MAX_ENTRIES", "30"))
 
 # 是否启用用户 rules 注入（每用户一份，存数据库；可选值：true / false）
 USER_RULES_ENABLED: bool = os.getenv("USER_RULES_ENABLED", "true").lower() == "true"

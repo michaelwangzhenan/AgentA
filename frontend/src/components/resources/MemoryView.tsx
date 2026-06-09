@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react'
 import { Pencil, Plus, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog,
@@ -23,27 +22,17 @@ import {
 } from '@/components/ui/alert-dialog'
 import {
   clearMemories,
+  createMemory,
   deleteMemory,
   listMemories,
   patchMemory,
-  upsertMemory,
 } from '@/api/client'
 import {
-  CATEGORY_LABELS,
   SOURCE_LABELS,
   type MemoryItem,
 } from '@/types/resources'
 import { ResourcePage } from '@/components/resources/ResourcePage'
 import { toast } from '@/lib/toast'
-
-// 跟后端 src/memory/user_memory.py MEMORY_CATEGORIES 对齐
-const ADD_CATEGORY_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
-  { value: 'preference', label: CATEGORY_LABELS.preference },
-  { value: 'background', label: CATEGORY_LABELS.background },
-  { value: 'instruction', label: CATEGORY_LABELS.instruction },
-  { value: 'task', label: CATEGORY_LABELS.task },
-  { value: 'correction', label: CATEGORY_LABELS.correction },
-]
 
 export function MemoryView() {
   const [items, setItems] = useState<MemoryItem[]>([])
@@ -57,9 +46,7 @@ export function MemoryView() {
 
   // 手动添加表单
   const [addOpen, setAddOpen] = useState(false)
-  const [addCategory, setAddCategory] = useState<string>('preference')
-  const [addKey, setAddKey] = useState('')
-  const [addValue, setAddValue] = useState('')
+  const [addText, setAddText] = useState('')
   const [adding, setAdding] = useState(false)
 
   const refresh = useCallback(async () => {
@@ -116,19 +103,16 @@ export function MemoryView() {
   }
 
   const resetAddForm = () => {
-    setAddCategory('preference')
-    setAddKey('')
-    setAddValue('')
+    setAddText('')
   }
 
   const submitAdd = async () => {
-    const k = addKey.trim()
-    const v = addValue.trim()
-    if (!k || !v) return
+    const t = addText.trim()
+    if (!t) return
     setAdding(true)
     try {
       // source='manual' 跟后端 SOURCE_LABELS 对齐，标记"手工"
-      await upsertMemory(addCategory, k, v, 'manual')
+      await createMemory(t, 'manual')
       toast.success('已添加')
       resetAddForm()
       setAddOpen(false)
@@ -140,7 +124,7 @@ export function MemoryView() {
     }
   }
 
-  const canSubmitAdd = addKey.trim().length > 0 && addValue.trim().length > 0
+  const canSubmitAdd = addText.trim().length > 0
 
   return (
     <ResourcePage
@@ -181,33 +165,27 @@ export function MemoryView() {
             {items.map((it) => (
               <li key={it.id} className="group flex items-start gap-3 px-3 py-2">
                 <div className="flex flex-col gap-0.5 pt-0.5">
-                  <span className="inline-flex w-fit items-center rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-                    {CATEGORY_LABELS[it.category] ?? it.category}
-                  </span>
                   <span className="text-[10px] text-muted-foreground">
                     {SOURCE_LABELS[it.source] ?? it.source}
                   </span>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium" title={it.key}>
-                    {it.key}
-                  </div>
-                  <div className="whitespace-pre-wrap break-words text-sm text-foreground/80">
-                    {it.value}
+                  <div className="whitespace-pre-wrap break-words text-sm text-foreground/90">
+                    {it.text}
                   </div>
                   <div className="mt-1 text-[10px] text-muted-foreground">
-                    {it.created_at}
+                    {it.updated_at}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                   <button
                     className="rounded p-1 hover:bg-accent"
                     onClick={() => {
-                      setEditValue(it.value)
+                      setEditValue(it.text)
                       setEditTarget(it)
                     }}
                     aria-label="编辑"
-                    title="编辑 value"
+                    title="编辑记忆"
                   >
                     <Pencil className="h-4 w-4" />
                   </button>
@@ -233,20 +211,20 @@ export function MemoryView() {
       >
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>编辑 value</DialogTitle>
+            <DialogTitle>编辑记忆</DialogTitle>
           </DialogHeader>
           {editTarget && (
             <div className="space-y-2">
-              <div className="text-xs text-muted-foreground">
-                {CATEGORY_LABELS[editTarget.category] ?? editTarget.category} ·{' '}
-                {editTarget.key}
-              </div>
-              <Input
+              <Textarea
                 value={editValue}
                 onChange={(e) => setEditValue(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') submitEdit()
+                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault()
+                    submitEdit()
+                  }
                 }}
+                rows={3}
                 autoFocus
               />
             </div>
@@ -270,9 +248,7 @@ export function MemoryView() {
           <AlertDialogHeader>
             <AlertDialogTitle>删除该条记忆？</AlertDialogTitle>
             <AlertDialogDescription>
-              即将删除 {deleteTarget && (CATEGORY_LABELS[deleteTarget.category] ?? deleteTarget.category)}
-              {' · '}
-              {deleteTarget?.key}，不可恢复。
+              即将删除：{deleteTarget?.text}，不可恢复。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -325,60 +301,24 @@ export function MemoryView() {
           <div className="space-y-3">
             <div className="space-y-1">
               <label
-                htmlFor="add-mem-category"
+                htmlFor="add-mem-text"
                 className="text-xs font-medium text-muted-foreground"
               >
-                类别
-              </label>
-              <select
-                id="add-mem-category"
-                value={addCategory}
-                onChange={(e) => setAddCategory(e.target.value)}
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring [color-scheme:light] dark:[color-scheme:dark]"
-              >
-                {ADD_CATEGORY_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}（{opt.value}）
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label
-                htmlFor="add-mem-key"
-                className="text-xs font-medium text-muted-foreground"
-              >
-                Key <span className="text-muted-foreground/70">（短标识，例如 favorite_language）</span>
-              </label>
-              <Input
-                id="add-mem-key"
-                value={addKey}
-                onChange={(e) => setAddKey(e.target.value)}
-                placeholder="favorite_language"
-                autoFocus
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label
-                htmlFor="add-mem-value"
-                className="text-xs font-medium text-muted-foreground"
-              >
-                Value <span className="text-muted-foreground/70">（具体内容；Ctrl+Enter 提交）</span>
+                记忆内容 <span className="text-muted-foreground/70">（一句自然语言；Ctrl+Enter 提交）</span>
               </label>
               <Textarea
-                id="add-mem-value"
-                value={addValue}
-                onChange={(e) => setAddValue(e.target.value)}
+                id="add-mem-text"
+                value={addText}
+                onChange={(e) => setAddText(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                     e.preventDefault()
                     if (canSubmitAdd && !adding) submitAdd()
                   }
                 }}
-                placeholder="Python"
+                placeholder="例如：用户偏好用中文回答，代码风格简洁。"
                 rows={3}
+                autoFocus
               />
             </div>
           </div>

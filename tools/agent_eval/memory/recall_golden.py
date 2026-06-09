@@ -76,7 +76,7 @@ def _load_dataset(path: Path) -> list[dict[str, Any]]:
 
 
 def _build_system_prompt(
-    memories: list[dict[str, str]],
+    memories: list[str],
     rules: str | None = None,
 ) -> str:
     """构造一次性 system prompt，复现 `Agent.run()` 的三层拼接：
@@ -87,15 +87,15 @@ def _build_system_prompt(
     不走 mock，确保评估的是端到端行为（含 `_sanitize`、防注入 guard）。
 
     Args:
-        memories: case 里写的 user_memory 条目列表。
+        memories: case 里写的 user_memory 条目（每条一句自然语言）。
         rules: case 可选 `rules` 字段；`None` / 空串 → 不注入 `<user_rules>` 块。
     """
     base_prompt = "你是一个有用的 AI 助手。"
     with tempfile.TemporaryDirectory() as td:
         store = UserMemoryStore(str(Path(td) / "eval.db"))
         try:
-            for m in memories:
-                store.upsert(m["category"], m["key"], m["value"], source="manual")
+            for text in memories:
+                store.add(text, source="manual")
             mgr = MemoryManager(
                 user_memory=store,
                 chat_history=MagicMock(),  # 不会用到

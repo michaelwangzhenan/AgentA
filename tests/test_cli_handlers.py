@@ -253,50 +253,36 @@ def _call_memory(mem: UserMemoryStore, *args: str) -> list[str]:
 
 
 class TestManualWrite:
-    """/memory add 与 /memory edit 的手动写入路径。"""
+    """/memory add 与 /memory edit 的手动写入路径（扁平自然语言）。"""
 
     def test_add_basic(self, mem_store: UserMemoryStore) -> None:
-        lines = _call_memory(mem_store, "add", "preference", "lang", "中文回答")
+        lines = _call_memory(mem_store, "add", "用户希望用中文回答")
         rows = mem_store.load_all()
         assert len(rows) == 1
-        assert rows[0]["category"] == "preference"
-        assert rows[0]["key"] == "lang"
-        assert rows[0]["value"] == "中文回答"
+        assert rows[0]["text"] == "用户希望用中文回答"
         assert rows[0]["source"] == "manual"
         assert any("已记录" in s for s in lines)
 
-    def test_add_value_with_spaces_preserved(self, mem_store: UserMemoryStore) -> None:
-        """value 中的空格 + 大小写必须原样保留（不能被 lower）。"""
-        lines = _call_memory(
-            mem_store, "add", "instruction", "cite_style", "APA 7th Edition with page #"
-        )
+    def test_add_text_with_spaces_and_case_preserved(self, mem_store: UserMemoryStore) -> None:
+        """内容中的空格 + 大小写必须原样保留（不能被 lower）。"""
+        _call_memory(mem_store, "add", "引用统一用 APA 7th Edition with page #")
         rows = mem_store.load_all()
-        assert rows[0]["value"] == "APA 7th Edition with page #"
-
-    def test_add_category_case_insensitive(self, mem_store: UserMemoryStore) -> None:
-        """类别大小写不敏感（用户敲 Preference 也应识别）。"""
-        _call_memory(mem_store, "add", "PREFERENCE", "lang", "中文")
-        assert mem_store.load_all()[0]["category"] == "preference"
-
-    def test_add_unknown_category_rejected(self, mem_store: UserMemoryStore) -> None:
-        lines = _call_memory(mem_store, "add", "bogus", "k", "v")
-        assert mem_store.load_all() == []
-        assert any("未知类别" in s for s in lines)
+        assert rows[0]["text"] == "引用统一用 APA 7th Edition with page #"
 
     def test_add_missing_args_shows_usage(self, mem_store: UserMemoryStore) -> None:
-        lines = _call_memory(mem_store, "add", "preference", "only_key")
+        lines = _call_memory(mem_store, "add")
         assert mem_store.load_all() == []
         assert any("用法" in s for s in lines)
 
-    def test_edit_updates_value(self, mem_store: UserMemoryStore) -> None:
-        mem_store.upsert("preference", "lang", "中文", source="manual")
+    def test_edit_updates_text(self, mem_store: UserMemoryStore) -> None:
+        mem_store.add("用户用中文", source="manual")
         row_id = mem_store.load_all()[0]["id"]
-        lines = _call_memory(mem_store, "edit", str(row_id), "English with examples")
-        assert mem_store.load_all()[0]["value"] == "English with examples"
+        lines = _call_memory(mem_store, "edit", str(row_id), "用户改用英文，含示例")
+        assert mem_store.load_all()[0]["text"] == "用户改用英文，含示例"
         assert any("已更新" in s for s in lines)
 
     def test_edit_missing_id_friendly(self, mem_store: UserMemoryStore) -> None:
-        lines = _call_memory(mem_store, "edit", "9999", "new value")
+        lines = _call_memory(mem_store, "edit", "9999", "new text")
         assert any("不存在" in s for s in lines)
 
     def test_edit_invalid_id_friendly(self, mem_store: UserMemoryStore) -> None:
@@ -305,28 +291,25 @@ class TestManualWrite:
 
 
 class TestMemoryOutput:
-    """/memory（无参）：分组、source 列、人性化时间。"""
+    """/memory（无参）：扁平列表、source 列、人性化时间。"""
 
     def test_empty_db_shows_hint(self, mem_store: UserMemoryStore) -> None:
         lines = _call_memory(mem_store)
         assert any("没有任何记忆" in s for s in lines)
 
-    def test_grouped_by_category_in_fixed_order(self, mem_store: UserMemoryStore) -> None:
-        mem_store.upsert("background", "job", "工程师", source="auto")
-        mem_store.upsert("preference", "lang", "中文", source="manual")
-        mem_store.upsert("instruction", "cite", "APA", source="explicit")
-        lines = _call_memory(mem_store)
-        full = "\n".join(lines)
-        # 顺序：preference → background → instruction（MEMORY_CATEGORY_ORDER）
-        i_pref = full.find("偏好")
-        i_back = full.find("背景")
-        i_inst = full.find("指令")
-        assert 0 < i_pref < i_back < i_inst
+    def test_flat_list_shows_text(self, mem_store: UserMemoryStore) -> None:
+        mem_store.add("用户是工程师", source="auto")
+        mem_store.add("用户偏好中文", source="manual")
+        full = "\n".join(_call_memory(mem_store))
+        assert "用户是工程师" in full
+        assert "用户偏好中文" in full
+        # 扁平：不再有类别标签分组
+        assert "偏好（" not in full and "背景（" not in full
 
     def test_source_labels_rendered(self, mem_store: UserMemoryStore) -> None:
-        mem_store.upsert("preference", "k1", "v1", source="auto")
-        mem_store.upsert("preference", "k2", "v2", source="explicit")
-        mem_store.upsert("preference", "k3", "v3", source="manual")
+        mem_store.add("条目1", source="auto")
+        mem_store.add("条目2", source="explicit")
+        mem_store.add("条目3", source="manual")
         full = "\n".join(_call_memory(mem_store))
         assert "自动" in full
         assert "请记住" in full
@@ -334,7 +317,7 @@ class TestMemoryOutput:
 
     def test_relative_time_rendered(self, mem_store: UserMemoryStore) -> None:
         """新写入条目应显示 '今天 HH:MM'（_format_relative_time 路径）。"""
-        mem_store.upsert("preference", "k", "v", source="manual")
+        mem_store.add("一条记忆", source="manual")
         full = "\n".join(_call_memory(mem_store))
         assert "今天" in full
 
@@ -345,15 +328,15 @@ class TestMemoryOutput:
         assert "add" in full and "edit" in full
 
     def test_del_still_works(self, mem_store: UserMemoryStore) -> None:
-        mem_store.upsert("preference", "k", "v", source="auto")
+        mem_store.add("待删条目", source="auto")
         row_id = mem_store.load_all()[0]["id"]
         lines = _call_memory(mem_store, "del", str(row_id))
         assert mem_store.load_all() == []
         assert any("已删除" in s for s in lines)
 
     def test_clear_still_works(self, mem_store: UserMemoryStore) -> None:
-        mem_store.upsert("preference", "k1", "v1", source="auto")
-        mem_store.upsert("preference", "k2", "v2", source="manual")
+        mem_store.add("条目1", source="auto")
+        mem_store.add("条目2", source="manual")
         lines = _call_memory(mem_store, "clear")
         assert mem_store.load_all() == []
         assert any("已清空" in s and "2" in s for s in lines)

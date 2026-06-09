@@ -1,25 +1,27 @@
 """
 跨 session 用户记忆模块
 
-持久化用户偏好、背景和明确指令，支持新 session 自动加载。
+持久化关于用户的长期信息（自然语言陈述句），支持新 session 自动加载注入。
+
+设计：ChatGPT 式扁平自然语言列表 —— 一条记忆就是一句自洽的自然语言（如
+"用户是后端工程师，常用 Python"），不分类别。新信息进来时由一次 LLM 调用
+完成"提取 + 合并"：对现有列表给出 ADD / UPDATE / DELETE 操作，天然去重去矛盾。
 
 职责：
-    1. 存储：结构化 key-value 条目，按类别组织，同 (category, key) 自动去重
-    2. 检索：加载相关条目并格式化为可注入 system prompt 的文本块
-    3. 提取：调用 LLM 从一轮对话中提取值得记住的用户信息
-    4. 安全：注入前校验，防止 prompt injection
-    5. 控制：用户可查询、删除、清空
+    1. 存储：一行一句自然语言记忆
+    2. 检索：加载并格式化为可注入 system prompt 的文本块
+    3. 提取合并：调 LLM 从一轮对话维护记忆列表（输出操作）
+    4. 安全：写入前 _sanitize 防 prompt injection
+    5. 控制：用户可查询、增、改、删、清空
 
 表结构：
     user_memories(
-        id          INTEGER  PRIMARY KEY AUTOINCREMENT,
-        category    TEXT     NOT NULL,  -- preference/background/instruction/task/correction
-        key         TEXT     NOT NULL,  -- 短标识（≤ 30 字符）
-        value       TEXT     NOT NULL,  -- 实际内容（≤ 500 字符）
-        source      TEXT     NOT NULL DEFAULT 'auto',  -- auto/explicit/manual
-        created_at  TEXT     NOT NULL,
-        accessed_at TEXT     NOT NULL,
-        UNIQUE(category, key)           -- 同类同 key 自动覆盖旧值
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id     INTEGER NOT NULL DEFAULT 1,
+        text        TEXT    NOT NULL,                 -- 自然语言整句
+        source      TEXT    NOT NULL DEFAULT 'auto',  -- auto/explicit/manual
+        created_at  TEXT    NOT NULL,
+        updated_at  TEXT    NOT NULL                  -- 最后改写时间
     )
 
 source 字段来源：
@@ -59,23 +61,6 @@ class LlmChatFn(Protocol):
 
 # ── 常量 ──────────────────────────────────────────────────────────────────────
 
-# 支持的记忆类别
-MEMORY_CATEGORIES: frozenset[str] = frozenset({
-    "preference",   # 用户偏好（代码风格、语言、格式）
-    "background",   # 用户背景（职业、技术栈、项目上下文）
-    "instruction",  # 明确指令（"不要用 bullet points"）
-    "task",         # 任务进度（未完成工作、决策记录）
-    "correction",   # 纠错（agent 犯过的错，避免重犯）
-})
-
-CATEGORY_LABELS: dict[str, str] = {
-    "preference":  "偏好",
-    "background":  "背景",
-    "instruction": "指令",
-    "task":        "任务",
-    "correction":  "纠错",
-}
-
 # 写入来源
 MEMORY_SOURCES: frozenset[str] = frozenset({"auto", "explicit", "manual"})
 SOURCE_LABELS: dict[str, str] = {
@@ -91,10 +76,12 @@ _REMEMBER_TRIGGERS: frozenset[str] = frozenset({
     "remember this", "remember that", "please remember", "keep in mind",
 })
 
-# 单条记忆 value 最大字符数
-_MAX_VALUE_CHARS: int = 500
-# 记忆 key 最大字符数
-_MAX_KEY_CHARS: int = 30
+# 单条记忆存储硬上限（字符）。prompt 另会提示 LLM 更短，这里只是兜底防超长。
+_MAX_TEXT_CHARS: int = 500
+# 单条记忆建议长度（提示给 LLM，保持精炼）
+_TEXT_HINT_CHARS: int = 120
+# 单次合并调用最多应用的操作数（防 LLM 异常输出搅乱整库）
+_MAX_OPS_PER_CALL: int = 10
 
 
 # ── 安全校验 ──────────────────────────────────────────────────────────────────
@@ -113,7 +100,7 @@ def _sanitize(text: str) -> str:
         text = text[:cut].strip()
     # 移除控制字符（保留 \t \n）
     text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
-    return text[:_MAX_VALUE_CHARS]
+    return text[:_MAX_TEXT_CHARS]
 
 
 # ── 触发检测 ──────────────────────────────────────────────────────────────────
@@ -124,109 +111,94 @@ def should_extract_immediately(user_text: str) -> bool:
     return any(trigger in lower for trigger in _REMEMBER_TRIGGERS)
 
 
-# ── LLM 提取 ─────────────────────────────────────────────────────────────────
+# ── LLM 提取 + 合并 ───────────────────────────────────────────────────────────
 
-# 自动提取模式：严格过滤，只保留用户个人信息相关内容
-_EXTRACT_SYSTEM_PROMPT = """\
-你是一个记忆提取助手。分析对话片段，从中提取**值得长期记住的用户信息**。
-
-规则：
-- 只提取明确出现的具体事实，不推断或编造
-- 忽略泛泛而谈、一次性的内容
-- 优先提取：用户偏好、职业背景、持久化指令、agent错误纠正
-- key 不超过 15 字，value 不超过 100 字
-
-输出 JSON 数组，每项格式：
-{"category": "<类别>", "key": "<简短标识>", "value": "<具体内容>"}
-
-支持的类别：
-- preference  用户偏好（代码风格、语言、格式要求）
-- background  用户背景（职业、技术栈、项目上下文）
-- instruction 明确指令（"不要用 bullet points" 等持久化要求）
-- task        任务进度（未完成的工作、待记录的决策）
-- correction  纠错（agent 犯过的错误，避免重复）
-
-若无值得记住的内容，返回空数组 []。只输出 JSON，不要有任何解释文字。\
-"""
-
-# 显式触发模式：用户主动说"记住这个"，使用更宽松的策略，积极保存对话结论
-_EXTRACT_SYSTEM_PROMPT_EXPLICIT = """\
-你是一个记忆提取助手。用户明确要求记住当前对话内容，请**积极提取**对话中值得保存的信息。
-
-规则：
-- 用户主动触发，应尽量记录，不要因"内容不够明确"而丢弃
-- 可以提取：讨论的主题结论、用户关注的技术方向、待办任务、重要决策、用户的工作背景
-- 对话中没有明显的用户个人信息时，将核心讨论内容归入 task 类别
-- key 不超过 15 字，value 不超过 100 字（提炼核心，不要原文照抄）
-
-输出 JSON 数组，每项格式：
-{"category": "<类别>", "key": "<简短标识>", "value": "<具体内容>"}
-
-支持的类别：
-- preference  用户偏好（代码风格、语言、格式要求）
-- background  用户背景（职业、技术栈、项目上下文）
-- instruction 明确指令（持久化要求，如"不要用 bullet points"）
-- task        任务进度 / 讨论结论（未完成工作、重要知识点、决策记录）
-- correction  纠错（agent 犯过的错误，避免重复）
-
-只输出 JSON，不要有任何解释文字。\
-"""
+# 不同触发模式下的策略行（拼进 system prompt）
+_MODE_AUTO = (
+    "当前是自动维护：只在对话里出现**明确的**用户长期信息（偏好、背景、持久指令、"
+    "需要纠正的错误）时才改动；泛泛而谈、一次性内容一律忽略，没有就返回 []。"
+)
+_MODE_EXPLICIT = (
+    "用户明确要求记住当前对话，请**积极**维护：讨论结论、关注的技术方向、待办、"
+    "重要决策、工作背景都值得 ADD 或 UPDATE。"
+)
 
 
-def _format_existing_memories(existing: list[dict[str, Any]]) -> str:
-    """把已有记忆条目排成 `category=.. key=.. value=..` 列表，供提取时提示复用 key。
+def _build_merge_system_prompt(max_entries: int, mode_line: str) -> str:
+    """构造"提取 + 合并"system prompt。
 
-    用 raw category（非中文标签）让 LLM 能原样复用，避免造近义新 key。
+    JSON 示例里有花括号，故用拼接而非 str.format，避免转义负担。
     """
-    lines = [
-        f"- category={m.get('category', '')} key={m.get('key', '')} value={m.get('value', '')}"
-        for m in existing
-        if m.get("category") and m.get("key")
-    ]
-    return "\n".join(lines)
+    return (
+        "你是用户记忆管理助手。基于最新对话，维护一份关于用户的长期记忆列表"
+        "（每条是一句自洽的自然语言陈述）。\n\n"
+        f"{mode_line}\n\n"
+        "你会看到【当前记忆列表】（带编号）和【最新对话】。请输出对列表的操作，"
+        "让它保持准确、精简、无重复、无矛盾：\n"
+        "- 出现值得长期记住的新信息 → ADD\n"
+        "- 新信息与某条已有记忆是同一主题（更新 / 纠正 / 补充）→ UPDATE 那条\n"
+        "- 已有记忆被新信息推翻、作废 → DELETE 那条\n"
+        "- 没有值得改动的 → 返回空数组 []\n\n"
+        "要求：\n"
+        f"- 每条记忆一句自然语言陈述（如\"用户是后端工程师，常用 Python\"），不超过 {_TEXT_HINT_CHARS} 字\n"
+        "- 只记明确事实，不推断不编造\n"
+        f"- 列表总数控制在 {max_entries} 条以内，超了就把最不重要 / 最旧的合并或 DELETE\n"
+        "- id 必须用【当前记忆列表】里真实存在的编号\n\n"
+        "输出 JSON 数组，每项是下列三种之一：\n"
+        '{"op": "ADD", "text": "..."}\n'
+        '{"op": "UPDATE", "id": 3, "text": "..."}\n'
+        '{"op": "DELETE", "id": 5}\n'
+        "只输出 JSON，不要任何解释文字。"
+    )
 
 
-def extract_memories(
+def _format_memory_list(existing: list[dict[str, Any]]) -> str:
+    """把已有记忆排成带编号的列表供 LLM 判断；空列表给出明确占位。"""
+    if not existing:
+        return "（当前没有任何记忆）"
+    return "\n".join(
+        f"{m['id']}. {m['text']}" for m in existing if m.get("id") and m.get("text")
+    )
+
+
+def extract_memory_ops(
     user_input: str,
     agent_reply: str,
     llm_chat_fn: LlmChatFn,
+    *,
+    existing: list[dict[str, Any]] | None = None,
     context_history: str = "",
-    existing_memories: list[dict[str, Any]] | None = None,
-) -> list[dict[str, str]]:
+    max_entries: int = 30,
+) -> list[dict[str, Any]]:
     """
-    调用 LLM 从一轮对话中提取值得记忆的用户信息。
+    调一次 LLM，基于本轮对话 + 现有记忆，产出对记忆列表的操作（提取 + 合并一步到位）。
 
     Args:
-        user_input:        用户的原始输入。
-        agent_reply:       Agent 的回答。
-        llm_chat_fn:       可调用的 LLM chat 函数（签名与 provider.chat 相同）。
-        context_history:   可选，最近几轮对话的文本（用于"记住这个"等指代性触发词的场景）。
-        existing_memories: 可选，该用户已有记忆条目。非空时提示 LLM 同主题复用已有 key，
-                           靠 upsert 对同 (category, key) 覆盖实现去重 / 去矛盾。
+        user_input:       用户输入。
+        agent_reply:      Agent 回答。
+        llm_chat_fn:      LLM chat 函数（签名同 provider.chat）。
+        existing:         该用户现有记忆（含 id / text），供 LLM 去重去矛盾。
+        context_history:  非空表示显式触发（"请记住"），附最近若干轮历史 + 用宽松策略。
+        max_entries:      记忆总条数软上限，提示 LLM 合并时控制规模。
 
     Returns:
-        list of {category, key, value}，可直接传给 UserMemoryStore.upsert()。
-        提取失败或无内容时返回空列表。
+        操作列表，每项形如 {"op": "ADD", "text": ...} / {"op": "UPDATE", "id": n, "text": ...}
+        / {"op": "DELETE", "id": n}。最多 _MAX_OPS_PER_CALL 条；失败或无改动返回 []。
     """
-    # 有历史上下文 = 用户显式触发（"记住这个"）→ 宽松策略，积极保存对话结论
-    # 无历史上下文 = AUTO_EXTRACT 自动触发       → 严格策略，只保存用户个人信息
+    existing = existing or []
+    is_explicit = bool(context_history)
+    mode_line = _MODE_EXPLICIT if is_explicit else _MODE_AUTO
+    system_prompt = _build_merge_system_prompt(max_entries, mode_line)
+
     if context_history:
-        system_prompt = _EXTRACT_SYSTEM_PROMPT_EXPLICIT
         conversation = (
             f"【近期对话上下文】\n{context_history}\n\n"
-            f"【触发记忆的当前轮】\n用户：{user_input}\n\nAgent：{agent_reply}"
+            f"【最新对话】\n用户：{user_input}\n\nAgent：{agent_reply}"
         )
     else:
-        system_prompt = _EXTRACT_SYSTEM_PROMPT
-        conversation = f"用户：{user_input}\n\nAgent：{agent_reply}"
-    if existing_memories:
-        existing_block = _format_existing_memories(existing_memories)
-        if existing_block:
-            conversation += (
-                "\n\n【该用户已有的记忆条目】\n" + existing_block
-                + "\n\n若你要提取的信息与上面某条是同一主题，请复用它的 category 和 key"
-                "（系统会更新而非新增），不要新造近义 key。"
-            )
+        conversation = f"【最新对话】\n用户：{user_input}\n\nAgent：{agent_reply}"
+    conversation += "\n\n【当前记忆列表】\n" + _format_memory_list(existing)
+
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": conversation},
@@ -235,30 +207,49 @@ def extract_memories(
         response = llm_chat_fn(messages, temperature=0.1)
         raw: str = response.choices[0].message.content or ""
         # 提取第一个 JSON 数组（防止 LLM 附加解释文字）
-        json_match = re.search(r'\[.*?\]', raw, re.DOTALL)
+        json_match = re.search(r'\[.*\]', raw, re.DOTALL)
         if not json_match:
             return []
         entries: list[Any] = json.loads(json_match.group())
-        result: list[dict[str, str]] = []
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            cat = str(entry.get("category", ""))
-            key = str(entry.get("key", "")).strip()[:_MAX_KEY_CHARS]
-            value = str(entry.get("value", "")).strip()
-            if cat in MEMORY_CATEGORIES and key and value:
-                result.append({"category": cat, "key": key, "value": value})
-        return result
+        return _normalize_ops(entries)
     except Exception as exc:
-        logger.warning("[UserMemory] LLM 提取失败: %s", exc)
+        logger.warning("[UserMemory] LLM 提取合并失败: %s", exc)
         return []
+
+
+def _normalize_ops(entries: list[Any]) -> list[dict[str, Any]]:
+    """校验并规整 LLM 输出的操作；丢弃非法项，截到 _MAX_OPS_PER_CALL 条。"""
+    result: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        action = str(entry.get("op", "")).strip().upper()
+        if action == "ADD":
+            text = str(entry.get("text", "")).strip()
+            if text:
+                result.append({"op": "ADD", "text": text})
+        elif action == "UPDATE":
+            text = str(entry.get("text", "")).strip()
+            try:
+                oid = int(entry.get("id"))
+            except (TypeError, ValueError):
+                continue
+            if text:
+                result.append({"op": "UPDATE", "id": oid, "text": text})
+        elif action == "DELETE":
+            try:
+                oid = int(entry.get("id"))
+            except (TypeError, ValueError):
+                continue
+            result.append({"op": "DELETE", "id": oid})
+    return result[:_MAX_OPS_PER_CALL]
 
 
 # ── UserMemoryStore ───────────────────────────────────────────────────────────
 
 class UserMemoryStore:
     """
-    跨 session 用户记忆存储。
+    跨 session 用户记忆存储（扁平自然语言列表）。
 
     独立于对话历史 ChatHistoryStore，使用单独的 SQLite 文件。
     同一进程建议复用单个实例；内置 threading.Lock，可被多线程安全读写。
@@ -279,152 +270,135 @@ class UserMemoryStore:
     def _create_tables(self) -> None:
         """创建 user_memories 表（幂等）+ fail-fast 检测旧 schema。
 
-        不做向后兼容 schema 迁移：从旧 schema 升级时请手动删除
-        `sqlite_db/user_memory.db` 重建（单用户场景损失可接受，避免引入迁移代码）。
-        但裸的 `sqlite3.OperationalError` 对用户不友好，所以在表创建后做一次
-        PRAGMA 自检，缺列时抛带操作指引的 RuntimeError。
+        不做向后兼容迁移：旧的结构化 schema（category/key/value）请手动删除
+        `./sqlite_db/user_memory.db` 重建。建表后做一次 PRAGMA 自检，缺 text 列
+        （= 旧结构化库）时抛带操作指引的 RuntimeError，而非裸 OperationalError。
         """
         with self._lock, self._conn:
             self._conn.execute("""
                 CREATE TABLE IF NOT EXISTS user_memories (
                     id          INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id     INTEGER NOT NULL DEFAULT 1,
-                    category    TEXT    NOT NULL,
-                    key         TEXT    NOT NULL,
-                    value       TEXT    NOT NULL,
+                    text        TEXT    NOT NULL,
                     source      TEXT    NOT NULL DEFAULT 'auto',
                     created_at  TEXT    NOT NULL,
-                    accessed_at TEXT    NOT NULL,
-                    UNIQUE(user_id, category, key)
+                    updated_at  TEXT    NOT NULL
                 )
             """)
-            # 先自检再建索引：旧库（缺 user_id）若先建 user_id 索引会抛裸
-            # OperationalError，盖过下面这条带操作指引的友好 RuntimeError。
             cols = {row[1] for row in self._conn.execute("PRAGMA table_info(user_memories)")}
-            if "user_id" not in cols:
+            if "text" not in cols:
                 raise RuntimeError(
-                    "user_memory.db schema 已过期（缺 user_id 列），请删除 ./sqlite_db/user_memory.db 后重启。"
+                    "user_memory.db schema 已过期（旧版结构化记忆），"
+                    "请删除 ./sqlite_db/user_memory.db 后重启。"
                 )
             self._conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_user_memories_user_category
-                    ON user_memories(user_id, category)
+                CREATE INDEX IF NOT EXISTS idx_user_memories_user
+                    ON user_memories(user_id)
             """)
 
     # ── 核心 CRUD ─────────────────────────────────────────────────────────────
 
-    def upsert(self, category: str, key: str, value: str, source: str = "auto",
-               user_id: int | None = None) -> int | None:
+    def add(self, text: str, source: str = "auto", user_id: int | None = None) -> int | None:
         """
-        插入或更新一条记忆。同 (category, key) 的旧值被新值覆盖（去重）。
+        新增一条记忆。
 
         Args:
-            category: 记忆类别，必须在 MEMORY_CATEGORIES 内。
-            key: 简短标识（≤ 30 字符，同样经过注入过滤）。
-            value: 具体内容（自动清洗、截断）。
-            source: 写入来源，必须在 MEMORY_SOURCES 内；未知值降级为 'auto'。
-                    冲突 upsert 时也会更新 source，反映"最近一次来源"。
+            text:   自然语言整句（自动 _sanitize + 截断）。
+            source: 写入来源，未知值降级为 'auto'。
 
         Returns:
-            写入或更新后的记录 id；任何校验跳过（未知类别 / 清洗后为空）返回 None。
-            历史调用方丢弃返回值仍兼容（None 也是 falsy）。
+            新行 id；text 清洗后为空则跳过、返回 None。
         """
         uid = user_id if user_id is not None else current_user_id()
-        if category not in MEMORY_CATEGORIES:
-            logger.warning("[UserMemory] 未知类别 %r，跳过写入", category)
-            return None
         if source not in MEMORY_SOURCES:
             logger.warning("[UserMemory] 未知 source %r，降级为 'auto'", source)
             source = "auto"
-        clean_key = _sanitize(key.strip())[:_MAX_KEY_CHARS]
-        clean_value = _sanitize(value)
-        if not clean_key:
-            logger.warning("[UserMemory] key 清洗后为空，跳过写入 [%s]", category)
-            return None
-        if not clean_value:
-            logger.warning("[UserMemory] value 清洗后为空，跳过写入 [%s] %s", category, key)
+        clean = _sanitize(text)
+        if not clean:
+            logger.warning("[UserMemory] text 清洗后为空，跳过写入")
             return None
         now = datetime.now().isoformat(timespec="seconds")
-        # SQLite UPSERT 触发 update 分支时 cursor.lastrowid 不返回更新行 id，
-        # 所以分两步：先查是否已存在 → 决定 update / insert
         with self._lock, self._conn:
-            existing = self._conn.execute(
-                "SELECT id FROM user_memories WHERE user_id = ? AND category = ? AND key = ?",
-                (uid, category, clean_key),
-            ).fetchone()
-            if existing is not None:
-                self._conn.execute(
-                    "UPDATE user_memories SET value = ?, source = ?, accessed_at = ? WHERE id = ?",
-                    (clean_value, source, now, existing["id"]),
-                )
-                row_id = int(existing["id"])
-            else:
-                cursor = self._conn.execute(
-                    """INSERT INTO user_memories(user_id, category, key, value, source, created_at, accessed_at)
-                       VALUES(?, ?, ?, ?, ?, ?, ?)""",
-                    (uid, category, clean_key, clean_value, source, now, now),
-                )
-                row_id = int(cursor.lastrowid or 0)
-        logger.info("[UserMemory] 已写入 [%s] %s (source=%s, id=%d)", category, key, source, row_id)
+            cursor = self._conn.execute(
+                """INSERT INTO user_memories(user_id, text, source, created_at, updated_at)
+                   VALUES(?, ?, ?, ?, ?)""",
+                (uid, clean, source, now, now),
+            )
+            row_id = int(cursor.lastrowid or 0)
+        logger.info("[UserMemory] 已新增 (source=%s, id=%d): %s", source, row_id, clean[:50])
         return row_id
 
-    def update_value(self, memory_id: int, new_value: str, user_id: int | None = None) -> bool:
-        """
-        按 id 更新单条记忆的 value（保持 category/key/source 不变；accessed_at 同步刷新）。
-
-        用途：CLI `/memory edit <id> <new_value>` 让用户直接修正 LLM 误提取的 value，
-        无需重敲完整 (category, key) 元组。
-
-        Args:
-            memory_id: `/memory` 列表中显示的 id。
-            new_value: 新内容，自动 _sanitize + 截断。
-
-        Returns:
-            True 表示 id 存在且已更新；False 表示 id 不存在。
-        """
-        clean_value = _sanitize(new_value)
-        if not clean_value:
-            logger.warning("[UserMemory] update_value: 清洗后为空，跳过 id=%d", memory_id)
+    def update_text(self, memory_id: int, new_text: str, user_id: int | None = None) -> bool:
+        """按 id 改写记忆内容（限本人，刷新 updated_at）；text 清洗后为空或 id 不存在返回 False。"""
+        clean = _sanitize(new_text)
+        if not clean:
+            logger.warning("[UserMemory] update_text: 清洗后为空，跳过 id=%d", memory_id)
             return False
         uid = user_id if user_id is not None else current_user_id()
         now = datetime.now().isoformat(timespec="seconds")
         with self._lock, self._conn:
             cursor = self._conn.execute(
-                "UPDATE user_memories SET value = ?, accessed_at = ? WHERE id = ? AND user_id = ?",
-                (clean_value, now, memory_id, uid),
+                "UPDATE user_memories SET text = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+                (clean, now, memory_id, uid),
             )
         updated = cursor.rowcount > 0
         if updated:
-            logger.info("[UserMemory] 已更新 id=%d", memory_id)
+            logger.info("[UserMemory] 已改写 id=%d: %s", memory_id, clean[:50])
         return updated
 
+    def apply_ops(
+        self, ops: list[dict[str, Any]], source: str = "auto", user_id: int | None = None
+    ) -> dict[str, int]:
+        """应用一组 LLM 产出的操作（ADD / UPDATE / DELETE），返回各操作的成功计数。
+
+        非法 id（不存在 / 非本人）的 UPDATE / DELETE 被静默忽略；操作数截到上限。
+        """
+        uid = user_id if user_id is not None else current_user_id()
+        added = updated = deleted = 0
+        for op in ops[:_MAX_OPS_PER_CALL]:
+            action = op.get("op")
+            if action == "ADD":
+                if self.add(op.get("text", ""), source=source, user_id=uid) is not None:
+                    added += 1
+            elif action == "UPDATE":
+                if self.update_text(int(op["id"]), op.get("text", ""), user_id=uid):
+                    updated += 1
+            elif action == "DELETE":
+                if self.delete(int(op["id"]), user_id=uid):
+                    deleted += 1
+        if added or updated or deleted:
+            logger.info(
+                "[UserMemory] 应用操作 (source=%s): +%d ~%d -%d", source, added, updated, deleted
+            )
+        return {"added": added, "updated": updated, "deleted": deleted}
+
     def load_all(self, user_id: int | None = None) -> list[dict[str, Any]]:
-        """加载某用户的全部记忆条目，按类别和创建时间升序排序。返回字段含 source。"""
+        """加载某用户全部记忆，按 id 升序（= 写入顺序，便于 CLI 编号稳定）。"""
         uid = user_id if user_id is not None else current_user_id()
         with self._lock:
             rows = self._conn.execute(
-                """SELECT id, category, key, value, source, created_at, accessed_at
+                """SELECT id, text, source, created_at, updated_at
                    FROM user_memories
                    WHERE user_id = ?
-                   ORDER BY category, created_at ASC""",
+                   ORDER BY id ASC""",
                 (uid,),
             ).fetchall()
         return [dict(row) for row in rows]
 
     def load_for_context(self, max_chars: int = 1500, user_id: int | None = None) -> str:
         """
-        加载记忆并格式化为可注入 system prompt 的文本块。
+        加载记忆并格式化为可注入 system prompt 的文本块（扁平自然语言 bullet）。
 
-        排序：用户手写的 manual / explicit 优先于 auto 自动提取，同级再按 created_at 倒序
-        （新写入优先）；超出 max_chars 时截断。注入是被动读取，不刷新 accessed_at——
-        避免"塞进上限的那批永远刷新、永远靠前"导致门外条目饥饿。
+        排序：manual / explicit（用户手写）优先于 auto，同级按 updated_at 倒序；
+        超出 max_chars 时截断。被动注入不刷新时间戳（避免门内条目永久占位、门外饥饿）。
 
         Returns:
-            格式化后的记忆文本，无记忆时返回空字符串。
+            每行 `- {text}` 的文本，无记忆时返回空字符串。
         """
         uid = user_id if user_id is not None else current_user_id()
         with self._lock:
             rows = self._conn.execute(
-                """SELECT id, category, key, value
+                """SELECT text
                    FROM user_memories
                    WHERE user_id = ?
                    ORDER BY CASE source
@@ -432,7 +406,7 @@ class UserMemoryStore:
                                 WHEN 'explicit' THEN 1
                                 ELSE 2
                             END,
-                            created_at DESC""",
+                            updated_at DESC""",
                 (uid,),
             ).fetchall()
         if not rows:
@@ -440,8 +414,7 @@ class UserMemoryStore:
 
         lines: list[str] = []
         for row in rows:
-            label = CATEGORY_LABELS.get(row["category"], row["category"])
-            line = f"- [{label}] {row['key']}：{row['value']}"
+            line = f"- {row['text']}"
             candidate = "\n".join(lines + [line])
             if len(candidate) > max_chars:
                 break

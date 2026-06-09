@@ -24,14 +24,6 @@ _HISTORY_PREVIEW_LEN: int = 60
 _SWITCH_PREVIEW_COUNT: int = 2
 # 切换预览每条消息正文截断长度
 _SWITCH_PREVIEW_LEN: int = 80
-# /memory 列表 key 列宽（对齐）
-_MEMORY_KEY_COL_WIDTH: int = 16
-
-# /memory 列表分组顺序（与 CATEGORY_LABELS 一致；以稳定输出便于人眼扫描）
-MEMORY_CATEGORY_ORDER: tuple[str, ...] = (
-    "preference", "background", "instruction", "task", "correction",
-)
-
 if TYPE_CHECKING:
     from src.agent.agent import Agent, ThinkingConfig
     from src.skills.skill_loader import SkillInfo
@@ -510,32 +502,28 @@ def switch_session(
 
 _MEMORY_USAGE = (
     "⚠️  未知子命令。用法：\n"
-    "    /memory                              展示全部记忆（按类别分组）\n"
-    "    /memory add <类别> <key> <value...>  手动追加一条（类别：preference/background/instruction/task/correction）\n"
-    "    /memory edit <id> <新内容...>        修正指定 id 的 value\n"
-    "    /memory del <id>                     删除指定 id\n"
-    "    /memory clear                        清空全部\n"
+    "    /memory                  展示全部记忆\n"
+    "    /memory add <内容...>    手动追加一条记忆（一句自然语言）\n"
+    "    /memory edit <id> <内容> 改写指定 id 的记忆\n"
+    "    /memory del <id>         删除指定 id\n"
+    "    /memory clear            清空全部\n"
 )
 
 
 def _print_memory_list(
     user_memory: "UserMemoryStore", out: OutputFn = _stdout
 ) -> None:
-    """`/memory` 列出全部记忆：按 category 分组 + 人性化时间 + source 标签。
+    """`/memory` 列出全部记忆：扁平自然语言列表 + source 标签 + 人性化时间。
 
     输出示例：
 
-        🧠 用户记忆（共 7 条）
+        🧠 用户记忆（共 3 条）
 
-        ── 偏好（3）─────────────────────────────
-          [ 1] 语言        中文                   自动     · 今天 10:23
-          [ 5] 长度        ≤ 200 字               请记住   · 昨天 18:05
-          [ 9] 引用风格    APA 7th                手工     · 3 天前
-
-        ── 背景（2）────────────────────────────
-          ...
+          [ 1] 用户是后端工程师，常用 Python          自动    · 今天 10:23
+          [ 5] 回答控制在 200 字以内                  请记住  · 昨天 18:05
+          [ 9] 引用统一用 APA 7th 格式                手工    · 3 天前
     """
-    from src.memory.user_memory import CATEGORY_LABELS, SOURCE_LABELS
+    from src.memory.user_memory import SOURCE_LABELS
 
     entries = user_memory.load_all()
     if not entries:
@@ -543,24 +531,11 @@ def _print_memory_list(
         return
 
     out(f"\n🧠 用户记忆（共 {len(entries)} 条）\n")
-    grouped: dict[str, list[dict[str, Any]]] = {}
     for e in entries:
-        grouped.setdefault(e["category"], []).append(e)
-
-    for cat in MEMORY_CATEGORY_ORDER:
-        items = grouped.get(cat)
-        if not items:
-            continue
-        label = CATEGORY_LABELS.get(cat, cat)
-        out(f"── {label}（{len(items)}）" + "─" * 30)
-        for e in items:
-            src_label = SOURCE_LABELS.get(e.get("source", "auto"), e.get("source", "auto"))
-            ts = _format_relative_time(e["created_at"])
-            key = e["key"][:_MEMORY_KEY_COL_WIDTH]
-            value = e["value"]
-            out(f"  [{e['id']:>3d}] {key:<{_MEMORY_KEY_COL_WIDTH}}  {value}")
-            out(f"        {src_label:<6}  · {ts}")
-        out("")
+        src_label = SOURCE_LABELS.get(e.get("source", "auto"), e.get("source", "auto"))
+        ts = _format_relative_time(e.get("updated_at") or e["created_at"])
+        out(f"  [{e['id']:>3d}] {e['text']}")
+        out(f"        {src_label:<6}  · {ts}")
     out("")
 
 
@@ -571,10 +546,8 @@ def handle_memory(
 ) -> None:
     """处理 /memory 子命令（list / add / edit / del / clear），详 _MEMORY_USAGE。
 
-    保留 value 中的原始大小写与空格：只对子命令名（add/edit/del/clear）做 lower。
+    保留内容中的原始大小写与空格：只对子命令名（add/edit/del/clear）做 lower。
     """
-    from src.memory.user_memory import MEMORY_CATEGORIES
-
     raw = cmd_parts[1].strip() if len(cmd_parts) > 1 else ""
     if not raw:
         _print_memory_list(user_memory, out)
@@ -602,26 +575,18 @@ def handle_memory(
             out(f"🗑️  已清空全部 {count} 条记忆。\n")
 
         case "add":
-            # add <category> <key> <value...>；value 允许含空格
-            toks = rest.split(maxsplit=2)
-            if len(toks) < 3:
-                out(
-                    "⚠️  用法：/memory add <类别> <key> <value...>\n"
-                    f"    类别可选：{'/'.join(sorted(MEMORY_CATEGORIES))}\n"
-                )
+            # add <内容...>；内容是一句自然语言，允许含空格
+            if not rest:
+                out("⚠️  用法：/memory add <内容...>（一句自然语言）\n")
                 return
-            category, key, value = toks[0].lower(), toks[1], toks[2]
-            if category not in MEMORY_CATEGORIES:
-                out(
-                    f"❌ 未知类别：{category!r}。\n"
-                    f"    可选：{'/'.join(sorted(MEMORY_CATEGORIES))}\n"
-                )
-                return
-            user_memory.upsert(category, key, value, source="manual")
-            out(f"✍️  已记录 [{category}] {key}：{value}\n")
+            new_id = user_memory.add(rest, source="manual")
+            if new_id is not None:
+                out(f"✍️  已记录：{rest}\n")
+            else:
+                out("❌ 内容清洗后为空，未写入。\n")
 
         case "edit":
-            # edit <id> <new value...>；new value 允许含空格
+            # edit <id> <new text...>；内容允许含空格
             toks = rest.split(maxsplit=1)
             if len(toks) < 2:
                 out("⚠️  用法：/memory edit <id> <新内容>\n")
@@ -631,10 +596,10 @@ def handle_memory(
             except ValueError:
                 out(f"❌ 无效 ID：{toks[0]!r}，应为整数。\n")
                 return
-            new_value = toks[1]
-            updated = user_memory.update_value(mid, new_value)
+            new_text = toks[1]
+            updated = user_memory.update_text(mid, new_text)
             if updated:
-                out(f"✏️  记忆 {mid} 已更新为：{new_value}\n")
+                out(f"✏️  记忆 {mid} 已更新为：{new_text}\n")
             else:
                 out(f"❌ 记忆 ID {mid} 不存在或新内容清洗后为空。\n")
 

@@ -474,22 +474,21 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 
 ## 3.4 用户记忆
 
-跨会话存储用户偏好 / 背景 / 指令 / 任务 / 纠错，使 Agent 在新一次对话中仍"认得"用户。由两层组成：`MemoryManager`（注入与提取策略）+ `UserMemoryStore`（SQLite 存储）。
+跨会话存储关于用户的长期信息，使 Agent 在新一次对话中仍"认得"用户。采用 ChatGPT 式**扁平自然语言列表**：一条记忆就是一句自洽的自然语言（如"用户是后端工程师，常用 Python"），不分类别。由两层组成：`MemoryManager`（注入与提取策略）+ `UserMemoryStore`（SQLite 存储）。
 
 ### 3.4.1 数据模型
 
 | 字段 | 用途 |
 |---|---|
 | `id` | 主键；`/memory` 列表 / `del` / `edit` 用 |
-| `category` | 五类之一：preference（偏好）/ background（背景）/ instruction（指令）/ task（任务）/ correction（纠错） |
-| `key` | 短标识，类内唯一 |
-| `value` | 实际内容；写入时做 prompt-injection sanitize |
+| `text` | 自然语言整句；写入时做 prompt-injection sanitize |
 | `source` | 写入来源：auto / explicit / manual（详 §3.4.2） |
-| `created_at` / `accessed_at` | 时间戳；写入或更新时刷新 |
+| `created_at` | 写入时间 |
+| `updated_at` | 最后改写时间；UPDATE 时刷新 |
 
-约束：`(category, key)` 唯一 — 同类同 key 自动覆盖去重。
+无类别、无 key、无唯一约束 — 去重去矛盾交给 LLM 合并（详 §3.4.2）。
 
-### 3.4.2 写入来源与混合范式
+### 3.4.2 写入来源与提取合并
 
 **混合范式**（参考 ChatGPT / Cursor Memories）：三种写入路径共存于同一记忆池，`source` 字段标记来源便于审计与排错。
 
@@ -499,9 +498,9 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 | `explicit` | 用户输入命中显式触发词（"请记住"等）立即触发，附最近若干轮历史作为 context | ✅ |
 | `manual` | `/memory add` / `/memory edit` CLI 命令 | ❌ |
 
-三者底层都走 `UserMemoryStore.upsert(category, key, value, source=...)`。
+**去重 / 去矛盾（LLM 全列表合并）**：自动 / 显式提取时，把该用户**全部**现有记忆（带编号）+ 本轮对话一次性喂给 LLM，让它输出对列表的**操作**而非新条目——`ADD`（新增）/ `UPDATE id`（同主题改写）/ `DELETE id`（作废旧条目）。同主题的旧记忆被改写或删除，天然实现去重去矛盾。这只是把原来那次提取调用的输出改聪明，**不增加 LLM 调用次数**。
 
-**去重 / 去矛盾**：提取时把该用户已有条目（category / key / value）一并喂给 extractor，提示它"同主题复用已有 key"；靠 `upsert` 对同 `(category, key)` 覆盖，自然实现去重并用新值替换旧值（不做过期、不主动删除矛盾旧条目）。
+操作应用规则：`UPDATE` / `DELETE` 校验 `id` 存在且属当前用户，非法 id 忽略；单次操作数设上限防 LLM 异常输出搅乱整库；总条数有软上限 `USER_MEMORY_MAX_ENTRIES`，prompt 提示 LLM 超限时合并 / 删最不重要的。`manual` 路径不走合并，直接 `add(text)`。
 
 ### 3.4.3 触发节流
 
@@ -511,6 +510,7 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 |---|---|---|
 | `USER_MEMORY_EXTRACT_EVERY_N` | 5 | 本 session 累计用户消息数为 N 的整数倍时才触发一次自动提取 |
 | `USER_MEMORY_EXTRACT_MIN_INPUT_LEN` | 20 | 用户输入字符数低于阈值不触发（短问无个人信息可提） |
+| `USER_MEMORY_MAX_ENTRIES` | 30 | 记忆总条数软上限，提示 LLM 合并时控制规模 |
 
 节流判定是**无状态**的：每轮直接数本 session 的 user 消息条数取模，不依赖跨轮内存计数器（`MemoryManager` 每轮新建，内存计数器会被归零）。**显式触发不受此限**，命中触发词立即提取。
 
@@ -518,7 +518,7 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 
 ### 3.4.4 注入 system_prompt
 
-每轮把记忆**全量按序注入** `<user_context>`（非按当前问题做相关性检索）：`manual` / `explicit`（用户手写）优先于 `auto`（自动提取），同级按写入时间倒序，累计超 `USER_MEMORY_MAX_CHARS` 截断。被动注入不刷新 `accessed_at`，避免门内条目永久占位、门外条目饥饿。拼接顺序参考 [§3.5.2 四层注入顺序](#352-四层注入顺序)。
+每轮把记忆**全量按序注入** `<user_context>`（非按当前问题做相关性检索），格式为扁平自然语言 bullet（`- {text}`）：`manual` / `explicit`（用户手写）优先于 `auto`（自动提取），同级按 `updated_at` 倒序，累计超 `USER_MEMORY_MAX_CHARS` 截断。被动注入不刷新时间戳，避免门内条目永久占位、门外条目饥饿。拼接顺序参考 [§3.5.2 四层注入顺序](#352-四层注入顺序)。
 
 
 ## 3.5 Prompt 管理

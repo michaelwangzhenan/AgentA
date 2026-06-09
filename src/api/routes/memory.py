@@ -1,4 +1,4 @@
-"""User Memory 管理端点（list / upsert / patch / delete / clear）。
+"""User Memory 管理端点（list / create / patch / delete / clear）。
 
 UserMemoryStore 内部已有 threading.Lock，多 connection 在 SQLite 文件锁下并发安全。
 """
@@ -8,14 +8,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from src.api.deps import get_current_user, get_user_memory_store
 from src.api.schemas.memory import (
     MemoryClearResponse,
+    MemoryCreateRequest,
     MemoryDeleteResponse,
     MemoryItem,
     MemoryListResponse,
     MemoryPatchRequest,
     MemoryPatchResponse,
-    MemoryUpsertRequest,
 )
-from src.memory.user_memory import MEMORY_CATEGORIES, UserMemoryStore
+from src.memory.user_memory import UserMemoryStore
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 
@@ -41,28 +41,23 @@ def list_memories(
 
 
 @router.post("", response_model=MemoryItem)
-def upsert_memory(
-    req: MemoryUpsertRequest,
+def create_memory(
+    req: MemoryCreateRequest,
     store: UserMemoryStore = Depends(_require_store),
     user: dict = Depends(get_current_user),
 ) -> MemoryItem:
-    if req.category not in MEMORY_CATEGORIES:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"未知 category: {req.category}；合法值：{sorted(MEMORY_CATEGORIES)}",
-        )
-    new_id = store.upsert(req.category, req.key, req.value, source=req.source, user_id=user["id"])
+    new_id = store.add(req.text, source=req.source, user_id=user["id"])
     if new_id is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="key 或 value 清洗后为空，未写入",
+            detail="text 清洗后为空，未写入",
         )
     for row in store.load_all(user_id=user["id"]):
         if row["id"] == new_id:
             return MemoryItem(**row)
     raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"upsert 成功 (id={new_id}) 但查不到该行（可能被其他进程并发删除）",
+        detail=f"新增成功 (id={new_id}) 但查不到该行（可能被其他进程并发删除）",
     )
 
 
@@ -73,11 +68,11 @@ def patch_memory(
     store: UserMemoryStore = Depends(_require_store),
     user: dict = Depends(get_current_user),
 ) -> MemoryPatchResponse:
-    updated = store.update_value(memory_id, req.value, user_id=user["id"])
+    updated = store.update_text(memory_id, req.text, user_id=user["id"])
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"memory id={memory_id} 不存在或更新失败（可能 value 清洗后为空）",
+            detail=f"memory id={memory_id} 不存在或更新失败（可能 text 清洗后为空）",
         )
     return MemoryPatchResponse(updated=True)
 

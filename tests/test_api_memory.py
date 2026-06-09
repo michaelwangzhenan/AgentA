@@ -44,69 +44,63 @@ def test_list_memories_empty(client: TestClient) -> None:
     assert r.json() == {"memories": []}
 
 
-def test_list_memories_after_upsert(client: TestClient, store: UserMemoryStore) -> None:
-    store.upsert("preference", "favorite_color", "blue", source="manual")
-    store.upsert("background", "name", "alice", source="explicit")
+def test_list_memories_after_add(client: TestClient, store: UserMemoryStore) -> None:
+    store.add("用户喜欢蓝色", source="manual")
+    store.add("用户名叫 alice", source="explicit")
     r = client.get("/api/memory")
     assert r.status_code == 200
     items = r.json()["memories"]
     assert len(items) == 2
-    cats = {m["category"] for m in items}
-    assert cats == {"preference", "background"}
+    texts = {m["text"] for m in items}
+    assert texts == {"用户喜欢蓝色", "用户名叫 alice"}
+    # 扁平模型：不再有 category / key 字段
+    assert "category" not in items[0]
+    assert "updated_at" in items[0]
 
 
-# ─── POST /api/memory（upsert） ─────────────────────────────────────────
+# ─── POST /api/memory（create） ─────────────────────────────────────────
 
 
-def test_upsert_memory_ok(client: TestClient) -> None:
+def test_create_memory_ok(client: TestClient) -> None:
     r = client.post(
         "/api/memory",
-        json={"category": "preference", "key": "lang", "value": "中文", "source": "manual"},
+        json={"text": "用户希望用中文回答", "source": "manual"},
     )
     assert r.status_code == 200
     body = r.json()
-    assert body["category"] == "preference"
-    assert body["key"] == "lang"
-    assert body["value"] == "中文"
+    assert body["text"] == "用户希望用中文回答"
     assert body["source"] == "manual"
     assert body["id"] > 0
 
 
-def test_upsert_memory_invalid_category(client: TestClient) -> None:
-    r = client.post(
-        "/api/memory",
-        json={"category": "fake_cat_xyz", "key": "k", "value": "v"},
-    )
+def test_create_memory_missing_text_422(client: TestClient) -> None:
+    r = client.post("/api/memory", json={"source": "manual"})
     assert r.status_code == 422
-    assert "fake_cat_xyz" in r.json()["detail"]
 
 
-def test_upsert_memory_updates_existing(client: TestClient) -> None:
-    client.post("/api/memory", json={"category": "preference", "key": "k1", "value": "v1"})
-    r = client.post("/api/memory", json={"category": "preference", "key": "k1", "value": "v2"})
-    assert r.status_code == 200
-    assert r.json()["value"] == "v2"
-
+def test_create_memory_appends_each_time(client: TestClient) -> None:
+    client.post("/api/memory", json={"text": "记忆一"})
+    client.post("/api/memory", json={"text": "记忆二"})
     items = client.get("/api/memory").json()["memories"]
-    assert len([m for m in items if m["key"] == "k1"]) == 1
+    assert len(items) == 2
 
 
 # ─── PATCH /api/memory/{id} ──────────────────────────────────────────────
 
 
 def test_patch_memory_ok(client: TestClient, store: UserMemoryStore) -> None:
-    store.upsert("preference", "k", "original")
+    store.add("原内容")
     item_id = store.load_all()[0]["id"]
-    r = client.patch(f"/api/memory/{item_id}", json={"value": "updated"})
+    r = client.patch(f"/api/memory/{item_id}", json={"text": "新内容"})
     assert r.status_code == 200
     assert r.json() == {"updated": True}
 
     items = store.load_all()
-    assert items[0]["value"] == "updated"
+    assert items[0]["text"] == "新内容"
 
 
 def test_patch_memory_404(client: TestClient) -> None:
-    r = client.patch("/api/memory/9999", json={"value": "x"})
+    r = client.patch("/api/memory/9999", json={"text": "x"})
     assert r.status_code == 404
 
 
@@ -114,7 +108,7 @@ def test_patch_memory_404(client: TestClient) -> None:
 
 
 def test_delete_memory_ok(client: TestClient, store: UserMemoryStore) -> None:
-    store.upsert("preference", "k", "v")
+    store.add("一条记忆")
     item_id = store.load_all()[0]["id"]
     r = client.delete(f"/api/memory/{item_id}")
     assert r.status_code == 200
@@ -132,8 +126,8 @@ def test_delete_memory_nonexistent_returns_false(client: TestClient) -> None:
 
 
 def test_clear_memories(client: TestClient, store: UserMemoryStore) -> None:
-    store.upsert("preference", "k1", "v1")
-    store.upsert("preference", "k2", "v2")
+    store.add("记忆一")
+    store.add("记忆二")
     r = client.delete("/api/memory")
     assert r.status_code == 200
     assert r.json() == {"cleared": 2}
