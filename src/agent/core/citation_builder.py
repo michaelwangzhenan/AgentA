@@ -28,6 +28,7 @@ CitationBuilder —— RAG 引用展示编排
 from __future__ import annotations
 
 import re
+import threading
 from dataclasses import dataclass
 
 from src.rag.retriever import Hit
@@ -70,6 +71,9 @@ class CitationBuilder:
         self._key_to_num: dict[tuple[str, str], int] = {}
         # 下一个可分配的编号（[n] 的 n）；从 1 起
         self._next_num: int = 1
+        # 同一轮多个 search_knowledge 可并行执行（tool_call_engine 并行路径），
+        # register 会改 _citations / _next_num，故加锁保证编号分配不竞争。
+        self._lock = threading.Lock()
 
     # ── 注册 ──────────────────────────────────────────────────────────────
 
@@ -88,25 +92,26 @@ class CitationBuilder:
             空列表入参 → 空列表返回。
         """
         nums: list[int] = []
-        for hit in hits:
-            heading = self._extract_heading(hit)
-            key = (hit.source, heading or "")
-            if key in self._key_to_num:
-                # 同 (source, heading) 复用编号，chunk_count 累加
-                num = self._key_to_num[key]
-                citation = next(c for c in self._citations if c.num == num)
-                citation.chunk_count += 1
-            else:
-                num = self._next_num
-                self._next_num += 1
-                self._key_to_num[key] = num
-                self._citations.append(Citation(
-                    num=num,
-                    source=hit.source,
-                    heading=heading,
-                    page_no=self._extract_page_no(hit),
-                ))
-            nums.append(num)
+        with self._lock:
+            for hit in hits:
+                heading = self._extract_heading(hit)
+                key = (hit.source, heading or "")
+                if key in self._key_to_num:
+                    # 同 (source, heading) 复用编号，chunk_count 累加
+                    num = self._key_to_num[key]
+                    citation = next(c for c in self._citations if c.num == num)
+                    citation.chunk_count += 1
+                else:
+                    num = self._next_num
+                    self._next_num += 1
+                    self._key_to_num[key] = num
+                    self._citations.append(Citation(
+                        num=num,
+                        source=hit.source,
+                        heading=heading,
+                        page_no=self._extract_page_no(hit),
+                    ))
+                nums.append(num)
         return nums
 
     @staticmethod

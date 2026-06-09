@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any
 
 from src.agent.core.event_bus import (
@@ -38,6 +39,12 @@ logger = logging.getLogger(__name__)
 
 # 工具结果预览截断长度
 _TOOL_PREVIEW_LEN: int = 100
+
+# plan 类 tool：有顺序依赖（审批 / reconstruct / 事件），永远串行执行，排除在并行外
+_PLAN_TOOLS: frozenset[str] = frozenset({"make_plan", "update_step", "abort_plan"})
+
+# 同一轮多个工具并行执行的线程数上限；多为网络 IO，封顶避免并行精排把 CPU 打满
+_MAX_PARALLEL_TOOLS: int = 4
 
 # search_knowledge 返回空结果时追加给 LLM 的引导提示
 TOOL_EMPTY_HINT: str = (
@@ -98,84 +105,131 @@ class ToolCallEngine:
             messages.append(assistant_msg)
         self._chat_history.append(self._session_id, assistant_msg)
 
-        for tool_call in message.tool_calls:
-            tool_name = tool_call.function.name
-            tool_args = json.loads(tool_call.function.arguments)
+        parsed = [
+            (tc, tc.function.name, json.loads(tc.function.arguments))
+            for tc in message.tool_calls
+        ]
 
-            if self._verbose:
-                logger.info(
-                    "[ToolCallEngine] 调用工具: %s，参数: %s",
-                    tool_name,
-                    json.dumps(tool_args, ensure_ascii=False),
-                )
+        # 同一轮 ≥2 个工具且都不是 plan tool 时并行执行：工具多为网络 IO，
+        # GIL 不挡；plan tool 有顺序依赖（审批 / reconstruct）故排除、退回串行。
+        if len(parsed) >= 2 and all(name not in _PLAN_TOOLS for _, name, _ in parsed):
+            # 先按序发 tool_call_start，保证 UI 里工具内部 progress 事件不早于 start
+            for tc, name, args in parsed:
+                self._emit_start(tc, name, args)
+            results = self._run_parallel(parsed, messages)
+            for (tc, name, args), result in zip(parsed, results):
+                self._consume_result(tc, name, args, result, messages)
+            return
 
-            if self._events is not None:
-                self._events.publish(AgentEvent(
-                    type=EVENT_TOOL_CALL_START,
-                    payload={"name": tool_name, "args": tool_args, "call_id": tool_call.id},
-                ))
+        # 串行路径（单工具 / 含 plan tool 轮）：逐个 start → 执行 → 落地，
+        # 保证 plan tool 执行时 messages 已含本轮先前工具结果。
+        for tc, name, args in parsed:
+            self._emit_start(tc, name, args)
+            with tool_progress_scope(self._events, tc.id):
+                result = self._exec(name, args, messages)
+            self._consume_result(tc, name, args, result, messages)
 
-            # 仅当持有 citation_builder 时才走 kwarg 路径，否则保持现有 3-arg
-            # 签名调用，避免破坏外部 mock execute_tool 的测试 fixture。
-            # messages 透传给 plan tools（update_step / abort_plan）
-            # 用于 reconstruct plan 状态；非 plan 工具忽略此参数。messages 此时
-            # 已含本轮 assistant tool_calls，plan tool 在内部 reconstruct 时
-            # 能看到自己刚发的 update_step / abort_plan 调用。
-            # 绑定 (bus, call_id) 到 contextvar，使工具内部（如 search_knowledge）
-            # 能发阶段进度事件，且无需逐层透传 bus/call_id。
+    def _emit_start(self, tool_call: Any, tool_name: str, tool_args: dict[str, Any]) -> None:
+        """打调用日志（verbose）+ 发 tool_call_start 事件。"""
+        if self._verbose:
+            logger.info(
+                "[ToolCallEngine] 调用工具: %s，参数: %s",
+                tool_name,
+                json.dumps(tool_args, ensure_ascii=False),
+            )
+        if self._events is not None:
+            self._events.publish(AgentEvent(
+                type=EVENT_TOOL_CALL_START,
+                payload={"name": tool_name, "args": tool_args, "call_id": tool_call.id},
+            ))
+
+    def _exec(
+        self, tool_name: str, tool_args: dict[str, Any], messages: list[dict[str, Any]],
+    ) -> ToolResult:
+        """执行单个工具。
+
+        仅当持有 citation_builder 时才走 kwarg 路径，否则保持现有 3-arg 签名，
+        避免破坏外部 mock execute_tool 的测试 fixture。messages 透传给 plan tools
+        （update_step / abort_plan）用于 reconstruct；非 plan 工具忽略此参数。
+        """
+        if self._citation_builder is not None:
+            return execute_tool(
+                tool_name, tool_args, self._skill_bodies,
+                citation_builder=self._citation_builder,
+                messages=messages,
+            )
+        return execute_tool(
+            tool_name, tool_args, self._skill_bodies,
+            messages=messages,
+        )
+
+    def _run_parallel(
+        self,
+        parsed: list[tuple[Any, str, dict[str, Any]]],
+        messages: list[dict[str, Any]],
+    ) -> list[ToolResult]:
+        """并行执行多个非 plan 工具，结果按入参顺序返回。
+
+        每个 worker 在自己线程内 set tool_progress contextvar（线程不继承父 context），
+        工具内部 publish_tool_progress 才能拿到 (bus, call_id)。execute_tool 自身捕获所有
+        异常并以 status=error 返回，故 future 不会抛出。并行期间不改 messages（只读透传），
+        落地（写历史 / 追加 messages）统一在主线程串行做，保证顺序与 plan 一致性。
+        """
+        def work(tool_call: Any, name: str, args: dict[str, Any]) -> ToolResult:
             with tool_progress_scope(self._events, tool_call.id):
-                if self._citation_builder is not None:
-                    result: ToolResult = execute_tool(
-                        tool_name, tool_args, self._skill_bodies,
-                        citation_builder=self._citation_builder,
-                        messages=messages,
-                    )
-                else:
-                    result = execute_tool(
-                        tool_name, tool_args, self._skill_bodies,
-                        messages=messages,
-                    )
+                return self._exec(name, args, messages)
 
-            if self._verbose:
-                preview = result.content[:_TOOL_PREVIEW_LEN].replace("\n", " ").replace("\r", " ")
-                logger.info("[ToolCallEngine] 工具结果 [%s] 预览: %s", result.status, preview)
+        with ThreadPoolExecutor(max_workers=min(len(parsed), _MAX_PARALLEL_TOOLS)) as pool:
+            return list(pool.map(lambda p: work(*p), parsed))
 
-            if self._events is not None:
-                preview = result.content[:_TOOL_PREVIEW_LEN].replace("\n", " ").replace("\r", " ")
-                self._events.publish(AgentEvent(
-                    type=EVENT_TOOL_CALL_END,
-                    payload={"call_id": tool_call.id, "status": result.status, "preview": preview},
-                ))
+    def _consume_result(
+        self,
+        tool_call: Any,
+        tool_name: str,
+        tool_args: dict[str, Any],
+        result: ToolResult,
+        messages: list[dict[str, Any]],
+    ) -> None:
+        """工具执行后的统一落地：结果日志 / tool_call_end / 写历史 / 注入 messages / plan 事件。"""
+        if self._verbose:
+            preview = result.content[:_TOOL_PREVIEW_LEN].replace("\n", " ").replace("\r", " ")
+            logger.info("[ToolCallEngine] 工具结果 [%s] 预览: %s", result.status, preview)
 
-            # DB 写入干净内容（无引导提示），避免污染历史。
-            # 先写入 tool 结果再调 plan 审批 hook，保证 PlanAbortedByUser
-            # 抛出时 chat_history 一致性（assistant_msg 已写入 + tool_msg 已写入）。
-            db_content = result.to_llm_str()
-            db_msg: dict[str, Any] = {
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": db_content,
-            }
-            self._chat_history.append(self._session_id, db_msg)
+        if self._events is not None:
+            preview = result.content[:_TOOL_PREVIEW_LEN].replace("\n", " ").replace("\r", " ")
+            self._events.publish(AgentEvent(
+                type=EVENT_TOOL_CALL_END,
+                payload={"call_id": tool_call.id, "status": result.status, "preview": preview},
+            ))
 
-            # 当前轮 messages 注入含引导提示的版本，引导 LLM 下一步决策
-            llm_content = db_content
-            if result.status == "error":
-                llm_content += "\n\n[提示] 请换一种方式（换参数或换工具）重试，不要直接回答。"
-            elif result.status == "empty" and tool_name == "search_knowledge":
-                llm_content += TOOL_EMPTY_HINT
+        # DB 写入干净内容（无引导提示），避免污染历史。
+        # 先写入 tool 结果再调 plan 审批 hook，保证 PlanAbortedByUser
+        # 抛出时 chat_history 一致性（assistant_msg 已写入 + tool_msg 已写入）。
+        db_content = result.to_llm_str()
+        db_msg: dict[str, Any] = {
+            "role": "tool",
+            "tool_call_id": tool_call.id,
+            "content": db_content,
+        }
+        self._chat_history.append(self._session_id, db_msg)
 
-            live_msg: dict[str, Any] = {**db_msg, "content": llm_content}
-            messages.append(live_msg)
+        # 当前轮 messages 注入含引导提示的版本，引导 LLM 下一步决策
+        llm_content = db_content
+        if result.status == "error":
+            llm_content += "\n\n[提示] 请换一种方式（换参数或换工具）重试，不要直接回答。"
+        elif result.status == "empty" and tool_name == "search_knowledge":
+            llm_content += TOOL_EMPTY_HINT
 
-            # plan tool 调用成功后叠加发 plan_* 事件，供 CLI
-            # 渲染 plan checkbox 进度。reconstruct_from_messages 此时 messages
-            # 已含本轮 assistant tool_calls，所以 update_step 状态即得最新 plan 视图。
-            # make_plan 分支内会调 approval_fn，用户拒绝即抛 PlanAbortedByUser；
-            # 此时 chat_history 已含 assistant_msg + tool_msg（一致性保住），让上游 agent.run
-            # 接住异常后追加 cancel_msg 即可。
-            if self._events is not None and result.status == "ok":
-                self._maybe_publish_plan_events(tool_name, tool_args, messages)
+        live_msg: dict[str, Any] = {**db_msg, "content": llm_content}
+        messages.append(live_msg)
+
+        # plan tool 调用成功后叠加发 plan_* 事件，供 CLI 渲染 plan checkbox 进度。
+        # reconstruct_from_messages 此时 messages 已含本轮 assistant tool_calls，
+        # 所以 update_step 状态即得最新 plan 视图。make_plan 分支内会调 approval_fn，
+        # 用户拒绝即抛 PlanAbortedByUser；此时 chat_history 已含 assistant_msg + tool_msg
+        # （一致性保住），让上游 agent.run 接住异常后追加 cancel_msg 即可。
+        if self._events is not None and result.status == "ok":
+            self._maybe_publish_plan_events(tool_name, tool_args, messages)
 
     def _maybe_publish_plan_events(
         self, tool_name: str, tool_args: dict[str, Any], messages: list[dict[str, Any]],
