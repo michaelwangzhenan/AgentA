@@ -28,6 +28,11 @@ alwaysApply: true
 - **复用主目录的虚拟环境**：不要重装环境，直接激活主目录那个 `AgentA\.venv\Scripts\Activate.ps1`。例外：当前分支要改依赖才在 worktree 里单独建 venv。
 - **`.env` 要自己拷**：测试跑 LLM 前先从主目录拷过来。
 
+### 提交代码
+- **严禁添加**: `Co-authored-by: Cursor <cursoragent@cursor.com>`
+- 尽量一句话概括所有内容，不要一条条的细列。
+
+
 ## 1.2. 语言规范
 
 ### 1.2.1. 中英文选择

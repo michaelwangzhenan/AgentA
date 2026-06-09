@@ -154,6 +154,9 @@ git commit               # 完成合并（merge 会用默认信息）
 | 带分支图 | `git log --oneline --graph --all` |
 | 看某文件的改动历史 | `git log -p 文件` |
 | 看某次提交的内容 | `git show <commit>` |
+| 看最后一次提交的完整改动 | `git show`（或 `git show HEAD` / `git log -1 -p`） |
+| 只看最后一次提交改了哪些文件 | `git show --stat` |
+| 只看最后一次提交里某文件的改动 | `git show HEAD -- 文件` |
 | 查每行是谁改的 | `git blame 文件` |
 
 ## 1.9. 临时保存（stash）
