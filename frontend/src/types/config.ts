@@ -14,6 +14,7 @@ export type ConfigSource = 'default' | 'override'
 export type ConfigItemView = {
   key: string
   group: string
+  section?: string | null // 组内子分区标题；缺省 = 不分区
   type: ConfigItemType
   value: unknown
   default: unknown

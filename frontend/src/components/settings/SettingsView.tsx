@@ -378,32 +378,51 @@ export function SettingsView({ embedded = false }: { embedded?: boolean } = {}) 
               <p className="text-sm text-muted-foreground">没有匹配的配置项</p>
             )}
 
-            {visibleGroups.map((g) => (
-              <section key={g.name} className="space-y-2">
-                {/* 仅搜索状态下展示组标题（多组并存）；非搜索是单组视图，标题冗余 */}
-                {searching && (
-                  <h2 className="border-b border-border pb-1 text-sm font-semibold tracking-tight">
-                    {g.label}
-                  </h2>
-                )}
-                <div className="space-y-2">
-                  {g.items.map((item) => {
-                    const edit = edits[item.key]
-                    return (
-                      <ConfigField
-                        key={item.key}
-                        item={item}
-                        localValue={edit?.value}
-                        error={edit?.error ?? null}
-                        saving={edit?.saving}
-                        onChange={(v) => setLocalValue(item, v)}
-                        onReset={() => resetItem(item)}
-                      />
-                    )
-                  })}
-                </div>
-              </section>
-            ))}
+            {visibleGroups.map((g) => {
+              const renderField = (item: ConfigItemView) => {
+                const edit = edits[item.key]
+                return (
+                  <ConfigField
+                    key={item.key}
+                    item={item}
+                    localValue={edit?.value}
+                    error={edit?.error ?? null}
+                    saving={edit?.saving}
+                    onChange={(v) => setLocalValue(item, v)}
+                    onReset={() => resetItem(item)}
+                  />
+                )
+              }
+              return (
+                <section key={g.name} className="space-y-3">
+                  {/* 仅搜索状态下展示组标题（多组并存）；非搜索是单组视图，标题冗余 */}
+                  {searching && (
+                    <h2 className="border-b border-border pb-1 text-sm font-semibold tracking-tight">
+                      {g.label}
+                    </h2>
+                  )}
+                  {splitSections(g.items).map(({ section, items }) =>
+                    section ? (
+                      // 有子分区：标题 + 卡片把同类项框在一起
+                      <div
+                        key={section}
+                        className="overflow-hidden rounded-lg border border-border/60 bg-muted/20"
+                      >
+                        <div className="border-b border-border/60 bg-muted/40 px-3 py-1.5 text-xs font-semibold tracking-wide text-muted-foreground">
+                          {section}
+                        </div>
+                        <div className="space-y-2 p-3">{items.map(renderField)}</div>
+                      </div>
+                    ) : (
+                      // 无子分区：直接平铺
+                      <div key="__nosection" className="space-y-2">
+                        {items.map(renderField)}
+                      </div>
+                    ),
+                  )}
+                </section>
+              )
+            })}
           </div>
         </div>
       )}
@@ -458,6 +477,23 @@ export function SettingsView({ embedded = false }: { embedded?: boolean } = {}) 
 }
 
 // ─── helpers ──────────────────────────────────────────────────────
+
+/** 把组内的项按 section 聚成有序块（保留首次出现顺序）；无 section 的归到 null 块。 */
+function splitSections(
+  items: ConfigItemView[],
+): { section: string | null; items: ConfigItemView[] }[] {
+  const order: (string | null)[] = []
+  const buckets = new Map<string | null, ConfigItemView[]>()
+  for (const it of items) {
+    const sec = it.section ?? null
+    if (!buckets.has(sec)) {
+      buckets.set(sec, [])
+      order.push(sec)
+    }
+    buckets.get(sec)!.push(it)
+  }
+  return order.map((sec) => ({ section: sec, items: buckets.get(sec)! }))
+}
 
 function findItem(groups: ConfigGroupView[], key: string): ConfigItemView | undefined {
   for (const g of groups) {

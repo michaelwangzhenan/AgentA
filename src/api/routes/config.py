@@ -42,6 +42,7 @@ def _build_view(item: ConfigItem) -> ConfigItemView:
     return ConfigItemView(
         key=item.key,
         group=item.group,
+        section=item.section,
         type=item.type.value,
         value=getattr(_cfg, item.key, None),
         default=config_overrides.get_initial_value(item.key),

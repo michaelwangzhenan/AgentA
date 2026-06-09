@@ -15,6 +15,7 @@ from pydantic import BaseModel
 class ConfigItemView(BaseModel):
     key: str
     group: str
+    section: str | None = None  # 组内子分区标题；None = 不分区
     type: str
     value: Any
     default: Any
