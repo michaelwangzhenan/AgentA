@@ -509,8 +509,8 @@ class TestCustomSystemPrompt:
     """测试 Agent 支持外部传入自定义 system_prompt 覆盖默认 SYSTEM_PROMPT。"""
 
     @pytest.fixture(autouse=True)
-    def _isolate_project_rules(self, monkeypatch):
-        """隔离仓库根 .agenta/rules.md 文件，否则真实存在时会把 <project_rules>
+    def _isolate_user_rules(self, monkeypatch):
+        """隔离当前用户的 rules，否则数据库里真有 rules 时会把 <user_rules>
         块拼到 system_prompt 末尾，破坏本类"裸 system_prompt"的断言。"""
         monkeypatch.setattr("src.agent.agent._get_active_rules", lambda: None)
 

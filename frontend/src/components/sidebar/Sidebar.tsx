@@ -182,7 +182,7 @@ export function Sidebar(props: SidebarProps) {
         />
         <ViewNavButton
           icon={<ScrollText className="h-4 w-4" />}
-          label="规则"
+          label="Rules"
           active={activeView === 'rules'}
           onClick={() => onSwitchView('rules')}
         />

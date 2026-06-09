@@ -7,7 +7,7 @@ LangChainAgent —— 基于 LangChain 1.x `create_agent`（LangGraph）的 Agen
   agent_commons（SYSTEM_PROMPT / 四层 prompt 组装 / plan 审批）；差异只在 loop 由
   LangChain 的 LangGraph runtime 接管。本文件 import 公共层，不反向依赖 Python 实现。
 - 用 langchain 1.x 的 `create_agent`（取代已被移除的 legacy `AgentExecutor`）。
-- 四层 system prompt 与 Python Agent 同构：base(+skill catalog) → <project_rules>
+- 四层 system prompt 与 Python Agent 同构：base(+skill catalog) → <user_rules>
   → <user_context> → <active_study_plan>，每轮 run() 动态拼接后重建 agent。
 - 事件桥接：`_EventBridgeHandler`(BaseCallbackHandler) 把 token / tool_call_start /
   tool_call_end / plan_* 事件转发到 EventBus，对齐 CLI 分层渲染。
@@ -240,7 +240,7 @@ class LangChainAgent:
         self._plan_aborted = False
         self.last_usage = None
 
-        # 四层 system prompt：base(+catalog) → <project_rules> → <user_context> → <active_study_plan>
+        # 四层 system prompt：base(+catalog) → <user_rules> → <user_context> → <active_study_plan>
         system_content, memory_mgr = build_layered_system_prompt(
             self._system_prompt,
             session_id=sid,

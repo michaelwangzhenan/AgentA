@@ -535,7 +535,7 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 | 格式 | 纯 Markdown / 文本，无 frontmatter，无元数据 |
 | 编辑 | Rules 页 / `PUT /api/rules`，只写当前用户那条 |
 | 加载时机 | 每轮对话即时读当前用户的 rules，改完即时生效 |
-| 异常处理 | 未设置 / 空 / `USER_RULES_ENABLED=false` → 静默跳过（不拼 `<project_rules>` 块） |
+| 异常处理 | 未设置 / 空 / `USER_RULES_ENABLED=false` → 静默跳过（不拼 `<user_rules>` 块） |
 
 ### 3.5.2 四层注入顺序
 
@@ -544,7 +544,7 @@ system prompt 最终由四层拼成：
 | 层 | 来源 | 决定 | 切换粒度 |
 |---|---|---|---|
 | **`base system_prompt`** | `agent.py:SYSTEM_PROMPT` 常量 + 启动时拼接的 `<available_skills>` skill catalog（详 [§3.7.2](#372-渐进披露)） | "Agent 是谁" + "有哪些 skill 可调" | 常量全局不变；catalog 在 `/reload-skills` 后刷新 |
-| **`<project_rules>`** | 当前用户的 rules（`auth.db.user_rules`） | "Agent 要遵守该用户什么偏好" — 语言 / 格式 / 引用风格等静态偏好 | 每轮对话即时读当前用户的，改完即时生效 |
+| **`<user_rules>`** | 当前用户的 rules（`auth.db.user_rules`） | "Agent 要遵守该用户什么偏好" — 语言 / 格式 / 引用风格等静态偏好 | 每轮对话即时读当前用户的，改完即时生效 |
 | **`<user_context>`** | `UserMemoryStore` （[§3.4](#34-用户记忆memory)） | "Agent 这次会话还要注意什么" — 动态学到的临时偏好 | 每轮对话即时刷新 |
 | **`<active_study_plan>`** | 学习计划（[§3.9.4](#394-跨-session-状态可见性)） | "Agent 当前在帮用户跟踪哪个学习计划 / 进度到哪了" |  `/study load` 手动注入 |
 
@@ -558,14 +558,14 @@ flowchart TD
 
     SYS --> BASE["base system_prompt<br/>= 常量 + &lt;available_skills&gt; catalog"]
     SKILLS -.->|"启动时拼 catalog"| BASE
-    RULES -.->|"每轮读当前用户"| R["拼 &lt;project_rules&gt; 块"]
+    RULES -.->|"每轮读当前用户"| R["拼 &lt;user_rules&gt; 块"]
     MEM -.->|"每轮 load_for_context()"| C["拼 &lt;user_context&gt; 块"]
     LP -.->|"仅当本 session 已 /study load"| P["拼 &lt;active_study_plan&gt; 块"]
 
     BASE --> R --> C --> P --> OUT["最终 system_prompt<br/>(发给 LLM)"]
 ```
 
-**注入顺序**：`base system_prompt → <project_rules> → <user_context> → <active_study_plan>`。
+**注入顺序**：`base system_prompt → <user_rules> → <user_context> → <active_study_plan>`。
 **覆盖约定**：用户定义高于系统默认，后注入覆盖前注入。如：AgentA 提供的默认能力（base）可被项目偏好（rules）覆盖，项目偏好可被会话偏好（memory）覆盖。
 
 **各层职责切分**：
@@ -1458,7 +1458,7 @@ UI 通过 `/api/mcp/*` 端点对 server 做 CRUD（详 iter_4_UI.md §6.4.6 API 
 | `src/agent/core/plan_manager.py` | `PlanState` / `PlanStep` dataclass + 从 messages reconstruct plan 状态（详 [§3.8.1](#381-数据载体)） | `reconstruct_from_messages(messages)` |
 | `src/agent/core/srs_scheduler.py` | SM-2 公式纯函数（4 档 → ease / interval / repetitions / lapses，详 [§3.11.2](#3112-sm-2-算法核心)） | `schedule_review(card, rating)` |
 | `src/agent/core/harness_manager.py` | Q1 测验批改自检 + R1 RAG 召回过滤；复用 `judge_with_llm`（详 [§3.12](#312-harness-自检)） | `HarnessManager.review_grading()` · `filter_chunks()` |
-| `src/agent/core/rules_loader.py` | 把用户 rules 文本拼成 `<project_rules>` block（rules 文本由 Agent 按当前用户从 `user_rules` 读，详 [§3.5](#35-prompt-管理)） | `build_rules_block()` |
+| `src/agent/core/rules_loader.py` | 把用户 rules 文本拼成 `<user_rules>` block（rules 文本由 Agent 按当前用户从 `user_rules` 读，详 [§3.5](#35-prompt-管理)） | `build_rules_block()` |
 | `src/agent/core/mcp_config.py` | MCP servers 配置解析 + UI 编辑路径的 CRUD 辅助 + disabled 列表管理（详 [§3.14.3](#3143-配置文件) / [§3.14.4](#3144-web-ui-管理)） | `load_mcp_config()` · `add_server()` · `update_server()` · `delete_server()` · `rename_server()` · `toggle_server()` |
 | `src/agent/core/mcp_manager.py` | MCP server 子进程生命周期 + tool 发现 / 调用（asyncio loop 跑在后台线程） | `MCPManager.start_all()` · `start_one()` · `stop_one()` · `reload()` · `list_tools()` · `call_tool()` |
 | `src/agent/core/url_guard.py` | SSRF 防护：私网 / 链路本地 / 保留段 IP 拦截 | `is_url_safe(url)` |
@@ -1474,7 +1474,7 @@ UI 通过 `/api/mcp/*` 端点对 server 做 CRUD（详 iter_4_UI.md §6.4.6 API 
 src/agent/agent.py · Agent.run(user_input)
   ├─ HistoryManager.load_truncated()                       ← 截断 + skill_pair 保护
   ├─ MemoryManager.build_system_prompt(base)               ← 拼 <user_context>
-  ├─ rules_loader.build_rules_block()                      ← 拼 <project_rules>
+  ├─ rules_loader.build_rules_block()                      ← 拼 <user_rules>
   ├─ build_active_study_plan_block(session_id)             ← 拼 <active_study_plan>
   └─ for iteration in range(MAX_HARD_CAP_ROUNDS):
        ├─ ThinkingPolicy.effective_budget(messages)         ← Adaptive 三档预算
@@ -1708,7 +1708,7 @@ LangChain 实现把 loop 交给 `AgentExecutor`，只在适配层把公共层接
 | 维度 | 落点 | 说明 |
 |---|---|---|
 | 工具 | `src/agent/langchain_tools.py` | 遍历 `get_tools()` 的 JSON schema 动态包装为 `StructuredTool`，路由 `execute_tool`——全 17+ 工具与 Python / AutoGPT 单一真相源一致（含 MCP 合流、名单门、security / harness） |
-| 四层 prompt | `src/agent/langchain_agent.py · run()` | base(+skill catalog) → `<project_rules>` → `<user_context>` → `<active_study_plan>`，每轮重建 executor |
+| 四层 prompt | `src/agent/langchain_agent.py · run()` | base(+skill catalog) → `<user_rules>` → `<user_context>` → `<active_study_plan>`，每轮重建 executor |
 | 事件流 | `_EventBridgeHandler`(BaseCallbackHandler) | token_chunk / tool_call_start / tool_call_end / plan_*（plan 为 best-effort，详 iter_a §4） |
 | 引用 | per-run `CitationBuilder` 经 `citation_getter` 透传 | RAG 回答带 `[n]` 与末尾 `— sources —` 块 |
 | 记忆 | `MemoryManager.try_extract` | 与 Python 同源的自动 / 显式提取 |

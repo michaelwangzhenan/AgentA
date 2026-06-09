@@ -61,10 +61,10 @@ class TestSystemPromptStructure:
         )
 
     def test_length_ceiling(self) -> None:
-        """prompt 字符数 < 4000 —— 防止业务偏好 / 应用场景假设回流（应放 rules.md）。"""
+        """prompt 字符数 < 4000 —— 防止业务偏好 / 应用场景假设回流（应放用户 rules）。"""
         assert len(SYSTEM_PROMPT) < 4000, (
             f"SYSTEM_PROMPT 已达 {len(SYSTEM_PROMPT)} 字符，疑似有业务偏好回流；"
-            "应用偏好应放 .agenta/rules.md，prompt 只放绝对系统指令"
+            "应用偏好应放用户 rules（<user_rules>），prompt 只放绝对系统指令"
         )
 
 
@@ -106,10 +106,10 @@ class TestSystemPromptToolContract:
 class TestSystemPromptInjectionBlocks:
     """SYSTEM_PROMPT 引用了两个外部注入 block，必须与代码层拼接的 block 名一致。"""
 
-    def test_project_rules_block_referenced(self) -> None:
-        """`<project_rules>` 标签由 rules_loader.build_rules_block() 拼接（line 97）；
+    def test_user_rules_block_referenced(self) -> None:
+        """`<user_rules>` 标签由 rules_loader.build_rules_block() 拼接（line 97）；
         prompt 必须引用它，否则 LLM 不知道项目偏好在哪个块。"""
-        assert "<project_rules>" in SYSTEM_PROMPT
+        assert "<user_rules>" in SYSTEM_PROMPT
 
     def test_user_context_block_referenced(self) -> None:
         """`<user_context>` 标签由 memory_manager.build_system_prompt() 拼接；
@@ -171,22 +171,22 @@ class TestSystemPromptCitationContract:
 
 
 # ---------------------------------------------------------------------------
-# 6. Fallback：<project_rules> 缺席时的行为指引必须存在
+# 6. Fallback：<user_rules> 缺席时的行为指引必须存在
 # ---------------------------------------------------------------------------
 class TestSystemPromptFallback:
     """当前用户未设置 rules / USER_RULES_ENABLED=false 时，`_get_active_rules` 返回
-    None 且不拼接 `<project_rules>` block。prompt 必须有 fallback 行为指引，
+    None 且不拼接 `<user_rules>` block。prompt 必须有 fallback 行为指引，
     否则"何时调 search_knowledge"指令悬空，LLM 行为不可预测。"""
 
-    def test_has_fallback_for_missing_project_rules(self) -> None:
-        """prompt 必须显式说明 `<project_rules>` 未注入时怎么办。"""
+    def test_has_fallback_for_missing_user_rules(self) -> None:
+        """prompt 必须显式说明 `<user_rules>` 未注入时怎么办。"""
         has_fallback = (
             "Fallback" in SYSTEM_PROMPT
             or "fallback" in SYSTEM_PROMPT
             or "未注入" in SYSTEM_PROMPT
         )
         assert has_fallback, (
-            "prompt 必须有 <project_rules> 缺席时的 fallback 行为指引，"
+            "prompt 必须有 <user_rules> 缺席时的 fallback 行为指引，"
             "否则 rules_loader 优雅降级时 LLM 没有调 KB 的指令依据"
         )
 
@@ -198,18 +198,18 @@ class TestSystemPromptInjectionIntegration:
     """端到端验证 prompt + build_rules_block 拼接结果。"""
 
     def test_rules_block_appended_when_rules_present(self) -> None:
-        """有 rules 文本时：最终 prompt 含 `<project_rules>...</project_rules>` 包裹的内容。"""
+        """有 rules 文本时：最终 prompt 含 `<user_rules>...</user_rules>` 包裹的内容。"""
         from src.agent.core.rules_loader import build_rules_block
 
         block = build_rules_block("我的偏好-INVARIANT-TEST")
         final = SYSTEM_PROMPT + block
 
-        assert "<project_rules>" in final
+        assert "<user_rules>" in final
         assert "我的偏好-INVARIANT-TEST" in final
-        assert "</project_rules>" in final
+        assert "</user_rules>" in final
 
     def test_no_rules_block_when_rules_absent(self) -> None:
-        """无 rules（None）时：build_rules_block 返回 ""，拼接不引入额外 `<project_rules>` 块。"""
+        """无 rules（None）时：build_rules_block 返回 ""，拼接不引入额外 `<user_rules>` 块。"""
         from src.agent.core.rules_loader import build_rules_block
 
         assert build_rules_block(None) == ""

@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+import src.config as cfg
 from src.api.main import app
 from src.memory.user_store import UserStore, reset_shared_store_for_testing
 
@@ -45,3 +46,19 @@ def test_write_overwrites(client: TestClient) -> None:
     client.put("/api/rules", json={"text": "v1"})
     client.put("/api/rules", json={"text": "v2 longer content"})
     assert client.get("/api/rules").json()["text"] == "v2 longer content"
+
+
+def test_write_rejects_over_max_chars(client: TestClient) -> None:
+    """超过 USER_RULES_MAX_CHARS 的写入返回 400，且不落库。"""
+    too_long = "x" * (cfg.USER_RULES_MAX_CHARS + 1)
+    r = client.put("/api/rules", json={"text": too_long})
+    assert r.status_code == 400
+    assert client.get("/api/rules").json()["text"] == ""
+
+
+def test_write_accepts_exactly_max_chars(client: TestClient) -> None:
+    """正好等于上限的写入应通过（边界）。"""
+    at_limit = "x" * cfg.USER_RULES_MAX_CHARS
+    r = client.put("/api/rules", json={"text": at_limit})
+    assert r.status_code == 200
+    assert client.get("/api/rules").json()["text"] == at_limit

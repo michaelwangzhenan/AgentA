@@ -6,7 +6,7 @@ key 存在独立文件 `.agenta/api_keys.json`（gitignore），没复用 `confi
 
 # 2. 用户记忆
 
-## 2.1. 2.1 分析
+## 2.1. 分析
 
 用户记忆实现（`UserMemoryStore` + `MemoryManager`）。
 
@@ -19,7 +19,7 @@ key 存在独立文件 `.agenta/api_keys.json`（gitignore），没复用 `confi
 |5|P2|`_sanitize` 对 `manual`/`explicit`（用户本人写的）记忆也按"命中即从该位置截断后半段"清洗|用户合法句子里含 `你现在是`/`act as`/`system:` 等宽 pattern 会被静默砍半；真正有注入风险的是 `auto` 来源|清洗按 source 区分：`auto` 严格清洗，`manual`/`explicit` 放宽；命中改为整条 reject + 记日志，不存半截|区分逻辑变复杂；放宽后若用户粘贴了不可信内容仍有极小注入面|
 |6|P2|`try_extract` 在 `FINAL_ANSWER` 事件 publish 之前同步跑一次完整 LLM 往返|开启 auto/显式提取时，本轮收尾事件 + usage 被提取拖住，用户感到卡顿（正文 token 已流式吐出，但完成事件延迟）|提取丢后台线程 fire-and-forget，或在 `FINAL_ANSWER` 之后再跑|后台线程要处理与主流程的 DB 并发；fire-and-forget 失败更难被用户感知|
 
-## 2.2. 2.1 优化方案
+## 2.2. 优化方案
 
 |No|结论|方案|
 |---|---|---|
@@ -32,7 +32,7 @@ key 存在独立文件 `.agenta/api_keys.json`（gitignore），没复用 `confi
 
 > 实施注意（#4 + #6 共用）：后台线程里所有 DB 调用都要显式带 `user_id`，不能依赖 `current_user_id()`。
 
-## 2.3. 2.2 验收
+## 2.3. 验收
 
 改动文件：`src/memory/chat_history.py`（新增 `count_user_messages`）、`src/memory/user_memory.py`（`extract_memories` 加 `existing_memories` + `load_for_context` 排序改造）、`src/agent/core/memory_manager.py`（无状态节流 + 后台线程提取）、`docs/design.md`（§3.4 改写）。
 
@@ -61,7 +61,7 @@ rules 实现（`UserStore.user_rules` 表 + `get_active_rules` + `build_rules_bl
 |4|P2|注入无长度上限：早期 `USER_RULES_MAX_CHARS=4000` 已删，`RulesWriteRequest.text` 无校验、`build_rules_block` 不截断|用户可写超长 rules，静默占满 context、挤掉 memory/正文预算|加回 `USER_RULES_MAX_CHARS`（config 三处同步）+ 写端点校验 + 前端字数提示|多一个 config 项|
 |5|P2|CLI 无编辑入口且 help 误导：`ui.py` help 仍引导去编辑 `.agenta/rules.md`（已失效），实际只能从 Web Rules 页改|CLI 用户改不了 rules，按 help 操作无效|改 help 指向 Web Rules 页，或补 CLI `/rules` 命令|加 CLI 命令要处理多行文本输入，体验不如 Web|
 
-## 3.2. 3.1 优化方案（已定）
+## 3.2. 优化方案
 
 命名定调：统一走 Cursor「Rules」体系（保留英文 "Rules"，不译"规则"），注入块 `<project_rules>` → `<user_rules>`（修正"每用户偏好却叫 project"的语义误导）。
 
@@ -74,3 +74,19 @@ rules 实现（`UserStore.user_rules` 表 + `get_active_rules` + `build_rules_bl
 |5|做（只改文案）|**CLI 不加命令，只修 help**。把 `src/cli/ui.py` help 里"去编辑 `.agenta/rules.md`"改成"在 Web 端 Rules 页编辑"。不新增 `/rules` 命令——CLI 多行文本编辑体验差、ROI 低。|
 
 > 实施注意：#1 改 `<project_rules>` → `<user_rules>` 是 prompt 契约变更，blast radius 主要落在测试断言（`test_system_prompt` / `test_rules_loader` / `test_memory_manager`），改完跑 `pytest -q` 锁回绿。
+
+## 3.2 验收
+
+改动文件：`rules_loader.py`（tag + 文案）、`agent_commons.py`（SYSTEM_PROMPT 4 处引用 + 注释）、`agent.py`/`langchain_agent.py`/`autogpt_agent.py`/`core/__init__.py`（注释）、`config_meta.py`（rules 项描述）、`config.py` + `.env.example` + `.env`（`USER_RULES_MAX_CHARS`）、`routes/rules.py`（PUT 400 校验）、`cli/ui.py`（help）、前端 `Sidebar.tsx` + `RulesView.tsx`（标签 / 标题 / 字数）、`tools/agent_eval/memory/recall_golden.py`（注释）、活文档 `README.md` / `copilot-instructions.md` / `agenta-conventions.mdc` / `design.md`、测试 `test_system_prompt.py` / `test_rules_loader.py` / `test_memory_manager.py` / `test_api_rules.py` / `test_agent.py`。
+
+| No | 达标标准 | 验收方式 | 结果 |
+|---|---|---|---|
+|1|live 代码/文档无 `<project_rules>`；注入块、SYSTEM_PROMPT 引用、UI 标签/标题统一为 Rules / `<user_rules>`|`grep project_rules` 仅剩历史 `iter_*` 与本 plan 文档；`test_system_prompt`(24) / `test_rules_loader`(4) / `test_memory_manager`(24) 断言 `<user_rules>` 全过|✅|
+|2|README / copilot-instructions / agenta-conventions / design / ui.py 不再写 `.agenta/rules.md`、`USER_RULES_FILE`、"启动一次性加载"|grep 这些 live 文件无 `USER_RULES_FILE`；§1.3.1 示例换成 `USER_RULES_MAX_CHARS`|✅|
+|3|`build_rules_block` 去掉"不可执行"，把 rules 框定为用户偏好并要求遵守|`test_framed_as_user_preference_to_obey`（断言含"偏好"+"遵守"，且不含旧"不可执行"语义）|✅|
+|4|写入超 `USER_RULES_MAX_CHARS` 返 400 且不落库；正好等于上限通过；config 三处同步|`test_write_rejects_over_max_chars`、`test_write_accepts_exactly_max_chars`；`config.py`/`.env.example`/`.env` 均含该项|✅|
+|5|CLI help 指向 Web Rules 页，不再提 `.agenta/rules.md`|人工核对 `src/cli/ui.py` help 注释|✅|
+
+测试：`tests/test_rules_loader.py` + `test_system_prompt.py` + `test_api_rules.py` + `test_memory_manager.py` 全过；全量 `pytest -q` **1409 passed, 0 failed**。
+
+遗留（P2，本期不做）：前端 `MAX_RULES_CHARS` 硬编码 4000 镜像后端默认值——`config_meta` 只暴露 `USER_RULES_ENABLED`、未暴露上限，故改 env 的 `USER_RULES_MAX_CHARS` 不会同步到前端字数提示；后端 400 仍兜底正确性。

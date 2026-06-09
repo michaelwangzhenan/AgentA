@@ -119,7 +119,7 @@ flowchart TB
 | 能力 | 说明 |
 |---|---|
 | **推理循环** | • 简单任务用 ReAct<br>• 复杂任务自动升级为 **Plan-Execute** 多步执行<br>• 测验批改 / RAG 召回用 **Harness 自检 + LLM-as-Judge** 双重复核 |
-| **Context 管理** | 四层注入：<br>• SYSTEM_PROMPT + Skill catalog<br>• 项目偏好 `.agenta/rules.md`<br>• 跨 session 用户记忆<br>• 临时上下文（学习计划 / 工具结果 / 用户输入） |
+| **Context 管理** | 四层注入：<br>• SYSTEM_PROMPT + Skill catalog<br>• 个人偏好 Rules（每用户一份，存 `auth.db`）<br>• 跨 session 用户记忆<br>• 临时上下文（学习计划 / 工具结果 / 用户输入） |
 | **安全防注入** | • `<untrusted_tool>` 包装隔离<br>• 启发式清洗<br>• plan 执行审批<br>• URL/SSRF 防护<br>• tool 名单门 |
 | **Thinking 模式** | • Extended Thinking 总开关<br>• Budget / Adaptive 两种预算策略可配<br>• 适配 Claude / Qwen3 |
 | **多模型切换** | • 内置 9 个国内外 LLM provider，`.env` 一行切换<br>• OpenAI 兼容 + Anthropic + Ollama 本地 |
@@ -272,7 +272,8 @@ RAG_QUERY_REWRITE_ENABLED=true    # Multi-Query 同义改写
 IMP_METHOD=PYTHON                 # PYTHON / LANGCHAIN / AUTOGPT
 THINKING_ENABLED=true             # Extended Thinking（Claude / Qwen3）
 USER_MEMORY_ENABLED=true          # 跨 session 用户记忆
-USER_RULES_ENABLED=true           # 项目级偏好 .agenta/rules.md 注入
+USER_RULES_ENABLED=true           # 每用户偏好 Rules 注入（存数据库）
+USER_RULES_MAX_CHARS=4000         # 单用户 rules 文本上限，超出写入时返 400
 PLAN_PERMISSION_MODE=false        # plan 执行前是否需要用户审批
 HARNESS_QUIZ_ENABLED=true         # 测验批改 LLM-as-Judge 复审
 HARNESS_RAG_ENABLED=true          # RAG 召回 chunks 相关性过滤

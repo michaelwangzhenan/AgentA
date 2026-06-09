@@ -117,7 +117,7 @@ def build_layered_system_prompt(
 ) -> tuple[str, MemoryManager]:
     """四层 system prompt 组装（三实现共享的单一组装点）。
 
-    顺序：base(+skill catalog 已在调用方拼好) → `<project_rules>` → `<user_context>`
+    顺序：base(+skill catalog 已在调用方拼好) → `<user_rules>` → `<user_context>`
     → `<active_study_plan>`。详 design.md §3.5.2。
 
     Returns:
@@ -151,13 +151,13 @@ def resolve_plan_approval(
 
 
 # SYSTEM_PROMPT —— Agent 系统提示：只放绝对系统指令（工具协议 / 引用规范 / 安全约束）；
-# 业务偏好走 <project_rules>。Skills 由 build_skill_catalog 按需追加 ## Skills 块。
+# 业务偏好走 <user_rules>。Skills 由 build_skill_catalog 按需追加 ## Skills 块。
 SYSTEM_PROMPT = """你是一个具备工具调用能力的 agent。可用工具：
 - `search_knowledge`：知识库混合检索（dense 向量 + BM25 关键词；内部已自动做 query 改写 / HyDE）
 - `web_search`：互联网搜索，返回 URL 列表
 - `fetch_url`：抓取指定网页正文（SPA 自动走 Jina Reader）
 
-**用户的应用场景、KB 性质、领域术语、回答风格、何时该查 KB 等业务偏好通过 `<project_rules>`（项目级，启动时注入）与 `<user_context>`（运行期学到的）块提供——以那里的指引为准。** 本 prompt 只描述工具调用协议、引用规范与安全约束，不假设业务语义。
+**用户的应用场景、KB 性质、领域术语、回答风格、何时该查 KB 等业务偏好通过 `<user_rules>`（每用户偏好，每轮注入）与 `<user_context>`（运行期学到的）块提供——以那里的指引为准。** 本 prompt 只描述工具调用协议、引用规范与安全约束，不假设业务语义。
 
 ## Plan / Tool 调用协议（最高优先级 —— 收到用户消息先按本节判定，再决定走哪条路）
 
@@ -177,11 +177,11 @@ plan 规范：
 
 ## 工具策略
 
-**何时调 `search_knowledge` / `web_search`**：以 `<project_rules>` 与对话上下文为准。**Fallback**（`<project_rules>` 未注入或未对本场景指引时）：信息性 / 开放性问题（"是什么 / 怎么样 / 为什么 / 怎么做"）默认先调 `search_knowledge`；纯闲聊或用户明确说"不用查"则直接回答。
+**何时调 `search_knowledge` / `web_search`**：以 `<user_rules>` 与对话上下文为准。**Fallback**（`<user_rules>` 未注入或未对本场景指引时）：信息性 / 开放性问题（"是什么 / 怎么样 / 为什么 / 怎么做"）默认先调 `search_knowledge`；纯闲聊或用户明确说"不用查"则直接回答。
 
 **`search_knowledge` query 准备**：
 - **用具体名词，不要代词**：先把"它/这个/那个"解析成具体名词再 query
-- **术语化**：把口语换成术语（领域术语见 `<project_rules>`）
+- **术语化**：把口语换成术语（领域术语见 `<user_rules>`）
 - **拆子查询**：复合问题拆成多条 query 同一轮一并发出（并行更快），别塞进单条
 - **过滤**：知道语种 / 扩展名时传 `where`，如 `{"lang":"zh"}` / `{"ext":{"$in":[".pdf",".docx"]}}`
 - **`top_k`**：默认 8，**不要传 1-2**（看不到候选会被孤立低分结果带偏）
@@ -199,7 +199,7 @@ plan 规范：
 1. 正文直接复用编号，如 `[1]`，多源 `[1][2]`
 2. **只能用 prompt 里出现过的编号**；造 `[99]` 这种没分配过的会被静默丢弃
 3. **不要手写 references / sources 列表**，系统会自动追加 `— sources —` 块，重复手写会有两份
-4. `<project_rules>` / `<user_context>` 若要求不写引用，按那里来
+4. `<user_rules>` / `<user_context>` 若要求不写引用，按那里来
 
 ## 数据隔离（最高优先级安全约束）
 

@@ -504,7 +504,7 @@ class AutoGPTAgent:
         """
         Phase 3：汇总所有子任务结果，调用 LLM 生成最终回答。
 
-        面向用户输出，按「四层 system」拼接（base + <project_rules> + <user_context>
+        面向用户输出，按「四层 system」拼接（base + <user_rules> + <user_context>
         + <active_study_plan>，与 Python Agent 一致），并在末尾追加 RAG 引用块。
         """
         results_text = self._format_prior_results(task_results)

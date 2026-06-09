@@ -58,9 +58,9 @@ HELP_TEXT = """
 #   en  →  all-MiniLM-L6-v2   英文/多语言
 #   zh  →  BAAI/bge-small-zh   中文优化
 
-# 项目偏好（Project Rules）：
-#   在项目根放 .agenta/rules.md，写入项目级静态偏好（语言/格式/背景等）。
-#   进程启动一次性加载，按 base → <project_rules> → <user_context> 顺序注入 system prompt。
+# 个人偏好（Rules）：
+#   每个用户一份，存数据库（auth.db.user_rules）；在 Web 端「Rules」页编辑。
+#   每轮对话即时读当前用户的 rules，按 base → <user_rules> → <user_context> 顺序注入 system prompt，改完下一轮即生效。
 
 # Skills：
 #   在 .agenta/skills/<名称>/SKILL.md 放置符合 agentskills.io 规范的 Skill。

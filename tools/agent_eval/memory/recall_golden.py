@@ -13,7 +13,7 @@ Memory Recall Golden 评估 (Phase 1.2 / 1.3 / 1.4 共用)
        遵循了记忆里的偏好/指令
 
 Phase 1.3 扩展：case 可加 `rules: str` 字段模拟项目根 `.agenta/rules.md`，
-通过 `build_rules_block` 拼入 `<project_rules>` 块；R0x 系列 case 验证。
+通过 `build_rules_block` 拼入 `<user_rules>` 块；R0x 系列 case 验证。
 
 Phase 1.4 扩展：case 可加 `mock_hits: [...]` 字段模拟 `search_knowledge` 工具
 返回，走 `CitationBuilder` 编号 → 格式化为带 [n] 的 RAG 上下文 → 让 LLM 写
@@ -81,14 +81,14 @@ def _build_system_prompt(
 ) -> str:
     """构造一次性 system prompt，复现 `Agent.run()` 的三层拼接：
 
-        base → <project_rules>（可选）→ <user_context>
+        base → <user_rules>（可选）→ <user_context>
 
     用真实的 `UserMemoryStore` + `MemoryManager` + `build_rules_block`，
     不走 mock，确保评估的是端到端行为（含 `_sanitize`、防注入 guard）。
 
     Args:
         memories: case 里写的 user_memory 条目列表。
-        rules: case 可选 `rules` 字段；`None` / 空串 → 不注入 `<project_rules>` 块。
+        rules: case 可选 `rules` 字段；`None` / 空串 → 不注入 `<user_rules>` 块。
     """
     base_prompt = "你是一个有用的 AI 助手。"
     with tempfile.TemporaryDirectory() as td:

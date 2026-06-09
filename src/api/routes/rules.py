@@ -4,8 +4,9 @@ rules 按用户独享，存 `auth.db.user_rules` 表；Agent 每轮对话动态�
 rules 注入 system prompt，改完下一轮即生效，无需重启。
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
+import src.config as cfg
 from src.api.deps import get_current_user, get_user_store
 from src.api.schemas.rules import RulesReadResponse, RulesWriteRequest, RulesWriteResponse
 from src.memory.user_store import UserStore
@@ -27,5 +28,10 @@ def write_rules(
     store: UserStore = Depends(get_user_store),
     user: dict = Depends(get_current_user),
 ) -> RulesWriteResponse:
+    if len(req.text) > cfg.USER_RULES_MAX_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"rules 超出 {cfg.USER_RULES_MAX_CHARS} 字符上限（当前 {len(req.text)}）",
+        )
     store.set_rules(user["id"], req.text)
     return RulesWriteResponse(length=len(req.text))

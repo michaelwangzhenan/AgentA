@@ -685,6 +685,9 @@ USER_MEMORY_EXTRACT_MIN_INPUT_LEN: int = int(os.getenv("USER_MEMORY_EXTRACT_MIN_
 # 是否启用用户 rules 注入（每用户一份，存数据库；可选值：true / false）
 USER_RULES_ENABLED: bool = os.getenv("USER_RULES_ENABLED", "true").lower() == "true"
 
+# 单用户 rules 文本最大字符数；写入超出此值的 PUT /api/rules 返回 400，防止挤占 context
+USER_RULES_MAX_CHARS: int = int(os.getenv("USER_RULES_MAX_CHARS", "4000"))
+
 # Skills 禁用列表文件路径（相对项目根；文件不存在视作"未禁用任何 skill"）
 SKILLS_DISABLED_FILE: str = os.getenv("SKILLS_DISABLED_FILE", ".agenta/skills/disabled.json")
 

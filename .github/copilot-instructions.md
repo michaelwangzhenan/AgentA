@@ -70,17 +70,17 @@ alwaysApply: true
 
 ```python
 # ✅ 好：说明意义 + 类型 / 默认行为
-# 是否启用项目级 rules 注入（可选值：true / false）
+# 是否启用用户 rules 注入（每用户一份，存数据库；可选值：true / false）
 USER_RULES_ENABLED: bool = os.getenv("USER_RULES_ENABLED", "true").lower() == "true"
 
-# rules 文件路径（相对项目根；文件不存在静默跳过）
-USER_RULES_FILE: str = os.getenv("USER_RULES_FILE", ".agenta/rules.md")
+# 单用户 rules 文本最大字符数；写入超出此值的 PUT /api/rules 返回 400
+USER_RULES_MAX_CHARS: int = int(os.getenv("USER_RULES_MAX_CHARS", "4000"))
 ```
 
 ```python
 # ❌ 差：解释设计思想 / Phase / 跟其他模块的关系
-# 项目级用户偏好（详 iter_2_agent.md §4.9.3）：在项目根放 .agenta/rules.md，启动时一次性
-# 加载并注入到 system prompt 的 <project_rules> 块。与 user_memory（动态学到的偏好）
+# 用户偏好（详 iter_2_agent.md §4.9.3）：每用户一份存 auth.db.user_rules，每轮即时读并
+# 注入到 system prompt 的 <user_rules> 块。与 user_memory（动态学到的偏好）
 # 形成两层：rules 是稳定基础设定，memory 在其之后注入做临时覆写。
 USER_RULES_ENABLED: bool = ...
 ```

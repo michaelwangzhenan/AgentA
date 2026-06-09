@@ -107,7 +107,7 @@ from src.agent.core.rules_loader import build_rules_block
 
 
 class TestRulesMemoryCompositionOrder:
-    """验证 base → <project_rules> → <user_context> 三层注入顺序。"""
+    """验证 base → <user_rules> → <user_context> 三层注入顺序。"""
 
     @staticmethod
     def _compose(base: str, rules: str | None, memory_text: str) -> str:
@@ -124,21 +124,21 @@ class TestRulesMemoryCompositionOrder:
     def test_base_plus_rules_no_memory(self) -> None:
         out = self._compose("BASE", rules="始终中文回答", memory_text="")
         assert out.startswith("BASE")
-        assert "<project_rules>" in out
+        assert "<user_rules>" in out
         assert "始终中文回答" in out
         assert "<user_context>" not in out
 
     def test_base_plus_memory_no_rules(self) -> None:
         out = self._compose("BASE", rules=None, memory_text="偏好简洁")
         assert out.startswith("BASE")
-        assert "<project_rules>" not in out
+        assert "<user_rules>" not in out
         assert "<user_context>" in out
         assert "偏好简洁" in out
 
     def test_base_plus_rules_plus_memory_order(self) -> None:
         """关键契约：rules 段必须出现在 user_context 段**之前**。"""
         out = self._compose("BASE", rules="始终中文", memory_text="偏好简洁")
-        rules_idx = out.index("<project_rules>")
+        rules_idx = out.index("<user_rules>")
         ctx_idx = out.index("<user_context>")
         assert rules_idx < ctx_idx, "rules 必须在 memory 之前注入，让 memory 能覆写 rules"
         # 两段内容都存在且不互相破坏

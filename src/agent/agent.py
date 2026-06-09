@@ -257,7 +257,7 @@ class Agent:
         history_mgr = HistoryManager(self._chat_history, sid, self.max_history_turns)
         history = history_mgr.load_truncated()
 
-        # 构建 system 消息：base → <project_rules>（静态偏好）→ <user_context>（动态记忆）
+        # 构建 system 消息：base → <user_rules>（静态偏好）→ <user_context>（动态记忆）
         #                  → <active_study_plan>（当前 session 已 `/study load` 的学习计划）
         # 顺序原则：稳定基础在前 / 动态状态在后 —— 后注入的内容更易被 LLM 记住，
         # 学习计划与"下一步"决策强相关，放最末贴近 user 消息。

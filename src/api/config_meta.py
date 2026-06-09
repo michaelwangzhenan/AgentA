@@ -326,7 +326,7 @@ REGISTRY: list[ConfigItem] = [
         type=ItemType.BOOL,
         brief="用户 Rules",
         detail="开启后每轮对话把当前用户的 rules（每人一份，存数据库）注入 "
-        "system prompt 的 <project_rules> 块；在 Rules 页编辑。",
+        "system prompt 的 <user_rules> 块；在 Rules 页编辑。",
     ),
     # ─── MCP ──────────────────────────────────────────────────────────────
     ConfigItem(
