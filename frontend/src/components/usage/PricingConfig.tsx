@@ -10,7 +10,7 @@ type Draft = Record<string, { input: string; output: string }>
 
 export function PricingConfig() {
   const [items, setItems] = useState<PricingItem[]>([])
-  const [currency, setCurrency] = useState('$')
+  const [currency, setCurrency] = useState('¥')
   const [draft, setDraft] = useState<Draft>({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)

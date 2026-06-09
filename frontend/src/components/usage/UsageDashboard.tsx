@@ -96,7 +96,7 @@ export function UsageDashboard({ scope }: DashboardProps) {
     setPage(0)
   }, [range, scope])
 
-  const currency = summary?.currency ?? '$'
+  const currency = summary?.currency ?? '¥'
   const csvUrl = usageEventsCsvUrl(range, { scope })
 
   return (

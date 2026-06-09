@@ -226,41 +226,41 @@ flowchart LR
 
 1. **内置默认**：`config.py` 里 `MODEL_PRICING_DEFAULTS`（每 1M token 的 `(input, output)`），按下文实时查到的公开价填好；覆盖 `MODEL_CONFIGS` 里全部模型。
 2. **运行时覆盖**：admin 在「单价配置」标签里改的值写进 overrides（文件 `./sqlite_db/usage_pricing.json` 或 usage.db 一张 `pricing` 表），读取时 `默认 ← 覆盖` 合并。改完即时生效，不重启。
-3. **币种**：`USAGE_CURRENCY`（默认 `$`，即下表的 USD）。国产厂商按 ¥ 公布的价，默认值里已折算成 USD（约 ¥7.1/$）；admin 可在 UI 改成任意值，所见即所填币种。免费 / 本地模型默认 0。
+3. **币种**：`USAGE_CURRENCY`（默认 `¥`，即下表的人民币）。下表为各厂商美元公开价按汇率约 7.1 折算的人民币；admin 可在 UI 改成任意值，所见即所填币种。免费 / 本地模型默认 0。
 
 「单价配置」标签 UI：**按 provider 分组列出当前支持的所有模型**（数据来自后端把 `MODEL_CONFIGS` + 现价吐给前端），每行两个输入框（输入价 / 输出价）+ 档位徽章，顶部一个币种符号，底部「保存」。
 
-### 默认单价表（USD / 1M token，输入 → 输出；2026-06 公开价快照，admin 可改）
+### 默认单价表（人民币 / 1M token，输入 → 输出；美元公开价按 7.1 折算，2026-06 快照，admin 可改）
 
 | Provider | 模型 id | 输入 | 输出 | 备注 |
 |---|---|---|---|---|
-| Moonshot Kimi | `kimi-k2.5` | 0.55 | 2.95 | 官网 ¥4/¥21 折算 |
-| Moonshot Kimi | `kimi-k2.6` | 0.95 | 4.00 | |
-| 通义千问 | `qwen3.5-flash` / `qwen3.5-flash-2026-02-23` | 0.05 | 0.40 | 阶梯价，取低档 |
-| 通义千问 | `qwen3.5-plus-2026-04-20` / `qwen3.5-plus-2026-02-15` | 0.12 | 0.69 | 阶梯价，取低档 |
-| 通义千问 | `qwen3.5-27b` / `qwen3.5-35b-a3b` | 0.10 | 0.40 | 估算 |
-| 通义千问 | `qwen3.5-122b-a10b` | 0.20 | 0.80 | 估算 |
-| 通义千问 | `qwen3.5-397b-a17b` | 0.40 | 1.20 | 估算 |
-| DeepSeek | `deepseek-v4-flash` / `deepseek-chat` | 0.14 | 0.28 | `deepseek-chat` 现映射 V4 Flash |
-| DeepSeek | `deepseek-v4-pro` | 0.44 | 0.87 | 促销价（标准价 1.74/3.48） |
+| Moonshot Kimi | `kimi-k2.5` | 3.91 | 20.95 | 官网约 ¥4/¥21 |
+| Moonshot Kimi | `kimi-k2.6` | 6.75 | 28.40 | |
+| 通义千问 | `qwen3.5-flash` / `qwen3.5-flash-2026-02-23` | 0.36 | 2.84 | 阶梯价，取低档 |
+| 通义千问 | `qwen3.5-plus-2026-04-20` / `qwen3.5-plus-2026-02-15` | 0.85 | 4.90 | 阶梯价，取低档 |
+| 通义千问 | `qwen3.5-27b` / `qwen3.5-35b-a3b` | 0.71 | 2.84 | 估算 |
+| 通义千问 | `qwen3.5-122b-a10b` | 1.42 | 5.68 | 估算 |
+| 通义千问 | `qwen3.5-397b-a17b` | 2.84 | 8.52 | 估算 |
+| DeepSeek | `deepseek-v4-flash` / `deepseek-chat` | 0.99 | 1.99 | `deepseek-chat` 现映射 V4 Flash |
+| DeepSeek | `deepseek-v4-pro` | 3.12 | 6.18 | 促销价（标准价约 12.35/24.71） |
 | 智谱 GLM | `glm-4-flash` / `glm-4.5-flash` / `glm-4.7-flash` | 0 | 0 | Flash 系列免费 |
-| 智谱 GLM | `glm-4.5` | 0.30 | 0.30 | 估算（不分输入输出） |
-| 智谱 GLM | `glm-4.6` | 0.70 | 0.70 | 官网 ¥5/¥5 折算 |
-| 智谱 GLM | `glm-5.1` | 0.70 | 2.00 | 估算 |
-| MiniMax | `MiniMax-Text-01` | 0.20 | 1.10 | 估算 |
-| MiniMax | `MiniMax-M2` | 0.30 | 1.20 | |
-| MiniMax | `MiniMax-M2.7-highspeed` | 0.60 | 2.40 | highspeed 翻倍 |
-| MiniMax | `MiniMax-M3` | 0.30 | 1.20 | 估算（最新 M 系） |
-| Anthropic Claude | `claude-sonnet-4-5` / `claude-sonnet-4-6` | 3.00 | 15.00 | |
-| Anthropic Claude | `claude-opus-4-7` / `claude-opus-4-8` | 5.00 | 25.00 | |
-| OpenAI | `gpt-4o` | 2.50 | 10.00 | |
-| OpenAI | `gpt-5.3-codex` | 1.75 | 14.00 | |
-| OpenAI | `gpt-5.4` | 2.50 | 15.00 | <272K 档 |
-| Google Gemini | `gemini-2.5-flash-lite` | 0.10 | 0.40 | 标 free，默认可填 0 |
-| Google Gemini | `gemini-2.5-flash` | 0.30 | 2.50 | 标 free，默认可填 0 |
-| Google Gemini | `gemini-3.1-flash-lite` | 0.25 | 1.50 | 标 free，默认可填 0 |
-| Google Gemini | `gemini-3.5-flash` | 0.50 | 3.00 | 估算，标 free |
-| xAI Grok | `grok-3-latest` | 1.25 | 2.50 | Grok 3 已退役→现价随 4.3 |
+| 智谱 GLM | `glm-4.5` | 2.13 | 2.13 | 估算（不分输入输出） |
+| 智谱 GLM | `glm-4.6` | 4.97 | 4.97 | 官网约 ¥5/¥5 |
+| 智谱 GLM | `glm-5.1` | 4.97 | 14.20 | 估算 |
+| MiniMax | `MiniMax-Text-01` | 1.42 | 7.81 | 估算 |
+| MiniMax | `MiniMax-M2` | 2.13 | 8.52 | |
+| MiniMax | `MiniMax-M2.7-highspeed` | 4.26 | 17.04 | highspeed 翻倍 |
+| MiniMax | `MiniMax-M3` | 2.13 | 8.52 | 估算（最新 M 系） |
+| Anthropic Claude | `claude-sonnet-4-5` / `claude-sonnet-4-6` | 21.30 | 106.50 | |
+| Anthropic Claude | `claude-opus-4-7` / `claude-opus-4-8` | 35.50 | 177.50 | |
+| OpenAI | `gpt-4o` | 17.75 | 71.00 | |
+| OpenAI | `gpt-5.3-codex` | 12.43 | 99.40 | |
+| OpenAI | `gpt-5.4` | 17.75 | 106.50 | <272K 档 |
+| Google Gemini | `gemini-2.5-flash-lite` | 0.71 | 2.84 | 标 free，默认可填 0 |
+| Google Gemini | `gemini-2.5-flash` | 2.13 | 17.75 | 标 free，默认可填 0 |
+| Google Gemini | `gemini-3.1-flash-lite` | 1.78 | 10.65 | 标 free，默认可填 0 |
+| Google Gemini | `gemini-3.5-flash` | 3.55 | 21.30 | 估算，标 free |
+| xAI Grok | `grok-3-latest` | 8.88 | 17.75 | Grok 3 已退役→现价随 4.3 |
 | Ollama 本地 | `qwen2.5:7b` | 0 | 0 | 本地无 API 费 |
 
 > 说明：标 free 的 Gemini / GLM-Flash 默认价给的是其付费档公开价，方便部署方"想算就算"；若该部署确实走免费额度，admin 在 UI 把它改 0 即可。标"估算"的是公开页未直接给该具体 id、按同系/同档推的近似值。所有数字均可被 admin 覆盖。
@@ -355,7 +355,7 @@ flowchart LR
 | D4 | 时间存储 | `created_at` 存 epoch 秒（INTEGER），区间 `>= ? AND < ?`；按天用 `strftime(...,'unixepoch','localtime')`；建 `(user_id,created_at)`/`(created_at)` 索引 | 数值区间查询快、可移植；按用户本地时区切天符合直觉 |
 | D5 | 成本计算 | 后端**实时算、不落库**；`summary/series/users` 内部先按 model 粒度算成本再 rollup | 单价会变，存死会失真；先 model 再 rollup 保证 group_by=模型/用户/合计 成本都正确 |
 | D6 | 未知单价处理 | 范围内出现"无内置单价"的模型时返回 `has_unpriced=true`，前端提示而非报错 | 成本是估算，缺价应降级提示、不应中断展示 |
-| D7 | 单价存储 | 两级合并：默认 `config.MODEL_PRICING_DEFAULTS`（2026-06 公开价快照，国产 ¥ 折算 USD）← admin 覆盖（`usage.db: model_pricing`）；`PUT` 仅接受已知模型 id | 默认随代码走、可审计；覆盖可热改、持久化；过滤未知 id 防脏写 |
+| D7 | 单价存储 | 两级合并：默认 `config.MODEL_PRICING_DEFAULTS`（2026-06 公开价快照，美元价按 7.1 折算人民币）← admin 覆盖（`usage.db: model_pricing`）；`PUT` 仅接受已知模型 id | 默认随代码走、可审计；覆盖可热改、持久化；过滤未知 id 防脏写 |
 | D8 | 图表方案 | 趋势图用**纯 SVG 堆叠柱状图**（`TrendChart.tsx`），零三方库 | 现有前端无 recharts 等；不为单页面扩大依赖面 |
 | D9 | 单例 + 测试注入 | `UsageStore` 用 `get_shared_store()` 进程单例；读写命中同一实例；测试用 `reset_shared_store_for_testing()` 注入临时库 | 与其它 store 一致；写（`record_usage`）与读（依赖）同源，免 dependency_overrides |
 | D10 | 旁路保护 | `record_usage()` try/except 吞异常仅 `logger.warning` | 用量采集**永不影响对话主链路**（验收 U12） |

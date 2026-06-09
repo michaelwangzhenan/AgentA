@@ -383,55 +383,55 @@ DEFAULT_USER_ID: int = int(os.getenv("DEFAULT_USER_ID", "1"))
 # ── Token 用量统计 ──────────────────────────────────────────────────────────
 # token 用量记录数据库路径
 USAGE_DB_PATH: str = os.getenv("USAGE_DB_PATH", "./sqlite_db/usage.db")
-# 估算成本展示用的币种符号（可选值：任意符号，如 $ / ¥）
-USAGE_CURRENCY: str = os.getenv("USAGE_CURRENCY", "$")
+# 估算成本展示用的币种符号（可选值：任意符号，如 ¥ / $）
+USAGE_CURRENCY: str = os.getenv("USAGE_CURRENCY", "¥")
 # 内置默认单价 {model_id: (输入价, 输出价)}，单位：每 1M token，币种见 USAGE_CURRENCY。
-# 未列出的模型按 0 计成本（token 仍照常统计）。
+# 数值为美元公开价按汇率 7.1 折算的人民币。未列出的模型按 0 计成本（token 仍照常统计）。
 MODEL_PRICING_DEFAULTS: dict[str, tuple[float, float]] = {
-    # Moonshot Kimi（官网 ¥ 折算）
-    "kimi-k2.5": (0.55, 2.95),
-    "kimi-k2.6": (0.95, 4.00),
+    # Moonshot Kimi
+    "kimi-k2.5": (3.91, 20.95),
+    "kimi-k2.6": (6.75, 28.40),
     # 通义千问（阶梯价取低档；部分为估算）
-    "qwen3.5-flash": (0.05, 0.40),
-    "qwen3.5-flash-2026-02-23": (0.05, 0.40),
-    "qwen3.5-plus-2026-04-20": (0.12, 0.69),
-    "qwen3.5-plus-2026-02-15": (0.12, 0.69),
-    "qwen3.5-27b": (0.10, 0.40),
-    "qwen3.5-35b-a3b": (0.10, 0.40),
-    "qwen3.5-122b-a10b": (0.20, 0.80),
-    "qwen3.5-397b-a17b": (0.40, 1.20),
+    "qwen3.5-flash": (0.36, 2.84),
+    "qwen3.5-flash-2026-02-23": (0.36, 2.84),
+    "qwen3.5-plus-2026-04-20": (0.85, 4.90),
+    "qwen3.5-plus-2026-02-15": (0.85, 4.90),
+    "qwen3.5-27b": (0.71, 2.84),
+    "qwen3.5-35b-a3b": (0.71, 2.84),
+    "qwen3.5-122b-a10b": (1.42, 5.68),
+    "qwen3.5-397b-a17b": (2.84, 8.52),
     # DeepSeek（v4-pro 为促销价；deepseek-chat 现映射 V4 Flash）
-    "deepseek-v4-flash": (0.14, 0.28),
-    "deepseek-chat": (0.14, 0.28),
-    "deepseek-v4-pro": (0.44, 0.87),
-    # 智谱 GLM（Flash 系列免费；其余 ¥ 折算 / 估算）
+    "deepseek-v4-flash": (0.99, 1.99),
+    "deepseek-chat": (0.99, 1.99),
+    "deepseek-v4-pro": (3.12, 6.18),
+    # 智谱 GLM（Flash 系列免费；其余为估算）
     "glm-4-flash": (0.0, 0.0),
     "glm-4.5-flash": (0.0, 0.0),
     "glm-4.7-flash": (0.0, 0.0),
-    "glm-4.5": (0.30, 0.30),
-    "glm-4.6": (0.70, 0.70),
-    "glm-5.1": (0.70, 2.00),
+    "glm-4.5": (2.13, 2.13),
+    "glm-4.6": (4.97, 4.97),
+    "glm-5.1": (4.97, 14.20),
     # MiniMax（highspeed 翻倍；部分估算）
-    "MiniMax-Text-01": (0.20, 1.10),
-    "MiniMax-M2": (0.30, 1.20),
-    "MiniMax-M2.7-highspeed": (0.60, 2.40),
-    "MiniMax-M3": (0.30, 1.20),
+    "MiniMax-Text-01": (1.42, 7.81),
+    "MiniMax-M2": (2.13, 8.52),
+    "MiniMax-M2.7-highspeed": (4.26, 17.04),
+    "MiniMax-M3": (2.13, 8.52),
     # Anthropic Claude
-    "claude-sonnet-4-5": (3.00, 15.00),
-    "claude-sonnet-4-6": (3.00, 15.00),
-    "claude-opus-4-7": (5.00, 25.00),
-    "claude-opus-4-8": (5.00, 25.00),
+    "claude-sonnet-4-5": (21.30, 106.50),
+    "claude-sonnet-4-6": (21.30, 106.50),
+    "claude-opus-4-7": (35.50, 177.50),
+    "claude-opus-4-8": (35.50, 177.50),
     # OpenAI
-    "gpt-4o": (2.50, 10.00),
-    "gpt-5.3-codex": (1.75, 14.00),
-    "gpt-5.4": (2.50, 15.00),
+    "gpt-4o": (17.75, 71.00),
+    "gpt-5.3-codex": (12.43, 99.40),
+    "gpt-5.4": (17.75, 106.50),
     # Google Gemini（标 free，给付费档参考价；走免费额度可在 UI 改 0）
-    "gemini-2.5-flash-lite": (0.10, 0.40),
-    "gemini-2.5-flash": (0.30, 2.50),
-    "gemini-3.1-flash-lite": (0.25, 1.50),
-    "gemini-3.5-flash": (0.50, 3.00),
+    "gemini-2.5-flash-lite": (0.71, 2.84),
+    "gemini-2.5-flash": (2.13, 17.75),
+    "gemini-3.1-flash-lite": (1.78, 10.65),
+    "gemini-3.5-flash": (3.55, 21.30),
     # xAI Grok（grok-3 已退役，现价随 4.3）
-    "grok-3-latest": (1.25, 2.50),
+    "grok-3-latest": (8.88, 17.75),
     # Ollama 本地（无 API 费）
     "qwen2.5:7b": (0.0, 0.0),
 }
