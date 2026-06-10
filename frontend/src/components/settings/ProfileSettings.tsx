@@ -2,6 +2,7 @@ import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { SettingsSection } from '@/components/settings/SettingsSection'
 import { updateUsername } from '@/api/client'
 import { useAuth } from '@/lib/auth'
 import { toast } from '@/lib/toast'
@@ -31,10 +32,8 @@ export function ProfileSettings() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* 用户名 */}
-      <section className="space-y-2">
-        <h3 className="text-sm font-semibold">用户名</h3>
+    <div className="space-y-4">
+      <SettingsSection title="用户名" description="应用内展示的名字，最长 64 字，可随时修改。">
         <div className="flex items-center gap-2">
           <Input
             value={username}
@@ -46,19 +45,15 @@ export function ProfileSettings() {
             保存
           </Button>
         </div>
-      </section>
+      </SettingsSection>
 
-      {/* 头像（占位，未实现） */}
-      <section className="space-y-2 opacity-60">
-        <h3 className="text-sm font-semibold">头像</h3>
+      <SettingsSection title="头像" className="opacity-60">
         <p className="text-xs text-muted-foreground">即将支持，敬请期待</p>
-      </section>
+      </SettingsSection>
 
-      {/* 语言（占位，未实现） */}
-      <section className="space-y-2 opacity-60">
-        <h3 className="text-sm font-semibold">语言</h3>
+      <SettingsSection title="语言" className="opacity-60">
         <p className="text-xs text-muted-foreground">即将支持，敬请期待</p>
-      </section>
+      </SettingsSection>
     </div>
   )
 }

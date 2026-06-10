@@ -97,11 +97,17 @@ export function RoutingPoolConfig() {
                     className="h-4 w-4"
                   />
                   <span className="flex-1 truncate">{m.label}</span>
-                  <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  <span
+                    className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                    title="价格档位：越靠 min 越便宜，路由按此向更便宜档位降级"
+                  >
                     {m.tier}
                   </span>
                   {!m.available && (
-                    <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
+                    <span
+                      className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400"
+                      title="该模型所属厂商尚未配置 API key，需先在「API 密钥」页配置"
+                    >
                       未配 key
                     </span>
                   )}

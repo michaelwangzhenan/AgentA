@@ -11,6 +11,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { SettingsSection } from '@/components/settings/SettingsSection'
 import { deleteOwnAccount } from '@/api/client'
 import { useAuth } from '@/lib/auth'
 import { toast } from '@/lib/toast'
@@ -39,20 +40,20 @@ export function AccountDeletion() {
 
   return (
     <div className="space-y-3">
-      <div className="rounded-md border border-destructive/40 bg-destructive/5 p-4">
-        <h3 className="text-sm font-semibold text-destructive">注销账号</h3>
-        <p className="mt-1 text-xs text-muted-foreground">
-          注销后将永久删除你的账号「{user?.username}」及全部数据（会话、记忆、学习计划、测验、SRS、规则），不可恢复。
-        </p>
-        <Button
-          variant="destructive"
-          size="sm"
-          className="mt-3"
-          onClick={() => setStep('confirm1')}
-        >
+      <SettingsSection
+        danger
+        title="注销账号"
+        description={
+          <>
+            将永久删除账号「{user?.username}」及全部数据（会话、记忆、学习计划、测验、SRS、规则），
+            不可恢复。删除前请确认已备份需要的内容。
+          </>
+        }
+      >
+        <Button variant="destructive" size="sm" onClick={() => setStep('confirm1')}>
           注销账号
         </Button>
-      </div>
+      </SettingsSection>
 
       {/* 第 1 次确认 */}
       <AlertDialog

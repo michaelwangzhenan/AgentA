@@ -68,8 +68,8 @@ export function ApiKeysConfig() {
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        在此为各 LLM 厂商与 web 搜索配置 API key。保存后立即生效，无需重启服务。出于安全，
-        界面只显示脱敏后的尾段，不回显完整密钥。
+        出于安全，界面只显示脱敏后的尾段，不回显完整密钥。输入新值后点保存即可覆盖；
+        已用 UI 覆盖的项可点恢复按钮回退到环境变量值。
       </p>
 
       <div className="space-y-2">

@@ -291,7 +291,7 @@ export function SettingsView({ embedded = false }: { embedded?: boolean } = {}) 
         size="sm"
         variant="outline"
         disabled={loading}
-        title="把磁盘上 .agenta/config_overrides.json 的内容拉回内存（用于手动改完文件后同步）"
+        title="重新读取 .agenta/config_overrides.json 并同步到内存；手动改过该文件后用。"
       >
         从文件重载
       </Button>

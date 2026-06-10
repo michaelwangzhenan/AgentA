@@ -102,16 +102,22 @@ function DetailHint({ item }: { item: ConfigItemView }) {
       ? `范围：${item.min ?? '−∞'} ~ ${item.max ?? '+∞'}`
       : null,
     `默认值：${formatValue(item.default)}`,
-    `来源：${item.source === 'override' ? 'runtime override' : '.env / 默认'}`,
   ].filter(Boolean)
   return (
-    <span
-      className="inline-flex cursor-help text-muted-foreground hover:text-foreground"
-      title={lines.join('\n')}
-      tabIndex={0}
-      aria-label={`详细说明：${item.brief}`}
-    >
-      <Info className="size-3.5" />
+    <span className="group/hint relative inline-flex">
+      <span
+        className="inline-flex cursor-help text-muted-foreground hover:text-foreground"
+        tabIndex={0}
+        aria-label={`详细说明：${item.brief}`}
+      >
+        <Info className="size-3.5" />
+      </span>
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute left-0 top-full z-50 mt-1 hidden w-max max-w-[380px] whitespace-pre-line wrap-break-word rounded-md border border-border bg-popover px-2.5 py-1.5 text-xs leading-relaxed text-popover-foreground shadow-md group-hover/hint:block group-focus-within/hint:block"
+      >
+        {lines.join('\n')}
+      </span>
     </span>
   )
 }
