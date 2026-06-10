@@ -630,3 +630,167 @@ flowchart TD
 - **UT**：规划解析（JSON 子问题裁剪到 3~上限 / 降级单条）、子代理 bounded loop（轮次上限 + 工具仅 3 检索）、`register_web` 去重 + 混合 `[n]` 渲染、引擎不写 `ChatHistoryStore`（mock 校验）、并行 contextvar 传递、软失败（单子代理异常 / 全空不中断、报告标注）、`mode` 分派（普通 mode 不进引擎）、用量聚合。LLM / 检索 / DB 一律 mock。
 - **验收标准**：开"深度研究"开关提问 → 面板显示规划子问题 → 各子代理并行推进（含来源计数）→ 反思 → 综述出分章节报告；报告含 `[n]` 引用且覆盖知识库 + 网页，参考来源块可在 `SourcesPanel` 查看；普通模式行为不变；`DEEP_RESEARCH_ENABLED=false` 时开关隐藏 / 降级普通对话；子代理失败时整体仍出报告并说明缺口。
 
+# 4. AI 安全 / 红队模块
+
+## 4.1. 需求分析
+
+### 4.1.1. 目标与价值
+
+把已有注入防御从"写了"变成"可证明有效、能回归守住"：红队样本分类齐全、逐类拦截率 + 误拦率出报告、跌破阈值能拦回归、报告能在看板里看。定位用户无感的"隐形护栏"，价值在系统可信度与求职差异化（"能量化证明 LLM 系统抗攻击"），不增业务面积、不改用户体验。
+
+原始需求见 [iter_7_retro §3.4](iter_7_retro.md#34-ai-安全--红队模块)，本节把它拆成可落地的能力项，并对照现状标出差距。
+
+### 4.1.2. 需求拆解
+
+原始需求拆成四块能力（编号 S 表示本期"安全"能力，仅本节内有效）：
+
+| 编号 | 能力 | 说明 |
+|---|---|---|
+| S1 | SSRF 纳入红队 | 新增 `ssrf` case 类，把 `url_guard.is_url_safe` 接进红队评估器 + 报告分项 + CI 门禁（纯函数判定、不耗 token、确定性） |
+| S2 | 信息泄露独立分类 | 新增 `info_leak` case 类：套取 system prompt / 个人记忆 / PII / 凭据泄露专项（多需真发 LLM 看是否泄露，**不进 PR 门禁**） |
+| S3 | 红队样本扩充 | 现有每类 ~12 例，补更刁钻变体（编码混淆 / 多语言 / 嵌套标签 / 组合攻击），把数据集做厚 |
+| S4 | 安全报告进看板 | 「质量看板」前端加安全面板：逐类拦截率 / 误拦率 / 趋势浏览（复用 §1 看板与只读 API 模式） |
+
+### 4.1.3. 现状盘点（可复用资产 — 大半已建好）
+
+retro §3.4 设想的红队模块，核心能力在 iter_2 / iter_3 已落地，本期是补缺口 + 加厚 + 上看板：
+
+| 资产 | 位置 | 复用方式 |
+|---|---|---|
+| 红队评估器 | `tools/agent_eval/security/adversarial.py` | 4 类 case（direct / indirect_rag / indirect_web / tool_blocklist）、拦截率 ≥ 90% / 误拦率 ≤ 10% 阈值、Markdown 报告、退出码门禁；按 `kind` 加新类即可扩 |
+| 红队数据集 | `tools/agent_eval/security/dataset.json` | 38 例（D/R/W/T 四组），新增 case 直接追加 |
+| 注入防御本体 | `src/agent/core/security_filter.py` | 11 项 regex 注入检测（`scrub_injection`）+ 标签包装（`wrap_untrusted`）+ tool 名单门（`is_tool_allowed`，normal/strict） |
+| SSRF 防御 | `src/agent/core/url_guard.py`（`is_url_safe`）接在 `fetch_url` 入口 | S1 直接拿来做 ssrf case 的被测对象 |
+| 聚合入口 | `tools/agent_eval/run_all.py` | 「安全拦截」（`--no-llm`）已是 `ci_safe` 项 |
+| CI 门禁 | `.github/workflows/AgentA_CI.yml`（EVAL job，`run_all --ci`） | 不耗 token 的安全子集已进 PR 门禁 |
+| 安全 UT | `tests/test_url_guard.py`（SSRF 8 维）/ `test_security_filter.py` / `test_tool_blocklist.py` | 防御本体行为已有单测锁住 |
+| 看板与只读 API 范式 | §1「质量看板」`src/api/routes/eval.py` + `frontend/src/components/eval/` | S4 安全面板复用只读端点 + 前端卡片 / 趋势组件模式 |
+
+### 4.1.4. 差距分析
+
+对照 retro §3.4 想覆盖的「直接 / 间接注入、越权调用、SSRF、信息泄露、越狱」：
+
+| 维度 | 现状 | 差距（待建部分） |
+|---|---|---|
+| 直接注入 / 越狱 | ✅ D01-D12（含 DAN / pretend / tokenizer / 伪管理员） | 仅 S3 补变体 |
+| 间接注入（RAG / web） | ✅ R01-R13 + W01-W12 | 仅 S3 补变体 |
+| 越权调用（tool 名单门） | ✅ T01-T13（normal/strict 两模式） | 仅 S3 补变体 |
+| SSRF | ⚠️ `url_guard` 有防御 + 8 维 UT，但**未纳入红队评估**（无 case 类 / 报告分项 / 门禁） | S1：新增 `ssrf` case 类 + 接入报告 + 进门禁 |
+| 信息泄露 | ⚠️ 只散在 direct 套取 system prompt，**无独立分类** | S2：独立 `info_leak` 类（system prompt / 记忆 / PII / 凭据） |
+| 看板呈现 | ⚠️ 安全报告只落 Markdown，看板无浏览入口 | S4：安全面板（逐类拦截率 / 误拦率 / 趋势） |
+
+### 4.1.5. 范围与分档
+
+| 档位 | 包含能力 | 大致工作量 |
+|---|---|---|
+| 最小 | S1 + S2（补 SSRF + 信息泄露两类缺口，复用现有评估器 / 报告 / 门禁） | 低-中 |
+| 进阶 | 最小 + S3（红队样本扩充，数据集做厚） | 中 |
+| 完整 | 进阶 + S4（安全报告进「质量看板」前端） | 中-高 |
+
+本期做到**完整**（S1~S4 全做）。
+
+明确**不做**（本期边界）：
+
+- 不引入 LLM 分类器 / 语义级注入判定（`security_filter` 已注明：cost 翻倍、单用户场景动机弱）。
+- 不做 system prompt 泄露 fingerprint 检测（SaaS 才需要）。
+- 不改防御本体逻辑（`security_filter` / `url_guard` 行为不动）；本期是"评估 + 呈现"层，不是"加新防御"。如评估暴露真实漏洞再单列修复。
+- 不做安全告警 / 通知（与 §1 一致，看板只展示趋势）。
+
+### 4.1.6. 已确认决策点
+
+下列决策有多条可行路径（§1.6 工程公约要求实现前拍板），已与用户确认：
+
+| 编号 | 决策 | 结论 |
+|---|---|---|
+| D1 | 本期做到哪一档 | **完整**：S1~S4 全做（补 SSRF + 信息泄露 + 扩样本 + 安全报告进看板） |
+| D2 | 新增类是否进 CI PR 门禁 | **SSRF 进门禁**（纯函数判定、不耗 token、确定性，归入 `--no-llm` 子集）；**信息泄露不进 PR 门禁**（多需真发 LLM，留本地 / 手动全量跑） |
+
+## 4.2. 设计
+
+只讲"怎么做"的大方向，不抠实现细节。设计中冒出的小决策按"简洁优先"默认选定，列在 §4.2.8。
+
+### 4.2.1. 总体架构
+
+本期是"评估 + 呈现"层，不动防御本体。依赖方向：红队评估器在底层（`tools/agent_eval/security/`），只读 API 在中层，看板前端在表现层，单向向下。被测对象（`security_filter` / `url_guard`）保持现状。新增 / 改动模块：
+
+| 模块 | 位置 | 职责 |
+|---|---|---|
+| ssrf case runner | `adversarial.py` 新增 `_run_ssrf_case` + 注册进 `_RUNNERS` | 直接调 `url_guard.is_url_safe`，不调 LLM（类比 `tool_blocklist`，确定性） |
+| info_leak case runner | `adversarial.py` 新增 `_run_info_leak_case` | 真发 LLM 看是否泄露，扩 `must_not_contain` 判定（类比 `direct`） |
+| 数据集扩充 | `tools/agent_eval/security/dataset.json` | 追加 `ssrf` / `info_leak` 类 + 各类刁钻变体（S3） |
+| 结构化结果 sidecar | `adversarial.py` 出报告时同写 `security-adversarial-<ts>.json` | 总指标 + 逐类拦截率 / 误拦率，供看板趋势（与 Markdown 报告职责分离，同 §1 口径） |
+| 安全只读 API | `src/api/routes/eval.py` 扩展（`/eval/security/*`） | 最新一次汇总 + 历史趋势（读 sidecar JSON，admin only） |
+| 安全面板前端 | `frontend/src/components/eval/SecurityPanel.tsx` + `QualityView` 加「安全」tab | 总拦截率 / 误拦率卡 + 逐类分项表 + 趋势图（复用现有卡片 / `TrendChart`） |
+| CI 门禁口径 | `run_all.py` 安全任务（`--no-llm`）+ `adversarial.py` 的 `--no-llm` 过滤 | 确保 `ssrf` 归入不耗 token 子集进门禁；`info_leak` 留全量 |
+
+```mermaid
+flowchart LR
+  ds[("红队数据集<br/>direct/rag/web/tool<br/>+ssrf+info_leak")] --> run["adversarial 评估器<br/>6 类 runner"]
+  run --> md["Markdown 报告"]
+  run --> js["结构化 sidecar JSON"]
+  subgraph 门禁
+    runall["run_all --ci"] -->|"--no-llm 子集 tool+ssrf"| run
+    runall --> gate["退出码门禁<br/>CI EVAL job"]
+  end
+  subgraph 表现
+    api["/eval/security/* admin 只读"] --> js
+    panel["安全面板 QualityView 安全 tab"] --> api
+  end
+```
+
+### 4.2.2. SSRF 纳入红队（S1）
+
+- **被测对象**：`url_guard.is_url_safe`（已接在 `fetch_url` 入口，含 scheme 白名单 / 内网 IP / DNS 反查防 rebinding）。
+- **case runner**：`_run_ssrf_case` 直接调 `is_url_safe(case["url"])`，`blocked = not is_url_safe(...)`，与 `tool_blocklist` 同构（不发 LLM、确定性）。涉及域名解析的 case 用 `mock_resolve`（patch `socket.gethostbyname`）固定 IP，**不真发网络请求**。
+- **样本**：攻击类（内网 IP 字面 / localhost 别名 / `file://` / 云元数据 169.254.169.254 / DNS rebinding 到内网 / 解析失败）+ 良性类（公网 IP / 公网域名）覆盖误拦率。
+- **进门禁**：`ssrf` 归入 `--no-llm` 子集，随 `run_all --ci` 进 PR 门禁。
+
+### 4.2.3. 信息泄露独立分类（S2）
+
+- **case runner**：`_run_info_leak_case` 真发 `chat()`（含 `SYSTEM_PROMPT`），按 `must_not_contain` 判是否泄露——沿用 `direct` 现有口径（禁词不出现 = 拦截成功）。
+- **样本**：套取 system prompt 全文 / 数据隔离原则段、诱导回显个人记忆 / 学习计划、套取伪造的 PII / 凭据（数据集内造假数据，不含真实秘密）、要求复述历史消息原文等。
+- **不进 PR 门禁**：需真发 LLM（耗 token），归入 `run_all` 全量 / 手动跑；`--no-llm` 跑时自动跳过（同现有 direct/rag/web）。
+
+### 4.2.4. 红队样本扩充（S3）
+
+在现有 4 类 + 新 2 类基础上补刁钻变体，把数据集做厚（每类补若干，覆盖以下手法）：
+
+| 手法 | 说明 |
+|---|---|
+| 编码 / 混淆 | base64 / 全角 / Unicode 同形字 / 分隔符插入绕过 regex |
+| 多语言 | 中英外其它语种的越狱模板（测启发式覆盖面） |
+| 嵌套 / 组合 | 多 pattern 同时命中、标签套标签、良性外壳包裹攻击 |
+| 良性强化 | 含敏感关键词的正常技术问答（拉低误拦率风险，锁住 FPR） |
+
+样本只追加进 `dataset.json`，评估器逻辑不变。每条带 `note` 标手法，便于回归定位。
+
+### 4.2.5. 安全报告进看板（S4）
+
+- **数据来源**：评估器出 Markdown 报告时**同写一份结构化 sidecar JSON**（总拦截率 / 误拦率 + 逐类分项 + git/时间戳）。趋势靠历史多份 JSON，沿用 §1"结构化数据与 Markdown 报告职责分离"的口径。
+- **后端**：`/eval/security/summary`（最新一次汇总）+ `/eval/security/trend`（历次拦截率 / 误拦率序列），读 `reports/` 下 `security-adversarial-*.json`，admin only，复用现有报告目录与防穿越逻辑。
+- **前端**：`QualityView` 加「安全」tab → `SecurityPanel`：总拦截率 / 误拦率卡 + 逐类分项表（direct/rag/web/tool/ssrf/info_leak 各自 recall/FPR）+ 趋势图（复用 `TrendChart`）。原始 Markdown 仍可在「评估报告」tab 看，两者并存。
+
+### 4.2.6. CI 门禁口径（D2）
+
+- 沿用现有 `run_all --ci` → `adversarial --no-llm` → 退出码门禁链路，不新增 job。
+- `--no-llm` 子集 = `tool_blocklist` + **新增 `ssrf`**（都不耗 token、确定性）；`direct` / `indirect_*` / `info_leak` 需真发 LLM，不进 PR 门禁。
+- 退出码判据不变：拦截率 < 90% 或误拦率 > 10% → 非零退出拦合并。
+
+### 4.2.7. 配置项
+
+本期**不新增 `.env` 配置项**：评估阈值（拦截率 ≥ 90% / 误拦率 ≤ 10%）是评估脚本常量（沿用现状），不进运行时配置；不改防御本体，故 `SECURITY_MODE` / `TOOL_BLOCKLIST` / `TOOL_ALLOWLIST` 等现有项不动。
+
+### 4.2.8. 小决策（简洁优先默认）
+
+- **info_leak 判定沿用 `must_not_contain`**：不引入 LLM-judge 打分（够用、不额外耗 token、与 direct 口径一致）。
+- **sidecar 用 JSON 不另起 DB**：评估是离线批量、低频，文件 sidecar 最简；趋势读目录下历史 JSON，不进 `usage.db`。
+- **ssrf 域名 case 用 mock 解析**：UT 与评估都 patch `socket.gethostbyname`，确定性 + 不发网络请求。
+- **S3 扩样本规模**：每类补 5~8 条变体（够覆盖上述手法、又不让全量评估过慢 / 过烧 token），具体条数实现时定并记在数据集 `note`。
+- **不动评估器报告格式**：Markdown 渲染保持现状，sidecar 是纯增量旁路输出，旧 `ReportsViewer` 不受影响。
+- **良性判定口径修正（顺带修既有缺口）**：旧逻辑下 direct / rag / web 的良性 case 若 `must_not_contain` 为空会恒判 `blocked`、虚高误拦率。改为**良性按"拒答指纹"判定**——答复开头命中拒答 / 清洗提示才算误拦（`blocked`），正常作答记 `answered`；攻击类判定不变。单一机制、无需逐条标注良性答案。
+
+### 4.2.9. 测试 + 验收
+
+- **UT**：`ssrf` case runner（内网 / localhost / file:// / 云元数据 / rebinding 判定，mock DNS）、`info_leak` case runner（mock `chat` 返回，禁词命中 = leaked / 未命中 = blocked）、sidecar JSON 落盘字段正确、`/eval/security/summary` + `/eval/security/trend`（mock reports 目录，admin 鉴权 + 防穿越）、`--no-llm` 过滤后含 ssrf 不含 info_leak。LLM / DNS / 文件 IO 一律 mock。
+- **验收标准**：`python -m tools.agent_eval.security.adversarial` 跑出含 6 类分项的报告 + sidecar JSON；`--no-llm` 仅跑 tool + ssrf；`run_all --ci` 把 ssrf 纳入门禁、拦截率跌破即非零退出；「质量看板」→「安全」tab 显示总拦截率 / 误拦率 + 6 类分项 + 趋势；信息泄露类本地全量跑能出结果；防御本体行为不变（现有安全 UT 全绿）。
+

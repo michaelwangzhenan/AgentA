@@ -25,6 +25,10 @@ from src.api.schemas.eval import (
     ReportContent,
     ReportItem,
     ReportList,
+    SecurityKindRow,
+    SecuritySummary,
+    SecurityTrend,
+    SecurityTrendPoint,
     TraceDetail,
     TraceList,
     TraceListItem,
@@ -280,3 +284,77 @@ def report_content(
     if root.resolve() not in fp.parents or fp.suffix != ".md" or not fp.is_file():
         raise HTTPException(status_code=404, detail="报告不存在")
     return ReportContent(name=name, content=fp.read_text(encoding="utf-8"))
+
+
+# ── 安全红队看板（admin，读 security-adversarial-*.json sidecar） ─────────────
+
+def _security_sidecars() -> list[Path]:
+    """按修改时间升序列出全部安全评估 sidecar JSON。"""
+    root = _report_roots()["agent_eval"]
+    if not root.is_dir():
+        return []
+    files = [fp for fp in root.glob("security-adversarial-*.json") if fp.is_file()]
+    files.sort(key=lambda p: p.stat().st_mtime)
+    return files
+
+
+def _load_sidecar(fp: Path) -> dict | None:
+    """读一份 sidecar JSON；解析失败返回 None（软失败，不让单份坏文件拖垮整个看板）。"""
+    import json
+
+    try:
+        data = json.loads(fp.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError) as exc:
+        logger.warning("[eval] 安全 sidecar 解析失败 %s：%s", fp.name, exc)
+        return None
+
+
+@router.get("/security/summary", response_model=SecuritySummary)
+def security_summary(_: dict = Depends(require_admin)) -> SecuritySummary:
+    """最近一次红队评估的汇总（总拦截率 / 误拦率 + 逐类分项）。无报告时 available=False。"""
+    files = _security_sidecars()
+    for fp in reversed(files):  # 从最新往回找第一份可解析的
+        data = _load_sidecar(fp)
+        if data is None:
+            continue
+        return SecuritySummary(
+            available=True,
+            timestamp=data.get("timestamp", ""),
+            git=data.get("git", ""),
+            partial=bool(data.get("partial", False)),
+            kinds_run=list(data.get("kinds_run", [])),
+            total=data.get("total", 0),
+            attacks=data.get("attacks", 0),
+            attack_blocked=data.get("attack_blocked", 0),
+            benigns=data.get("benigns", 0),
+            benign_blocked=data.get("benign_blocked", 0),
+            recall=data.get("recall", 0.0),
+            fpr=data.get("fpr", 0.0),
+            recall_threshold=data.get("recall_threshold", 0.0),
+            fpr_threshold=data.get("fpr_threshold", 0.0),
+            passed=bool(data.get("passed", False)),
+            by_kind=[SecurityKindRow(**kr) for kr in data.get("by_kind", [])],
+        )
+    return SecuritySummary(available=False)
+
+
+@router.get("/security/trend", response_model=SecurityTrend)
+def security_trend(
+    limit: int = Query(30, ge=1, le=200),
+    _: dict = Depends(require_admin),
+) -> SecurityTrend:
+    """历次红队评估的拦截率 / 误拦率趋势（按时间升序，取最近 limit 次）。"""
+    points: list[SecurityTrendPoint] = []
+    for fp in _security_sidecars():
+        data = _load_sidecar(fp)
+        if data is None:
+            continue
+        points.append(SecurityTrendPoint(
+            timestamp=data.get("timestamp", ""),
+            recall=data.get("recall", 0.0),
+            fpr=data.get("fpr", 0.0),
+            total=data.get("total", 0),
+            partial=bool(data.get("partial", False)),
+        ))
+    return SecurityTrend(points=points[-limit:])

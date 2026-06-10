@@ -6,8 +6,9 @@ import { ResourcePage } from '@/components/resources/ResourcePage'
 import { TraceDashboard } from './TraceDashboard'
 import { GoldenManager } from './GoldenManager'
 import { ReportsViewer } from './ReportsViewer'
+import { SecurityPanel } from './SecurityPanel'
 
-type Tab = 'trace' | 'golden' | 'reports'
+type Tab = 'trace' | 'security' | 'golden' | 'reports'
 
 export function QualityView() {
   const { isAdmin } = useAuth()
@@ -17,6 +18,7 @@ export function QualityView() {
     { value: 'trace', label: '在线可观测' },
     ...(isAdmin
       ? ([
+          { value: 'security', label: '安全' },
           { value: 'golden', label: 'Golden 管理' },
           { value: 'reports', label: '评估报告' },
         ] as { value: Tab; label: string }[])
@@ -49,6 +51,7 @@ export function QualityView() {
       }
     >
       {active === 'trace' && <TraceDashboard />}
+      {active === 'security' && isAdmin && <SecurityPanel />}
       {active === 'golden' && isAdmin && <GoldenManager />}
       {active === 'reports' && isAdmin && <ReportsViewer />}
     </ResourcePage>
