@@ -7,6 +7,8 @@
     ui.ps1 start                   两个 server 一起后台启动
     ui.ps1 stop                    两个一起停
     ui.ps1 stop uvicorn|vite       只停其中一个
+    ui.ps1 restart                 两个一起重启（先停再起）
+    ui.ps1 restart uvicorn|vite    只重启其中一个
     ui.ps1 logs uvicorn|vite       tail -f 对应日志（Ctrl+C 只退出"看日志"，服务继续跑）
     ui.ps1 status                  显示两个服务的 PID / 端口 / URL
     ui.ps1 help                    显示帮助（不带参数时也显示）
@@ -21,7 +23,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('start', 'stop', 'logs', 'status', 'help')]
+    [ValidateSet('start', 'stop', 'restart', 'logs', 'status', 'help')]
     [string]$Action = 'help',
 
     [Parameter(Position = 1)]
@@ -199,6 +201,15 @@ function Stop-One {
     Remove-Item $Svc.PidFile -ErrorAction SilentlyContinue
 }
 
+function Restart-One {
+    param([string]$Name, $Svc)
+
+    Stop-One $Name $Svc
+    # 等端口/进程树彻底释放，避免紧接着 start 时端口仍被占而跳过
+    Start-Sleep -Milliseconds 1200
+    Start-One $Name $Svc
+}
+
 function Show-Status {
     Write-Host ""
     $fmt = "{0,-10} {1,-9} {2,-7} {3,-8} {4}"
@@ -228,8 +239,9 @@ function Show-Help {
     Write-Host ""
     Write-Host "Usage:"
     Write-Host "  ui.ps1 start                  启动 uvicorn (:8000) + vite (:5173)，后台运行"
-    Write-Host "  ui.ps1 stop  [uvicorn|vite]   停止（不带参数 = 都停）"
-    Write-Host "  ui.ps1 logs   uvicorn|vite    tail -f 日志（Ctrl+C 退出查看，服务继续跑）"
+    Write-Host "  ui.ps1 stop    [uvicorn|vite]  停止（不带参数 = 都停）"
+    Write-Host "  ui.ps1 restart [uvicorn|vite]  重启（先停再起，不带参数 = 都重启）"
+    Write-Host "  ui.ps1 logs     uvicorn|vite   tail -f 日志（Ctrl+C 退出查看，服务继续跑）"
     Write-Host "  ui.ps1 status                 显示 PID / 端口 / URL"
     Write-Host "  ui.ps1 help                   显示本帮助（不带参数时默认显示）"
     Write-Host ""
@@ -269,6 +281,15 @@ switch ($Action) {
         else {
             foreach ($n in $Services.Keys) { Stop-One $n $Services[$n] }
         }
+    }
+    'restart' {
+        if ($Target) {
+            Restart-One $Target $Services[$Target]
+        }
+        else {
+            foreach ($n in $Services.Keys) { Restart-One $n $Services[$n] }
+        }
+        Show-Status
     }
     'logs' {
         if (-not $Target) {
