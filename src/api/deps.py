@@ -32,6 +32,10 @@ from src.memory.quiz_store import QuizStore
 from src.memory.quiz_store import get_shared_store as _get_shared_quiz_store
 from src.memory.srs_store import SRSStore
 from src.memory.srs_store import get_shared_store as _get_shared_srs_store
+from src.memory.golden_store import GoldenStore
+from src.memory.golden_store import get_shared_store as _get_shared_golden_store
+from src.memory.trace_store import TraceStore
+from src.memory.trace_store import get_shared_store as _get_shared_trace_store
 from src.memory.user_memory import UserMemoryStore
 from src.memory.usage_store import UsageStore
 from src.memory.usage_store import get_shared_store as _get_shared_usage_store
@@ -127,6 +131,16 @@ def get_user_store() -> UserStore:
 def get_usage_store() -> UsageStore:
     """复用 usage_store 进程内共享单例（token 用量记录 + 单价覆盖）。"""
     return _get_shared_usage_store()
+
+
+def get_trace_store() -> TraceStore:
+    """复用 trace_store 进程内共享单例（对话分阶段 trace，写 usage.db）。"""
+    return _get_shared_trace_store()
+
+
+def get_golden_store() -> GoldenStore:
+    """复用 golden_store 进程内共享单例（RAG golden CRUD + 审核状态）。"""
+    return _get_shared_golden_store()
 
 
 # 关认证时回落到的默认用户（CLI / 单机自用）；admin 角色让 admin 门也能过

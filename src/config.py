@@ -436,6 +436,19 @@ MODEL_PRICING_DEFAULTS: dict[str, tuple[float, float]] = {
     "qwen2.5:7b": (0.0, 0.0),
 }
 
+# ── 评估 + 可观测 ────────────────────────────────────────────────────────────
+# 是否采集每次对话的分阶段 trace（检索 / LLM / tool 耗时 + token + 成本）；
+# 写入复用 usage.db 的 trace 表。出错只记日志、不影响对话（可选值：true / false）
+TRACE_ENABLED: bool = os.getenv("TRACE_ENABLED", "true").lower() == "true"
+# RAG golden 数据集库路径（带来源 / 审核状态，支持在线 CRUD）
+RAG_GOLDEN_DB_PATH: str = os.getenv("RAG_GOLDEN_DB_PATH", "./sqlite_db/rag_golden.db")
+# RAG 入库后是否调 LLM 自动生成 golden 候选（后台运行；可选值：true / false）
+EVAL_AUTO_GOLDEN_ENABLED: bool = os.getenv("EVAL_AUTO_GOLDEN_ENABLED", "true").lower() == "true"
+# 入库单个文档自动生成 golden 候选的最大条数
+EVAL_AUTO_GOLDEN_MAX_Q: int = int(os.getenv("EVAL_AUTO_GOLDEN_MAX_Q", "3"))
+# 跑评估时是否纳入未审核（pending）的 golden；默认只用已审核（approved）的
+EVAL_GOLDEN_USE_PENDING: bool = os.getenv("EVAL_GOLDEN_USE_PENDING", "false").lower() == "true"
+
 # 同时在跑的 agent.run 并发上限（信号量）；超出的请求排队等待，
 # 防止并发把 LLM 配额 / CPU（含 search_knowledge 精排）打满。
 MAX_CONCURRENT_AGENT_RUNS: int = int(os.getenv("MAX_CONCURRENT_AGENT_RUNS", "4"))

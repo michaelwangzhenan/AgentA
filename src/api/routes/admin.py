@@ -15,6 +15,7 @@ from src.api.deps import (
     get_plan_store,
     get_quiz_store,
     get_srs_store,
+    get_trace_store,
     get_usage_store,
     get_user_memory_store,
     get_user_store,
@@ -38,6 +39,7 @@ def purge_user_data(user_id: int) -> None:
     get_quiz_store().delete_all_for_user(user_id)
     get_srs_store().delete_all_for_user(user_id)
     get_usage_store().delete_all_for_user(user_id)
+    get_trace_store().delete_all_for_user(user_id)
 
 
 @router.get("/users", response_model=UserListResponse)

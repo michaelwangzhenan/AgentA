@@ -20,6 +20,7 @@ from src.api.routes.auth import effective_llm_prefs
 from src.api.schemas.chat import ChatRequest, ChatResponse
 from src.api.schemas.auth import LlmPrefs
 from src.memory.chat_history import ChatHistoryStore
+from src.memory.trace_store import TraceCollector, record_trace_safe
 from src.memory.usage_store import record_usage
 from src.memory.user_store import UserStore
 from src.log_setup import set_session_id
@@ -96,18 +97,30 @@ def chat(
     # use_user 设当前用户（让 tools 调 store 落到本人数据），退出时复位，避免线程复用
     # 导致 user_id 残留到下个请求。use_llm_prefs 把该用户选的模型 / thinking 压进
     # contextvar，多用户互不干扰。
-    # 通过 final_answer 事件抓 per-run usage（公共采集点，三实现通用）
+    # 通过 final_answer 事件抓 per-run usage（公共采集点，三实现通用）；
+    # 同时挂 trace 采集器，从事件流重建分阶段耗时（旁路，软失败不影响对话）。
     usage_holder, usage_cb = _make_usage_capture()
+    collector = TraceCollector()
+    trace_id = str(uuid.uuid4())
+
+    def _combined_cb(event: Any) -> None:
+        usage_cb(event)
+        collector.on_event(event)
+
     with _AGENT_SEMAPHORE, use_user(user["id"]), _cfg.use_llm_prefs(
         prefs.active_model, prefs.thinking_enabled, prefs.thinking_budget
     ):
         try:
-            reply = agent.run(req.message, session_id=session_id, event_callback=usage_cb)
+            reply = agent.run(req.message, session_id=session_id, event_callback=_combined_cb)
         except Exception as exc:
             logger.exception("[/api/chat] agent.run 抛异常")
             raise HTTPException(status_code=500, detail=f"agent error: {exc}") from exc
 
     _record_run_usage(user["id"], prefs, usage_holder.get("usage"), session_id)
+    record_trace_safe(
+        collector, trace_id, user["id"], session_id,
+        prefs.active_model, prefs.thinking_enabled,
+    )
     return ChatResponse(reply=reply, session_id=session_id)
 
 
@@ -160,13 +173,17 @@ async def chat_stream(
 
     # 同步事件回调（运行在 executor 线程）→ 经 call_soon_threadsafe 转回主 loop 入队
     # asyncio.Queue 非线程安全，必须 call_soon_threadsafe 调度 put_nowait
-    # 顺带抓 per-run usage（final_answer 事件），run 结束后落库（公共采集点）
+    # 顺带抓 per-run usage（final_answer 事件），run 结束后落库（公共采集点）；
+    # trace 采集器从事件流重建分阶段耗时（旁路，软失败）。
     usage_holder: dict[str, Any] = {}
+    collector = TraceCollector()
+    trace_id = str(uuid.uuid4())
 
     def _on_event(event: Any) -> None:
         if getattr(event, "type", None) == "final_answer":
             payload = getattr(event, "payload", None) or {}
             usage_holder["usage"] = payload.get("usage")
+        collector.on_event(event)
         try:
             frame = {
                 "type": event.type,
@@ -204,8 +221,12 @@ async def chat_stream(
                 },
             })
         finally:
-            # run 结束（含异常）后落库本次 usage；usage 缺失则内部跳过
+            # run 结束（含异常）后落库本次 usage + trace；缺失则内部跳过
             _record_run_usage(user["id"], prefs, usage_holder.get("usage"), session_id)
+            record_trace_safe(
+                collector, trace_id, user["id"], session_id,
+                prefs.active_model, prefs.thinking_enabled,
+            )
             await queue.put(_STREAM_SENTINEL)
 
     run_task = asyncio.create_task(_drive_agent())

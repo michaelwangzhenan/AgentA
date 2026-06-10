@@ -9,5 +9,14 @@ LLM-judge 通用 helper（Phase 2.2 [§4.9.7 D6 / D11](../../../docs/iter_2_agen
 """
 
 from tools.agent_eval.judge.llm_judge import JudgeResult, judge_with_llm
+from tools.agent_eval.judge.rag_metrics import (
+    judge_answer_relevance,
+    judge_faithfulness,
+)
 
-__all__ = ["JudgeResult", "judge_with_llm"]
+__all__ = [
+    "JudgeResult",
+    "judge_with_llm",
+    "judge_faithfulness",
+    "judge_answer_relevance",
+]

@@ -83,3 +83,44 @@ jobs:
           path: tools/agent_eval/reports/perf-*.md
           if-no-files-found: warn
           retention-days: 30
+
+  EVAL:
+    name: Eval Gate (non-token)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      MOONSHOT_API_KEY: ci-dummy
+      QWEN_API_KEY: ci-dummy
+      TRANSFORMERS_OFFLINE: "1"
+      HF_DATASETS_OFFLINE: "1"
+      TOKENIZERS_PARALLELISM: "false"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 只跑不耗 token 的确定性评估子集（安全拦截等）；run_all --ci 有任一 FAIL 即非零退出
+      - name: Run eval gate
+        run: python -m tools.agent_eval.run_all --ci
+
+      - name: Upload eval reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: eval-reports
+          path: tools/agent_eval/reports/run-all-*.md
+          if-no-files-found: warn
+          retention-days: 30

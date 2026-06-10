@@ -8,6 +8,7 @@ import { RulesView } from '@/components/resources/RulesView'
 import { SkillsView } from '@/components/resources/SkillsView'
 import { MasteryView } from '@/components/business/MasteryView'
 import { UsageView } from '@/components/usage/UsageView'
+import { QualityView } from '@/components/eval/QualityView'
 import { SettingsPage } from '@/components/settings/SettingsPage'
 import { LoginView } from '@/components/auth/LoginView'
 import { Sidebar, type ViewKind } from '@/components/sidebar/Sidebar'
@@ -172,6 +173,7 @@ function App() {
         />
       )}
       {activeView === 'usage' && <UsageView />}
+      {activeView === 'quality' && <QualityView />}
       {activeView === 'settings' && <SettingsPage />}
       <Toaster
         position="bottom-right"

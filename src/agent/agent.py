@@ -12,6 +12,7 @@ Agent 主控逻辑 —— ReAct（Reason + Act）循环
 
 import logging
 import threading
+import time
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -288,6 +289,7 @@ class Agent:
         empty_retry_used = False
         force_no_tools = False
         _prompt_tokens = _comp_tokens = 0  # 本次 run() 各轮累计 token
+        _llm_rounds: list[dict[str, Any]] = []  # 各轮 LLM 耗时，随 final_answer trace 透传
         # 每轮 new CitationBuilder，跨同轮多次 search_knowledge 累计编号
         citation_builder = CitationBuilder()
         tool_engine = ToolCallEngine(
@@ -343,6 +345,7 @@ class Agent:
                 logger.warning("[Agent] 工具调用已达上限 %d 轮（含 plan 自适应），强制生成最终回答", eff_tool_max)
 
             # 调用 LLM：开启 thinking 时走流式 thinking 分支，否则普通 chat()
+            _llm_t0 = time.perf_counter()
             try:
                 if thinking_policy.enabled:
                     response = call_with_thinking(
@@ -361,6 +364,13 @@ class Agent:
                     payload={"message": str(exc), "recoverable": False, "phase": "llm_call"},
                 ))
                 raise
+            # 本轮 LLM 耗时记进 _llm_rounds（随 final_answer payload 的 trace 字段透传给采集器，
+            # 不污染公共事件流）；end_ts 用 time.time()，与事件 ts 同一时钟，便于排瀑布。
+            _llm_rounds.append({
+                "round": iteration,
+                "duration_ms": (time.perf_counter() - _llm_t0) * 1000.0,
+                "end_ts": time.time(),
+            })
             _u = getattr(response, "usage", None)
             if _u:
                 _prompt_tokens += getattr(_u, "prompt_tokens", 0)
@@ -387,7 +397,9 @@ class Agent:
                         self.last_usage = _usage
                     bus.publish(AgentEvent(
                         type=EVENT_FINAL_ANSWER,
-                        payload={"text": cancel_msg, "usage": _usage, "aborted_by_user": True},
+                        payload={"text": cancel_msg, "usage": _usage,
+                                 "aborted_by_user": True,
+                                 "trace": {"llm_rounds": _llm_rounds}},
                     ))
                     return cancel_msg
                 continue
@@ -427,7 +439,8 @@ class Agent:
                 self._finalize_pending_plan_steps(messages, bus)
                 bus.publish(AgentEvent(
                     type=EVENT_FINAL_ANSWER,
-                    payload={"text": final_answer, "usage": _usage},
+                    payload={"text": final_answer, "usage": _usage,
+                             "trace": {"llm_rounds": _llm_rounds}},
                 ))
                 return final_answer
 
@@ -453,7 +466,8 @@ class Agent:
             ))
             bus.publish(AgentEvent(
                 type=EVENT_FINAL_ANSWER,
-                payload={"text": fallback, "usage": _usage},
+                payload={"text": fallback, "usage": _usage,
+                         "trace": {"llm_rounds": _llm_rounds}},
             ))
             return fallback
 
@@ -472,7 +486,8 @@ class Agent:
         ))
         bus.publish(AgentEvent(
             type=EVENT_FINAL_ANSWER,
-            payload={"text": fallback, "usage": _usage},
+            payload={"text": fallback, "usage": _usage,
+                     "trace": {"llm_rounds": _llm_rounds}},
         ))
         return fallback
 

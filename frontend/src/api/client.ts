@@ -69,6 +69,18 @@ import type {
   UsageSummary,
   UserUsageList,
 } from '@/types/usage'
+import type {
+  GoldenCreateInput,
+  GoldenItem,
+  GoldenList,
+  GoldenUpdateInput,
+  ReportContent,
+  ReportList,
+  TraceDetail,
+  TraceList,
+  TraceOverview,
+  TraceSeries,
+} from '@/types/eval'
 
 // ─── 401 全局处理 ──────────────────────────────────────────────────────
 // 登录态失效时，由 AuthProvider 注册回调把界面切回登录页。
@@ -864,4 +876,102 @@ export async function putPricing(items: PricingUpdateItem[]): Promise<PricingRes
   })
   await _ensureOk(res)
   return (await res.json()) as PricingResponse
+}
+
+// ─── 评估 + 可观测（质量看板，iter_14）─────────────────────────────────
+
+export async function getTraceOverview(
+  range: string,
+  scope: 'mine' | 'all' = 'mine',
+): Promise<TraceOverview> {
+  const res = await apiFetch(`/api/eval/trace/overview?range=${range}&scope=${scope}`)
+  await _ensureOk(res)
+  return (await res.json()) as TraceOverview
+}
+
+export async function getTraceSeries(
+  range: string,
+  scope: 'mine' | 'all' = 'mine',
+): Promise<TraceSeries> {
+  const res = await apiFetch(`/api/eval/trace/series?range=${range}&scope=${scope}`)
+  await _ensureOk(res)
+  return (await res.json()) as TraceSeries
+}
+
+export async function getTraceList(
+  range: string,
+  opts: { scope?: 'mine' | 'all'; limit?: number; offset?: number } = {},
+): Promise<TraceList> {
+  const { scope = 'mine', limit = 30, offset = 0 } = opts
+  const res = await apiFetch(
+    `/api/eval/trace/list?range=${range}&scope=${scope}&limit=${limit}&offset=${offset}`,
+  )
+  await _ensureOk(res)
+  return (await res.json()) as TraceList
+}
+
+export async function getTraceDetail(traceId: string): Promise<TraceDetail> {
+  const res = await apiFetch(`/api/eval/trace/${encodeURIComponent(traceId)}`)
+  await _ensureOk(res)
+  return (await res.json()) as TraceDetail
+}
+
+export async function getGolden(
+  opts: { status?: string; source?: string; limit?: number; offset?: number } = {},
+): Promise<GoldenList> {
+  const params = new URLSearchParams()
+  if (opts.status) params.set('status', opts.status)
+  if (opts.source) params.set('source', opts.source)
+  params.set('limit', String(opts.limit ?? 50))
+  params.set('offset', String(opts.offset ?? 0))
+  const res = await apiFetch(`/api/eval/golden?${params.toString()}`)
+  await _ensureOk(res)
+  return (await res.json()) as GoldenList
+}
+
+export async function createGolden(input: GoldenCreateInput): Promise<GoldenItem> {
+  const res = await apiFetch('/api/eval/golden', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as GoldenItem
+}
+
+export async function updateGolden(
+  id: number,
+  input: GoldenUpdateInput,
+): Promise<GoldenItem> {
+  const res = await apiFetch(`/api/eval/golden/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as GoldenItem
+}
+
+export async function deleteGolden(id: number): Promise<{ deleted: boolean }> {
+  const res = await apiFetch(`/api/eval/golden/${id}`, { method: 'DELETE' })
+  await _ensureOk(res)
+  return (await res.json()) as { deleted: boolean }
+}
+
+export async function importGolden(): Promise<{ added: number; source: string }> {
+  const res = await apiFetch('/api/eval/golden/import', { method: 'POST' })
+  await _ensureOk(res)
+  return (await res.json()) as { added: number; source: string }
+}
+
+export async function getReports(): Promise<ReportList> {
+  const res = await apiFetch('/api/eval/reports')
+  await _ensureOk(res)
+  return (await res.json()) as ReportList
+}
+
+export async function getReportContent(name: string): Promise<ReportContent> {
+  const res = await apiFetch(`/api/eval/reports/content?name=${encodeURIComponent(name)}`)
+  await _ensureOk(res)
+  return (await res.json()) as ReportContent
 }

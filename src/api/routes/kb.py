@@ -33,6 +33,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# 持有后台 golden 生成任务的强引用，避免 asyncio 在任务跑完前把它当垃圾回收
+# （fire-and-forget 任务若无引用可能被 GC，见 asyncio.create_task 文档警示）。
+_bg_tasks: set = set()
+
 
 def _md_to_kbdoc(md: dict) -> KBDocument:
     """`list_kb_documents` 返回的 dict → KBDocument"""
@@ -132,6 +136,22 @@ async def upload_document(
     status = result["status"]
     chunks = result["chunks"]
     doc_id = result["doc_id"]
+
+    # 入库成功后台调 LLM 自动生成 golden 候选（不感知、软失败、不阻塞响应）；
+    # 仅对真正新入库（非跳过 / 空）的文档触发。
+    if status == "ingested" and config.EVAL_AUTO_GOLDEN_ENABLED:
+        from src.rag.golden_gen import run_generation_for_file
+
+        task = asyncio.create_task(
+            asyncio.to_thread(
+                run_generation_for_file,
+                file_path=str(target_path),
+                source=safe_name,
+                doc_id=doc_id,
+            )
+        )
+        _bg_tasks.add(task)
+        task.add_done_callback(_bg_tasks.discard)
 
     if status == "empty":
         return KBUploadResponse(

@@ -5,6 +5,7 @@ import {
   BookOpen,
   Brain,
   ChevronDown,
+  GaugeCircle,
   GraduationCap,
   HelpCircle,
   LogOut,
@@ -61,6 +62,7 @@ export type ViewKind =
   | 'mcp'
   | 'mastery'
   | 'usage'
+  | 'quality'
   | 'settings'
 
 export type SidebarProps = {
@@ -213,6 +215,12 @@ export function Sidebar(props: SidebarProps) {
           label="用量"
           active={activeView === 'usage'}
           onClick={() => onSwitchView('usage')}
+        />
+        <ViewNavButton
+          icon={<GaugeCircle className="h-4 w-4" />}
+          label="质量看板"
+          active={activeView === 'quality'}
+          onClick={() => onSwitchView('quality')}
         />
       </div>
 
