@@ -1,4 +1,11 @@
-"""Chat 端点 —— 非流式 + SSE 流式"""
+"""Chat 端点 —— 非流式 + SSE 流式
+
+每次请求在跑 agent 前先做两件降本事：
+  1. 语义缓存：单轮起步的提问先查缓存，命中即跳过整次检索 + 生成直接返回。
+  2. 模型路由：按难度在候选池内向更便宜的模型降级（只降不升）；路由后的模型遇瞬时
+     错误回退到基准模型重试一次（仅单轮起步、未改历史时）。
+两者均软失败：出错只记 log、回落正常流程，绝不阻断对话。
+"""
 
 from __future__ import annotations
 
@@ -18,10 +25,18 @@ from src.core.user_context import use_user
 from src.api.deps import get_agent, get_chat_history, get_current_user, get_user_store
 from src.api.routes.auth import effective_llm_prefs
 from src.api.schemas.chat import ChatRequest, ChatResponse
-from src.api.schemas.auth import LlmPrefs
+from src.llm import model_router
+from src.llm.model_router import RouteDecision
+from src.memory import semantic_cache
 from src.memory.chat_history import ChatHistoryStore
 from src.memory.trace_store import TraceCollector, record_trace_safe
-from src.memory.usage_store import record_usage
+from src.memory.usage_store import (
+    cost_of,
+    get_shared_store,
+    merged_pricing,
+    record_saving,
+    record_usage,
+)
 from src.memory.user_store import UserStore
 from src.log_setup import set_session_id
 
@@ -43,12 +58,42 @@ def _check_session_owner(store: ChatHistoryStore, session_id: str | None, user_i
 # run 数，避免并发把 LLM 配额 / CPU（含 search_knowledge 精排）打满；超出的请求排队。
 _AGENT_SEMAPHORE = threading.BoundedSemaphore(_cfg.MAX_CONCURRENT_AGENT_RUNS)
 
+# 视为"瞬时"的 LLM 错误（限流 / 网关 / 超时）→ 路由降级模型遇此可回退基准重试。
+# 4xx 只认 408 超时 / 425 too-early / 429 限流，其余 4xx 多是请求本身错，不重试。
+_TRANSIENT_STATUS = {408, 425, 429}
+
+
+def _is_transient_llm_error(exc: Exception) -> bool:
+    """判断 LLM 调用异常是否瞬时（可换模型重试）；保守起见 400/401/403 等不算。"""
+    sc = getattr(exc, "status_code", None)
+    if sc is None:
+        sc = getattr(getattr(exc, "response", None), "status_code", None)
+    if isinstance(sc, int) and (sc in _TRANSIENT_STATUS or 500 <= sc <= 599):
+        return True
+    name = type(exc).__name__.lower()
+    return any(
+        k in name
+        for k in ("timeout", "ratelimit", "internalserver", "serviceunavailable", "apiconnection")
+    )
+
+
+def _estimate_tokens(text: str) -> int:
+    """粗估 token 数（约 4 字符/token），仅用于缓存命中的节省估算。"""
+    return max(1, len(text or "") // 4)
+
+
+def _is_fresh_session(history: ChatHistoryStore, session_id: str, user_id: int) -> bool:
+    """会话此前无消息 = 单轮起步，才允许语义缓存查询 / 写入。"""
+    try:
+        return not history.load_last_n_messages(session_id, n=1, user_id=user_id)
+    except Exception:
+        return False
+
 
 def _make_usage_capture() -> tuple[dict[str, Any], Any]:
-    """返回 (holder, callback)：callback 抓 final_answer 事件里的 per-run TokenUsage。
+    """返回 (holder, callback)：从 final_answer 事件抓 usage / 答案文本 / 可缓存标记。
 
-    这是 iter_11 §4.1 的"公共采集点"——只认 AgentAPI 的 final_answer 事件契约，
-    三种实现（PYTHON / LANGCHAIN / AUTOGPT）都满足，故对实现零侵入。
+    只认 AgentAPI 的 final_answer 事件契约（三种实现通用），对实现零侵入。
     """
     holder: dict[str, Any] = {}
 
@@ -56,21 +101,58 @@ def _make_usage_capture() -> tuple[dict[str, Any], Any]:
         if getattr(event, "type", None) == "final_answer":
             payload = getattr(event, "payload", None) or {}
             holder["usage"] = payload.get("usage")
+            holder["text"] = payload.get("text")
+            holder["used_tools"] = bool(payload.get("used_tools"))
+            holder["personalized"] = bool(payload.get("personalized"))
 
     return holder, _capture
 
 
 def _record_run_usage(
-    user_id: int, prefs: LlmPrefs, usage: Any, session_id: str
+    user_id: int, model_id: str, thinking: bool, usage: Any, session_id: str
 ) -> None:
-    """把本次 run 的用量落库（旁路，record_usage 内部已吞异常）。"""
+    """把本次 run 的用量落库（旁路，record_usage 内部已吞异常）。model_id 取实际跑的模型。"""
     record_usage(
         user_id=user_id,
-        model_id=prefs.active_model,
-        thinking=prefs.thinking_enabled,
+        model_id=model_id,
+        thinking=thinking,
         usage=usage,
         session_id=session_id,
     )
+
+
+def _record_route_saving(user_id: int, decision: RouteDecision, usage: Any) -> None:
+    """路由降级的估算节省 = 用基准模型的成本 − 实际成本（按本次实际 token）。"""
+    if not decision.downgraded or usage is None:
+        return
+    prompt = int(getattr(usage, "prompt_tokens", 0) or 0)
+    comp = int(getattr(usage, "completion_tokens", 0) or 0)
+    if prompt == 0 and comp == 0:
+        return
+    pricing = merged_pricing(get_shared_store())
+    saved = (cost_of(decision.baseline, prompt, comp, pricing)
+             - cost_of(decision.model_id, prompt, comp, pricing))
+    if saved > 0:
+        record_saving(user_id, "route", decision.baseline, decision.model_id, saved, prompt + comp)
+
+
+def _record_cache_saving(user_id: int, would_use_model: str, query: str, answer: str) -> None:
+    """缓存命中的估算节省 = 本应用 would_use_model 完整生成的成本（按答案长度粗估）。"""
+    pricing = merged_pricing(get_shared_store())
+    prompt = _estimate_tokens(query)
+    comp = _estimate_tokens(answer)
+    saved = cost_of(would_use_model, prompt, comp, pricing)
+    record_saving(user_id, "cache", would_use_model, "cache", saved, prompt + comp)
+
+
+def _maybe_store_cache(
+    fresh: bool, holder: dict[str, Any], query: str, user_id: int, model_id: str
+) -> None:
+    """run 结束后按可缓存条件写语义缓存：单轮起步 + 无工具 + 未注入个性化 + 有答案。"""
+    answer = holder.get("text")
+    if not (fresh and answer and not holder.get("used_tools") and not holder.get("personalized")):
+        return
+    semantic_cache.store_cached(query, answer, user_id, model_id=model_id)
 
 
 # ─── 非流式（保留作为 fallback / 测试入口）─────────────────────────
@@ -83,44 +165,71 @@ def chat(
     history: ChatHistoryStore = Depends(get_chat_history),
     users: UserStore = Depends(get_user_store),
 ) -> ChatResponse:
-    """单轮聊天：转发用户消息给 Agent.run、返回完整答案。
+    """单轮聊天：先查缓存 → 路由选模型 → Agent.run（带 fallback）→ 写缓存 + 记节省。
 
     同步路由（不加 async）—— FastAPI 会自动把它扔到 thread pool 跑，不阻塞 event loop。
-    session_id 由调用方生成并作为 per-run 入参传给 agent.run，单例 Agent 不被写脏，
-    并发请求互不串台；`_AGENT_SEMAPHORE` 仅做并发数限流。
     """
     _check_session_owner(history, req.session_id, user["id"])
     prefs = effective_llm_prefs(users, user["id"])
-    # 调用方生成 session_id（空则新建 uuid），不再回读 agent.session_id —— 既避免并发
-    # 串台，也修掉"新会话复用单例构造期 uuid"的旧隐患。
     session_id = req.session_id or str(uuid.uuid4())
-    # use_user 设当前用户（让 tools 调 store 落到本人数据），退出时复位，避免线程复用
-    # 导致 user_id 残留到下个请求。use_llm_prefs 把该用户选的模型 / thinking 压进
-    # contextvar，多用户互不干扰。
-    # 通过 final_answer 事件抓 per-run usage（公共采集点，三实现通用）；
-    # 同时挂 trace 采集器，从事件流重建分阶段耗时（旁路，软失败不影响对话）。
-    usage_holder, usage_cb = _make_usage_capture()
-    collector = TraceCollector()
+    fresh = _is_fresh_session(history, session_id, user["id"])
+
+    decision = model_router.route(req.message, prefs.active_model)
+    used_model = decision.model_id
+    logger.info("[/api/chat] 路由：%s", decision.reason)
+
+    # 语义缓存：单轮起步先查，命中即跳过整次 run
+    if fresh:
+        cached = semantic_cache.lookup_cached(req.message, user["id"])
+        if cached is not None:
+            history.append(session_id, {"role": "user", "content": req.message}, user_id=user["id"])
+            history.append(session_id, {"role": "assistant", "content": cached}, user_id=user["id"])
+            _record_cache_saving(user["id"], used_model, req.message, cached)
+            return ChatResponse(reply=cached, session_id=session_id)
+
     trace_id = str(uuid.uuid4())
 
-    def _combined_cb(event: Any) -> None:
-        usage_cb(event)
-        collector.on_event(event)
+    def _run_once(model: str) -> tuple[str, dict[str, Any], TraceCollector]:
+        holder, ucb = _make_usage_capture()
+        collector = TraceCollector()
 
-    with _AGENT_SEMAPHORE, use_user(user["id"]), _cfg.use_llm_prefs(
-        prefs.active_model, prefs.thinking_enabled, prefs.thinking_budget
-    ):
-        try:
-            reply = agent.run(req.message, session_id=session_id, event_callback=_combined_cb)
-        except Exception as exc:
+        def _cb(event: Any) -> None:
+            ucb(event)
+            collector.on_event(event)
+
+        with _AGENT_SEMAPHORE, use_user(user["id"]), _cfg.use_llm_prefs(
+            model, prefs.thinking_enabled, prefs.thinking_budget
+        ):
+            r = agent.run(req.message, session_id=session_id, event_callback=_cb)
+        return r, holder, collector
+
+    try:
+        reply, usage_holder, collector = _run_once(used_model)
+    except Exception as exc:
+        if fresh and decision.downgraded and _is_transient_llm_error(exc):
+            logger.warning(
+                "[/api/chat] 路由模型 %s 瞬时失败，回退基准 %s 重试：%s",
+                used_model, decision.baseline, exc,
+            )
+            history.clear(session_id, user_id=user["id"])
+            used_model = decision.baseline
+            try:
+                reply, usage_holder, collector = _run_once(used_model)
+            except Exception as exc2:
+                logger.exception("[/api/chat] fallback 仍失败")
+                raise HTTPException(status_code=500, detail=f"agent error: {exc2}") from exc2
+        else:
             logger.exception("[/api/chat] agent.run 抛异常")
             raise HTTPException(status_code=500, detail=f"agent error: {exc}") from exc
 
-    _record_run_usage(user["id"], prefs, usage_holder.get("usage"), session_id)
+    usage = usage_holder.get("usage")
+    _record_run_usage(user["id"], used_model, prefs.thinking_enabled, usage, session_id)
     record_trace_safe(
-        collector, trace_id, user["id"], session_id,
-        prefs.active_model, prefs.thinking_enabled,
+        collector, trace_id, user["id"], session_id, used_model, prefs.thinking_enabled,
     )
+    if used_model == decision.model_id:  # 未 fallback 才记路由节省
+        _record_route_saving(user["id"], decision, usage)
+    _maybe_store_cache(fresh, usage_holder, req.message, user["id"], used_model)
     return ChatResponse(reply=reply, session_id=session_id)
 
 
@@ -145,6 +254,10 @@ def _sanitize_payload(value: Any) -> Any:
     return value
 
 
+def _sse_frame(event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return {"event": "message", "data": json.dumps({"type": event_type, "payload": payload}, ensure_ascii=False)}
+
+
 @router.post("/chat/stream")
 async def chat_stream(
     req: ChatRequest,
@@ -156,77 +269,116 @@ async def chat_stream(
     """SSE 流式聊天：Agent.run 扔 thread pool，事件经 asyncio.Queue 流给 SSE。
 
     帧格式：`event: message` + `data: {"type": "<event_type>", "payload": {...}}`
-    其中 `<event_type>` 取值参见 `src.agent.core.event_bus.ALL_EVENT_TYPES`。
     收到 `final_answer` 或 Agent.run 结束（含异常） → 流自动关闭。
+    缓存命中时直接发 token_chunk + final_answer 两帧（payload.cached=True），不跑 agent。
     """
     if not req.message or not req.message.strip():
         raise HTTPException(status_code=422, detail="message must be non-empty")
 
     _check_session_owner(history, req.session_id, user["id"])
-    # 在请求线程算好该用户生效偏好，闭包带进 executor 线程内设置 contextvar
     prefs = effective_llm_prefs(users, user["id"])
-    # 调用方生成 session_id（空则新建 uuid），作为 per-run 入参传给 agent.run
     session_id = req.session_id or str(uuid.uuid4())
+    fresh = _is_fresh_session(history, session_id, user["id"])
+
+    decision = model_router.route(req.message, prefs.active_model)
+    used_model = decision.model_id
+    logger.info("[/api/chat/stream] 路由：%s", decision.reason)
+
+    # 语义缓存命中：直接两帧返回，不跑 agent
+    if fresh:
+        cached = semantic_cache.lookup_cached(req.message, user["id"])
+        if cached is not None:
+            history.append(session_id, {"role": "user", "content": req.message}, user_id=user["id"])
+            history.append(session_id, {"role": "assistant", "content": cached}, user_id=user["id"])
+            _record_cache_saving(user["id"], used_model, req.message, cached)
+
+            async def _cached_gen():
+                yield _sse_frame("token_chunk", {"text": cached})
+                yield _sse_frame("final_answer", {"text": cached, "usage": None, "cached": True})
+
+            return EventSourceResponse(_cached_gen())
 
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-
-    # 同步事件回调（运行在 executor 线程）→ 经 call_soon_threadsafe 转回主 loop 入队
-    # asyncio.Queue 非线程安全，必须 call_soon_threadsafe 调度 put_nowait
-    # 顺带抓 per-run usage（final_answer 事件），run 结束后落库（公共采集点）；
-    # trace 采集器从事件流重建分阶段耗时（旁路，软失败）。
-    usage_holder: dict[str, Any] = {}
-    collector = TraceCollector()
     trace_id = str(uuid.uuid4())
 
+    usage_holder: dict[str, Any] = {}
+    # fallback 期间把第一次尝试的 error 帧暂存，不立即下发；真正失败时才 flush，
+    # 成功 fallback 则丢弃，避免用户先看到一条 error 又看到正常答案。
+    _state: dict[str, Any] = {
+        "collector": TraceCollector(),
+        "held_errors": [],
+        "suppress": fresh and decision.downgraded and _cfg.MODEL_ROUTING_ENABLED,
+    }
+
     def _on_event(event: Any) -> None:
-        if getattr(event, "type", None) == "final_answer":
+        et = getattr(event, "type", None)
+        if et == "final_answer":
             payload = getattr(event, "payload", None) or {}
             usage_holder["usage"] = payload.get("usage")
-        collector.on_event(event)
+            usage_holder["text"] = payload.get("text")
+            usage_holder["used_tools"] = bool(payload.get("used_tools"))
+            usage_holder["personalized"] = bool(payload.get("personalized"))
+        _state["collector"].on_event(event)
         try:
-            frame = {
-                "type": event.type,
-                "payload": _sanitize_payload(event.payload),
-            }
+            frame = {"type": event.type, "payload": _sanitize_payload(event.payload)}
         except Exception:
             logger.exception("[/api/chat/stream] sanitize 事件失败 type=%s", getattr(event, "type", "?"))
             return
+        if et == "error" and _state["suppress"]:
+            _state["held_errors"].append(frame)
+            return
         loop.call_soon_threadsafe(queue.put_nowait, frame)
 
-    # session_id 与事件回调都作为 per-run 入参传进 agent.run（不写共享实例属性），
-    # 多请求并发互不串台；信号量仅限流。
-    def _sync_run() -> None:
-        # contextvar 不随 run_in_executor 传播，必须在 executor 线程内重设；
-        # use_user / use_llm_prefs 退出时复位，避免值残留到复用该线程的下个请求。
-        with _AGENT_SEMAPHORE, use_user(user["id"]), _cfg.use_llm_prefs(
-            prefs.active_model, prefs.thinking_enabled, prefs.thinking_budget
-        ):
-            # 把当前 session 写进日志上下文（ContextVar，线程内有效），
-            # 使本次 agent.run 期间的日志带 s:<session>
+    def _run_with(model: str) -> None:
+        with _cfg.use_llm_prefs(model, prefs.thinking_enabled, prefs.thinking_budget):
             set_session_id(session_id)
             agent.run(req.message, session_id=session_id, event_callback=_on_event)
+
+    def _sync_run() -> None:
+        nonlocal used_model
+        with _AGENT_SEMAPHORE, use_user(user["id"]):
+            try:
+                _run_with(used_model)
+            except Exception as exc:
+                if _state["suppress"] and _is_transient_llm_error(exc):
+                    logger.warning(
+                        "[/api/chat/stream] 路由模型 %s 瞬时失败，回退基准 %s 重试：%s",
+                        used_model, decision.baseline, exc,
+                    )
+                    history.clear(session_id, user_id=user["id"])
+                    _state["held_errors"].clear()
+                    _state["suppress"] = False
+                    _state["collector"] = TraceCollector()
+                    usage_holder.clear()
+                    used_model = decision.baseline
+                    _run_with(used_model)  # 再失败则向上抛
+                else:
+                    raise
 
     async def _drive_agent() -> None:
         try:
             await loop.run_in_executor(None, _sync_run)
         except Exception as exc:
             logger.exception("[/api/chat/stream] agent.run 抛异常")
+            for f in _state["held_errors"]:
+                await queue.put(f)
             await queue.put({
                 "type": "error",
-                "payload": {
-                    "message": str(exc),
-                    "recoverable": False,
-                    "phase": "run",
-                },
+                "payload": {"message": str(exc), "recoverable": False, "phase": "run"},
             })
         finally:
-            # run 结束（含异常）后落库本次 usage + trace；缺失则内部跳过
-            _record_run_usage(user["id"], prefs, usage_holder.get("usage"), session_id)
-            record_trace_safe(
-                collector, trace_id, user["id"], session_id,
-                prefs.active_model, prefs.thinking_enabled,
+            _record_run_usage(
+                user["id"], used_model, prefs.thinking_enabled,
+                usage_holder.get("usage"), session_id,
             )
+            record_trace_safe(
+                _state["collector"], trace_id, user["id"], session_id,
+                used_model, prefs.thinking_enabled,
+            )
+            if used_model == decision.model_id:
+                _record_route_saving(user["id"], decision, usage_holder.get("usage"))
+            _maybe_store_cache(fresh, usage_holder, req.message, user["id"], used_model)
             await queue.put(_STREAM_SENTINEL)
 
     run_task = asyncio.create_task(_drive_agent())

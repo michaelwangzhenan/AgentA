@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Response
+from pydantic import BaseModel
 
 import src.config as _cfg
 from src.api.deps import get_current_user, get_usage_store, get_user_store, require_admin
@@ -413,3 +414,101 @@ def put_pricing(
     if bulk:
         store.set_pricing_bulk(bulk)
     return get_pricing(_, store)
+
+
+# ── 降本看板（路由 / 缓存节省） ────────────────────────────────────────────────
+
+
+class SavingsSummary(BaseModel):
+    start: int
+    end: int
+    range: str
+    currency: str
+    route_count: int
+    route_saved: float
+    cache_count: int
+    cache_saved: float
+    total_saved: float
+
+
+class SavingsSeriesRow(BaseModel):
+    date: str
+    kind: str          # route | cache
+    count: int
+    saved: float
+
+
+class SavingsSeries(BaseModel):
+    start: int
+    end: int
+    range: str
+    currency: str
+    rows: list[SavingsSeriesRow]
+
+
+def _savings_summary(store: UsageStore, start: int, end: int, user_id: int | None) -> SavingsSummary:
+    agg = store.aggregate_savings(start, end, user_id=user_id)
+    return SavingsSummary(
+        start=start, end=end, range="", currency=_cfg.USAGE_CURRENCY,
+        route_count=agg["route_count"], route_saved=round(agg["route_saved"], 6),
+        cache_count=agg["cache_count"], cache_saved=round(agg["cache_saved"], 6),
+        total_saved=round(agg["route_saved"] + agg["cache_saved"], 6),
+    )
+
+
+def _savings_series(store: UsageStore, start: int, end: int, user_id: int | None) -> SavingsSeries:
+    rows = [
+        SavingsSeriesRow(date=r["day"], kind=r["kind"], count=r["count"], saved=round(r["saved"], 6))
+        for r in store.savings_series(start, end, user_id=user_id)
+    ]
+    return SavingsSeries(
+        start=start, end=end, range="", currency=_cfg.USAGE_CURRENCY, rows=rows,
+    )
+
+
+@router.get("/savings", response_model=SavingsSummary)
+def my_savings(
+    range: str = Query("30d"),
+    user: dict = Depends(get_current_user),
+    store: UsageStore = Depends(get_usage_store),
+) -> SavingsSummary:
+    start, end = _resolve_range(range)
+    out = _savings_summary(store, start, end, user_id=user["id"])
+    out.range = range
+    return out
+
+
+@router.get("/savings/series", response_model=SavingsSeries)
+def my_savings_series(
+    range: str = Query("30d"),
+    user: dict = Depends(get_current_user),
+    store: UsageStore = Depends(get_usage_store),
+) -> SavingsSeries:
+    start, end = _resolve_range(range)
+    out = _savings_series(store, start, end, user_id=user["id"])
+    out.range = range
+    return out
+
+
+@router.get("/admin/savings", response_model=SavingsSummary)
+def admin_savings(
+    range: str = Query("30d"),
+    _: dict = Depends(require_admin),
+    store: UsageStore = Depends(get_usage_store),
+) -> SavingsSummary:
+    start, end = _resolve_range(range)
+    out = _savings_summary(store, start, end, user_id=None)
+    out.range = range
+    return out
+
+
+@router.get("/admin/savings/series", response_model=SavingsSeries)
+def admin_savings_series(
+    range: str = Query("30d"),
+    _: dict = Depends(require_admin),
+    store: UsageStore = Depends(get_usage_store),
+) -> SavingsSeries:
+    start, end = _resolve_range(range)
+    out = _savings_series(store, start, end, user_id=None)
+    out.range = range
+    return out

@@ -52,6 +52,7 @@ from src.api.routes import (  # noqa: E402
     memory,
     plans,
     quizzes,
+    routing,
     rules,
     sessions,
     skills,
@@ -135,4 +136,5 @@ app.include_router(plans.router, prefix="/api", tags=["plans"])
 app.include_router(quizzes.router, prefix="/api", tags=["quizzes"])
 app.include_router(srs.router, prefix="/api", tags=["srs"])
 app.include_router(usage.router, prefix="/api", tags=["usage"])
+app.include_router(routing.router, prefix="/api", tags=["routing"])
 app.include_router(eval_route.router, prefix="/api", tags=["eval"])

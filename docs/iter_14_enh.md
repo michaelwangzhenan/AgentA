@@ -291,10 +291,10 @@ flowchart TD
   cq -- 命中 --> ret[返回缓存答案<br/>记命中+节省]
   cq -- 未命中 --> route
   fit -- 否 --> route[模型路由<br/>候选池内向下选]
-  route --> call[Agent.run ReAct 多轮]
-  call -. 瞬时错误且首轮未改历史 .-> fb[fallback 到用户自选/最高tier<br/>重试一次]
-  fb --> call
-  call --> ans[生成答案]
+  route --> arun[Agent.run ReAct 多轮]
+  arun -.->|瞬时错误且首轮未改历史| fb[fallback 到用户自选/最高tier<br/>重试一次]
+  fb --> arun
+  arun --> ans[生成答案]
   ans --> wr[写语义缓存<br/>记路由节省]
   subgraph 旁路
     ingest[KB 入库/删除] --> inval[作废命中相关文档的缓存]
@@ -305,7 +305,7 @@ flowchart TD
 
 ### 2.2.2. 模型路由（C1）
 
-- **候选池**：在「配置 API key」页让用户勾选"已充值可用"的模型，存为该用户（或全局 admin）配置。路由只在池内选，从源头避免选到没 key 的模型。
+- **候选池**：在「配置 API key」页（admin-only）勾选"已充值可用"的模型，存为**全局 admin** 配置（`.agenta/routing_pool.json`）。路由只在池内选，从源头避免选到没 key 的模型；未显式配置时回落到"provider 已配 api_key"的全部模型。
 - **判定方式（可配，admin UI 可切）**：
   - **规则启发**（默认，近乎零开销）：按 query 长度、是否会带 tool、是否命中"难/简单"关键词，映射到目标 tier。
   - **轻量 LLM 分类器**：用便宜小模型给 query 难度打分，多一次小调用（有成本 / 延迟）。
@@ -319,12 +319,12 @@ flowchart TD
 两层缓存的关系见 §2.1.7（叠加协作、不替代）。本期新增的是高层"语义答案缓存"：
 
 - **适用判定**：只对「单轮 + 无 tool + 无个人记忆注入」的纯问答启用；其余（多轮 / 带 tool / 走个人记忆）直接跳过缓存，照常跑。
-- **存储**：独立 ChromaDB collection，一条缓存 = query 向量 + 答案 + 元数据（`user_id`、命中的 KB 文档 id 列表、写入时间、过期时间）。query 编码复用 `retriever._embed_query_cached`。
+- **存储**：独立 ChromaDB collection，一条缓存 = query 向量 + 答案 + 元数据（`user_id`、原 query、写入时间、过期时间、模型 id）。query 编码复用 `retriever._embed_query_cached`（RAG 默认 embedding 模型）。
 - **命中**：按 `user_id` 过滤 + 向量相似度检索，相似度 ≥ 阈值（可配）且未过期才算命中；命中即返回缓存答案，跳过整条检索 + 生成。**软失败**：查询出错只记 log，回落正常流程。
 - **写入**：未命中且本次是"可缓存纯问答"时，run 结束把 query 向量 + 答案 + 关联 KB 文档 id + 过期时间写入。**软失败**：写库出错只记 log，不影响已返回给用户的答案。
 - **失效（C3）**：
   - **过期**：每条带过期时间，查询时过滤掉过期条目（惰性），另可配定期清理。
-  - **KB 变更**：`ingest_one` / `delete_kb_document` 写盘后旁路作废"元数据里命中了被改 / 删文档"的缓存条目；`delete_all` 清空该用户 / 全部缓存。挂在写盘点之后，与 §1 入库钩子同源。
+  - **KB 变更**：`ingest_one`（入库成功）/ `delete_kb_document` / `delete_all_kb_documents` 写盘后旁路**全量作废**整个缓存 collection。答案依赖 KB 但精确追踪"每条答案命中了哪些文档"成本高、KB 变更又不频繁，故按"简洁优先"全量清，绝不返回过期答案。删号时按 `user_id` 清该用户缓存。
 
 ### 2.2.4. 降本看板（C4）
 
@@ -381,10 +381,12 @@ flowchart TD
 
 ### 2.2.8. 小决策（简洁优先默认）
 
-- 候选池配置粒度：先做**每用户**勾选（与现有 API key 配置同维度）；全局默认池留后续。
-- fallback 范围：仅瞬时错误 + 仅 run 首轮未改历史，回退一次（不做多级链）。
+- 候选池配置粒度：定为**全局 admin**（API key 页本就 admin-only，模型可用性是全局事实，不分用户）；未配置时回落"已配 api_key"的全部模型。
+- fallback 范围：仅瞬时错误（408/425/429/5xx）+ 仅 run 首轮未改历史（fresh 会话），回退一次到基准模型（手选=自选、auto=池内最高档），不做多级链；流式下首轮 error 帧暂存，成功回退则丢弃。
 - 缓存隔离：严格按 `user_id`，不做"公共问答全局共享池"（避免跨用户泄露，简洁优先）。
-- 降本节省口径：估算 = 按 `merged_pricing` 算"假设用原模型的成本 − 实际成本"，缓存命中按"假设完整生成的成本"估，标注为估算值。
+- 缓存可写判定：单轮起步（fresh 会话，无历史）+ 无 tool + 未注入个性化（rules/记忆/学习计划），三者皆满足才写；`used_tools` / `personalized` 由 agent `final_answer` 事件透传。
+- 缓存失效粒度：KB 任一变更全量作废（不按文档精确作废），简洁优先。
+- 降本节省口径：估算 = 按 `merged_pricing` 算"假设用原模型的成本 − 实际成本"，缓存命中按"假设完整生成的成本"（按答案长度粗估 token）估，标注为估算值。
 
 ### 2.2.9. 测试 + 验收
 

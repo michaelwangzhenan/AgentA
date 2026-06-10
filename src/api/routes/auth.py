@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 import src.config as _cfg
 from src.api.deps import get_current_user, get_user_store
 from src.api.routes.admin import purge_user_data
+from src.llm import model_router
 from src.api.schemas.auth import (
     AuthRequest,
     AuthResponse,
@@ -150,8 +151,15 @@ def update_llm_prefs(
     user: dict = Depends(get_current_user),
     store: UserStore = Depends(get_user_store),
 ) -> LlmPrefs:
-    """更新当前用户的模型 / thinking 偏好；只改传入字段。不影响其他用户。"""
-    if req.active_model is not None and req.active_model not in _cfg.MODEL_CONFIGS:
+    """更新当前用户的模型 / thinking 偏好；只改传入字段。不影响其他用户。
+
+    active_model 允许 "auto"（交给模型路由按难度选）或任一已知模型 id。
+    """
+    if (
+        req.active_model is not None
+        and req.active_model != model_router.AUTO_MODEL
+        and req.active_model not in _cfg.MODEL_CONFIGS
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"不支持的模型: {req.active_model}",

@@ -449,6 +449,26 @@ EVAL_AUTO_GOLDEN_MAX_Q: int = int(os.getenv("EVAL_AUTO_GOLDEN_MAX_Q", "3"))
 # 跑评估时是否纳入未审核（pending）的 golden；默认只用已审核（approved）的
 EVAL_GOLDEN_USE_PENDING: bool = os.getenv("EVAL_GOLDEN_USE_PENDING", "false").lower() == "true"
 
+# ── 降本：模型路由 + 语义缓存 ──────────────────────────────────────────────────
+# 是否启用模型路由（按难度向更便宜的模型降级；可选值：true / false）
+MODEL_ROUTING_ENABLED: bool = os.getenv("MODEL_ROUTING_ENABLED", "true").lower() == "true"
+# 路由难度判定方式（可选值：rule / classifier / hybrid）
+#   rule       纯规则启发（长度 / 是否带 tool 倾向 / 关键词），零额外开销
+#   classifier 调小模型给难度打分（多一次调用，有成本 / 延迟）
+#   hybrid     规则先判，拿不准再调小模型
+MODEL_ROUTING_MODE: str = os.getenv("MODEL_ROUTING_MODE", "rule").lower()
+# classifier / hybrid 模式下做难度打分的小模型 id；为空则降级为纯规则
+MODEL_ROUTING_CLASSIFIER_MODEL: str = os.getenv("MODEL_ROUTING_CLASSIFIER_MODEL", "")
+# 是否启用语义缓存（相近 query 命中历史答案，跳过整次检索 + 生成；可选值：true / false）
+# 出错只记日志、不阻断对话
+SEMANTIC_CACHE_ENABLED: bool = os.getenv("SEMANTIC_CACHE_ENABLED", "true").lower() == "true"
+# 语义缓存用的 ChromaDB collection 名（存在 CHROMA_DB_PATH 下，与 KB collection 分开）
+SEMANTIC_CACHE_COLLECTION: str = os.getenv("SEMANTIC_CACHE_COLLECTION", "semantic_cache")
+# 命中相似度阈值（余弦相似度，0~1；偏严避免误命中）
+SEMANTIC_CACHE_THRESHOLD: float = float(os.getenv("SEMANTIC_CACHE_THRESHOLD", "0.95"))
+# 缓存条目过期天数；查询时过滤掉过期条目
+SEMANTIC_CACHE_TTL_DAYS: int = int(os.getenv("SEMANTIC_CACHE_TTL_DAYS", "7"))
+
 # 同时在跑的 agent.run 并发上限（信号量）；超出的请求排队等待，
 # 防止并发把 LLM 配额 / CPU（含 search_knowledge 精排）打满。
 MAX_CONCURRENT_AGENT_RUNS: int = int(os.getenv("MAX_CONCURRENT_AGENT_RUNS", "4"))

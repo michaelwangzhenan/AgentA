@@ -281,7 +281,21 @@ def ingest_one(
 
     client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
     collection = _open_collection(client, model_name, collection_name)
-    return _ingest_one_file(fp, docs_path, collection, collection_name)
+    result = _ingest_one_file(fp, docs_path, collection, collection_name)
+    # KB 内容变了，语义缓存里依赖旧 KB 的答案可能过期 → 全量作废（软失败旁路）
+    if result.get("status") == "ingested":
+        _invalidate_semantic_cache()
+    return result
+
+
+def _invalidate_semantic_cache() -> None:
+    """KB 变更后作废语义缓存；出错只记 log，不影响入库 / 删除主流程。"""
+    try:
+        from src.memory.semantic_cache import invalidate_all_soft
+
+        invalidate_all_soft()
+    except Exception as e:
+        logger.warning("语义缓存作废失败（已忽略）: %s", e)
 
 
 def ingest_all(
@@ -456,6 +470,7 @@ def delete_kb_document(
     except Exception as e:
         logger.warning("KB 删除物理文件失败 doc_id=%s: %s", doc_id, e)
 
+    _invalidate_semantic_cache()
     return True, chunks_removed
 
 
@@ -529,6 +544,7 @@ def delete_all_kb_documents(
     except Exception as e:
         logger.warning("KB 清空 web_uploads 目录失败: %s", e)
 
+    _invalidate_semantic_cache()
     return {
         "docs_removed": docs_removed,
         "chunks_removed": chunks_removed,

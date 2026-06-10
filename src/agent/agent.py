@@ -268,6 +268,9 @@ class Agent:
         base_with_rules = self.system_prompt + build_rules_block(_get_active_rules())
         system_content = memory_mgr.build_system_prompt(base_with_rules)
         system_content = system_content + build_active_study_plan_block(sid)
+        # 是否注入了个性化内容（user rules / 记忆 / 学习计划）—— 供语义缓存判定是否可缓存：
+        # 个性化答案因人 / 因状态而异，不进缓存。
+        _personalized = system_content.strip() != (self.system_prompt or "").strip()
 
         # 构建当前轮完整 messages
         messages: list[dict[str, Any]] = [
@@ -440,7 +443,10 @@ class Agent:
                 bus.publish(AgentEvent(
                     type=EVENT_FINAL_ANSWER,
                     payload={"text": final_answer, "usage": _usage,
-                             "trace": {"llm_rounds": _llm_rounds}},
+                             "trace": {"llm_rounds": _llm_rounds},
+                             # 语义缓存判定：无工具 + 未注入个性化 才可缓存
+                             "used_tools": tool_rounds > 0,
+                             "personalized": _personalized},
                 ))
                 return final_answer
 

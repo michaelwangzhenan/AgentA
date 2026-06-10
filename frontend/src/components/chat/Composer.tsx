@@ -27,6 +27,7 @@ import {
   DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -418,6 +419,17 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                 {settings.activeModelLabel || '模型'}
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" side="top" className="w-auto min-w-44">
+                <DropdownMenuRadioGroup
+                  value={settings.activeModel}
+                  onValueChange={(v) => void settings.setModel(v)}
+                >
+                  <DropdownMenuRadioItem value="auto">
+                    <span className="flex flex-1 items-center justify-between">
+                      <span className="font-medium">自动（按难度选）</span>
+                    </span>
+                  </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+                <DropdownMenuSeparator />
                 {settings.providers.map((p) => (
                   <DropdownMenuSub key={p.name}>
                     <DropdownMenuSubTrigger>{p.label}</DropdownMenuSubTrigger>

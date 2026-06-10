@@ -111,3 +111,32 @@ export type PricingUpdateItem = {
   input_price: number
   output_price: number
 }
+
+// 降本看板（模型路由 + 语义缓存节省，iter_14）。对齐 src/api/routes/usage.py。
+
+export type SavingsSummary = {
+  start: number
+  end: number
+  range: string
+  currency: string
+  route_count: number
+  route_saved: number
+  cache_count: number
+  cache_saved: number
+  total_saved: number
+}
+
+export type SavingsSeriesRow = {
+  date: string
+  kind: 'route' | 'cache'
+  count: number
+  saved: number
+}
+
+export type SavingsSeries = {
+  start: number
+  end: number
+  range: string
+  currency: string
+  rows: SavingsSeriesRow[]
+}

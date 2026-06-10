@@ -71,6 +71,20 @@ class UsageStore:
                     output_price  REAL NOT NULL DEFAULT 0,
                     updated_at    INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS saving_events (
+                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id        INTEGER NOT NULL,
+                    created_at     INTEGER NOT NULL,
+                    kind           TEXT    NOT NULL,   -- route | cache
+                    original_model TEXT    NOT NULL DEFAULT '',
+                    used_model     TEXT    NOT NULL DEFAULT '',
+                    saved_cost     REAL    NOT NULL DEFAULT 0,
+                    total_tokens   INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS idx_saving_user_time
+                    ON saving_events(user_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_saving_time
+                    ON saving_events(created_at);
             """)
 
     @staticmethod
@@ -301,13 +315,91 @@ class UsageStore:
                 "DELETE FROM model_pricing WHERE model_id = ?", (str(model_id),)
             )
 
+    # ── 降本节省记录（路由 / 缓存命中） ──────────────────────────────────────────
+
+    def record_saving(
+        self,
+        user_id: int,
+        kind: str,
+        original_model: str,
+        used_model: str,
+        saved_cost: float,
+        total_tokens: int = 0,
+        created_at: int | None = None,
+    ) -> None:
+        """记录一次降本事件（路由降级 / 缓存命中）。旁路调用，调用方吞异常。"""
+        ts = int(created_at) if created_at is not None else self._now()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO saving_events"
+                "(user_id, created_at, kind, original_model, used_model, saved_cost, total_tokens) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (int(user_id), ts, str(kind), str(original_model or ""),
+                 str(used_model or ""), float(saved_cost or 0.0), int(total_tokens or 0)),
+            )
+
+    def aggregate_savings(
+        self, start_ts: int, end_ts: int, user_id: int | None = None
+    ) -> dict[str, Any]:
+        """按 kind 汇总降本（次数 + 估算节省）。"""
+        sql = (
+            "SELECT kind, COUNT(*) AS cnt, SUM(saved_cost) AS saved "
+            "FROM saving_events WHERE created_at >= ? AND created_at < ?"
+        )
+        params: list[Any] = [int(start_ts), int(end_ts)]
+        if user_id is not None:
+            sql += " AND user_id = ?"
+            params.append(int(user_id))
+        sql += " GROUP BY kind"
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        out = {
+            "route_count": 0, "route_saved": 0.0,
+            "cache_count": 0, "cache_saved": 0.0,
+        }
+        for r in rows:
+            if r["kind"] == "route":
+                out["route_count"] = int(r["cnt"] or 0)
+                out["route_saved"] = float(r["saved"] or 0.0)
+            elif r["kind"] == "cache":
+                out["cache_count"] = int(r["cnt"] or 0)
+                out["cache_saved"] = float(r["saved"] or 0.0)
+        return out
+
+    def savings_series(
+        self, start_ts: int, end_ts: int, user_id: int | None = None
+    ) -> list[dict[str, Any]]:
+        """按 (天, kind) 聚合节省金额（趋势图原料）。"""
+        sql = (
+            "SELECT strftime('%Y-%m-%d', created_at, 'unixepoch', 'localtime') AS day, "
+            "kind, COUNT(*) AS cnt, SUM(saved_cost) AS saved "
+            "FROM saving_events WHERE created_at >= ? AND created_at < ?"
+        )
+        params: list[Any] = [int(start_ts), int(end_ts)]
+        if user_id is not None:
+            sql += " AND user_id = ?"
+            params.append(int(user_id))
+        sql += " GROUP BY day, kind ORDER BY day ASC"
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [
+            {
+                "day": r["day"], "kind": r["kind"],
+                "count": int(r["cnt"] or 0), "saved": float(r["saved"] or 0.0),
+            }
+            for r in rows
+        ]
+
     # ── 级联清理 ──────────────────────────────────────────────────────────────
 
     def delete_all_for_user(self, user_id: int) -> int:
-        """删除某用户的全部用量记录（注销 / admin 删号时级联调用）。返回删除条数。"""
+        """删除某用户的全部用量 + 降本记录（注销 / admin 删号时级联调用）。返回 usage 删除条数。"""
         with self._lock, self._conn:
             cur = self._conn.execute(
                 "DELETE FROM usage_events WHERE user_id = ?", (int(user_id),)
+            )
+            self._conn.execute(
+                "DELETE FROM saving_events WHERE user_id = ?", (int(user_id),)
             )
         return cur.rowcount
 
@@ -398,3 +490,21 @@ def record_usage(
         )
     except Exception:
         logger.warning("[usage] record_usage 失败（已忽略，不影响对话）", exc_info=True)
+
+
+def record_saving(
+    user_id: int,
+    kind: str,
+    original_model: str,
+    used_model: str,
+    saved_cost: float,
+    total_tokens: int = 0,
+) -> None:
+    """记录一次降本事件；**异常只记日志、绝不抛**（旁路，不影响对话）。"""
+    try:
+        get_shared_store().record_saving(
+            user_id=user_id, kind=kind, original_model=original_model,
+            used_model=used_model, saved_cost=saved_cost, total_tokens=total_tokens,
+        )
+    except Exception:
+        logger.warning("[usage] record_saving 失败（已忽略）", exc_info=True)

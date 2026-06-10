@@ -64,11 +64,14 @@ import type { AuthResponse, LlmPrefs, LlmPrefsUpdate, UserInfo } from '@/types/a
 import type {
   PricingResponse,
   PricingUpdateItem,
+  SavingsSeries,
+  SavingsSummary,
   UsageEvents,
   UsageSeries,
   UsageSummary,
   UserUsageList,
 } from '@/types/usage'
+import type { RoutingPoolResponse } from '@/types/routing'
 import type {
   GoldenCreateInput,
   GoldenItem,
@@ -876,6 +879,42 @@ export async function putPricing(items: PricingUpdateItem[]): Promise<PricingRes
   })
   await _ensureOk(res)
   return (await res.json()) as PricingResponse
+}
+
+// ─── 降本看板 + 模型路由候选池（iter_14）─────────────────────────────────
+
+export async function getSavingsSummary(
+  range: string,
+  scope: UsageScope = 'mine',
+): Promise<SavingsSummary> {
+  const res = await apiFetch(`${_usagePrefix(scope)}/savings?range=${range}`)
+  await _ensureOk(res)
+  return (await res.json()) as SavingsSummary
+}
+
+export async function getSavingsSeries(
+  range: string,
+  scope: UsageScope = 'mine',
+): Promise<SavingsSeries> {
+  const res = await apiFetch(`${_usagePrefix(scope)}/savings/series?range=${range}`)
+  await _ensureOk(res)
+  return (await res.json()) as SavingsSeries
+}
+
+export async function getRoutingPool(): Promise<RoutingPoolResponse> {
+  const res = await apiFetch('/api/routing/pool')
+  await _ensureOk(res)
+  return (await res.json()) as RoutingPoolResponse
+}
+
+export async function putRoutingPool(modelIds: string[]): Promise<RoutingPoolResponse> {
+  const res = await apiFetch('/api/routing/pool', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model_ids: modelIds }),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as RoutingPoolResponse
 }
 
 // ─── 评估 + 可观测（质量看板，iter_14）─────────────────────────────────

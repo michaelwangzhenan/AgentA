@@ -68,6 +68,7 @@ export function useComposerSettings() {
 
   // 当前模型的 label + 是否支持 thinking，从目录里查
   const active = useMemo(() => {
+    if (activeModel === 'auto') return { label: '自动', thinking: false }
     for (const p of providers) {
       const m = p.models.find((x) => x.id === activeModel)
       if (m) return { label: m.label, thinking: m.thinking }

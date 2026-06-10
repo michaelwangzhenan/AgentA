@@ -5,8 +5,9 @@ import { useAuth } from '@/lib/auth'
 import { ResourcePage } from '@/components/resources/ResourcePage'
 import { UsageDashboard } from './UsageDashboard'
 import { PricingConfig } from './PricingConfig'
+import { SavingsPanel } from './SavingsPanel'
 
-type Tab = 'mine' | 'all' | 'pricing'
+type Tab = 'mine' | 'savings' | 'all' | 'savings_all' | 'pricing'
 
 export function UsageView() {
   const { isAdmin } = useAuth()
@@ -14,9 +15,11 @@ export function UsageView() {
 
   const tabs: { value: Tab; label: string }[] = [
     { value: 'mine', label: '我的用量' },
+    { value: 'savings', label: '降本' },
     ...(isAdmin
       ? ([
           { value: 'all', label: '全员用量' },
+          { value: 'savings_all', label: '全员降本' },
           { value: 'pricing', label: '单价配置' },
         ] as { value: Tab; label: string }[])
       : []),
@@ -49,7 +52,9 @@ export function UsageView() {
       }
     >
       {active === 'mine' && <UsageDashboard scope="mine" />}
+      {active === 'savings' && <SavingsPanel scope="mine" />}
       {active === 'all' && isAdmin && <UsageDashboard scope="all" />}
+      {active === 'savings_all' && isAdmin && <SavingsPanel scope="all" />}
       {active === 'pricing' && isAdmin && <PricingConfig />}
     </ResourcePage>
   )

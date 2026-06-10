@@ -40,6 +40,9 @@ def purge_user_data(user_id: int) -> None:
     get_srs_store().delete_all_for_user(user_id)
     get_usage_store().delete_all_for_user(user_id)
     get_trace_store().delete_all_for_user(user_id)
+    # 语义缓存按 user_id 隔离，删号时一并清掉该用户的缓存答案（软失败）
+    from src.memory.semantic_cache import delete_for_user_soft
+    delete_for_user_soft(user_id)
 
 
 @router.get("/users", response_model=UserListResponse)

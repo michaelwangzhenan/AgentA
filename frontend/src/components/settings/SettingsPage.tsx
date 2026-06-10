@@ -1,16 +1,17 @@
 import { useState } from 'react'
-import { KeyRound, KeySquare, SlidersHorizontal, User, Users, UserX } from 'lucide-react'
+import { KeyRound, KeySquare, Route, SlidersHorizontal, User, Users, UserX } from 'lucide-react'
 
 import { ProfileSettings } from '@/components/settings/ProfileSettings'
 import { PasswordSettings } from '@/components/settings/PasswordSettings'
 import { AccountDeletion } from '@/components/settings/AccountDeletion'
 import { ApiKeysConfig } from '@/components/settings/ApiKeysConfig'
+import { RoutingPoolConfig } from '@/components/settings/RoutingPoolConfig'
 import { SettingsView } from '@/components/settings/SettingsView'
 import { UserManagement } from '@/components/settings/UserManagement'
 import { useAuth } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 
-type Section = 'profile' | 'password' | 'system' | 'apikeys' | 'users' | 'account'
+type Section = 'profile' | 'password' | 'system' | 'apikeys' | 'routing' | 'users' | 'account'
 
 type NavItem = {
   id: Section
@@ -24,6 +25,7 @@ const NAV: NavItem[] = [
   { id: 'password', label: '修改密码', icon: KeyRound },
   { id: 'system', label: '系统配置', icon: SlidersHorizontal, adminOnly: true },
   { id: 'apikeys', label: 'API 密钥', icon: KeySquare, adminOnly: true },
+  { id: 'routing', label: '模型选择', icon: Route, adminOnly: true },
   { id: 'users', label: '用户管理', icon: Users, adminOnly: true },
   { id: 'account', label: '注销账号', icon: UserX },
 ]
@@ -89,6 +91,12 @@ export function SettingsPage() {
           {section === 'apikeys' && isAdmin && (
             <div className="mx-auto max-w-2xl">
               <ApiKeysConfig />
+            </div>
+          )}
+          {section === 'routing' && isAdmin && (
+            <div className="mx-auto max-w-2xl">
+              <h2 className="mb-1 text-sm font-semibold">模型路由候选池</h2>
+              <RoutingPoolConfig />
             </div>
           )}
           {section === 'users' && isAdmin && (
