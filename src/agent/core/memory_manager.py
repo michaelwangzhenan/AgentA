@@ -8,6 +8,7 @@ UserMemoryStore 本身只做 CRUD（add / load_all / load_for_context / apply_op
 """
 from __future__ import annotations
 
+import contextvars
 import logging
 import threading
 from typing import Any, Callable
@@ -134,9 +135,15 @@ class MemoryManager:
         context_history = self._format_turns(recent_turns)
         source = "explicit" if is_explicit else "auto"
 
+        # 子线程默认不继承父 context：复制一份当前 context 带进去，让后台提取的日志
+        # 仍带 session/request（否则会丢成 `s:- r:-`，无法跟本轮对话串链路）。
+        # uid 仍显式下传（不依赖 contextvar），保持原有写库正确性不变。
+        ctx = contextvars.copy_context()
         thread = threading.Thread(
-            target=self._extract_and_store,
-            args=(user_input, agent_reply, context_history, is_explicit, source, uid),
+            target=lambda: ctx.run(
+                self._extract_and_store,
+                user_input, agent_reply, context_history, is_explicit, source, uid,
+            ),
             name="user-memory-extract",
             daemon=True,
         )

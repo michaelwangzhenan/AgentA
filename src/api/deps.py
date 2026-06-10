@@ -84,11 +84,19 @@ def get_chat_history() -> ChatHistoryStore:
 def get_user_memory_store() -> UserMemoryStore | None:
     """返回进程级单例 UserMemoryStore；USER_MEMORY_ENABLED=false 时返回 None。
 
-    API 层独立 connection，与 Agent 共用底层 sqlite 文件。
+    API 层独立 connection，与 Agent 共用底层 sqlite 文件。旧版结构化 schema 触发
+    fail-fast（RuntimeError）时转成带操作指引的 503，避免给前端裸抛 500 + traceback。
+    lru_cache 不缓存异常，删库重建后下次调用会重新构造成功。
     """
     if not _cfg.USER_MEMORY_ENABLED:
         return None
-    return UserMemoryStore(_cfg.USER_MEMORY_DB_PATH)
+    try:
+        return UserMemoryStore(_cfg.USER_MEMORY_DB_PATH)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
 
 
 def get_mcp_manager() -> MCPManager:

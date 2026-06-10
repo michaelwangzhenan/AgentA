@@ -114,6 +114,35 @@ class TestParallelToolExecution:
         first_end = min(i for i, e in enumerate(captured) if e == EVENT_TOOL_CALL_END)
         assert last_start < first_end
 
+    def test_parallel_workers_inherit_logging_context(self) -> None:
+        """并行 worker 线程应继承父 context：工具内读到的 session_id = 父线程所设值。
+
+        锁住 iter_8_13 验证报告 §2.1 的修复（copy_context）：不修时子线程取默认 '-'，
+        并行工具的日志会丢成 `s:-`，无法按 session 串链路。
+        """
+        from src.log_setup import get_session_id, set_session_id
+
+        engine = _mk_engine()
+        seen: dict[str, str] = {}
+
+        def fake_exec(name: str, args: dict[str, Any], skill_bodies: dict, **kw: Any) -> ToolResult:
+            seen[args["q"]] = get_session_id()
+            return ToolResult(status="ok", content="ok")
+
+        set_session_id("sess-xyz")
+        try:
+            messages: list[dict[str, Any]] = []
+            msg = _message(
+                _tc("c1", "web_search", {"q": "a"}),
+                _tc("c2", "web_search", {"q": "b"}),
+            )
+            with patch("src.agent.core.tool_call_engine.execute_tool", side_effect=fake_exec):
+                engine.process(msg, messages)
+        finally:
+            set_session_id(None)
+
+        assert seen == {"a": "sess-xyz", "b": "sess-xyz"}
+
     def test_single_tool_still_works(self) -> None:
         """单工具走串行路径，行为不变。"""
         engine = _mk_engine()

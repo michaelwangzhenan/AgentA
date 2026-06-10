@@ -12,6 +12,7 @@ ToolCallEngine —— 工具调用编排（Helper 层）
 """
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
@@ -170,17 +171,26 @@ class ToolCallEngine:
     ) -> list[ToolResult]:
         """并行执行多个非 plan 工具，结果按入参顺序返回。
 
-        每个 worker 在自己线程内 set tool_progress contextvar（线程不继承父 context），
-        工具内部 publish_tool_progress 才能拿到 (bus, call_id)。execute_tool 自身捕获所有
+        每个 worker 在自己线程内 set tool_progress contextvar，工具内部
+        publish_tool_progress 才能拿到 (bus, call_id)。execute_tool 自身捕获所有
         异常并以 status=error 返回，故 future 不会抛出。并行期间不改 messages（只读透传），
         落地（写历史 / 追加 messages）统一在主线程串行做，保证顺序与 plan 一致性。
+
+        子线程默认不继承父 context，故每个任务在主线程复制一份当前 context 带进去
+        （`copy_context().run`）——让日志的 session/request、user/llm_prefs 等 contextvar
+        在工具线程内仍有效（否则并行工具的日志会丢成 `s:- r:-`，无法串链路）。
+        每个任务各自一份独立 copy，互不串扰；tool_progress 仍在各自 copy 内现场设。
         """
         def work(tool_call: Any, name: str, args: dict[str, Any]) -> ToolResult:
             with tool_progress_scope(self._events, tool_call.id):
                 return self._exec(name, args, messages)
 
         with ThreadPoolExecutor(max_workers=min(len(parsed), _MAX_PARALLEL_TOOLS)) as pool:
-            return list(pool.map(lambda p: work(*p), parsed))
+            futures = [
+                pool.submit(contextvars.copy_context().run, work, tc, name, args)
+                for tc, name, args in parsed
+            ]
+            return [f.result() for f in futures]
 
     def _consume_result(
         self,
