@@ -1,6 +1,7 @@
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import type {
   AgentStreamEvent,
+  ChatMode,
   ChatRequest,
   ChatResponse,
 } from '@/types/chat'
@@ -143,9 +144,9 @@ class StreamAbortedError extends Error {}
 export async function streamChat(
   message: string,
   handlers: StreamHandlers,
-  options: { sessionId?: string; signal?: AbortSignal } = {},
+  options: { sessionId?: string; signal?: AbortSignal; mode?: ChatMode } = {},
 ): Promise<void> {
-  const { sessionId, signal } = options
+  const { sessionId, signal, mode } = options
   try {
     await fetchEventSource('/api/chat/stream', {
       method: 'POST',
@@ -154,6 +155,7 @@ export async function streamChat(
       body: JSON.stringify({
         message,
         ...(sessionId ? { session_id: sessionId } : {}),
+        ...(mode ? { mode } : {}),
       } satisfies ChatRequest),
       signal,
       openWhenHidden: true,

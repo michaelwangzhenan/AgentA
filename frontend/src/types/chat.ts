@@ -1,8 +1,11 @@
 export type Role = 'user' | 'assistant'
 
+export type ChatMode = 'chat' | 'deep_research'
+
 export type ChatRequest = {
   message: string
   session_id?: string
+  mode?: ChatMode
 }
 
 export type ChatResponse = {
@@ -59,6 +62,29 @@ export type AgentStreamEvent =
       payload: { message: string; recoverable: boolean; phase: string }
     }
   | { type: 'info'; payload: Record<string, unknown> }
+  // ─── Deep Research 四阶段进度事件（对齐后端 research_* 事件）───────────
+  | { type: 'research_started'; payload: { query: string } }
+  | {
+      type: 'research_plan'
+      payload: { subquestions: { id: number; text: string }[] }
+    }
+  | {
+      type: 'research_subagent_start'
+      payload: { sub_id: number; question: string }
+    }
+  | {
+      type: 'research_subagent_progress'
+      payload: { sub_id: number; stage: string; label: string; sources: number }
+    }
+  | {
+      type: 'research_subagent_end'
+      payload: { sub_id: number; status: string; sources: number; note?: string }
+    }
+  | {
+      type: 'research_reflect'
+      payload: { note: string; gap?: string; followups?: string[] }
+    }
+  | { type: 'research_synthesizing'; payload: Record<string, unknown> }
 
 // ─── Assistant 消息子块状态 ────────────────────────────────────────────
 
@@ -105,6 +131,42 @@ export type ToolSegment = {
 /** 按事件到达顺序排列的 thinking / 工具调用混合时间线（保留 think→act 的循环结构） */
 export type TimelineItem = ThinkingSegment | ToolSegment
 
+// ─── Deep Research 研究面板状态 ────────────────────────────────────────
+
+export type ResearchPhase =
+  | 'planning'
+  | 'researching'
+  | 'reflecting'
+  | 'synthesizing'
+  | 'done'
+
+export type ResearchSubagentStatus = 'running' | 'ok' | 'failed'
+
+export type ResearchSubagent = {
+  sub_id: number
+  question: string
+  status: ResearchSubagentStatus
+  /** 当前阶段标签（检索知识库 / 联网搜索 / 读取网页），结束后清空 */
+  label?: string
+  sources: number
+  note?: string
+}
+
+export type ResearchReflect = {
+  note: string
+  gap?: string
+  followups?: string[]
+}
+
+/** 深度研究进度面板状态：四阶段 + 子代理行 */
+export type ResearchState = {
+  phase: ResearchPhase
+  query: string
+  subquestions: { id: number; text: string }[]
+  subagents: ResearchSubagent[]
+  reflect?: ResearchReflect | null
+}
+
 /** 一次生成结果的快照；regenerate 多次后用于 ‹N/M› 切换（仅前端内存，不持久化） */
 export type AssistantVersion = {
   content: string
@@ -122,6 +184,8 @@ export type AssistantMessage = {
   error: string | null
   streaming: boolean
   createdAt?: number
+  /** 深度研究进度面板状态；非深度研究消息为 null / 缺省 */
+  research?: ResearchState | null
   /** regenerate 产生的历史版本快照（含当前）；缺省 / 长度<2 时不显示切换器 */
   versions?: AssistantVersion[]
   versionIndex?: number

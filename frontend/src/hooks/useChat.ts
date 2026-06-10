@@ -3,9 +3,11 @@ import { loadSessionMessages, streamChat, truncateSession } from '@/api/client'
 import type {
   AssistantMessage,
   AssistantVersion,
+  ChatMode,
   Message,
   PlanStep,
   PlanStepStatus,
+  ResearchState,
   TimelineItem,
   ToolCallState,
   UserMessage,
@@ -13,7 +15,11 @@ import type {
 import { backendMessagesToFrontend } from '@/types/session'
 import { parseUserMessage } from '@/lib/attachments'
 
-function newAssistantMessage(): AssistantMessage {
+function newResearchState(): ResearchState {
+  return { phase: 'planning', query: '', subquestions: [], subagents: [], reflect: null }
+}
+
+function newAssistantMessage(mode?: ChatMode): AssistantMessage {
   return {
     id: crypto.randomUUID(),
     role: 'assistant',
@@ -23,6 +29,7 @@ function newAssistantMessage(): AssistantMessage {
     error: null,
     streaming: true,
     createdAt: Date.now(),
+    research: mode === 'deep_research' ? newResearchState() : null,
   }
 }
 
@@ -119,7 +126,7 @@ export function useChat({ sessionId, onSettled }: Options) {
 
   // ─── 流式核心：把一段文本流进指定 assistant 消息 ───────────────────────
   const streamInto = useCallback(
-    async (text: string, assistantId: string, sid: string) => {
+    async (text: string, assistantId: string, sid: string, mode?: ChatMode) => {
       setInFlight(true)
       const ctrl = new AbortController()
       streamCtrlRef.current = ctrl
@@ -135,6 +142,11 @@ export function useChat({ sessionId, onSettled }: Options) {
             m.role === 'assistant' && m.id === assistantId ? updater(m) : m,
           ),
         )
+      }
+
+      // 深度研究：把更新合并进 research 状态（缺省时先建基础态，兼容历史回看消息）
+      const updateResearch = (fn: (r: ResearchState) => ResearchState) => {
+        update((m) => ({ ...m, research: fn(m.research ?? newResearchState()) }))
       }
 
       try {
@@ -267,11 +279,85 @@ export function useChat({ sessionId, onSettled }: Options) {
                       ) ?? null,
                   }))
                   break
+                case 'research_started':
+                  updateResearch((r) => ({
+                    ...r,
+                    phase: 'planning',
+                    query: ev.payload.query,
+                  }))
+                  break
+                case 'research_plan':
+                  updateResearch((r) => ({
+                    ...r,
+                    phase: 'researching',
+                    subquestions: ev.payload.subquestions,
+                  }))
+                  break
+                case 'research_subagent_start':
+                  updateResearch((r) => {
+                    const rest = r.subagents.filter((s) => s.sub_id !== ev.payload.sub_id)
+                    return {
+                      ...r,
+                      phase: 'researching',
+                      subagents: [
+                        ...rest,
+                        {
+                          sub_id: ev.payload.sub_id,
+                          question: ev.payload.question,
+                          status: 'running' as const,
+                          sources: 0,
+                        },
+                      ].sort((a, b) => a.sub_id - b.sub_id),
+                    }
+                  })
+                  break
+                case 'research_subagent_progress':
+                  updateResearch((r) => ({
+                    ...r,
+                    subagents: r.subagents.map((s) =>
+                      s.sub_id === ev.payload.sub_id
+                        ? { ...s, label: ev.payload.label, sources: ev.payload.sources }
+                        : s,
+                    ),
+                  }))
+                  break
+                case 'research_subagent_end':
+                  updateResearch((r) => ({
+                    ...r,
+                    subagents: r.subagents.map((s) =>
+                      s.sub_id === ev.payload.sub_id
+                        ? {
+                            ...s,
+                            status:
+                              ev.payload.status === 'failed' ? 'failed' : 'ok',
+                            sources: ev.payload.sources,
+                            note: ev.payload.note,
+                            label: undefined,
+                          }
+                        : s,
+                    ),
+                  }))
+                  break
+                case 'research_reflect':
+                  updateResearch((r) => ({
+                    ...r,
+                    phase: 'reflecting',
+                    reflect: {
+                      note: ev.payload.note,
+                      gap: ev.payload.gap,
+                      followups: ev.payload.followups,
+                    },
+                  }))
+                  break
+                case 'research_synthesizing':
+                  updateResearch((r) => ({ ...r, phase: 'synthesizing' }))
+                  break
                 case 'final_answer':
                   update((m) => ({
                     ...m,
                     content: m.content || ev.payload.text,
                     streaming: false,
+                    research: m.research ? { ...m.research, phase: 'done' } : m.research,
                   }))
                   break
                 case 'error':
@@ -311,7 +397,7 @@ export function useChat({ sessionId, onSettled }: Options) {
               })
             },
           },
-          { sessionId: sid, signal: ctrl.signal },
+          { sessionId: sid, signal: ctrl.signal, mode },
         )
       } catch {
         // onError 已处理
@@ -335,7 +421,7 @@ export function useChat({ sessionId, onSettled }: Options) {
 
   // ─── 发新消息 ──────────────────────────────────────────────────────────
   const send = useCallback(
-    (text: string) => {
+    (text: string, mode?: ChatMode) => {
       if (!sessionId || !text.trim()) return
       // text 是含内联附件正文的完整消息：发给后端用全文，气泡展示只留 query + 附件卡片
       const { text: display, attachments } = parseUserMessage(text)
@@ -347,9 +433,9 @@ export function useChat({ sessionId, onSettled }: Options) {
         attachments,
         createdAt: Date.now(),
       }
-      const assistantMsg = newAssistantMessage()
+      const assistantMsg = newAssistantMessage(mode)
       setMessages((prev) => [...prev, userMsg, assistantMsg])
-      void streamInto(text, assistantMsg.id, sessionId)
+      void streamInto(text, assistantMsg.id, sessionId, mode)
     },
     [sessionId, streamInto],
   )

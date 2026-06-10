@@ -203,6 +203,64 @@ def test_stream_with_session_id_passes_it_to_run():
     assert fake.last_session_id == "target-uuid"
 
 
+def test_stream_deep_research_mode_dispatches_to_research_engine(monkeypatch):
+    """mode=deep_research → 走 ResearchEngine，不调 agent.run；研究事件透传到流。"""
+    import src.agent.core.research_engine as re_mod
+
+    fake = FakeAgent(events_to_emit=[
+        AgentEvent(type="final_answer", payload={"text": "should-not-be-used", "usage": None}),
+    ])
+    app.dependency_overrides[get_agent] = lambda: fake
+
+    class FakeResearchEngine:
+        def __init__(self, history, user_id=None):
+            self.history = history
+
+        def run(self, message, *, session_id, event_callback=None):
+            event_callback(AgentEvent(type="research_started", payload={"query": message}))
+            event_callback(AgentEvent(type="research_plan", payload={
+                "subquestions": [{"id": 0, "text": "子问题"}],
+            }))
+            event_callback(AgentEvent(type="final_answer", payload={
+                "text": "研究报告", "usage": None, "used_tools": True, "personalized": False,
+            }))
+            return "研究报告"
+
+    monkeypatch.setattr(re_mod, "ResearchEngine", FakeResearchEngine)
+
+    with client.stream(
+        "POST", "/api/chat/stream",
+        json={"message": "深度问题", "mode": "deep_research"},
+    ) as r:
+        assert r.status_code == 200
+        body = "".join(chunk for chunk in r.iter_text())
+
+    frames = _parse_sse(body)
+    types = [f["data"]["type"] for f in frames]
+    assert "research_started" in types
+    assert "research_plan" in types
+    assert types[-1] == "final_answer"
+    # 深度研究分支不应调用普通 agent.run
+    assert fake.last_session_id is None
+
+
+def test_stream_default_mode_uses_agent_not_research_engine():
+    """缺省 / mode=chat → 走普通 agent.run（回归保护）。"""
+    fake = FakeAgent(events_to_emit=[
+        AgentEvent(type="final_answer", payload={"text": "ok", "usage": None}),
+    ])
+    app.dependency_overrides[get_agent] = lambda: fake
+
+    with client.stream(
+        "POST", "/api/chat/stream", json={"message": "hi", "mode": "chat"},
+    ) as r:
+        assert r.status_code == 200
+        for _ in r.iter_text():
+            pass
+
+    assert fake.last_session_id is not None
+
+
 def test_stream_sanitizes_namedtuple_payload():
     """final_answer.payload 的 usage 可能是 TokenUsage NamedTuple；
     确认 sanitize 后变成 dict 而不是 JSON 里的 list。"""

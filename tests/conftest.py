@@ -70,6 +70,9 @@ def _isolated_agent_memory(tmp_path, _neutralize_runtime_overrides):
     - 替换 _chat_history：隔离对话历史 DB
     - 替换 _shared_user_memory 为 None，并临时关闭 USER_MEMORY_ENABLED：
       防止 MemoryManager.try_extract 向真实 DB 写入、或额外调用 LLM 干扰 mock 计数
+    - 临时关闭 SEMANTIC_CACHE_ENABLED：语义缓存共用进程级 ChromaDB（不随测试隔离），
+      历次跑积累的条目会让 chat 端点测试随机命中缓存、跳过 agent.run 而失败；
+      默认关掉保证确定性。需要验证缓存的测试自行 monkeypatch 设回 True。
     """
     from src.memory.chat_history import ChatHistoryStore
 
@@ -86,6 +89,10 @@ def _isolated_agent_memory(tmp_path, _neutralize_runtime_overrides):
     _agent_module._cfg.USER_MEMORY_ENABLED = False
     _agent_module._cfg.USER_MEMORY_AUTO_EXTRACT = False
 
+    # ── 语义缓存隔离 ──────────────────────────────────────────────────────────
+    _orig_cache = _agent_module._cfg.SEMANTIC_CACHE_ENABLED
+    _agent_module._cfg.SEMANTIC_CACHE_ENABLED = False
+
     yield
 
     # ── 恢复原始状态 ──────────────────────────────────────────────────────────
@@ -93,4 +100,5 @@ def _isolated_agent_memory(tmp_path, _neutralize_runtime_overrides):
     _agent_module._shared_user_memory = _orig_user_mem
     _agent_module._cfg.USER_MEMORY_ENABLED = _orig_enabled
     _agent_module._cfg.USER_MEMORY_AUTO_EXTRACT = _orig_auto
+    _agent_module._cfg.SEMANTIC_CACHE_ENABLED = _orig_cache
     mem.close()

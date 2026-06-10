@@ -473,6 +473,24 @@ SEMANTIC_CACHE_TTL_DAYS: int = int(os.getenv("SEMANTIC_CACHE_TTL_DAYS", "7"))
 # 防止并发把 LLM 配额 / CPU（含 search_knowledge 精排）打满。
 MAX_CONCURRENT_AGENT_RUNS: int = int(os.getenv("MAX_CONCURRENT_AGENT_RUNS", "4"))
 
+# ── Deep Research（深度研究）──────────────────────────────────────────────────
+# 一句话换回一篇带引用的调研报告：规划拆子问题 → 并行子代理查 KB+web → 反思补查 → 综述成稿。
+# 定位"重质量不重速度"；走独立 ResearchEngine，不复用普通 chat 主循环。
+# 是否启用深度研究（关则前端开关隐藏、收到 deep_research 请求降级为普通对话；可选值：true / false）
+DEEP_RESEARCH_ENABLED: bool = os.getenv("DEEP_RESEARCH_ENABLED", "true").lower() == "true"
+# 规划阶段子问题数上限（实际数量裁剪到 3~该值）
+DEEP_RESEARCH_MAX_SUBQUESTIONS: int = int(os.getenv("DEEP_RESEARCH_MAX_SUBQUESTIONS", "5"))
+# 子代理并行上限（同时在跑的子代理数；放大会成倍占用 LLM 配额，故封顶）
+DEEP_RESEARCH_MAX_PARALLEL_SUBAGENTS: int = int(os.getenv("DEEP_RESEARCH_MAX_PARALLEL_SUBAGENTS", "3"))
+# 单个子代理的工具调用轮次上限（到上限即让它就该子问题产出小结）
+DEEP_RESEARCH_SUBAGENT_MAX_ROUNDS: int = int(os.getenv("DEEP_RESEARCH_SUBAGENT_MAX_ROUNDS", "4"))
+# 单个子代理最多采纳的来源数（KB + web 合计），防单路检索失控
+DEEP_RESEARCH_MAX_SOURCES_PER_SUBAGENT: int = int(os.getenv("DEEP_RESEARCH_MAX_SOURCES_PER_SUBAGENT", "5"))
+# 整次研究的总来源上限，防全局失控
+DEEP_RESEARCH_MAX_TOTAL_SOURCES: int = int(os.getenv("DEEP_RESEARCH_MAX_TOTAL_SOURCES", "20"))
+# 是否开反思补查（综述前评估缺口，最多补查 1 轮；可选值：true / false）
+DEEP_RESEARCH_REFLECT_ENABLED: bool = os.getenv("DEEP_RESEARCH_REFLECT_ENABLED", "true").lower() == "true"
+
 # 单次问答里最多调几轮工具（baseline，无 active plan 时用），防止 LLM 工具调用死循环
 MAX_TOOL_ROUNDS: int = int(os.getenv("MAX_TOOL_ROUNDS", "8"))
 

@@ -14,6 +14,7 @@ import {
   Brain,
   Loader2,
   Mic,
+  Microscope,
   Paperclip,
   Plus,
   Square,
@@ -41,6 +42,7 @@ import {
 } from '@/hooks/useComposerSettings'
 import { listSkills } from '@/api/client'
 import type { SkillItem } from '@/types/resources'
+import type { ChatMode } from '@/types/chat'
 import { cn } from '@/lib/utils'
 
 export type ComposerHandle = {
@@ -51,7 +53,7 @@ export type ComposerHandle = {
 type Props = {
   sessionId: string | null
   inFlight: boolean
-  onSend: (text: string) => void
+  onSend: (text: string, mode?: ChatMode) => void
   onStop: () => void
 }
 
@@ -254,7 +256,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     if (inFlight) return
     const msg = buildMessage()
     if (!msg) return
-    onSend(msg)
+    onSend(msg, settings.deepResearch ? 'deep_research' : undefined)
     clearDraft()
     setAttachments((prev) => {
       prev.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl))
@@ -499,6 +501,25 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                 </DropdownMenuRadioGroup>
               </DropdownMenuContent>
             </DropdownMenu>
+
+            {/* 深度研究开关：仅在全局启用时显示；耗时数分钟、费更多 token */}
+            {settings.deepResearchEnabled ? (
+              <button
+                type="button"
+                onClick={() => settings.setDeepResearch(!settings.deepResearch)}
+                aria-pressed={settings.deepResearch}
+                title="深度研究：拆子问题 → 并行查 KB+联网 → 反思补查 → 综述带引用的报告（耗时数分钟、费更多 token）"
+                className={cn(
+                  'flex h-8 items-center gap-1 rounded-md px-2 text-sm transition-colors',
+                  settings.deepResearch
+                    ? 'bg-violet-500/15 text-violet-600 dark:text-violet-300'
+                    : 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground',
+                )}
+              >
+                <Microscope className="h-4 w-4" />
+                深度研究
+              </button>
+            ) : null}
 
             <div className="ml-auto flex items-center gap-2">
               {/* token 估算占位 [§3] */}

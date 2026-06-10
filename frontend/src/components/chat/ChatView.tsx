@@ -3,13 +3,13 @@ import { Composer, type ComposerHandle } from '@/components/chat/Composer'
 import { MessageList } from '@/components/chat/MessageList'
 import { EmptyState, EmptyChips } from '@/components/chat/EmptyState'
 import type { BubbleCallbacks } from '@/components/chat/MessageBubble'
-import type { Message } from '@/types/chat'
+import type { ChatMode, Message } from '@/types/chat'
 
 export type ChatViewProps = {
   sessionId: string | null
   messages: Message[]
   inFlight: boolean
-  onSend: (text: string) => void
+  onSend: (text: string, mode?: ChatMode) => void
   onStop: () => void
   onRegenerate: (assistantId: string) => void
   onEditResend: (userId: string, newText: string) => void

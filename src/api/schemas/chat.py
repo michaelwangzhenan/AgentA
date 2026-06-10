@@ -1,5 +1,7 @@
 """Chat 端点请求 / 响应模型"""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -8,6 +10,10 @@ class ChatRequest(BaseModel):
     session_id: str | None = Field(
         None,
         description="目标 session id；不传则用 Agent 当前 session_id（兼容 Step 2 行为）",
+    )
+    mode: Literal["chat", "deep_research"] | None = Field(
+        None,
+        description="对话模式；deep_research 走 ResearchEngine 深度研究，缺省 / chat 为普通对话",
     )
 
 

@@ -280,12 +280,26 @@ async def chat_stream(
     session_id = req.session_id or str(uuid.uuid4())
     fresh = _is_fresh_session(history, session_id, user["id"])
 
-    decision = model_router.route(req.message, prefs.active_model)
-    used_model = decision.model_id
-    logger.info("[/api/chat/stream] 路由：%s", decision.reason)
+    # Deep Research：重质量不重速度 —— 跳过语义缓存（多源研究永不可缓存）+ 跳过模型降级
+    # 路由（绝不向下换便宜模型），用用户选定 / 基准模型。
+    is_deep = bool(req.mode == "deep_research" and _cfg.DEEP_RESEARCH_ENABLED)
+    if is_deep:
+        # 跳过难度分类 / 降级路由（enabled=False 不调分类 LLM），但仍要把 auto 解析成
+        # 具体模型 —— 否则 "auto" 会原样传到 chat() / get_active_model() 解析失败。
+        base = model_router.route(req.message, prefs.active_model, enabled=False)
+        used_model = base.model_id
+        decision = RouteDecision(
+            model_id=used_model, baseline=used_model, downgraded=False,
+            difficulty="-", mode="deep_research", reason="deep_research: 跳过路由",
+        )
+        logger.info("[/api/chat/stream] Deep Research：跳过缓存 / 路由，模型=%s", used_model)
+    else:
+        decision = model_router.route(req.message, prefs.active_model)
+        used_model = decision.model_id
+        logger.info("[/api/chat/stream] 路由：%s", decision.reason)
 
-    # 语义缓存命中：直接两帧返回，不跑 agent
-    if fresh:
+    # 语义缓存命中：直接两帧返回，不跑 agent（Deep Research 不查缓存）
+    if fresh and not is_deep:
         cached = semantic_cache.lookup_cached(req.message, user["id"])
         if cached is not None:
             history.append(session_id, {"role": "user", "content": req.message}, user_id=user["id"])
@@ -333,7 +347,13 @@ async def chat_stream(
     def _run_with(model: str) -> None:
         with _cfg.use_llm_prefs(model, prefs.thinking_enabled, prefs.thinking_budget):
             set_session_id(session_id)
-            agent.run(req.message, session_id=session_id, event_callback=_on_event)
+            if is_deep:
+                from src.agent.core.research_engine import ResearchEngine
+                ResearchEngine(history, user["id"]).run(
+                    req.message, session_id=session_id, event_callback=_on_event,
+                )
+            else:
+                agent.run(req.message, session_id=session_id, event_callback=_on_event)
 
     def _sync_run() -> None:
         nonlocal used_model

@@ -13,6 +13,7 @@ import {
 import { toast } from 'sonner'
 import { ThinkingBlock } from './ThinkingBlock'
 import { PlanBlock } from './PlanBlock'
+import { ResearchPanel } from './ResearchPanel'
 import { ToolBlock } from './ToolBlock'
 import { Markdown } from './Markdown'
 import { parseSources } from './sources'
@@ -250,12 +251,15 @@ function AssistantBubble({
   const hasAny =
     message.timeline.length > 0 ||
     message.plan ||
+    message.research ||
     message.content ||
     message.error
 
   return (
     <div className="group flex flex-col items-start gap-1">
       <div className={cn('w-full space-y-1', cb.compact ? 'max-w-full' : 'max-w-[85%]')}>
+        {message.research ? <ResearchPanel research={message.research} /> : null}
+
         {message.plan && message.plan.length > 0 ? (
           <PlanBlock steps={message.plan} />
         ) : null}

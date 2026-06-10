@@ -44,14 +44,16 @@ _SOURCES_HEADER = "— sources —"
 
 @dataclass
 class Citation:
-    """一条引用条目（按 source+heading 合并后的逻辑单位）。
+    """一条引用条目（KB 按 source+heading 合并，web 按 url 合并）。
 
     Attributes:
         num:         分配的全局编号（[n] 的 n）。
-        source:      文件相对路径（如 `src/rag/retriever.py`）。
+        source:      KB 文件相对路径（如 `src/rag/retriever.py`）；web 来源为空串。
         heading:     标题路径（如 `## 2.1.3 检索融合`）；None 表示无 heading。
         page_no:     页号；None 表示 markdown 等无页号来源。
         chunk_count: 该 (source, heading) 下合并了几个 chunk。
+        url:         web 来源 URL；非 None 即表示这是一条网页引用（渲染走 web 分支）。
+        title:       web 来源标题；缺省时渲染回退到 url。
     """
 
     num: int
@@ -59,6 +61,8 @@ class Citation:
     heading: str | None
     page_no: int | None
     chunk_count: int = 1
+    url: str | None = None
+    title: str | None = None
 
 
 class CitationBuilder:
@@ -111,6 +115,43 @@ class CitationBuilder:
                         heading=heading,
                         page_no=self._extract_page_no(hit),
                     ))
+                nums.append(num)
+        return nums
+
+    def register_web(self, sources: list[dict[str, str]]) -> list[int]:
+        """注册一批 web 来源（`web_search` / `fetch_url` 命中），分配（或复用）编号。
+
+        与 `register` 共用同一 `_next_num` 序列 —— KB 与 web 来源在同一份 `[n]`
+        编号体系里连续编号，报告引用可混用知识库片段与网页。
+
+        Args:
+            sources: `[{"url": ..., "title": ...}]`；按 `url` 去重，重复 url 复用编号
+                     （首次出现的 title 生效）。url 为空的项跳过、不分配编号。
+
+        Returns:
+            `list[int]`，长度等于入参中 url 非空的项数，依出现顺序给出编号。
+        """
+        nums: list[int] = []
+        with self._lock:
+            for s in sources:
+                url = (s.get("url") or "").strip()
+                if not url:
+                    continue
+                key = ("\x00web", url)
+                if key in self._key_to_num:
+                    nums.append(self._key_to_num[key])
+                    continue
+                num = self._next_num
+                self._next_num += 1
+                self._key_to_num[key] = num
+                self._citations.append(Citation(
+                    num=num,
+                    source="",
+                    heading=None,
+                    page_no=None,
+                    url=url,
+                    title=(s.get("title") or "").strip() or None,
+                ))
                 nums.append(num)
         return nums
 
@@ -194,7 +235,10 @@ class CitationBuilder:
 
     @staticmethod
     def _render_one(c: Citation) -> str:
-        """单条引用的展示行。"""
+        """单条引用的展示行（web 来源走 `[n] title — url`，KB 来源走 source § heading）。"""
+        if c.url:
+            title = c.title or c.url
+            return f"[{c.num}] {title} — {c.url}"
         head = f"§ {c.heading}" if c.heading else ""
         tail_bits: list[str] = []
         if c.page_no is not None:

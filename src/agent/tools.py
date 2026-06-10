@@ -131,6 +131,20 @@ def get_tools(skill_bodies: dict[str, str] | None = None) -> list[dict[str, Any]
     return [t for t in tools if is_tool_allowed(t.get("function", {}).get("name", ""))]
 
 
+def get_research_tools() -> list[dict[str, Any]]:
+    """返回 Deep Research 子代理可用的检索工具子集（search_knowledge / web_search / fetch_url）。
+
+    只给这 3 个检索 tool，不含 plan / 业务 / skill / MCP —— 子代理专注查资料。
+    仍过名单门（SECURITY_MODE / BLOCKLIST / ALLOWLIST），被禁的 tool 同样剔除。
+    """
+    from src.agent.core.security_filter import is_tool_allowed
+    wanted = {"search_knowledge", "web_search", "fetch_url"}
+    return [
+        t for t in TOOLS
+        if t["function"]["name"] in wanted and is_tool_allowed(t["function"]["name"])
+    ]
+
+
 def _load_mcp_tools_safe() -> list[dict[str, Any]]:
     """读 MCP shared manager 的 list_tools；任何异常 / 未启动一律返空，避免阻塞 LLM 主流程。"""
     try:
@@ -493,13 +507,21 @@ _STUDY_PLAN_TOOLS: list[dict[str, Any]] = [
 # ── 工具实现 ──────────────────────────────────────────────────────────────────
 
 
-def _tool_web_search(query: str, num: int = 5) -> ToolResult:
+def _tool_web_search(
+    query: str,
+    num: int = 5,
+    citation_builder: "CitationBuilder | None" = None,
+    cite_web: bool = False,
+) -> ToolResult:
     """
     通过 Serper.dev 搜索引擎执行网络搜索，返回真实 URL 列表及摘要。
 
     Args:
         query: 搜索关键词。
         num: 期望返回的结果条数（最多 WEB_SEARCH_MAX_NUM）。
+        citation_builder: 引用编排器；仅 cite_web=True 时把命中 URL 注册进去拿到全局
+                          编号，并把 `[n]` 写进给 LLM 看的结果文本（用于 Deep Research）。
+        cite_web: 是否启用 web 引用编号；默认 False 保持普通 chat 行为不变。
 
     Returns:
         ToolResult：有结果 → status="ok"；无结果 → status="empty"；请求失败 → status="error"。
@@ -539,14 +561,24 @@ def _tool_web_search(query: str, num: int = 5) -> ToolResult:
     # ② 整个返回值用 wrap_untrusted(kind="web") 包装。
     from src.agent.core.security_filter import scrub_injection, wrap_untrusted
 
+    items = organic[:num]
+    do_cite = cite_web and citation_builder is not None
+
     lines: list[str] = []
-    for i, item in enumerate(organic[:num], 1):
+    for i, item in enumerate(items, 1):
         title = item.get("title", "(无标题)")
         link = item.get("link", "")
         snippet = item.get("snippet", "")
         cleaned_snippet, scrubbed = scrub_injection(snippet)
         flag = " [⚠️ 已清洗]" if scrubbed else ""
-        lines.append(f"[{i}] {title}{flag}\n    URL: {link}\n    摘要: {cleaned_snippet}")
+        # cite_web 时把命中 URL 注册进 CitationBuilder 拿全局编号（让 LLM 在报告里能引 [n]）；
+        # 否则沿用旧的局部序号 1..N（普通 chat 行为不变）。link 为空时退回局部序号。
+        marker = f"[{i}]"
+        if do_cite and link:
+            nums = citation_builder.register_web([{"url": link, "title": title}])
+            if nums:
+                marker = f"[{nums[0]}]"
+        lines.append(f"{marker} {title}{flag}\n    URL: {link}\n    摘要: {cleaned_snippet}")
 
     return ToolResult(status="ok", content=wrap_untrusted("\n\n".join(lines), kind="web"))
 
@@ -744,7 +776,12 @@ def _fetch_via_jina(url: str, max_chars: int) -> ToolResult:
     return ToolResult(status="ok", content=f"[via Jina Reader]\n{text}")
 
 
-def _tool_fetch_url(url: str, max_chars: int = 3000) -> ToolResult:
+def _tool_fetch_url(
+    url: str,
+    max_chars: int = 3000,
+    citation_builder: "CitationBuilder | None" = None,
+    cite_web: bool = False,
+) -> ToolResult:
     """
     抓取网页正文内容，使用 BeautifulSoup 提取纯文本。
     若检测到 SPA 空壳（内容过少或含 #app/#root 挂载点），自动 fallback 到 Jina Reader。
@@ -752,6 +789,9 @@ def _tool_fetch_url(url: str, max_chars: int = 3000) -> ToolResult:
     Args:
         url: 目标网页 URL，必须来自 web_search 或知识库，不得凭空猜测。
         max_chars: 返回内容的最大字符数。
+        citation_builder: 引用编排器；仅 cite_web=True 时把本 URL 注册进去拿编号，
+                          并在返回正文前标注 `[n]`（用于 Deep Research）。
+        cite_web: 是否启用 web 引用编号；默认 False 保持普通 chat 行为不变。
 
     Returns:
         网页正文纯文本（截断至 max_chars），抓取失败时返回错误说明。
@@ -786,7 +826,14 @@ def _tool_fetch_url(url: str, max_chars: int = 3000) -> ToolResult:
         from src.agent.core.security_filter import scrub_injection, wrap_untrusted
         cleaned, scrubbed = scrub_injection(result.content)
         flag = "[⚠️ 已清洗] " if scrubbed else ""
-        wrapped = wrap_untrusted(f"{flag}{cleaned}", kind="web")
+        # cite_web 时把本 URL 注册进引用器（与 web_search 同一 url 去重 → 复用编号），
+        # 并在正文前标注 [n]，让 LLM 知道这段网页正文对应哪条引用。
+        cite_prefix = ""
+        if cite_web and citation_builder is not None:
+            nums = citation_builder.register_web([{"url": url, "title": url}])
+            if nums:
+                cite_prefix = f"[来源 [{nums[0]}]: {url}]\n"
+        wrapped = wrap_untrusted(f"{cite_prefix}{flag}{cleaned}", kind="web")
         return ToolResult(status="ok", content=wrapped)
 
     return result
@@ -2266,6 +2313,7 @@ def execute_tool(
     skill_bodies: dict[str, str] | None = None,
     citation_builder: "CitationBuilder | None" = None,
     messages: list[dict[str, Any]] | None = None,
+    cite_web: bool = False,
 ) -> ToolResult:
     """
     根据工具名称路由执行对应工具函数。
@@ -2274,11 +2322,13 @@ def execute_tool(
         name: 工具名称，对应 TOOLS / `_PLAN_TOOLS` 中的 function.name。
         args: 工具参数字典，由 LLM 的 tool_calls 解析而来。
         skill_bodies: {skill_name: body} 映射，供 load_skill 工具使用。
-        citation_builder: 引用编排器；仅 search_knowledge 路径透传，
-                          其它工具无引用语义直接忽略。
+        citation_builder: 引用编排器；search_knowledge 始终透传，web_search /
+                          fetch_url 仅 cite_web=True 时透传以注册 web 引用。
         messages: 当前轮已累计的 messages（含本次 assistant tool_calls）；仅 plan
                   tools（update_step / abort_plan）用于 reconstruct plan 状态。
                   非 plan 工具忽略此参数。
+        cite_web: 是否给 web_search / fetch_url 启用 web 引用编号（仅 Deep Research
+                  子代理路径传 True）；默认 False 保持普通 chat 行为不变。
 
     Returns:
         ToolResult：status 为 "ok"/"empty"/"error"，content 为工具输出内容。
@@ -2313,11 +2363,15 @@ def execute_tool(
                 return _tool_web_search(
                     query=args["query"],
                     num=args.get("num", 5),
+                    citation_builder=citation_builder,
+                    cite_web=cite_web,
                 )
             case "fetch_url":
                 return _tool_fetch_url(
                     url=args["url"],
                     max_chars=args.get("max_chars", 3000),
+                    citation_builder=citation_builder,
+                    cite_web=cite_web,
                 )
             case "load_skill":
                 return _tool_load_skill(

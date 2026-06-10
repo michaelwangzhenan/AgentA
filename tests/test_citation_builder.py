@@ -393,3 +393,68 @@ class TestEndToEnd:
         sources_block = builder.render(used)
         assert "[1]" in sources_block
         assert "[99]" not in sources_block
+
+
+# ── 7. web 来源（Deep Research）─────────────────────────────────────────────
+
+class TestRegisterWeb:
+    """register_web() 网页来源编号分配 / 去重 / 渲染（与 KB 共用同一编号体系）。"""
+
+    def test_single_web_source(self) -> None:
+        builder = CitationBuilder()
+        nums = builder.register_web([{"url": "https://a.com", "title": "A 站"}])
+        assert nums == [1]
+        c = builder.citations[0]
+        assert c.url == "https://a.com"
+        assert c.title == "A 站"
+        assert c.source == ""
+
+    def test_empty_url_skipped(self) -> None:
+        """url 为空 / 空白的项跳过、不分配编号。"""
+        builder = CitationBuilder()
+        nums = builder.register_web([
+            {"url": "", "title": "无效"},
+            {"url": "   ", "title": "也无效"},
+            {"url": "https://b.com", "title": "B"},
+        ])
+        assert nums == [1]
+        assert len(builder) == 1
+
+    def test_same_url_dedups_and_reuses_num(self) -> None:
+        builder = CitationBuilder()
+        n1 = builder.register_web([{"url": "https://x.com", "title": "X"}])
+        n2 = builder.register_web([{"url": "https://x.com", "title": "X 改名（被忽略）"}])
+        assert n1 == n2 == [1]
+        assert len(builder) == 1
+        assert builder.citations[0].title == "X"  # 首次 title 生效
+
+    def test_missing_title_falls_back_to_url_on_render(self) -> None:
+        builder = CitationBuilder()
+        builder.register_web([{"url": "https://noname.com"}])
+        out = builder.render([1])
+        assert "[1] https://noname.com — https://noname.com" in out
+
+    def test_render_web_line_format(self) -> None:
+        builder = CitationBuilder()
+        builder.register_web([{"url": "https://a.com/p", "title": "标题"}])
+        out = builder.render([1])
+        assert "[1] 标题 — https://a.com/p" in out
+
+    def test_kb_and_web_share_continuous_numbering(self) -> None:
+        """KB register 与 web register_web 共用 _next_num，编号连续。"""
+        builder = CitationBuilder()
+        kb = builder.register([_make_hit("a.md"), _make_hit("b.md")])
+        web = builder.register_web([{"url": "https://c.com", "title": "C"}])
+        assert kb == [1, 2]
+        assert web == [3]
+        out = builder.render([1, 3])
+        assert "[1] a.md" in out
+        assert "[3] C — https://c.com" in out
+        assert "[2]" not in out
+
+    def test_web_url_never_collides_with_kb_source(self) -> None:
+        """web key 用哨兵前缀，url 与某 KB source 同名也不会误合并。"""
+        builder = CitationBuilder()
+        builder.register([_make_hit("https://a.com")])  # KB source 恰好长得像 url
+        builder.register_web([{"url": "https://a.com", "title": "网页"}])
+        assert len(builder) == 2

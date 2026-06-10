@@ -367,7 +367,7 @@ flowchart TD
 
 **总权衡**：路由——规则近乎免费、分类器需权衡；缓存——拿"每请求 +几十 ms 固定开销"换"命中请求 −几秒"，靠命中率回本。两者都软失败，绝不阻断对话。
 
-### 2.2.7. 配置项（三处同步 config.py / .env.example / .env）
+### 2.2.7. 配置项
 
 | 配置项 | 用途 |
 |---|---|
@@ -392,4 +392,241 @@ flowchart TD
 
 - **UT**：路由规则判定（各 tier 映射 + 向下约束 + 候选池过滤）、fallback（瞬时错误回退一次 / 中途失败不回退 / 400 不回退）、缓存命中与未命中（阈值边界、`user_id` 隔离、过期过滤）、缓存软失败（读 / 写异常不影响对话）、KB 变更触发失效、`saving_events` 记录。judge / LLM 调用一律 mock，不真发请求。
 - **验收标准**：auto 档下简单问被路由到更便宜模型、复杂问不降级；手选模型遇瞬时错误回退到自选模型；相近问法命中缓存且延迟显著下降；KB 更新后相关缓存失效、不返回过期答案；跨用户查不到彼此缓存；「降本」面板能看命中率 / 估算节省 / 趋势；全程 log 可还原路由 + 缓存决策。
+
+# 3. Deep Research
+
+## 3.1. 需求分析
+
+### 3.1.1. 目标与价值
+
+一句话换回一篇跨多源查证、带引用的调研报告：用户给一个研究问题，AgentA 自动把它拆成子问题，派多个独立上下文的子代理并行查知识库 + 联网，反思补查后综述成一篇分章节、带引用脚注的 Markdown 报告。定位"重质量不重速度"。
+
+**背景与本质**：各家 Deep Research（ChatGPT / Gemini / Perplexity / Grok）本质是同一个套路——你给一个问题 → 系统自己把它拆成一堆子问题 → 多路去查（联网 + 自己的知识库）→ 反复读、交叉验证、去重 → 最后产出一篇分章节、带引用脚注的调研报告。代价是耗时几分钟、烧不少 token；换回的是"一篇能直接用的报告"而不是"一段聊天回复"——这也是它定位"重质量不重速度"的原因。
+
+这些产品早期多用一个显眼的"Deep Research"按钮触发，近来部分（如 ChatGPT）把它折叠进工具菜单、改由模型自动判断是否深挖——本期取显式按钮路线（见 §3.1.6 D1）。
+
+价值（对照 [iter_7_retro §2.1](iter_7_retro.md#21-一个判断) 的三层加分）：求职差异化上是能"哇住人"的 demo 亮点，蹭上当下 agent 潮流；贴合"个人学习助手"定位，强化"主动帮你学一个新东西"的主线；复用率高（EventBus / tools / RAG / 前端进度块大半现成）。
+
+原始需求见 [iter_7_retro §3.3](iter_7_retro.md#33-deep-research)，本节把它拆成可落地的能力项，并对照现状标出差距。
+
+### 3.1.2. 需求拆解
+
+原始需求拆成六块能力（编号 R 表示本期 Deep Research 能力，仅本节内有效）：
+
+| 编号 | 能力 | 说明 |
+|---|---|---|
+| R1 | 研究规划 | 把研究问题拆成 3~6 个子问题（数量受控），形成可展示的研究计划 |
+| R2 | 子代理并行检索 | 每个子问题派一个独立上下文的子代理，并行查知识库（`search_knowledge`）+ 联网（`web_search` / `fetch_url`） |
+| R3 | 反思补查 | 综述前评估已收集信息是否充分 / 矛盾，决定是否就缺口补查（受总轮数上限约束） |
+| R4 | 综述成稿 | 跨子代理结果去重、分章节，产出带引用 `[n]` 的结构化 Markdown 报告 |
+| R5 | 引用体系扩展 | 把联网来源（`web_search` / `fetch_url`）纳入 `[n]` 引用编号，报告引用覆盖"知识库 + 网页" |
+| R6 | 入口与进度可视化 | `Composer` 加"深度研究"开关；强化研究进度面板，把规划 / 并行检索 / 反思 / 综述四阶段实时显性化 |
+
+### 3.1.3. 现状盘点（可复用资产）
+
+本期不是从零开始（详见对 [后端 Agent 能力调研](23f4a86b-c85a-4581-bb1b-f24d9c089522) 与前端聊天界面调研）：
+
+| 资产 | 位置 | 复用方式 |
+|---|---|---|
+| Plan-Execute 规划 | `src/agent/tools.py`（`make_plan` / `update_step`）+ `src/agent/core/plan_manager.py` | 拆步骤 + 从 history 重建进度，配 `plan_*` 事件，可作研究计划骨架 |
+| 联网工具 | `src/agent/tools.py`（`_tool_web_search` / `_tool_fetch_url`） | 现成联网检索（Serper 搜索 + 正文抓取 + Jina Reader 兜底） |
+| 知识库检索 | `src/agent/tools.py`（`_tool_search_knowledge`）→ `src/rag/retriever.py`（`search()`） | 现成 RAG 检索（dense + BM25 + RRF + rerank） |
+| 引用渲染 | `src/agent/core/citation_builder.py`（`CitationBuilder`） | RAG 命中按 `(source, heading)` 去重编号 `[n]` 并渲染来源块（当前仅覆盖 RAG） |
+| 同轮多工具并行 | `src/agent/core/tool_call_engine.py`（`_run_parallel`，ThreadPoolExecutor，≤4） | 子代理 run 内并行执行的底座可借鉴 |
+| 事件流 → SSE | `src/agent/core/event_bus.py` + `src/api/routes/chat.py`（`/chat/stream`） | `plan_*` / `tool_*` / `tool_progress` / `token_chunk` 等事件已能推前端 |
+| 前端进度块 | `frontend/src/components/chat/`（`PlanBlock` / `ToolBlock` / `SourcesPanel`）+ `useChat` + `Composer` | 计划清单、工具展开、来源面板、SSE 状态机、输入工具条均现成 |
+
+### 3.1.4. 差距分析
+
+对照 R1-R6，标出"已有 / 部分 / 待建"：
+
+| 能力 | 现状 | 差距（待建部分） |
+|---|---|---|
+| R1 规划 | 有 `make_plan` 拆步骤工具，但无研究专用的子问题分解提示 / 数量约束 | 研究规划提示 + 子问题作为可并行单元 |
+| R2 子代理 | **无 SubAgent 框架**，仅同轮多工具并行（共享同一 messages 上下文） | 独立上下文子代理 runner + 并行编排 + 结果回填 |
+| R3 反思 | ReAct 可多轮，但无显式"反思补查"阶段编排 | 反思阶段编排 + 缺口判定 + 受控补查 |
+| R4 综述 | 无报告综述阶段，普通回答是聊天式 | 综述阶段：跨子代理结果去重 + 分章节报告生成 |
+| R5 引用 | 仅 `search_knowledge` 有 `[n]`；web 来源走 `wrap_untrusted` 无编号 | `CitationBuilder` 扩展到 web 来源（URL 作来源键） |
+| R6 入口 / 进度 | 无 `Composer` 模式开关，`ChatRequest` 仅 `{message, session_id}`；进度块面向普通对话 | 深度研究开关 + `ChatRequest` 加模式字段 + 子代理粒度进度事件 + 研究面板 |
+
+### 3.1.5. 范围与分档
+
+| 档位 | 包含能力 | 大致工作量 |
+|---|---|---|
+| 最小 | R1 + R2 + R4（规划 + 子代理并行 + 综述报告），引用沿用 RAG | 中-高 |
+| 进阶 | 最小 + R3 + R5（反思补查 + web 引用） | 高 |
+| 完整 | 进阶 + R6 强化进度面板 + 边界参数完善 | 高 |
+
+本期做到**完整**（R1~R6 全做）。
+
+明确**不做**（本期边界）：
+
+- 不另起后台异步任务系统：执行 = 同轮流式，用户开着页面实时看进度（见 §3.1.6 D4）。
+- 不为 Deep Research 改造全局并发模型：`_AGENT_LOCK` 维持现状，一次研究长跑期间其他 chat 请求排队等待，是已知取舍（详见 §3.1.7）。
+- 不引入重型 workflow / DAG 编排引擎：子代理是受限 runner，复用现有 Agent 能力，不另造框架。
+- 不做多层嵌套子代理（子代理再派子代理），单层。
+- 限轮数 / 来源数防失控（见 §3.1.6 D5）；子代理 / 检索失败软失败降级——部分子问题失败仍出报告并标注，不整体中断。
+- 不破坏已有功能：普通 chat 路径行为不变；`CitationBuilder` 改造向后兼容现有 RAG-only 引用；新增 EventBus 事件类型对旧前端 / CLI 无害（未知事件忽略）。
+
+### 3.1.6. 已确认决策点
+
+下列决策有多条可行路径（§1.6 工程公约要求实现前拍板），已与用户确认：
+
+| 编号 | 决策 | 结论 |
+|---|---|---|
+| D1 | 入口形态 | **显式按钮**：`Composer` 工具条加"深度研究"开关，与"深度思考"并列，用户主动开 |
+| D2 | 架构 | **真做 SubAgent 框架**：每个子问题派独立上下文子代理并行查、再回填主线；做成受限 runner（单层、复用现有 Agent / tools / EventBus），不引重型编排引擎 |
+| D3 | 引用 | **web 来源纳入 `[n]`**：扩展 `CitationBuilder`，报告引用覆盖知识库 + 网页 |
+| D4 | 执行模式 | **同轮流式 + 强化进度面板**：不另起异步任务；重点把"在推进、推进到哪"显性化（四阶段实时反馈），不追求快 |
+| D5 | 边界与默认参数 | **按业内标准定、可配并记录**：子问题 3~6 个；单子问题来源上限 ~5；整次研究总来源 / 总轮数设上限；报告为分章节 Markdown（摘要 → 分节正文 → 参考来源），长度由来源驱动不硬截 |
+
+### 3.1.7. 工程冲突澄清（具体分析）
+
+讨论中提过两个潜在工程冲突。结论：对本期**不构成阻塞**——本期目标就是把 feature 做好、同时不破坏已有功能。逐条分析：
+
+| 冲突 | 具体分析 | 本期处理 |
+|---|---|---|
+| 简洁 > 全面（公约 §1）vs 子代理框架偏重 | 子代理在此是**受限能力**，不是通用编排：复用现有 `Agent.run` + tools + RAG + EventBus，只加一层薄的"子任务 runner"（独立 messages 上下文 + 共享工具），不引 DAG / workflow 引擎、不做多层嵌套 | 架构层仍守简洁：做小做干净，不冲突 |
+| 全局并发模型（[§1.3.7 API1](iter_7_retro.md#137-srcapi) 曾记的"单例 Agent + `_AGENT_LOCK` 全局串行"）| 该取舍**已在本期 §1/§2 落地时改掉**：`chat.py` 现用 `_AGENT_SEMAPHORE`（`MAX_CONCURRENT_AGENT_RUNS` 名额）限并发数、Agent 已 per-run 状态化可并发，不再有全局串行锁。Deep Research = 一个 chat 请求 = 占一个名额，内部用线程池派子代理（类比 `_run_parallel`），不是新请求。唯一放大点：一个名额下会有 N 个并发 LLM 调用（N = 并行子代理数）| 用 `DEEP_RESEARCH_MAX_PARALLEL_SUBAGENTS` 封顶 + 子代理失败软降级；不改并发模型，详见 §3.2.8。子代理用独立 messages 上下文、研究中间过程不写用户会话历史，避免污染已有功能 |
+
+## 3.2. 设计
+
+只讲"怎么做"的大方向，不抠实现细节。设计中冒出的小决策按"简洁优先"默认选定，列在 §3.2.10。
+
+### 3.2.1. 总体架构
+
+一次深度研究是一条**四阶段流水线**（规划 → 并行子代理检索 → 反思补查 → 综述成稿），由新引擎 `ResearchEngine` 编排，复用现有 LLM 出口 / 检索工具 / 引用器 / EventBus / SSE。普通 chat 路径完全不走本引擎。
+
+```mermaid
+flowchart TD
+  q[深度研究提问] --> plan["① 规划 LLM：拆 3~6 子问题"]
+  plan --> fan["② 并行子代理：每子问题独立上下文"]
+  fan --> s1[子代理1 查 KB+web]
+  fan --> s2[子代理2 查 KB+web]
+  fan --> s3[子代理N 查 KB+web]
+  s1 --> reflect["③ 反思 LLM：查缺口 / 矛盾"]
+  s2 --> reflect
+  s3 --> reflect
+  reflect -->|有缺口且未超预算| fan2[补查 ≤2 子问题]
+  fan2 --> synth
+  reflect -->|已充分| synth["④ 综述 LLM 流式：分章节 + [n] 引用"]
+  synth --> report[报告 + 参考来源块]
+```
+
+依赖方向守住：`ResearchEngine` 在 `src/agent/core/`，向下用 `llm.provider` / `rag` / `tools` / `citation_builder` / `event_bus`，不反向依赖表现层。新增 / 改动模块：
+
+| 模块 | 位置 | 职责 |
+|---|---|---|
+| 研究编排引擎 | `src/agent/core/research_engine.py`（`ResearchEngine`） | 四阶段编排 + 子代理派发 / 回填 + 用量聚合；`run(query, *, session_id, event_callback) -> 报告` |
+| 受限子代理 | `research_engine.py` 内 `_run_subagent` | 单子问题的 bounded ReAct（仅 3 个检索 tool + 独立 in-memory 上下文，不写 DB），返回发现 + 引用编号 |
+| 引用扩展 | `src/agent/core/citation_builder.py` | 新增 `register_web` + 渲染 web 来源；KB / web 统一 `[n]` 编号体系 |
+| 检索工具加引用 | `src/agent/tools.py` | `web_search` / `fetch_url` 接 `citation_builder`（`cite_web` 门控）；新增 `get_research_tools()` 返回 3 检索 tool 子集 |
+| 新进度事件 | `src/agent/core/event_bus.py` | 追加 `research_*` 事件常量到 `ALL_EVENT_TYPES` |
+| 请求模式 | `src/api/schemas/chat.py` + `src/api/routes/chat.py` | `ChatRequest.mode`；`/chat/stream` 按 mode 分派 `ResearchEngine` |
+| 前端开关 | `frontend/src/components/chat/Composer.tsx` + `useComposerSettings` | "深度研究" toggle |
+| 研究面板 | `frontend/src/components/chat/ResearchPanel.tsx` + `useChat` + `types/chat.ts` | 四阶段 + 子代理行进度渲染 |
+
+### 3.2.2. 受限子代理框架（R2 / D2）
+
+子代理是"受限 runner"，不是通用 Agent，也不复用 `Agent` 类（理由见 §3.2.10）。每个子代理：
+
+- **独立上下文**：自带一份 in-memory `messages`（system 研究提示 + 子问题），**不读不写** `ChatHistoryStore`——研究中间过程不污染用户会话历史。
+- **受限工具**：只给 `search_knowledge` / `web_search` / `fetch_url`（`get_research_tools()`），不给 plan / 业务 / skill / MCP 工具，专注检索。
+- **bounded ReAct**：复用 `ToolCallEngine`（传一个一次性 in-memory chat_history）跑有限轮（`DEEP_RESEARCH_SUBAGENT_MAX_ROUNDS`），到上限即让 LLM 就该子问题产出小结。
+- **共享引用器**：所有子代理共用同一个 `CitationBuilder` 实例（其 `register` 已带锁，线程安全），KB + web 来源跨子代理统一编号。
+- **软失败降级**：单个子代理抛异常 / 检索全空 → 标记该子问题失败、记 note，**不中断**整体；综述阶段照常出报告并说明哪条没查到。
+
+### 3.2.3. 四阶段编排（R1 / R3 / R4）
+
+| 阶段 | 做法 | 产出 |
+|---|---|---|
+| ① 规划 | 一次 `provider.chat`：研究问题 → 输出 3~6 条子问题（严格 JSON）。解析失败 / 越界则裁剪到 `[3, MAX_SUBQUESTIONS]`，再失败降级为"原问题单条" | 子问题清单，发 `research_plan` |
+| ② 并行检索 | `ThreadPoolExecutor`（≤ `MAX_PARALLEL_SUBAGENTS`）跑各子代理；子线程 `copy_context().run` 传 `user_id` / `llm_prefs` / `session` 等 contextvar（与 `_run_parallel` 一致） | 各子问题的发现文本 + 已注册引用 |
+| ③ 反思 | 一次 `provider.chat`：汇总各子问题发现 → 判断是否充分 / 有矛盾 / 有缺口；有缺口且未超总预算 → 派 ≤2 个补查子问题（最多 1 轮反思，防失控） | 反思结论，发 `research_reflect` |
+| ④ 综述 | 一次**流式** `provider.chat`：全部发现 + 已注册来源 → 产出分章节 Markdown 报告（摘要 → 分节正文 → 参考来源），正文用 `[n]` 引用。流式经 `token_chunk` 推前端 | 报告正文 |
+
+收尾：综述完调 `citation_builder.extract_used(report)` + `render(used)` 生成参考来源块拼到报告末尾（与 `Agent.run` 收尾一致），聚合各阶段 token 用量发 `final_answer`（带 `usage`，供既有 usage / trace 采集），并把"用户问题 + 最终报告"写入 `ChatHistoryStore`。
+
+### 3.2.4. 引用体系扩展：KB + web 统一 `[n]`（R5 / D3）
+
+现状 `CitationBuilder` 只认 RAG `Hit`（按 `(source, heading)` 编号）。扩展为同时支持 web 来源：
+
+- **`Citation` 加可选字段** `url` / `title`；`_render_one` 分支渲染：有 `url` → `[n] title — url`，否则按原 RAG 样式。
+- **新增 `register_web(sources)`**：按 `url` 去重分配编号（与 RAG 同一 `_next_num` 序列，KB / web 混合连续编号）。
+- **工具注入 `[n]`**：`_tool_web_search` / `_tool_fetch_url` 接 `citation_builder` 参数——注册来源拿到编号后，把 `[n]` 标注写进给 LLM 看的结果文本（与 `search_knowledge` 用 `citation_nums` 同理），LLM 才能在报告里正确引用网页。
+- **门控不破坏普通 chat**：web 注入由 `cite_web` 标志控制，**仅 Deep Research 子代理路径开启**；普通 `Agent.run` 默认 `cite_web=False`，`web_search` / `fetch_url` 行为与现在完全一致（见 §3.2.10 对"是否给普通 chat 也加 web 引用"的取舍）。
+
+### 3.2.5. 进度事件模型（R6 / D4）
+
+为"强化进度面板"新增一组 `research_*` 事件（追加进 `ALL_EVENT_TYPES`）。它们是**纯增量**：旧前端 / CLI 收到未知事件即忽略，不影响普通 chat。最终报告与用量仍走现有 `token_chunk` + `final_answer`。
+
+| 事件 | payload | 用途 |
+|---|---|---|
+| `research_started` | `{query}` | 进入研究模式，面板初始化（阶段=规划中） |
+| `research_plan` | `{subquestions: [{id, text}]}` | 子问题清单 |
+| `research_subagent_start` | `{sub_id, question}` | 某子代理开跑 |
+| `research_subagent_progress` | `{sub_id, stage, label, sources}` | 子代理阶段（检索知识库 / 联网搜索 / 读取网页）+ 已收集来源数 |
+| `research_subagent_end` | `{sub_id, status, sources, note}` | 子代理结束（含失败标记） |
+| `research_reflect` | `{note, gap, followups?}` | 反思结论 / 是否补查 |
+| `research_synthesizing` | `{}` | 进入综述阶段 |
+
+子代理内部仍可复用 `tool_progress` 语义，但因并行需归属，统一走带 `sub_id` 的 `research_subagent_progress`，让面板按子代理分组（不混进普通对话的扁平 timeline）。不发 `plan_*` 事件——避免子问题在研究面板与旧 `PlanBlock` 重复显示。
+
+### 3.2.6. 入口与请求链路（R6 / D1）
+
+- **`ChatRequest` 加 `mode`**：`mode: Literal["chat", "deep_research"] | None = None`，缺省 = 普通 chat（旧行为零改动）。
+- **`/chat/stream` 分派**：`req.mode == "deep_research"` 且 `DEEP_RESEARCH_ENABLED` → 走 `ResearchEngine.run`；否则走现有 `agent.run`。引擎同样在 executor 线程跑、`event_callback` → `asyncio.Queue` → SSE，复用整条流式管线。
+- **跳过降本两件套**：Deep Research **不查语义缓存**（多源研究永不可缓存）、**不做模型降级路由**（"重质量不重速度"，用用户选定 / 基准模型，绝不向下换便宜模型）。
+- **复用现有旁路**：占用 `_AGENT_SEMAPHORE` 一个名额；`final_answer` 的 `usage` 聚合后照走 `record_usage` / `record_trace_safe`（软失败）。
+
+### 3.2.7. 前端：深度研究开关 + 研究面板（R6）
+
+- **开关**：`Composer.tsx` 工具条加"深度研究" toggle（紧挨"深度思考"），状态进 `useComposerSettings`；开启时 `send → streamInto → streamChat` 在请求体带 `mode: "deep_research"`（`ChatRequest` 类型 + body 同步加字段）。
+- **研究面板**：新增 `ResearchPanel.tsx`，订阅 `research_*` 事件渲染四阶段进度——规划出的子问题清单 + 每个子代理一行（排队 / 检索知识库 / 联网 / 读取网页 + 已收集来源数）+ 反思结论 + "综述中"。渲染在 `AssistantBubble` 报告正文之上。
+- **状态**：`AssistantMessage` 加 `research: ResearchState | null`；`useChat.streamInto` 的 `switch` 增 `research_*` 分支累积进该状态。`AgentStreamEvent` 联合类型加对应变体。
+- **报告与来源复用**：最终报告走 `token_chunk` 进正文、由现有 `Markdown` + `parseSources` + `SourcesPanel` 渲染，无需新报告组件。
+- **历史回看**：重新打开会话时报告作为普通 assistant markdown 消息呈现（含来源块）；研究面板时间线不重建（与现有 thinking / plan 历史不重建一致），可接受。
+
+### 3.2.8. 并发与"不破坏已有功能"
+
+并发模型已在本期 §1/§2 落地时从全局锁改为信号量（修正了 [§3.1.7](#317-工程冲突澄清具体分析) 的旧描述）：
+
+- 一次 Deep Research = 一个 chat 请求 = 占 `_AGENT_SEMAPHORE` 一个名额；内部用 `ThreadPoolExecutor` 派 ≤ `DEEP_RESEARCH_MAX_PARALLEL_SUBAGENTS` 个子代理，子线程 `copy_context().run` 带 contextvar。
+- 唯一放大点：一个名额下会有 N 个并发 LLM 调用（N = 并行子代理数），对 LLM 配额 / 限流是压力点 → 用并行上限封顶 + 子代理失败软降级兜住。
+
+不破坏已有功能的守点（逐条）：
+
+| 守点 | 做法 |
+|---|---|
+| 普通 chat 零改动 | `mode` 缺省走旧 `agent.run`；`ResearchEngine` 是独立路径 |
+| `CitationBuilder` 向后兼容 | 仅新增 `register_web` / 渲染分支，旧 RAG 路径不变 |
+| web 引用不外溢 | `cite_web` 默认 False，普通 `web_search` / `fetch_url` 行为不变 |
+| 事件向后兼容 | `research_*` 为新增类型，旧端未知即忽略 |
+| 会话历史干净 | 子代理用 in-memory 上下文，中间过程不写 `ChatHistoryStore`，只落最终报告 |
+
+### 3.2.9. 配置项（三处同步 `config.py` / `.env.example` / `.env` + UI）
+
+| 配置项 | 用途 | 默认 |
+|---|---|---|
+| `DEEP_RESEARCH_ENABLED` | 是否启用深度研究（关则前端开关隐藏 / 降级普通对话） | true |
+| `DEEP_RESEARCH_MAX_SUBQUESTIONS` | 规划阶段子问题数上限（裁剪到 3~该值） | 5 |
+| `DEEP_RESEARCH_MAX_PARALLEL_SUBAGENTS` | 子代理并行上限 | 3 |
+| `DEEP_RESEARCH_SUBAGENT_MAX_ROUNDS` | 单子代理 tool 轮次上限 | 4 |
+| `DEEP_RESEARCH_MAX_SOURCES_PER_SUBAGENT` | 单子代理来源数上限 | 5 |
+| `DEEP_RESEARCH_MAX_TOTAL_SOURCES` | 整次研究总来源上限 | 20 |
+| `DEEP_RESEARCH_REFLECT_ENABLED` | 是否开反思补查（最多 1 轮） | true |
+
+### 3.2.10. 小决策（简洁优先默认）
+
+- **子代理不复用 `Agent` 类**，改用引擎内精简 loop：避免给 `Agent.run` 加 mode 分支污染主循环，也不注入 user rules / 记忆 / 学习计划（子代理要纯净上下文）；最简且零破坏。
+- **反思最多 1 轮**：控成本、防跑题失控；够用即止。
+- **Deep Research 跳过语义缓存 + 跳过模型降级路由**：研究永不可缓存、且重质量不向下换模型。
+- **用独立 `research_*` 事件、不发 `plan_*`**：研究面板自管子问题展示，避免与旧 `PlanBlock` 重复。
+- **web 引用仅限 Deep Research**（`cite_web` 门控）：给普通 chat 也加 web 引用属 scope 蔓延（§1.6），本期不顺手做；如需再单列。
+- **报告不硬截长度**：由来源与子问题驱动；总量靠来源 / 轮次上限间接收敛。
+
+### 3.2.11. 测试 + 验收
+
+- **UT**：规划解析（JSON 子问题裁剪到 3~上限 / 降级单条）、子代理 bounded loop（轮次上限 + 工具仅 3 检索）、`register_web` 去重 + 混合 `[n]` 渲染、引擎不写 `ChatHistoryStore`（mock 校验）、并行 contextvar 传递、软失败（单子代理异常 / 全空不中断、报告标注）、`mode` 分派（普通 mode 不进引擎）、用量聚合。LLM / 检索 / DB 一律 mock。
+- **验收标准**：开"深度研究"开关提问 → 面板显示规划子问题 → 各子代理并行推进（含来源计数）→ 反思 → 综述出分章节报告；报告含 `[n]` 引用且覆盖知识库 + 网页，参考来源块可在 `SourcesPanel` 查看；普通模式行为不变；`DEEP_RESEARCH_ENABLED=false` 时开关隐藏 / 降级普通对话；子代理失败时整体仍出报告并说明缺口。
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { getLlmPrefs, getModels, patchLlmPrefs } from '@/api/client'
+import { getConfig, getLlmPrefs, getModels, patchLlmPrefs } from '@/api/client'
 import type { ProviderModels } from '@/types/config'
 
 export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high'
@@ -24,6 +24,9 @@ export function useComposerSettings() {
   const [providers, setProviders] = useState<ProviderModels[]>([])
   const [activeModel, setActiveModel] = useState('')
   const [level, setLevelState] = useState<ThinkingLevel>('off')
+  // 深度研究：是否启用（来自全局配置，决定开关是否显示）+ 本会话当前是否开启
+  const [deepResearchEnabled, setDeepResearchEnabled] = useState(false)
+  const [deepResearch, setDeepResearch] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -35,6 +38,16 @@ export function useComposerSettings() {
       console.error('[useComposerSettings] 读配置失败', e)
     } finally {
       setLoading(false)
+    }
+    // 深度研究开关是否显示，单独读全局配置（失败则隐藏，安全降级）
+    try {
+      const cfg = await getConfig()
+      const item = cfg.groups
+        .flatMap((g) => g.items)
+        .find((it) => it.key === 'DEEP_RESEARCH_ENABLED')
+      setDeepResearchEnabled(item?.value === true)
+    } catch {
+      setDeepResearchEnabled(false)
     }
   }, [])
 
@@ -85,5 +98,8 @@ export function useComposerSettings() {
     level,
     setLevel,
     thinkingSupported: active.thinking,
+    deepResearchEnabled,
+    deepResearch,
+    setDeepResearch,
   }
 }

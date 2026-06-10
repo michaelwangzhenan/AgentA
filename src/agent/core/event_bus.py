@@ -37,6 +37,14 @@ EVENT_INFO = "info"
 EVENT_PLAN_CREATED = "plan_created"
 EVENT_PLAN_STEP_START = "plan_step_start"
 EVENT_PLAN_STEP_END = "plan_step_end"
+# Deep Research 四阶段进度事件（仅 ResearchEngine 发；旧端收到未知类型忽略）
+EVENT_RESEARCH_STARTED = "research_started"
+EVENT_RESEARCH_PLAN = "research_plan"
+EVENT_RESEARCH_SUBAGENT_START = "research_subagent_start"
+EVENT_RESEARCH_SUBAGENT_PROGRESS = "research_subagent_progress"
+EVENT_RESEARCH_SUBAGENT_END = "research_subagent_end"
+EVENT_RESEARCH_REFLECT = "research_reflect"
+EVENT_RESEARCH_SYNTHESIZING = "research_synthesizing"
 
 ALL_EVENT_TYPES: tuple[str, ...] = (
     EVENT_THINKING_CHUNK,
@@ -50,6 +58,13 @@ ALL_EVENT_TYPES: tuple[str, ...] = (
     EVENT_PLAN_CREATED,
     EVENT_PLAN_STEP_START,
     EVENT_PLAN_STEP_END,
+    EVENT_RESEARCH_STARTED,
+    EVENT_RESEARCH_PLAN,
+    EVENT_RESEARCH_SUBAGENT_START,
+    EVENT_RESEARCH_SUBAGENT_PROGRESS,
+    EVENT_RESEARCH_SUBAGENT_END,
+    EVENT_RESEARCH_REFLECT,
+    EVENT_RESEARCH_SYNTHESIZING,
 )
 
 
