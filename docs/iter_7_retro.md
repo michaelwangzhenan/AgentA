@@ -231,7 +231,7 @@ LLMOps（LLM 运维：把评估 / 监控 / 成本治理工程化）、GraphRAG�
 
 | Feature 名 | 功能 | side effect |
 |---|---|---|
-| 评估 + 可观测闭环 | golden 数据集 + RAG/Agent 指标 + CI 回归门禁 + trace / 成本看板 | 引入结构化指标库（与"报告强制 Markdown"红线需职责分离）；埋点轻微侵入主链路（须软失败不阻断）；LLM judge 评估耗 token |
+| 评估 + 可观测闭环 | golden 数据集 + RAG/Agent 指标 + CI 回归门禁 + trace / 成本看板 | 引入结构化指标库（同时有markdown报告）；埋点轻微侵入主链路（须软失败不阻断）；LLM judge 评估耗 token |
 | 模型路由 + 语义缓存 + 降本 | 按难度 / 成本路由模型 + 语义缓存命中 + 降本看板 | 缓存可能返回过期 / 不精确结果（需失效策略）；路由判断本身有开销、可能选错模型；多一层逻辑增加复杂度 |
 | Deep Research | planner + 子代理并行查（KB+web）+ 反思 + 带引用的结构化报告 | 更慢、更贵（多轮 LLM + 多路检索）；复杂度高；可能放大幻觉 / 跑题，需约束 |
 | AI 安全 / 红队模块 | 红队攻击测试集 + guardrail 评分 + CI 拦截率门禁 | 误杀（FPR）可能挡正常输入；红队样本要持续维护；评测耗 token；用户无感、不增体验 |
@@ -243,6 +243,7 @@ LLMOps（LLM 运维：把评估 / 监控 / 成本治理工程化）、GraphRAG�
 **目标**：质量能用数据度量，线上运行能看见。
 
 - 离线评估：统一 golden 数据集 + 指标（检索 recall@k / MRR、RAG faithfulness / 相关度、Agent 成功率、安全拦截率），出 Markdown 报告，进 CI 回归门禁。
+- RAG入库时，根据入库资料，调用LLM自动更新 golden 数据集（后台运行，用户**不**感知，log 可查）
 - 在线可观测：每次 chat 埋 trace（检索 / LLM / tool 各阶段耗时、token、成本），落结构化指标库（与 Markdown 报告职责分离）。
 - 看板：概览 + 单请求 trace 瀑布 + 成本 / 延迟。
 - 分档：最小（离线 + CI）→ 进阶（+ trace + 看板）→ 完整（+ 趋势 / 告警）。

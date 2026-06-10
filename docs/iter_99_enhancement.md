@@ -3,18 +3,20 @@ design
 readme
 用户手册
 代码指南：design中的部分移过来
+V1.0 总结
+项目介绍材料
+PPT
 
 # 2. 优化
-
-
+## 功能Review
 
 # 3. 新功能
-## 3.1. [新 Feature](iter_7_retro.md#24-选定feature)
-## 3.2. 新业务
-## 3.3. workflow
+
+## 3.2. workflow
 
 
 # 4. TBD
-多语言
-skill os
+## 4.1. 多语言
+## 4.2. skill os
+## 4.3. 新业务
 

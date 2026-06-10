@@ -46,6 +46,7 @@ logs/
 
 # ── 配置 UI runtime override（个人本地修改，不进 git）──────────
 .agenta/config_overrides.json
+.agenta/routing_pool.json
 
 # ── API key（admin 在 UI 配的明文密钥，绝不进 git）─────────────
 .agenta/api_keys.json
