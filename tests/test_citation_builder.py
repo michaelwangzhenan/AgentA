@@ -458,3 +458,62 @@ class TestRegisterWeb:
         builder.register([_make_hit("https://a.com")])  # KB source 恰好长得像 url
         builder.register_web([{"url": "https://a.com", "title": "网页"}])
         assert len(builder) == 2
+
+
+# ── 8. 重编号（Deep Research：连续 [n]）─────────────────────────────────────
+
+class TestRenumberAndRender:
+    """renumber_and_render()：把正文实际引用的稀疏编号压成从 1 起连续。"""
+
+    def test_no_citation_returns_text_and_empty(self) -> None:
+        builder = CitationBuilder()
+        builder.register([_make_hit("a.md")])
+        new_text, block = builder.renumber_and_render("没有引用的正文")
+        assert new_text == "没有引用的正文"
+        assert block == ""
+
+    def test_sparse_nums_compacted_by_first_appearance(self) -> None:
+        """分配了 [1]..[5]，正文只引 [4][2][5]（首现序）→ 改写为 [1][2][3]。"""
+        builder = CitationBuilder()
+        for i in range(5):
+            builder.register([_make_hit(f"f{i}.md")])
+        text = "先 [4]，再 [2]，最后 [5]。"
+        new_text, block = builder.renumber_and_render(text)
+        assert new_text == "先 [1]，再 [2]，最后 [3]。"
+        # sources 块按新编号连续
+        assert "[1] f3.md" in block
+        assert "[2] f1.md" in block
+        assert "[3] f4.md" in block
+        assert "[4]" not in block
+
+    def test_repeated_citation_keeps_same_new_num(self) -> None:
+        builder = CitationBuilder()
+        for i in range(3):
+            builder.register([_make_hit(f"f{i}.md")])
+        new_text, _ = builder.renumber_and_render("[3] 然后 [1] 又 [3]")
+        assert new_text == "[1] 然后 [2] 又 [1]"
+
+    def test_web_and_kb_mixed_renumber(self) -> None:
+        builder = CitationBuilder()
+        builder.register([_make_hit("a.md")])  # [1]
+        builder.register_web([{"url": "https://x.com", "title": "X"}])  # [2]
+        builder.register([_make_hit("b.md")])  # [3]
+        text = "网页 [2] 与文档 [3]"  # 只引 web 和第二个 KB
+        new_text, block = builder.renumber_and_render(text)
+        assert new_text == "网页 [1] 与文档 [2]"
+        assert "[1] X — https://x.com" in block
+        assert "[2] b.md" in block
+
+    def test_hallucinated_num_left_untouched(self) -> None:
+        builder = CitationBuilder()
+        builder.register([_make_hit("a.md")])  # 只有 [1]
+        new_text, block = builder.renumber_and_render("真引 [1]，幻觉 [9]")
+        assert new_text == "真引 [1]，幻觉 [9]"  # [9] 不在分配范围，原样保留
+        assert "[1] a.md" in block
+
+    def test_chinese_brackets_preserved(self) -> None:
+        builder = CitationBuilder()
+        for i in range(3):
+            builder.register([_make_hit(f"f{i}.md")])
+        new_text, _ = builder.renumber_and_render("见【3】与【1】")
+        assert new_text == "见【1】与【2】"

@@ -37,6 +37,8 @@ from src.rag.retriever import Hit
 # 正文里识别引用编号的正则；同时支持英文 `[n]` 与中文【n】方括号。
 # 复合写法 `[1,2]` 也会被 `findall` 抓两次（每次一个数字），靠 set 去重。
 _CITATION_RE = re.compile(r"[\[【](\d+)[\]】]")
+# 同上但分组捕获左右括号，供重编号时原样保留括号风格（[n] / 【n】）。
+_CITATION_RE_PARTS = re.compile(r"([\[【])(\d+)([\]】])")
 
 # 渲染 sources 块时的标题分隔条
 _SOURCES_HEADER = "— sources —"
@@ -230,15 +232,48 @@ class CitationBuilder:
         )
         lines = [_SOURCES_HEADER]
         for c in chosen:
-            lines.append(self._render_one(c))
+            lines.append(self._render_one(c, c.num))
         return "\n\n" + "\n".join(lines)
 
+    def renumber_and_render(self, text: str) -> tuple[str, str]:
+        """把正文里实际用到的 `[n]` 压缩成从 1 起的连续编号，返回 (改写后正文, sources 块)。
+
+        分配的全局编号是按"被检索到的顺序"递增的，LLM 只引用其中一部分，直接渲染会
+        出现 `[1] [4] [18]` 这种空洞。这里按**正文里首次出现的顺序**重排成 `[1][2][3]...`，
+        同步改写正文里的 `[n]` 标记与 sources 块，保证两边编号一致且连续。
+
+        Args:
+            text: 含 `[n]` 标记的报告正文（不含 sources 块）。
+
+        Returns:
+            `(新正文, sources 块)`；正文无有效引用时返回 `(原文, "")`。
+        """
+        used = self.extract_used(text)  # 已是"首次出现顺序 + 仅合法编号"
+        if not used:
+            return text, ""
+        old_to_new = {old: i for i, old in enumerate(used, start=1)}
+        by_num = {c.num: c for c in self._citations}
+
+        def _sub(m: re.Match[str]) -> str:
+            br_open, num_s, br_close = m.group(1), m.group(2), m.group(3)
+            new = old_to_new.get(int(num_s))
+            return f"{br_open}{new}{br_close}" if new is not None else m.group(0)
+
+        new_text = _CITATION_RE_PARTS.sub(_sub, text)
+        lines = [_SOURCES_HEADER]
+        for old in used:
+            lines.append(self._render_one(by_num[old], old_to_new[old]))
+        return new_text, "\n\n" + "\n".join(lines)
+
     @staticmethod
-    def _render_one(c: Citation) -> str:
-        """单条引用的展示行（web 来源走 `[n] title — url`，KB 来源走 source § heading）。"""
+    def _render_one(c: Citation, num: int) -> str:
+        """单条引用的展示行（web 来源走 `[n] title — url`，KB 来源走 source § heading）。
+
+        `num` 显式传入而非用 `c.num`：重编号场景下展示编号与内部分配编号不同。
+        """
         if c.url:
             title = c.title or c.url
-            return f"[{c.num}] {title} — {c.url}"
+            return f"[{num}] {title} — {c.url}"
         head = f"§ {c.heading}" if c.heading else ""
         tail_bits: list[str] = []
         if c.page_no is not None:
@@ -249,7 +284,7 @@ class CitationBuilder:
         body = f"{c.source}"
         if head:
             body = f"{body} {head}"
-        return f"[{c.num}] {body}{tail}"
+        return f"[{num}] {body}{tail}"
 
     # ── 调试 / 内省 ────────────────────────────────────────────────────────
 

@@ -206,7 +206,7 @@ class ResearchEngine:
         bus.publish(AgentEvent(type=EVENT_RESEARCH_SYNTHESIZING, payload={}))
         report = self._synthesize(query, results, usage, _on_token)
 
-        return self._finalize(report, citation_builder, session_id, usage, bus, _on_token)
+        return self._finalize(report, citation_builder, session_id, usage, bus)
 
     # ── ① 规划 ──────────────────────────────────────────────────────────────
 
@@ -348,8 +348,12 @@ class ResearchEngine:
         except (json.JSONDecodeError, TypeError):
             args = {}
         stage, label = _TOOL_STAGE.get(name, ("retrieving", "检索中"))
+        # 工具入参里的检索词 / URL，作为过程展示的细节（面板显示"联网搜索：xxx"）
+        detail = str(args.get("query") or args.get("url") or "").strip()
+        # action=True 让前端面板就本次工具调用新增一行过程，detail 为这次查的内容
         bus.publish(AgentEvent(type=EVENT_RESEARCH_SUBAGENT_PROGRESS, payload={
-            "sub_id": sub_id, "stage": stage, "label": label, "sources": sources,
+            "sub_id": sub_id, "stage": stage, "label": label,
+            "detail": detail, "sources": sources, "action": True,
         }))
 
         result = execute_tool(
@@ -363,9 +367,11 @@ class ResearchEngine:
         if gained:
             with self._sources_lock:
                 self._total_sources += 1
-            bus.publish(AgentEvent(type=EVENT_RESEARCH_SUBAGENT_PROGRESS, payload={
-                "sub_id": sub_id, "stage": stage, "label": label, "sources": sources + gained,
-            }))
+        # 工具结束：刷新来源计数 + 本次结果状态（action 省略，仅更新最近这行）
+        bus.publish(AgentEvent(type=EVENT_RESEARCH_SUBAGENT_PROGRESS, payload={
+            "sub_id": sub_id, "stage": stage, "label": label,
+            "sources": sources + gained, "status": result.status,
+        }))
         return gained
 
     def _total_cap_reached(self) -> bool:
@@ -456,14 +462,15 @@ class ResearchEngine:
         session_id: str,
         usage: _Usage,
         bus: EventBus,
-        on_token: Callable[[str], None],
     ) -> str:
-        """扫报告里的 [n] 渲染参考来源块、落库最终报告、发 final_answer。"""
+        """把报告里的 [n] 压缩成连续编号 + 追加 sources 块、落库、发 final_answer。
+
+        正文在综述阶段已按"被检索顺序"的原始编号流式推给前端；这里重编号后由
+        final_answer 携带完整文本，前端深度研究消息以 final_answer 文本为准覆盖显示，
+        所以不再单独 stream sources 块（避免新旧编号在流式途中打架）。
+        """
         report = report.strip()
-        used = citation_builder.extract_used(report)
-        sources_block = citation_builder.render(used)
-        if sources_block:
-            on_token(sources_block)
+        report, sources_block = citation_builder.renumber_and_render(report)
         report = report + sources_block
 
         self._chat_history.append(

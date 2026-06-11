@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import {
   Copy,
+  Download,
   Pencil,
   RotateCcw,
   RefreshCw,
@@ -65,6 +66,32 @@ async function copyText(text: string) {
   } catch {
     toast.error('复制失败')
   }
+}
+
+/** 把文本另存为本地 .md 文件（深度研究报告导出用）。 */
+function downloadMarkdown(filename: string, content: string) {
+  try {
+    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+    toast.success('已导出')
+  } catch {
+    toast.error('导出失败')
+  }
+}
+
+/** 由研究问题 + 日期拼一个安全的文件名（去掉非法字符，限长）。 */
+function researchFilename(query: string | undefined): string {
+  const date = new Date().toISOString().slice(0, 10)
+  const base = (query || '深度研究报告')
+    .replace(/[\\/:*?"<>|\n\r]/g, ' ')
+    .trim()
+    .slice(0, 40)
+  return `${base || '深度研究报告'}-${date}.md`
 }
 
 export function MessageBubble({
@@ -331,6 +358,19 @@ function AssistantBubble({
           <IconBtn label="复制" onClick={() => copyText(body)}>
             <Copy className="h-3.5 w-3.5" />
           </IconBtn>
+          {message.research ? (
+            <IconBtn
+              label="另存为 Markdown"
+              onClick={() =>
+                downloadMarkdown(
+                  researchFilename(message.research?.query),
+                  message.content,
+                )
+              }
+            >
+              <Download className="h-3.5 w-3.5" />
+            </IconBtn>
+          ) : null}
           <IconBtn
             label="重新生成"
             disabled={cb.inFlight}

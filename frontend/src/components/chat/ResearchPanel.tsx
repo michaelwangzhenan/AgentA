@@ -1,6 +1,15 @@
-import { AlertCircle, Check, Loader2, Microscope } from 'lucide-react'
+import {
+  AlertCircle,
+  Check,
+  FileText,
+  Globe,
+  Loader2,
+  Microscope,
+  Search,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type {
+  ResearchAction,
   ResearchPhase,
   ResearchState,
   ResearchSubagent,
@@ -43,8 +52,17 @@ export function ResearchPanel({ research }: { research: ResearchState }) {
               <SubagentIcon status={s.status} />
               <div className="min-w-0 flex-1">
                 <div className="break-words text-foreground">{s.question}</div>
+                {s.actions && s.actions.length > 0 ? (
+                  <ul className="mt-1 space-y-0.5">
+                    {s.actions.map((a, i) => (
+                      <ActionRow key={i} action={a} />
+                    ))}
+                  </ul>
+                ) : null}
                 <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
-                  {s.status === 'running' && s.label ? <span>{s.label}…</span> : null}
+                  {s.status === 'running' && s.label && !s.actions?.length ? (
+                    <span>{s.label}…</span>
+                  ) : null}
                   {s.sources > 0 ? <span>{s.sources} 条来源</span> : null}
                   {s.status === 'failed' ? (
                     <span className="text-destructive">{s.note || '未查到资料'}</span>
@@ -68,6 +86,31 @@ export function ResearchPanel({ research }: { research: ResearchState }) {
         </div>
       ) : null}
     </div>
+  )
+}
+
+function ActionRow({ action }: { action: ResearchAction }) {
+  const Icon =
+    action.label.includes('网页') || action.label.includes('读取')
+      ? FileText
+      : action.label.includes('联网')
+        ? Globe
+        : Search
+  return (
+    <li className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+      {action.status === 'running' ? (
+        <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin text-violet-400" />
+      ) : action.status === 'error' ? (
+        <AlertCircle className="mt-0.5 h-3 w-3 shrink-0 text-destructive" />
+      ) : (
+        <Icon className="mt-0.5 h-3 w-3 shrink-0" />
+      )}
+      <span className="min-w-0 break-words">
+        <span className="text-foreground/70">{action.label}</span>
+        {action.detail ? <span>：{action.detail}</span> : null}
+        {action.status === 'empty' ? <span className="opacity-60">（无结果）</span> : null}
+      </span>
+    </li>
   )
 }
 

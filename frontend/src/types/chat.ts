@@ -84,7 +84,18 @@ export type AgentStreamEvent =
     }
   | {
       type: 'research_subagent_progress'
-      payload: { sub_id: number; stage: string; label: string; sources: number }
+      payload: {
+        sub_id: number
+        stage: string
+        label: string
+        sources: number
+        /** 本次工具调用查的内容（检索词 / URL）；action=true 时随新动作给出 */
+        detail?: string
+        /** true = 一次新的工具调用开始（面板就此新增一行过程） */
+        action?: boolean
+        /** 工具结束时的结果状态（ok / empty / error） */
+        status?: string
+      }
     }
   | {
       type: 'research_subagent_end'
@@ -152,6 +163,16 @@ export type ResearchPhase =
 
 export type ResearchSubagentStatus = 'running' | 'ok' | 'failed'
 
+/** 子代理执行过程中的一次工具调用（用于面板展示"正在查什么"） */
+export type ResearchAction = {
+  /** 工具标签：检索知识库 / 联网搜索 / 读取网页 */
+  label: string
+  /** 查的内容：检索词 / URL */
+  detail: string
+  /** 结果状态：running（进行中）/ ok / empty / error */
+  status: 'running' | 'ok' | 'empty' | 'error'
+}
+
 export type ResearchSubagent = {
   sub_id: number
   question: string
@@ -160,6 +181,8 @@ export type ResearchSubagent = {
   label?: string
   sources: number
   note?: string
+  /** 执行过程中的工具调用序列（按发生顺序） */
+  actions?: ResearchAction[]
 }
 
 export type ResearchReflect = {

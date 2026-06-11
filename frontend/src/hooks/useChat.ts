@@ -7,6 +7,7 @@ import type {
   Message,
   PlanStep,
   PlanStepStatus,
+  ResearchAction,
   ResearchState,
   TimelineItem,
   ToolCallState,
@@ -323,11 +324,27 @@ export function useChat({ sessionId, onSettled }: Options) {
                 case 'research_subagent_progress':
                   updateResearch((r) => ({
                     ...r,
-                    subagents: r.subagents.map((s) =>
-                      s.sub_id === ev.payload.sub_id
-                        ? { ...s, label: ev.payload.label, sources: ev.payload.sources }
-                        : s,
-                    ),
+                    subagents: r.subagents.map((s) => {
+                      if (s.sub_id !== ev.payload.sub_id) return s
+                      const base = { ...s, label: ev.payload.label, sources: ev.payload.sources }
+                      const actions = [...(s.actions ?? [])]
+                      if (ev.payload.action) {
+                        // 新工具调用：追加一行进行中的过程
+                        actions.push({
+                          label: ev.payload.label,
+                          detail: ev.payload.detail ?? '',
+                          status: 'running',
+                        })
+                      } else if (ev.payload.status && actions.length > 0) {
+                        // 工具结束：把最近一行过程标成结果状态
+                        const last = actions[actions.length - 1]
+                        actions[actions.length - 1] = {
+                          ...last,
+                          status: ev.payload.status as ResearchAction['status'],
+                        }
+                      }
+                      return { ...base, actions }
+                    }),
                   }))
                   break
                 case 'research_subagent_end':
@@ -364,7 +381,9 @@ export function useChat({ sessionId, onSettled }: Options) {
                 case 'final_answer':
                   update((m) => ({
                     ...m,
-                    content: m.content || ev.payload.text,
+                    // 深度研究：正文流式时是"被检索顺序"的原始编号，final_answer 才是
+                    // 重编号后的最终稿 —— 以它为准覆盖；普通对话保留已流式好的正文。
+                    content: m.research ? ev.payload.text : m.content || ev.payload.text,
                     streaming: false,
                     model: ev.payload.model ?? m.model,
                     cached: ev.payload.cached ?? false,
