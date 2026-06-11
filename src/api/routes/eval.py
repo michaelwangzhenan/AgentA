@@ -16,7 +16,13 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from src.api.deps import get_current_user, get_golden_store, get_trace_store, require_admin
+from src.api.deps import (
+    get_current_user,
+    get_golden_store,
+    get_security_event_store,
+    get_trace_store,
+    require_admin,
+)
 from src.api.schemas.eval import (
     GoldenCreateRequest,
     GoldenItem,
@@ -25,7 +31,9 @@ from src.api.schemas.eval import (
     ReportContent,
     ReportItem,
     ReportList,
+    SecurityEventRow,
     SecurityKindRow,
+    SecurityRuntimeSummary,
     SecuritySummary,
     SecurityTrend,
     SecurityTrendPoint,
@@ -38,6 +46,7 @@ from src.api.schemas.eval import (
     TraceSpan,
 )
 from src.memory.golden_store import GoldenStore
+from src.memory.security_event_store import SecurityEventStore
 from src.memory.trace_store import TraceStore
 
 logger = logging.getLogger(__name__)
@@ -360,3 +369,22 @@ def security_trend(
             partial=bool(data.get("partial", False)),
         ))
     return SecurityTrend(points=points[-limit:])
+
+
+@router.get("/security/runtime/summary", response_model=SecurityRuntimeSummary)
+def security_runtime_summary(
+    range: str = Query("30d"),
+    limit: int = Query(50, ge=1, le=200),
+    _: dict = Depends(require_admin),
+    store: SecurityEventStore = Depends(get_security_event_store),
+) -> SecurityRuntimeSummary:
+    """线上真实拦截统计：区间总数 + 分类型计数 + 最近若干条（全员视角，admin）。"""
+    start, end = _resolve_range(range)
+    s = store.summary(start, end)
+    recent = store.recent(start, end, limit=limit)
+    return SecurityRuntimeSummary(
+        range=range,
+        total=s["total"],
+        by_type=s["by_type"],
+        recent=[SecurityEventRow(**r) for r in recent],
+    )

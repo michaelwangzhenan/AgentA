@@ -80,6 +80,7 @@ import type {
   GoldenUpdateInput,
   ReportContent,
   ReportList,
+  SecurityRuntimeSummary,
   SecuritySummary,
   SecurityTrend,
   TraceDetail,
@@ -1035,4 +1036,13 @@ export async function getSecurityTrend(limit = 30): Promise<SecurityTrend> {
   const res = await apiFetch(`/api/eval/security/trend?limit=${limit}`)
   await _ensureOk(res)
   return (await res.json()) as SecurityTrend
+}
+
+export async function getSecurityRuntimeSummary(
+  range = '30d',
+  limit = 50,
+): Promise<SecurityRuntimeSummary> {
+  const res = await apiFetch(`/api/eval/security/runtime/summary?range=${range}&limit=${limit}`)
+  await _ensureOk(res)
+  return (await res.json()) as SecurityRuntimeSummary
 }

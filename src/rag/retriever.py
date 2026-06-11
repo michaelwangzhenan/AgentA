@@ -571,6 +571,7 @@ def format_search_results(
     from src.agent.core.security_filter import scrub_injection, wrap_untrusted
 
     parts: list[str] = []
+    any_scrubbed = False
     for i, hit in enumerate(hits, start=1):
         if hit.score is not None:
             score_str = f"{hit.score:.4f}"
@@ -592,9 +593,13 @@ def format_search_results(
         n = citation_nums[i - 1] if citation_nums is not None else i
 
         cleaned_doc, scrubbed = scrub_injection(hit.document)
+        any_scrubbed = any_scrubbed or scrubbed
         flag = " [⚠️ 已清洗]" if scrubbed else ""
         parts.append(
             f"[{n}] 来源: {hit.source}（相关性: {score_str}，库: {hit.collection}{loc_str}）{flag}\n"
             f"{cleaned_doc}"
         )
+    if any_scrubbed:
+        from src.memory.security_event_store import EVENT_SCRUB, record_security_event
+        record_security_event(EVENT_SCRUB, "知识库检索")
     return wrap_untrusted("\n\n---\n\n".join(parts), kind="doc")

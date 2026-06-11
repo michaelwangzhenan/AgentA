@@ -565,11 +565,13 @@ def _tool_web_search(
     do_cite = cite_web and citation_builder is not None
 
     lines: list[str] = []
+    any_scrubbed = False
     for i, item in enumerate(items, 1):
         title = item.get("title", "(无标题)")
         link = item.get("link", "")
         snippet = item.get("snippet", "")
         cleaned_snippet, scrubbed = scrub_injection(snippet)
+        any_scrubbed = any_scrubbed or scrubbed
         flag = " [⚠️ 已清洗]" if scrubbed else ""
         # cite_web 时把命中 URL 注册进 CitationBuilder 拿全局编号（让 LLM 在报告里能引 [n]）；
         # 否则沿用旧的局部序号 1..N（普通 chat 行为不变）。link 为空时退回局部序号。
@@ -580,6 +582,9 @@ def _tool_web_search(
                 marker = f"[{nums[0]}]"
         lines.append(f"{marker} {title}{flag}\n    URL: {link}\n    摘要: {cleaned_snippet}")
 
+    if any_scrubbed:
+        from src.memory.security_event_store import EVENT_SCRUB, record_security_event
+        record_security_event(EVENT_SCRUB, "web 搜索")
     return ToolResult(status="ok", content=wrap_untrusted("\n\n".join(lines), kind="web"))
 
 
@@ -802,6 +807,8 @@ def _tool_fetch_url(
     # SSRF 防御统一入口，拦 file:// / 内网 IP / 解析失败的域名
     from src.agent.core.url_guard import is_url_safe
     if not is_url_safe(url):
+        from src.memory.security_event_store import EVENT_SSRF, record_security_event
+        record_security_event(EVENT_SSRF, url)
         return ToolResult(
             status="error",
             content=(
@@ -825,6 +832,9 @@ def _tool_fetch_url(
     if result.status == "ok":
         from src.agent.core.security_filter import scrub_injection, wrap_untrusted
         cleaned, scrubbed = scrub_injection(result.content)
+        if scrubbed:
+            from src.memory.security_event_store import EVENT_SCRUB, record_security_event
+            record_security_event(EVENT_SCRUB, "网页抓取")
         flag = "[⚠️ 已清洗] " if scrubbed else ""
         # cite_web 时把本 URL 注册进引用器（与 web_search 同一 url 去重 → 复用编号），
         # 并在正文前标注 [n]，让 LLM 知道这段网页正文对应哪条引用。
@@ -2299,6 +2309,9 @@ def _execute_mcp_tool(name: str, args: dict[str, Any]) -> ToolResult:
         return ToolResult(status="error", content=f"MCP 工具异常: {exc}")
 
     cleaned, scrubbed = scrub_injection(text or "")
+    if scrubbed:
+        from src.memory.security_event_store import EVENT_SCRUB, record_security_event
+        record_security_event(EVENT_SCRUB, f"MCP 工具 {name}")
     flag = "[⚠️ 已清洗] " if scrubbed else ""
     wrapped = wrap_untrusted(f"{flag}{cleaned}", kind="tool")
     return ToolResult(status="ok", content=wrapped)
@@ -2341,6 +2354,8 @@ def execute_tool(
     # 命中即拒绝（status=error 让 tool_call_engine 引导 LLM 换工具），防绕过。
     from src.agent.core.security_filter import is_tool_allowed
     if not is_tool_allowed(name):
+        from src.memory.security_event_store import EVENT_TOOL, record_security_event
+        record_security_event(EVENT_TOOL, name)
         return ToolResult(
             status="error",
             content=f"工具 {name!r} 当前被名单门拒绝（SECURITY_MODE / TOOL_BLOCKLIST / TOOL_ALLOWLIST）。请改用其它工具或如实告知用户当前无法获取该信息。",

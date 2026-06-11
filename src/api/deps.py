@@ -34,6 +34,8 @@ from src.memory.srs_store import SRSStore
 from src.memory.srs_store import get_shared_store as _get_shared_srs_store
 from src.memory.golden_store import GoldenStore
 from src.memory.golden_store import get_shared_store as _get_shared_golden_store
+from src.memory.security_event_store import SecurityEventStore
+from src.memory.security_event_store import get_shared_store as _get_shared_security_event_store
 from src.memory.trace_store import TraceStore
 from src.memory.trace_store import get_shared_store as _get_shared_trace_store
 from src.memory.user_memory import UserMemoryStore
@@ -141,6 +143,11 @@ def get_trace_store() -> TraceStore:
 def get_golden_store() -> GoldenStore:
     """复用 golden_store 进程内共享单例（RAG golden CRUD + 审核状态）。"""
     return _get_shared_golden_store()
+
+
+def get_security_event_store() -> SecurityEventStore:
+    """复用 security_event_store 进程内共享单例（实时安全拦截事件，写 usage.db）。"""
+    return _get_shared_security_event_store()
 
 
 # 关认证时回落到的默认用户（CLI / 单机自用）；admin 角色让 admin 门也能过

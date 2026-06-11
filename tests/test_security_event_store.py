@@ -1,0 +1,119 @@
+"""实时安全拦截事件存储 + 软失败埋点 + runtime API UT（iter_14 §4.3）。"""
+
+from __future__ import annotations
+
+import time
+from collections.abc import Iterator
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+from fastapi.testclient import TestClient
+
+from src.api.deps import get_security_event_store
+from src.api.main import app
+from src.core.user_context import use_user
+from src.memory import security_event_store as ses
+from src.memory.security_event_store import (
+    EVENT_SCRUB,
+    EVENT_SSRF,
+    EVENT_TOOL,
+    SecurityEventStore,
+)
+
+
+@pytest.fixture
+def store(tmp_path: Path) -> Iterator[SecurityEventStore]:
+    s = SecurityEventStore(str(tmp_path / "usage.db"))
+    yield s
+    s.close()
+
+
+# ── 存储读写 ─────────────────────────────────────────────────────────────────
+
+
+class TestStore:
+    def test_record_and_summary(self, store: SecurityEventStore) -> None:
+        store.record(EVENT_SCRUB, "知识库检索", user_id=1)
+        store.record(EVENT_SCRUB, "web 搜索", user_id=1)
+        store.record(EVENT_TOOL, "fetch_url", user_id=1)
+        store.record(EVENT_SSRF, "http://10.0.0.1", user_id=2)
+
+        s = store.summary(0, int(time.time()) + 10)
+        assert s["total"] == 4
+        assert s["by_type"] == {"scrub": 2, "tool": 1, "ssrf": 1}
+
+    def test_summary_filters_user(self, store: SecurityEventStore) -> None:
+        store.record(EVENT_TOOL, "a", user_id=1)
+        store.record(EVENT_SSRF, "b", user_id=2)
+        s = store.summary(0, int(time.time()) + 10, user_id=2)
+        assert s["total"] == 1 and s["by_type"]["ssrf"] == 1
+
+    def test_recent_desc_and_limit(self, store: SecurityEventStore) -> None:
+        for i in range(5):
+            store.record(EVENT_TOOL, f"tool{i}", user_id=1)
+        rows = store.recent(0, int(time.time()) + 10, limit=3)
+        assert len(rows) == 3
+        # 时间倒序：最后写入的在最前（同秒时按 id 倒序）
+        assert rows[0]["detail"] == "tool4"
+
+    def test_summary_empty_by_type_keys(self, store: SecurityEventStore) -> None:
+        s = store.summary(0, int(time.time()) + 10)
+        assert s["total"] == 0
+        assert set(s["by_type"].keys()) == {"scrub", "tool", "ssrf"}
+
+    def test_delete_all_for_user(self, store: SecurityEventStore) -> None:
+        store.record(EVENT_TOOL, "a", user_id=1)
+        store.record(EVENT_TOOL, "b", user_id=1)
+        store.record(EVENT_TOOL, "c", user_id=2)
+        n = store.delete_all_for_user(1)
+        assert n == 2
+        assert store.summary(0, int(time.time()) + 10)["total"] == 1
+
+
+# ── 软失败埋点 ───────────────────────────────────────────────────────────────
+
+
+class TestRecordSoftFail:
+    def test_record_uses_current_user(self, store: SecurityEventStore) -> None:
+        ses.reset_shared_store_for_testing(store)
+        try:
+            with use_user(7):
+                ses.record_security_event(EVENT_SSRF, "http://169.254.169.254")
+            rows = store.recent(0, int(time.time()) + 10)
+            assert rows[0]["user_id"] == 7 and rows[0]["event_type"] == "ssrf"
+        finally:
+            ses.reset_shared_store_for_testing(None)
+
+    def test_record_swallows_store_error(self) -> None:
+        """store 抛异常时 record_security_event 不得向上抛（绝不阻断对话）。"""
+        with patch.object(ses, "get_shared_store", side_effect=RuntimeError("boom")):
+            ses.record_security_event(EVENT_TOOL, "x")  # 不抛即通过
+
+
+# ── runtime API ──────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def client(store: SecurityEventStore) -> Iterator[TestClient]:
+    app.dependency_overrides[get_security_event_store] = lambda: store
+    yield TestClient(app)
+    app.dependency_overrides.clear()
+
+
+def test_runtime_summary_api(client: TestClient, store: SecurityEventStore) -> None:
+    store.record(EVENT_SCRUB, "知识库检索", user_id=1)
+    store.record(EVENT_TOOL, "fetch_url", user_id=1)
+    r = client.get("/api/eval/security/runtime/summary?range=30d")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["total"] == 2
+    assert body["by_type"]["scrub"] == 1 and body["by_type"]["tool"] == 1
+    assert len(body["recent"]) == 2
+    assert body["recent"][0]["event_type"] in ("scrub", "tool")
+
+
+def test_runtime_summary_empty(client: TestClient) -> None:
+    r = client.get("/api/eval/security/runtime/summary")
+    assert r.status_code == 200
+    assert r.json()["total"] == 0

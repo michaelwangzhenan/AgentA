@@ -1,10 +1,19 @@
 import { useCallback, useEffect, useState } from 'react'
+import { AlertCircle } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
 import { Button } from '@/components/ui/button'
-import { getSecuritySummary, getSecurityTrend } from '@/api/client'
-import type { SecuritySummary, SecurityTrend } from '@/types/eval'
+import {
+  getSecurityRuntimeSummary,
+  getSecuritySummary,
+  getSecurityTrend,
+} from '@/api/client'
+import type {
+  SecurityRuntimeSummary,
+  SecuritySummary,
+  SecurityTrend,
+} from '@/types/eval'
 
 // 类别中文名（与 adversarial.py 的 kind 对齐）
 const KIND_LABELS: Record<string, string> = {
@@ -16,11 +25,118 @@ const KIND_LABELS: Record<string, string> = {
   info_leak: '信息泄露',
 }
 
+// 实时拦截事件类型中文名
+const EVENT_TYPE_LABELS: Record<string, string> = {
+  scrub: '注入清洗',
+  tool: '越权调用拦截',
+  ssrf: 'SSRF 拦截',
+}
+
 function pct(v: number): string {
   return `${(v * 100).toFixed(1)}%`
 }
 
+// 顶部：质量看板入口，先展示线上真实拦截，再展示离线红队评估。
 export function SecurityPanel() {
+  return (
+    <div className="space-y-8">
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-sm font-semibold">实时安全监控</h2>
+          <p className="text-xs text-muted-foreground">对话进行中真实发生的拦截（线上实况）</p>
+        </div>
+        <RuntimeMonitor />
+      </section>
+
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-sm font-semibold">离线安全评估</h2>
+          <p className="text-xs text-muted-foreground">红队样本主动测防御，出拦截率 / 误拦率</p>
+        </div>
+        <OfflineEval />
+      </section>
+    </div>
+  )
+}
+
+function RuntimeMonitor() {
+  const [data, setData] = useState<SecurityRuntimeSummary | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    try {
+      setData(await getSecurityRuntimeSummary())
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  if (loading && !data) {
+    return <p className="text-sm text-muted-foreground">加载中…</p>
+  }
+
+  const byType = data?.by_type ?? {}
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">近 30 天</span>
+        <Button variant="outline" size="sm" onClick={refresh}>
+          刷新
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatCard label="总拦截" value={String(data?.total ?? 0)} />
+        <StatCard label="注入清洗" value={String(byType.scrub ?? 0)} />
+        <StatCard label="越权调用" value={String(byType.tool ?? 0)} />
+        <StatCard label="SSRF" value={String(byType.ssrf ?? 0)} />
+      </div>
+
+      <section className="rounded-lg border border-border p-4">
+        <h3 className="mb-3 text-sm font-medium">最近拦截</h3>
+        {data && data.recent.length > 0 ? (
+          <div className="overflow-hidden rounded-md border border-border">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/50 text-left text-xs text-muted-foreground">
+                  <th className="px-3 py-2 font-medium">时间</th>
+                  <th className="px-3 py-2 font-medium">类型</th>
+                  <th className="px-3 py-2 font-medium">详情</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.recent.map((e, i) => (
+                  <tr key={`${e.created_at}-${i}`} className="border-b border-border last:border-0">
+                    <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">
+                      {new Date(e.created_at * 1000).toLocaleString()}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2">
+                      {EVENT_TYPE_LABELS[e.event_type] ?? e.event_type}
+                    </td>
+                    <td className="break-all px-3 py-2 text-muted-foreground">{e.detail}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            近 30 天暂无拦截记录（对话中触发防御后会自动记录到这里）。
+          </p>
+        )}
+      </section>
+    </div>
+  )
+}
+
+function OfflineEval() {
   const [summary, setSummary] = useState<SecuritySummary | null>(null)
   const [trend, setTrend] = useState<SecurityTrend | null>(null)
   const [loading, setLoading] = useState(true)
@@ -49,8 +165,7 @@ export function SecurityPanel() {
   if (!summary || !summary.available) {
     return (
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-medium">红队评估</h2>
+        <div className="flex justify-end">
           <Button variant="outline" size="sm" onClick={refresh}>
             刷新
           </Button>
@@ -76,8 +191,12 @@ export function SecurityPanel() {
           最近评估：{summary.timestamp || '—'}
           {summary.git ? ` · ${summary.git}` : ''}
           {summary.partial && (
-            <span className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-600 dark:text-amber-500">
+            <span
+              className="ml-2 inline-flex cursor-help items-center gap-0.5 rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-600 dark:text-amber-500"
+              title="只跑了部分攻击类别（如 --no-llm 跳过需 LLM 评判的类别）；分数仅覆盖跑过的类别，不能与全量结果直接比较"
+            >
               部分类别（{summary.kinds_run.join(', ') || '—'}）
+              <AlertCircle className="h-3 w-3 shrink-0" />
             </span>
           )}
         </div>
@@ -170,9 +289,17 @@ export function SecurityPanel() {
           <div className="space-y-1.5">
             {trend.points.map((p, i) => (
               <div key={`${p.timestamp}-${i}`} className="flex items-center gap-2 text-xs">
-                <span className="w-32 shrink-0 truncate text-muted-foreground">
-                  {p.timestamp || '—'}
-                  {p.partial && <span className="ml-1 text-amber-600 dark:text-amber-500">·部分</span>}
+                <span className="w-44 shrink-0 whitespace-nowrap text-muted-foreground">
+                  {p.timestamp ? p.timestamp.replace('T', ' ') : '—'}
+                  {p.partial && (
+                    <span
+                      className="ml-1 inline-flex cursor-help items-center gap-0.5 align-middle text-amber-600 dark:text-amber-500"
+                      title="只跑了部分攻击类别（如 --no-llm 跳过需 LLM 评判的类别）；分数仅覆盖跑过的类别，不能与全量结果直接比较"
+                    >
+                      ·部分
+                      <AlertCircle className="h-3 w-3 shrink-0" />
+                    </span>
+                  )}
                 </span>
                 <div className="relative h-4 flex-1 rounded bg-muted/40">
                   <div className="h-4 rounded bg-emerald-500/70" style={{ width: `${p.recall * 100}%` }} />

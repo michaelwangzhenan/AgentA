@@ -882,3 +882,44 @@ flowchart LR
 - **UT**：`ssrf` case runner（内网 / localhost / file:// / 云元数据 / rebinding 判定，mock DNS）、`info_leak` case runner（mock `chat` 返回，禁词命中 = leaked / 未命中 = blocked）、sidecar JSON 落盘字段正确、`/eval/security/summary` + `/eval/security/trend`（mock reports 目录，admin 鉴权 + 防穿越）、`--no-llm` 过滤后含 ssrf 不含 info_leak。LLM / DNS / 文件 IO 一律 mock。
 - **验收标准**：`python -m tools.agent_eval.security.adversarial` 跑出含 6 类分项的报告 + sidecar JSON；`--no-llm` 仅跑 tool + ssrf；`run_all --ci` 把 ssrf 纳入门禁、拦截率跌破即非零退出；「质量看板」→「安全」tab 显示总拦截率 / 误拦率 + 6 类分项 + 趋势；信息泄露类本地全量跑能出结果；防御本体行为不变（现有安全 UT 全绿）。
 
+## 4.3. 实时安全监控（线上拦截统计）
+
+### 4.3.1. 需求
+
+§4.1~§4.2 的红队评估是**离线**的（拿固定样本主动考防御）。但更能反映实战的，是**线上真实对话里到底拦了什么**——这一节把"对话中真实发生的拦截"记录下来、在安全页展示。
+
+- **目标**：对话进行中，三类运行时防御一旦触发就记一条，安全页展示总数 / 分类型 / 最近列表。
+- **价值**：线上真实拦截数据 > 离线评估，证明防御在实战中起作用；"隐形护栏"可见化。
+- **现状**：三类拦截目前都只 `log warning`，不持久化、看板看不到。
+- **风险**：埋点进主对话链路——必须**软失败**，绝不阻断对话。
+
+捕获三类（与已有防御一一对应）：
+
+| 类型 | 触发点 | detail 记什么 |
+|---|---|---|
+| `scrub`（注入清洗） | `scrub_injection` 返回命中（RAG / web / fetch / MCP 内容含注入模板被删段） | 来源（知识库检索 / web 搜索 / 网页抓取 / MCP 工具） |
+| `tool`（名单门拦截） | `execute_tool` 入口 `is_tool_allowed` 返回 False | 被拦工具名 |
+| `ssrf`（SSRF 拦截） | `_tool_fetch_url` 的 `is_url_safe` 返回 False | 被拦 URL |
+
+### 4.3.2. 设计
+
+| 模块 | 位置 | 职责 |
+|---|---|---|
+| 事件存储 | `src/memory/security_event_store.py`（`SecurityEventStore`，写 `usage.db`） | `security_events` 表：类型 / detail / user_id / 时间；读：区间汇总 + 最近列表 |
+| 软失败记录 | 同上 `record_security_event(event_type, detail)` | 读 `current_user_id()`、懒加载共享 store、当场写一行；**异常只 log 不抛**（同 `record_trace_safe` 范式） |
+| 埋点 | `retriever.format_search_results` / `tools.py`（web / fetch / mcp scrub + ssrf + execute_tool 名单门） | 在**调用点**记录，不改 `scrub_injection` / `is_url_safe` / `is_tool_allowed` 纯函数本身 |
+| 只读 API | `src/api/routes/eval.py`（`/eval/security/runtime/summary`） | admin only；区间总数 + 分类型计数 + 最近 N 条 |
+| 前端 | `frontend/src/components/eval/SecurityPanel.tsx` | 顶部加「实时安全监控」区（总数 + 分类型 + 最近列表）；现有红队那块标题改「离线安全评估」 |
+
+**埋点方式（D1，已确认）**：拦截点**直接记**（读 `current_user_id`、懒 import store、逐条写）。拦截是低频事件、IO 压力可忽略；比走 EventBus 聚合改动小、即时不丢。归属只记 `user_id`（拦截点不一定有 session 上下文，先不做 session 维度）。
+
+**小决策（简洁优先）**：
+- 不新增 `.env` 开关：记录始终开、软失败，足够轻量（要关再单列）。
+- 复用 `usage.db`，与 trace / saving 同库不同表，不另起 db。
+- 在调用点记、不污染 `security_filter` / `url_guard` 纯函数，保持依赖方向干净。
+
+### 4.3.3. 测试 + 验收
+
+- **UT**：`SecurityEventStore` 写入 + 区间汇总 + 最近列表；`record_security_event` 软失败（store 抛异常不影响调用方）；`/eval/security/runtime/summary`（mock store，admin 鉴权）。
+- **验收标准**：对话中触发拦截（如工具被黑名单挡 / 抓内网 URL / 召回含注入模板）后，安全页「实时安全监控」区出现对应记录与计数；记录失败不影响对话正常返回。
+

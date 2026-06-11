@@ -173,3 +173,19 @@ class SecurityTrendPoint(BaseModel):
 
 class SecurityTrend(BaseModel):
     points: list[SecurityTrendPoint]      # 按时间升序
+
+
+# ── 实时安全监控（线上拦截事件） ─────────────────────────────────────────────
+
+class SecurityEventRow(BaseModel):
+    event_type: str                       # scrub | tool | ssrf
+    detail: str
+    user_id: int
+    created_at: int
+
+
+class SecurityRuntimeSummary(BaseModel):
+    range: str
+    total: int
+    by_type: dict[str, int]               # {scrub, tool, ssrf} → 计数
+    recent: list[SecurityEventRow]        # 最近若干条（时间倒序）

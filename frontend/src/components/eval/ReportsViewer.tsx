@@ -186,7 +186,7 @@ export function ReportsViewer() {
                                 selected === p.report.name && 'bg-accent',
                               )}
                             >
-                              <div className="truncate font-medium" title={p.report.name}>
+                              <div className="break-all font-medium" title={p.report.name}>
                                 {p.report.name.split('/').pop()}
                               </div>
                               <div className="text-[10px] text-muted-foreground">

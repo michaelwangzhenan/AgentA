@@ -8,7 +8,7 @@
 
 | 维度 | 结果 |
 |---|---|
-| 后端 UT（`pytest -q`） | **1538 passed, 133 deselected**（含本期新增 `test_security_adversarial.py` 25 条） |
+| 后端 UT（`pytest -q`） | **1585 passed, 133 deselected**（含 `test_security_adversarial.py` 25 条 + `test_security_event_store.py` 9 条） |
 | 评估器 `--no-llm`（确定性子集） | **24/24 PASS**（15 tool_blocklist + 9 ssrf），拦截率 100% / 误拦率 0% |
 | CI 门禁（`run_all --ci`） | **PASS**：安全拦截子集含 ssrf，退出码 0 |
 | 数据集规模 | 38 → **75 例**（新增 ssrf 9 / info_leak 6 / direct+4 / rag+2 / web+2 / tool+2） |
@@ -66,3 +66,33 @@
 ## 6. 后续建议（不在本期 scope）
 
 - 暂无遗留项（良性评估口径缺口已于本期一并修复，见 §4）。
+
+## 7. §4.3 实时安全监控 追加验收
+
+线上真实拦截统计（对话进行中触发防御即记录），与离线红队评估并列展示。
+
+| 维度 | 结果 |
+|---|---|
+| 后端 UT | `test_security_event_store.py` **9 条全绿**（存储读写 / 用户过滤 / 倒序限量 / 删号级联 / 软失败 / runtime API） |
+| 前端 tsc | 0 error |
+| 既有功能回归 | 埋点全程软失败（`record_security_event` 吞异常），不阻断对话；普通链路行为不变 |
+
+| 标准（对照 §4.3.3） | 验收方式 | 结果 |
+|---|---|---|
+| 三类拦截被记录（scrub / tool / ssrf） | 5 处调用点埋点：`retriever.format_search_results`、`tools` 的 web/fetch/mcp scrub + ssrf + `execute_tool` 名单门 | ✅ |
+| 软失败不阻断对话 | `TestRecordSoftFail::test_record_swallows_store_error`（store 抛异常时 `record_security_event` 不上抛） | ✅ |
+| 归属 user_id | `record_security_event` 读 `current_user_id()`；`test_record_uses_current_user` | ✅ |
+| runtime API 区间汇总 + 分类型 + 最近 | `/eval/security/runtime/summary`（admin）；`test_runtime_summary_api` | ✅ |
+| 前端「实时安全监控」区 + 旧区改「离线安全评估」 | `SecurityPanel` 拆 `RuntimeMonitor` + `OfflineEval` 两区；总数 + 分类型卡 + 最近列表 | ✅ 代码 + tsc；真实视觉需起服务看 |
+
+本期改动追加：
+
+| 层 | 文件 | 说明 |
+|---|---|---|
+| 存储 | `src/memory/security_event_store.py`（新） | `SecurityEventStore`（`usage.db` `security_events` 表）+ `record_security_event` 软失败 |
+| 埋点 | `src/rag/retriever.py` / `src/agent/tools.py` | 5 处调用点记录拦截，不污染 `security_filter` / `url_guard` 纯函数 |
+| API | `src/api/deps.py` / `schemas/eval.py` / `routes/eval.py` | `get_security_event_store` + `SecurityRuntimeSummary` + `/eval/security/runtime/summary` |
+| 前端 | `types/eval.ts` / `api/client.ts` / `SecurityPanel.tsx` | 实时类型 + `getSecurityRuntimeSummary` + 实时/离线两区 |
+| 测试 | `tests/test_security_event_store.py`（新） | 存储 + 软失败 + runtime API |
+
+**埋点方式决策（D1）**：拦截点直接记（读 `current_user_id`、懒 import store、逐条写、软失败）。理由：拦截低频、IO 可忽略；比 EventBus 聚合改动小、即时不丢。归属先只记 `user_id`。

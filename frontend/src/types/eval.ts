@@ -166,3 +166,19 @@ export type SecurityTrendPoint = {
 export type SecurityTrend = {
   points: SecurityTrendPoint[]
 }
+
+// 实时安全监控（线上拦截事件，对齐 SecurityRuntimeSummary）
+
+export type SecurityEventRow = {
+  event_type: string // scrub | tool | ssrf
+  detail: string
+  user_id: number
+  created_at: number
+}
+
+export type SecurityRuntimeSummary = {
+  range: string
+  total: number
+  by_type: Record<string, number>
+  recent: SecurityEventRow[]
+}
