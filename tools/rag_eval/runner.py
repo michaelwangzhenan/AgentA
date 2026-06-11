@@ -12,6 +12,7 @@ RAG 检索评估脚本（Iter-5）。
     python -m tools.rag_eval.runner --no-rewriter                    # 关闭 query 改写（基线对比）
     python -m tools.rag_eval.runner --no-rerank                      # 关闭 reranker（真关，透传给 retriever）
     python -m tools.rag_eval.runner -o tools/rag_eval/reports/m3.md  # 同时落盘 Markdown + .log trace
+    python -m tools.rag_eval.runner --llm 10                         # 额外评前 10 条答案质量（耗 token）
     python -m tools.rag_eval.runner -v                               # 终端打印 [search] 阶段化日志
 
 设计原则：
@@ -38,6 +39,7 @@ Markdown 报告结构（results-first：打开就能看到结果，无需滚动�
     标题块                  时间戳 / git / python / provider
     ## 核心指标  l            指标 → 值 表格
     ## 环境与配置           Embeddings / Reranker / BM25 / Query rewrite / Retrieval 等
+    ## 答案质量             仅 --llm 时有：faithfulness / 相关度平均分 + 回答/评委模型 + 逐条
     ## Miss 用例 (N)         未命中样本 + 期望 vs 实际 top-3，CI 回归定位最有用
 
 注意：未填 expected_source*/expected_keywords 的 item 会自动按"该指标的分母"剔除，
@@ -52,6 +54,7 @@ import os
 import platform
 import subprocess
 import sys
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -149,6 +152,30 @@ class EvalReport:
     use_rerank: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
     cases: list[CaseResult] = field(default_factory=list)
+    # 仅 --llm 时填：答案质量（faithfulness / 相关度）评估结果，否则 None
+    answer_quality: "AnswerQualityReport | None" = None
+
+
+@dataclass
+class AnswerQualityCase:
+    """单条 golden 的答案质量评估结果（faithfulness + 相关度），score=None 表示评委软失败。"""
+    query: str
+    answer: str
+    faithfulness: float | None
+    relevance: float | None
+    faith_reason: str
+    rel_reason: str
+
+
+@dataclass
+class AnswerQualityReport:
+    """--llm 答案质量评估汇总：回答模型 / 评委模型 + 平均分 + 逐条。"""
+    answer_model: str       # 生成答案用的模型（= 跑脚本时的 ACTIVE_MODEL）
+    judge_model: str        # 评委模型（EVAL_JUDGE_MODEL，空则回落 answer_model）
+    scored: int             # 实际跑了几条
+    avg_faithfulness: float | None
+    avg_relevance: float | None
+    cases: list[AnswerQualityCase] = field(default_factory=list)
 
 
 def _git_info(repo_root: Path) -> dict[str, Any]:
@@ -474,6 +501,139 @@ def evaluate(
     )
 
 
+# 答案质量评估用的极简 RAG 生成 prompt：严格按检索资料作答，缺资料就直说，不编造。
+_RAG_ANSWER_SYS = (
+    "你是一个严谨的知识库问答助手。只依据下面提供的【资料】回答用户问题；"
+    "资料里没有的内容一律不要编造，资料不足以回答时直接说明资料中未提及。"
+    "回答用中文，简洁、直接。"
+)
+# 喂给生成 + faithfulness 评委的资料块字符上限，避免长上下文撑爆 token
+_EVAL_CONTEXT_MAX_CHARS = 4000
+
+
+def _build_eval_context(hits: list[Any], max_chars: int = _EVAL_CONTEXT_MAX_CHARS) -> str:
+    """把检索 hits 的正文拼成「资料块」，喂给答案生成和 faithfulness 评委（截到 max_chars）。"""
+    parts: list[str] = []
+    total = 0
+    for i, h in enumerate(hits, start=1):
+        doc = (getattr(h, "document", "") or "").strip()
+        if not doc:
+            continue
+        block = f"[资料{i}] {doc}"
+        parts.append(block)
+        total += len(block)
+        if total >= max_chars:
+            break
+    return "\n\n".join(parts)[:max_chars]
+
+
+def _generate_rag_answer(query: str, context: str) -> str:
+    """用当前回答模型（ACTIVE_MODEL）基于检索资料生成答案；无资料或失败软返回空串。"""
+    from src.llm.provider import chat
+
+    if not context.strip():
+        return ""
+    messages = [
+        {"role": "system", "content": _RAG_ANSWER_SYS},
+        {"role": "user", "content": f"【资料】\n{context}\n\n【问题】\n{query}"},
+    ]
+    try:
+        resp = chat(messages, temperature=0.0)
+        return (resp.choices[0].message.content or "").strip()
+    except Exception as e:  # noqa: BLE001 — 评估场景：单条生成失败软返回，不中断整轮
+        logger.warning("[eval] 生成答案失败（query=%r）：%s", query[:40], e)
+        return ""
+
+
+def evaluate_answer_quality(
+    items: list[dict[str, Any]],
+    k: int,
+    use_rewriter: bool,
+    use_rerank: bool,
+    limit: int,
+) -> AnswerQualityReport:
+    """对前 limit 条 golden 跑「检索 → 生成答案 → faithfulness / 相关度评分」。
+
+    limit <= 0 表示不限条数。回答用 ACTIVE_MODEL；评委用 EVAL_JUDGE_MODEL（为空回落
+    ACTIVE_MODEL），评委调用走 use_llm_prefs 切到评委模型、关 thinking、温度 0，
+    避免同模型自评偏高。每条都要调 LLM（生成 + 两次评委），耗 token，默认不进 CI。
+    """
+    from tools.rag_eval.rag_judge import judge_answer_relevance, judge_faithfulness
+
+    subset = items if limit <= 0 else items[:limit]
+    n = len(subset)
+
+    answer_model = config.current_active_model()
+    judge_model = (config.EVAL_JUDGE_MODEL or "").strip()
+    # 评委模型非法时回落回答模型：否则逐条 judge 全部软失败，用户还查不到原因
+    if judge_model and judge_model not in config.MODEL_CONFIGS:
+        logger.warning(
+            "[eval] EVAL_JUDGE_MODEL=%r 不在 MODEL_CONFIGS，回落回答模型 %s",
+            judge_model, answer_model,
+        )
+        judge_model = ""
+    judge_label = judge_model or answer_model
+
+    # 检索侧与 evaluate 同一套 query 改写 / rerank 透传设置
+    expand_fn = None
+    if use_rewriter:
+        try:
+            from src.rag.query_rewriter import expand_queries as expand_fn  # type: ignore
+        except Exception as e:
+            logger.warning("[eval] query_rewriter 不可用，已禁用：%s", e)
+            expand_fn = None
+    search_rerank: bool | None = None if use_rerank else False
+
+    def _judge_ctx():
+        # 评委有单独模型才切上下文；为空则原样用回答模型（nullcontext 不动 contextvar）
+        return config.use_llm_prefs(judge_model, False, 0) if judge_model else nullcontext()
+
+    cases: list[AnswerQualityCase] = []
+    faith_scores: list[float] = []
+    rel_scores: list[float] = []
+
+    for i, item in enumerate(subset, start=1):
+        query: str = item["query"]
+        _print_progress(i, n, query)
+
+        queries = list(expand_fn(query)) if expand_fn else [query]
+        hits = search(query, top_k=k, queries=queries, rerank=search_rerank)
+        context = _build_eval_context(hits)
+        answer = _generate_rag_answer(query, context)
+
+        with _judge_ctx():
+            faith = judge_faithfulness(query, context, answer)
+            rel = judge_answer_relevance(query, answer)
+
+        if faith.score is not None:
+            faith_scores.append(faith.score)
+        if rel.score is not None:
+            rel_scores.append(rel.score)
+
+        cases.append(AnswerQualityCase(
+            query=query,
+            answer=answer,
+            faithfulness=faith.score,
+            relevance=rel.score,
+            faith_reason=faith.reason,
+            rel_reason=rel.reason,
+        ))
+
+    _clear_progress_line()
+
+    avg_faith = (sum(faith_scores) / len(faith_scores)) if faith_scores else None
+    avg_rel = (sum(rel_scores) / len(rel_scores)) if rel_scores else None
+
+    return AnswerQualityReport(
+        answer_model=answer_model,
+        judge_model=judge_label,
+        scored=n,
+        avg_faithfulness=avg_faith,
+        avg_relevance=avg_rel,
+        cases=cases,
+    )
+
+
 def _load_golden_from_db() -> list[dict[str, Any]]:
     """从 ``rag_golden.db`` 取评估用 golden。
 
@@ -483,6 +643,11 @@ def _load_golden_from_db() -> list[dict[str, Any]]:
     from src.memory.golden_store import get_shared_store
 
     return get_shared_store().list_for_eval(use_pending=config.EVAL_GOLDEN_USE_PENDING)
+
+
+def _fmt_score5(v: float | None) -> str:
+    """0-5 分展示：None（评委软失败）显示 —，否则 x.xx/5。"""
+    return "—" if v is None else f"{v:.2f}/5"
 
 
 def _print_report(rep: EvalReport, report_path: Path | None = None) -> None:
@@ -551,6 +716,16 @@ def _print_report(rep: EvalReport, report_path: Path | None = None) -> None:
             f"max={qr.get('max_queries')}  hyde={qr.get('hyde_enabled')}  "
             f"translate={qr.get('translate_enabled')}"
         )
+
+    aq = rep.answer_quality
+    if aq is not None:
+        print("-" * 60)
+        print("答案质量（LLM 评委）：")
+        print(f"  评估条数:       {aq.scored}")
+        print(f"  回答模型:       {aq.answer_model}")
+        print(f"  评委模型:       {aq.judge_model}")
+        print(f"  faithfulness:   {_fmt_score5(aq.avg_faithfulness)}")
+        print(f"  answer-relev.:  {_fmt_score5(aq.avg_relevance)}")
     print("=" * 60)
     if report_path is not None:
         print(f"📁 报告已写入 {report_path}")
@@ -634,6 +809,28 @@ def _render_markdown(rep: EvalReport) -> str:
     )
     lines.append("")
 
+    aq = rep.answer_quality
+    if aq is not None:
+        lines.append("## 答案质量（LLM 评委）")
+        lines.append("")
+        lines.append(f"- **评估条数**: {aq.scored}")
+        lines.append(f"- **回答模型**: {aq.answer_model}")
+        lines.append(f"- **评委模型**: {aq.judge_model}")
+        lines.append(f"- **平均 faithfulness**: {_fmt_score5(aq.avg_faithfulness)}")
+        lines.append(f"- **平均 answer-relevance**: {_fmt_score5(aq.avg_relevance)}")
+        lines.append("")
+        lines.append("| # | query | faithfulness | 相关度 | 评委简评（忠实度 / 相关度） |")
+        lines.append("| --- | --- | --- | --- | --- |")
+        for idx, c in enumerate(aq.cases, start=1):
+            q = c.query.replace("|", "\\|").replace("\n", " ")[:40]
+            fr = (c.faith_reason or "").replace("|", "\\|").replace("\n", " ")[:30]
+            rr_ = (c.rel_reason or "").replace("|", "\\|").replace("\n", " ")[:30]
+            lines.append(
+                f"| {idx} | {q} | {_fmt_score5(c.faithfulness)} | "
+                f"{_fmt_score5(c.relevance)} | {fr} / {rr_} |"
+            )
+        lines.append("")
+
     # Miss 用例：has_*_target 为 True 但都没命中。
     # 没目标的 case 不进 Miss（避免没期望的"自由 query"被计为漏召）。
     misses = [
@@ -679,6 +876,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-rerank", action="store_true", help="禁用 reranker（基线对比）")
     ap.add_argument("-o", dest="output", default="",
                     help="把详细报告写到该 Markdown 文件（同时把 INFO trace 落到同名 .log）")
+    ap.add_argument("--llm", type=int, default=None, metavar="N",
+                    help="额外跑答案质量评估（faithfulness / 相关度）：N=最多评的 golden 条数，"
+                         "N<=0 表示全部。会调 LLM 生成答案 + LLM 评委打分，耗 token，不进 CI")
     ap.add_argument("-v", "--verbose", action="store_true",
                     help="终端打印 retriever 阶段化 INFO 日志（会干扰单行进度条）")
     ap.add_argument("--quiet", action="store_true",
@@ -741,6 +941,17 @@ def main(argv: list[str] | None = None) -> int:
         use_rewriter_eff=rep.use_rewriter,
         use_rerank_eff=rep.use_rerank,
     )
+
+    # --llm：在检索评估之后再跑答案质量链路（生成 + 评委，耗 token）
+    if args.llm is not None:
+        aq_answer = config.current_active_model()
+        aq_judge = (config.EVAL_JUDGE_MODEL or "").strip() or aq_answer
+        aq_n = len(items) if args.llm <= 0 else min(args.llm, len(items))
+        print(f"答案质量评估 — {aq_n} cases, 回答模型={aq_answer}, 评委模型={aq_judge}")
+        rep.answer_quality = evaluate_answer_quality(
+            items, k=k, use_rewriter=rep.use_rewriter, use_rerank=rep.use_rerank,
+            limit=args.llm,
+        )
 
     # 先落盘 Markdown 再打印：_print_report 若在 Windows 控制台抛 UnicodeEncodeError
     # 会导致整个 main 退出码非 0，旧版会把 -o 写文件这一步也跳过；

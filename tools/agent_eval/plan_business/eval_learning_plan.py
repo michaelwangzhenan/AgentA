@@ -6,7 +6,7 @@ Phase 2.2 学习计划业务评估器（[§4.9.7 #7](../../../docs/iter_2_agent.
 1. **触发识别**：给定学习目标 → LLM 是否在第一轮就调对 tool
    - positive `create` case：应调 `make_plan`（走嵌套 4 步落库）或 `create_study_plan`（一次性落库，弱形式）
    - negative case（单事实 / 闲聊）：**不应**调 `make_plan` / `create_study_plan`
-2. **计划质量**：positive 通过且调了 `make_plan` 的 case，把 plan steps 喂给 [`judge_with_llm`](../judge/llm_judge.py)
+2. **计划质量**：positive 通过且调了 `make_plan` 的 case，把 plan steps 喂给 [`judge_with_llm`](../../eval_common/llm_judge.py)
    按 "完整性 / 顺序合理 / 可执行 / 时间分配" 评 0-5 分，验收 ① 阈值 ≥ 4.0。
 
 为什么 single-step 而非 e2e：
@@ -40,7 +40,7 @@ load_dotenv(override=True)
 import src.config as config  # noqa: E402
 from src.agent.tools import get_tools  # noqa: E402
 from src.llm.provider import chat  # noqa: E402
-from tools.agent_eval.judge import judge_with_llm  # noqa: E402
+from tools.eval_common import judge_with_llm  # noqa: E402
 
 
 _DEFAULT_DATASET = Path(__file__).parent / "dataset.json"

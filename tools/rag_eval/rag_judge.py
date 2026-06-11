@@ -1,6 +1,6 @@
 """RAG 答案质量评委：faithfulness（忠实度）与 answer-relevance（相关度）。
 
-复用 ``judge_with_llm`` 的 0-5 分机制，只是固定好两类 prompt：
+复用 ``tools.eval_common`` 的 0-5 分 judge 机制，只是固定好两类 prompt：
 
 - **faithfulness**：答案的论断是否都能在「检索到的资料」里找到支撑（编造 / 无中生有扣分）。
   把问题 + 资料拼进 judge 的"任务输入"，答案作为"被评估的输出"。
@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from tools.agent_eval.judge.llm_judge import JudgeResult, judge_with_llm
+from tools.eval_common import JudgeResult, judge_with_llm
 
 _FAITHFULNESS_CRITERIA = """- **有据可依**（满分 4）：答案里的每个事实性论断都能在检索资料中找到支撑；
   能找到则高分，出现资料里没有的信息（编造 / 张冠李戴）则按比例扣分

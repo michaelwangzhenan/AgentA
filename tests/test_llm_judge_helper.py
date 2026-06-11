@@ -1,5 +1,5 @@
 """
-测试 [`tools.agent_eval.judge.judge_with_llm`](../tools/agent_eval/judge/llm_judge.py) 公共 helper（Phase 2.2 D6 / D11）。
+测试 [`tools.eval_common.judge_with_llm`](../tools/eval_common/llm_judge.py) 公共 helper（Phase 2.2 D6 / D11）。
 
 覆盖：
     - 入参校验：empty prompt / output、非法 score 区间
@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tools.agent_eval.judge import JudgeResult, judge_with_llm
+from tools.eval_common import JudgeResult, judge_with_llm
 
 
 def _mock_chat_response(content: str) -> SimpleNamespace:
@@ -54,7 +54,7 @@ class TestParseOk:
 
     def test_parses_basic_json(self) -> None:
         with patch(
-            "tools.agent_eval.judge.llm_judge.chat",
+            "tools.eval_common.llm_judge.chat",
             return_value=_mock_chat_response('{"score": 4.5, "reason": "结构清晰"}'),
         ):
             res = judge_with_llm(prompt="q", output="a", criteria="c")
@@ -65,7 +65,7 @@ class TestParseOk:
     def test_parses_within_markdown_code_block(self) -> None:
         raw = '```json\n{"score": 3.0, "reason": "ok"}\n```'
         with patch(
-            "tools.agent_eval.judge.llm_judge.chat",
+            "tools.eval_common.llm_judge.chat",
             return_value=_mock_chat_response(raw),
         ):
             res = judge_with_llm(prompt="q", output="a", criteria="c")
@@ -75,7 +75,7 @@ class TestParseOk:
     def test_parses_with_surrounding_text(self) -> None:
         raw = '评分结果如下：{"score": 4.0, "reason": "good"} 谢谢'
         with patch(
-            "tools.agent_eval.judge.llm_judge.chat",
+            "tools.eval_common.llm_judge.chat",
             return_value=_mock_chat_response(raw),
         ):
             res = judge_with_llm(prompt="q", output="a", criteria="c")
@@ -84,7 +84,7 @@ class TestParseOk:
 
     def test_missing_reason_defaults(self) -> None:
         with patch(
-            "tools.agent_eval.judge.llm_judge.chat",
+            "tools.eval_common.llm_judge.chat",
             return_value=_mock_chat_response('{"score": 2.5}'),
         ):
             res = judge_with_llm(prompt="q", output="a", criteria="c")
@@ -93,7 +93,7 @@ class TestParseOk:
 
     def test_custom_score_range(self) -> None:
         with patch(
-            "tools.agent_eval.judge.llm_judge.chat",
+            "tools.eval_common.llm_judge.chat",
             return_value=_mock_chat_response('{"score": 7.5, "reason": "x"}'),
         ):
             res = judge_with_llm(
@@ -109,7 +109,7 @@ class TestFailures:
 
     def test_llm_exception_soft_fail(self) -> None:
         with patch(
-            "tools.agent_eval.judge.llm_judge.chat",
+            "tools.eval_common.llm_judge.chat",
             side_effect=RuntimeError("API 502"),
         ):
             res = judge_with_llm(prompt="q", output="a", criteria="c")
@@ -118,7 +118,7 @@ class TestFailures:
 
     def test_non_json_response(self) -> None:
         with patch(
-            "tools.agent_eval.judge.llm_judge.chat",
+            "tools.eval_common.llm_judge.chat",
             return_value=_mock_chat_response("评分：很好"),
         ):
             res = judge_with_llm(prompt="q", output="a", criteria="c")
@@ -127,7 +127,7 @@ class TestFailures:
 
     def test_score_out_of_range(self) -> None:
         with patch(
-            "tools.agent_eval.judge.llm_judge.chat",
+            "tools.eval_common.llm_judge.chat",
             return_value=_mock_chat_response('{"score": 9.9, "reason": "x"}'),
         ):
             res = judge_with_llm(prompt="q", output="a", criteria="c")
@@ -138,7 +138,7 @@ class TestFailures:
 
     def test_invalid_score_type(self) -> None:
         with patch(
-            "tools.agent_eval.judge.llm_judge.chat",
+            "tools.eval_common.llm_judge.chat",
             return_value=_mock_chat_response('{"score": "high", "reason": "x"}'),
         ):
             res = judge_with_llm(prompt="q", output="a", criteria="c")

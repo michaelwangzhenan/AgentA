@@ -52,7 +52,7 @@ load_dotenv(override=True)
 import src.config as config  # noqa: E402
 from src.agent.tools import get_tools  # noqa: E402
 from src.llm.provider import chat  # noqa: E402
-from tools.agent_eval.judge import judge_with_llm  # noqa: E402
+from tools.eval_common import judge_with_llm  # noqa: E402
 
 
 _DEFAULT_DATASET = Path(__file__).parent / "dataset.json"
@@ -86,7 +86,7 @@ _BASE_PROMPT = """你是一个善于使用工具的 AI 助手。可用工具包�
 """
 
 # LLM-judge 评分维度：plan 结构（粒度 / 顺序 / 覆盖度 / 业务对齐）；
-# 调用走 [`tools.agent_eval.judge.judge_with_llm`](../judge/llm_judge.py) 公共 helper
+# 调用走 [`tools.eval_common.judge_with_llm`](../../eval_common/llm_judge.py) 公共 helper
 _JUDGE_CRITERIA = """- **粒度合适**（满分 1.5）：每步动作明确、可独立执行；既不过于宽泛（"先研究一下"）也不过于琐碎（"打开浏览器"）。
 - **顺序合理**（满分 1）：前后依赖关系正确，关键步骤不缺位。
 - **覆盖度**（满分 1.5）：完成 plan 后能产出用户真正想要的答案；不缺少综合/对比/总结这类收口步骤。
@@ -179,7 +179,7 @@ def _llm_judge_plan_structure(
     """
     调一次 LLM judge，返回 (score, reason)。失败时返回 (None, error_msg)。
 
-    走 [`tools.agent_eval.judge.judge_with_llm`](../judge/llm_judge.py) 公共 helper，
+    走 [`tools.eval_common.judge_with_llm`](../../eval_common/llm_judge.py) 公共 helper，
     与 Phase 2.2 学习计划质量 judge 共享同一抽象（[§4.9.7 D6 / D11](../../docs/iter_2_agent.md#497-学习计划生成-phase-22)）。
     """
     plan_block = "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(steps))

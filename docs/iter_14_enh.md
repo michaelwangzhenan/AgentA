@@ -17,10 +17,10 @@
 
 | 功能 | 一句话 | 解决什么 |
 |---|---|---|
-| 会话监控 | 每次对话的分阶段耗时 / token 采集下来，前端看概览 + 明细 + 阶段瀑布 | 线上慢在哪、错在哪，原来只能翻日志，现在看得见 |
-| Golden 管理 | RAG 评估基准（golden）转独立库，入库时自动生成候选 + 网页增删改查与审核 | golden 原来是手写 JSON、难维护；现在能自动攒、在线审 |
-| 离线评估 | 一条命令跑全部评估出一份总报告，报告在网页上看 | 各评估脚本散着跑、结果难汇总；现在一把跑、一份报告 |
-| CI 回归门禁 | CI 加一个 job，跑不耗 token 的评估子集，跌了就拦合并 | 评估指标退步原来没人拦，现在进 PR 门禁 |
+| 会话监控 | UI上可以查看对话的分阶段耗时，平均耗时，错误率等。 | 线上慢在哪、错在哪，原来只能翻日志，现在看得见 |
+| Golden 管理 | RAG 评估基准（golden）db存储独立库，入库时LLM自动生成， 网页可人工增删改查与审核<br/> 原json文件弃用 | golden 原来是手写 JSON、难维护；现在能自动攒、在线审 |
+| 离线评估 | 1. 合并 agent_eval 到一个脚本<br/> 2. RAG 新增两个指标：忠实度/相关度，需LLM judge<br/> 3.报告在网页上看 | 各评估脚本散着跑、结果难汇总；现在一把跑、一份报告 
+| CI 回归门禁 | CI 加一个 job，跑不耗 token 的评估子集| 评估指标退步原来没人拦，现在进 PR 门禁 |
 
 下面四节逐块说清"做什么"和"边界"，并对齐已落地的代码。
 
@@ -50,7 +50,7 @@
 
 - **统一入口**：一条命令把现有各评估脚本（RAG 检索 + agent 各项）逐个拉起，按退出码判通过 / 失败，汇总成一份 Markdown 总报告；各脚本仍可单独跑。
 - **新指标**：补两个 RAG 答案质量评委——faithfulness（忠实度，答案是否忠于检索资料、不编造）、answer-relevance（相关度，答案是否切题），都复用现成的 0-5 分 LLM 评委机制。
-  > **现状（重要）**：这两个评委目前**只有函数实现 + 单元测试，尚未接入任何能跑真实分数的脚本**。要用起来需另写一个端到端入口（检索 → 生成答案 → 调评委 → 出报告）并登记进统一入口，属后续工作。
+  > **接入方式**：RAG 评估脚本加 `--llm N` 开关跑端到端链路（检索 → 用回答模型生成答案 → 两个评委打分 → 报告出平均分 + 逐条）。N 是最多评的 golden 条数（N≤0 全部）。回答用跑脚本时的 `ACTIVE_MODEL`，评委用单独的 `EVAL_JUDGE_MODEL`（空则回落回答模型），避免同模型自评偏高。每条都调 LLM，耗 token，不进 CI。
 - **报告浏览**：admin 可在网页上看历史 Markdown 报告。
 - **其它指标**：recall@k（前 k 召回率）/ MRR（Mean Reciprocal Rank，平均倒数排名）/ 安全拦截率 / 各类 LLM 评委已有，靠总报告统一成"通过 / 失败 + 关键指标"一张表呈现。
 
@@ -67,7 +67,7 @@
 |---|---|---|
 | 离线评估脚手架 | `tools/agent_eval/`（10+ 脚本）、`tools/rag_eval/` | golden 用 JSON 约定、报告落 Markdown、`judge_with_llm()` 已封装 |
 | 检索指标 | `tools/rag_eval/runner.py` | recall / hit@k / MRR 已算 |
-| LLM 评委 | `tools/agent_eval/judge/llm_judge.py` | `judge_with_llm()` 出 0-5 分 + 理由，可扩展 faithfulness 等 prompt |
+| LLM 评委 | `tools/eval_common/llm_judge.py` | `judge_with_llm()` 出 0-5 分 + 理由，RAG / agent 各域复用的通用核心 |
 | token / 成本采集 | `src/memory/usage_store.py`（`usage.db`）+ `src/api/routes/usage.py` | 每次 run 一行（token + model），成本查询时按单价实时算 |
 | 成本看板雏形 | 前端「用量」页 `frontend/src/components/usage/` | 已有汇总卡 + 趋势图 + 明细 + CSV 导出 |
 | CI 门禁模式 | `.github/workflows/AgentA_CI.yml`（perf job） | 跑脚本 → 退出码 / grep 判失败 → exit 1 → 上传 artifact |
@@ -105,7 +105,7 @@
 | golden 存储 | `src/memory/golden_store.py`（`GoldenStore`，独立 `rag_golden.db`） | **仅 RAG golden** 转此库（带来源 + 状态 + 增删改查）；其余 `dataset.json` 不动 | Golden 管理 |
 | 入库生成钩子 | `src/rag/golden_gen.py` + `src/rag/ingest.py` 后置回调 + 后台任务 | 入库后调 LLM 生成 golden 候选 | Golden 管理 |
 | 评估聚合入口 | `tools/agent_eval/run_all.py` | 一条命令跑全部评估，汇总成一份总报告 | 离线评估 |
-| 新指标评委 | `tools/agent_eval/judge/rag_metrics.py` | faithfulness / answer-relevance 两个评委 | 离线评估 |
+| 新指标评委 | `tools/rag_eval/rag_judge.py` | faithfulness / answer-relevance 两个 RAG 评委，由 `runner --llm N` 接入 | 离线评估 |
 | 只读 / 管理 API | `src/api/routes/eval.py` | golden 增删改查（admin）+ trace / 报告只读 | 看板 / Golden |
 | 看板前端 | `frontend/src/components/eval/` | 会话监控（概览 + 阶段瀑布 + 趋势）+ golden 管理页（admin）+ 报告浏览 | 各功能 |
 | CI 门禁 | `.github/workflows/AgentA_CI.yml`（EVAL job） | 跑不耗 token 的评估子集，失败拦合并 | CI 门禁 |
@@ -148,7 +148,7 @@ flowchart LR
 
 - **聚合入口**：`run_all.py` 用子进程逐个拉起现有各评估脚本（RAG 检索 + agent 各项），按退出码判 PASS / FAIL，汇总成一份 Markdown 总报告（含每项结果 + 关键指标）。各脚本保持可单独跑，不重写。
 - **新指标评委**：faithfulness（答案是否忠于检索资料、不编造）、answer-relevance（答案是否切题），都用现成 `judge_with_llm()` 出 0-5 分 + 理由。
-  > **现状**：两个评委只实现了函数 + 单元测试，**还没接入任何能对 golden 跑真实分数的脚本**；要用需另写端到端入口（检索 → 生成答案 → 调评委 → 出报告）并登记进 `run_all`，属后续工作。
+  > **接入方式**：RAG 评估脚本 `runner --llm N` 跑端到端链路（检索 → 用 `ACTIVE_MODEL` 生成答案 → 两个评委打分 → 报告出平均分 + 逐条），N 为最多评的 golden 条数（N≤0 全部）。评委用单独的 `EVAL_JUDGE_MODEL`（空则回落回答模型）防自评偏高。每条都调 LLM，耗 token，不进 CI。
 - **报告浏览**：admin 可在「评估报告」标签看历史 Markdown 报告。
 - **其它指标**：recall@k / MRR / 安全拦截率 / 各类 LLM 评委已有，靠总报告统一成"PASS / FAIL + 关键指标"一张表呈现。
 
@@ -166,13 +166,14 @@ flowchart LR
 | `EVAL_AUTO_GOLDEN_ENABLED` | 入库是否触发 LLM 自动生成 golden（默认 true） |
 | `EVAL_AUTO_GOLDEN_MAX_Q` | 单个文档自动生成 golden 候选的最大条数 |
 | `EVAL_GOLDEN_USE_PENDING` | 评估是否纳入未审核 golden（默认 false） |
+| `EVAL_JUDGE_MODEL` | 答案质量评委用的模型 id；空则回落回答模型，建议填与被评不同的防自评偏高 |
 
 设计中按"简洁优先"定的小决策：golden 用独立 sqlite（支持增删改查 + 状态）；后台任务用 `asyncio.to_thread`，不引任务队列；trace 只记大阶段（检索 / 每轮 LLM / 每次工具），不做更细粒度。
 
 ### 1.2.7. 测试 + 验收
 
 - **UT**：trace 采集软失败（写库异常不影响对话）、`GoldenStore` 增删改查 + 状态流转、聚合 runner 汇总、评委 mock、入库钩子触发后台任务。
-- **验收标准**：`run_all` 一条命令出总报告；对话后 `usage.db` 有 trace；入库后 golden 库出现 pending 候选；admin 管理页可增删改查 + 审核；会话监控能看概览 / 瀑布 / 趋势；CI 的 EVAL job 能拦回归。faithfulness / answer-relevance 因尚未接入跑分入口，本期只验到评委函数 + 单元测试层面。
+- **验收标准**：`run_all` 一条命令出总报告；对话后 `usage.db` 有 trace；入库后 golden 库出现 pending 候选；admin 管理页可增删改查 + 审核；会话监控能看概览 / 瀑布 / 趋势；CI 的 EVAL job 能拦回归；`runner --llm N` 能对 golden 跑出 faithfulness / answer-relevance 平均分 + 逐条（评委走 `EVAL_JUDGE_MODEL`）。
 
 
 

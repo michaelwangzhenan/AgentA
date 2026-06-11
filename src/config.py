@@ -448,6 +448,9 @@ EVAL_AUTO_GOLDEN_ENABLED: bool = os.getenv("EVAL_AUTO_GOLDEN_ENABLED", "true").l
 EVAL_AUTO_GOLDEN_MAX_Q: int = int(os.getenv("EVAL_AUTO_GOLDEN_MAX_Q", "3"))
 # 跑评估时是否纳入未审核（pending）的 golden；默认只用已审核（approved）的
 EVAL_GOLDEN_USE_PENDING: bool = os.getenv("EVAL_GOLDEN_USE_PENDING", "false").lower() == "true"
+# 答案质量评委（faithfulness / 相关度）用的模型 id；空则回落 ACTIVE_MODEL。
+# 建议填一个与被评模型不同的，避免同模型自评偏高（取值见 MODEL_CONFIGS 的 key）
+EVAL_JUDGE_MODEL: str = os.getenv("EVAL_JUDGE_MODEL", "")
 
 # ── 降本：模型路由 + 语义缓存 ──────────────────────────────────────────────────
 # 是否启用模型路由（按难度向更便宜的模型降级；可选值：true / false）

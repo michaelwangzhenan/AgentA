@@ -1,9 +1,9 @@
 """
 LLM-judge 核心实现 —— `judge_with_llm` 函数式 helper
 
-用法（[`eval_plan.py`](../plan/eval_plan.py) / [`eval_learning_plan.py`](../plan_business/eval_learning_plan.py)）：
+用法（plan / quiz / rag 各域评估脚本通用）：
 
-    from tools.agent_eval.judge import judge_with_llm
+    from tools.eval_common import judge_with_llm
 
     res = judge_with_llm(
         role_intro="你是一个学习计划质量评委",

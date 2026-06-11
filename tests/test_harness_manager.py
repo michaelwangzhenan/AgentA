@@ -31,7 +31,7 @@ from src.agent.core.harness_manager import (
     get_harness_manager,
     reset_for_test,
 )
-from tools.agent_eval.judge import JudgeResult
+from tools.eval_common import JudgeResult
 
 
 # ── fixtures ──────────────────────────────────────────────────────────────────

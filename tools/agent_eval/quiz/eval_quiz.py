@@ -7,7 +7,7 @@ Phase 2.3 Quiz 业务评估器（[§4.9.8 #8](../../../docs/iter_2_agent.md#498-
    - `create` case（出题需求）：应调 `make_plan`（嵌套 4 步落库）或 `create_quiz`（一次性落库，弱形式）
    - `history` case（查 quiz 历史 / 错题复盘）：应调 `query_quiz_history`
    - `negative` case（闲聊 / 定义查询 / 学习计划场景）：**不应**调 `create_quiz` / `grade_quiz` / `query_quiz_history`
-2. **plan 质量**：create 通过且调 `make_plan` 的 case，把 plan steps 喂给 [`judge_with_llm`](../judge/llm_judge.py)
+2. **plan 质量**：create 通过且调 `make_plan` 的 case，把 plan steps 喂给 [`judge_with_llm`](../../eval_common/llm_judge.py)
    按 "意图解析 / KB 检索 / 出题组织 / 落库步骤" 评 0-5 分，验收 ① 阈值 ≥ 4.0。
 
 为什么 single-step 而非 e2e：
@@ -41,7 +41,7 @@ load_dotenv(override=True)
 import src.config as config  # noqa: E402
 from src.agent.tools import get_tools  # noqa: E402
 from src.llm.provider import chat  # noqa: E402
-from tools.agent_eval.judge import judge_with_llm  # noqa: E402
+from tools.eval_common import judge_with_llm  # noqa: E402
 
 
 _DEFAULT_DATASET = Path(__file__).parent / "dataset.json"

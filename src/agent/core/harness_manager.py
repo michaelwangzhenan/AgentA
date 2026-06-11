@@ -2,7 +2,7 @@
 
 提供两路生产路径 critic：
 
-1. `review_grading()` — 单题 quiz 批改自检；复用 [`judge_with_llm`](../../../tools/agent_eval/judge/__init__.py) helper
+1. `review_grading()` — 单题 quiz 批改自检；复用 [`judge_with_llm`](../../../tools/eval_common/llm_judge.py) helper
 2. `filter_chunks()` — RAG 召回 chunks 相关性批量过滤；K 条一次 LLM 调用
 
 所有 critic 调用都用 `ThreadPoolExecutor` 包 timeout（跨平台），超时静默降级保留原始输出。
@@ -22,7 +22,7 @@ from typing import Any
 
 import src.config as config
 from src.llm.provider import chat
-from tools.agent_eval.judge import judge_with_llm
+from tools.eval_common import judge_with_llm
 
 logger = logging.getLogger(__name__)
 
