@@ -427,7 +427,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                 >
                   <DropdownMenuRadioItem value="auto">
                     <span className="flex flex-1 items-center justify-between">
-                      <span className="font-medium">自动（按难度选）</span>
+                      <span className="font-medium"> Auto </span>
                     </span>
                   </DropdownMenuRadioItem>
                 </DropdownMenuRadioGroup>
