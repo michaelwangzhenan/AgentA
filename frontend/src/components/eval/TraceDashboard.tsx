@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Info } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
@@ -112,18 +113,47 @@ export function TraceDashboard() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        <StatCard label="对话数" value={overview ? String(overview.count) : '—'} />
+        <StatCard
+          label="对话数"
+          value={overview ? String(overview.count) : '—'}
+          tip="选定时间范围内的对话总数"
+        />
         <StatCard
           label="错误率"
           value={overview ? `${(overview.error_rate * 100).toFixed(1)}%` : '—'}
           hint={overview && overview.error_count > 0 ? `${overview.error_count} 次出错` : undefined}
+          tip="运行中发生错误对话比例"
         />
-        <StatCard label="延迟 P50" value={overview ? ms(overview.latency_p50_ms) : '—'} />
-        <StatCard label="延迟 P95" value={overview ? ms(overview.latency_p95_ms) : '—'} />
-        <StatCard label="平均 LLM" value={overview ? ms(overview.avg_llm_ms) : '—'} />
-        <StatCard label="平均检索" value={overview ? ms(overview.avg_retrieval_ms) : '—'} />
-        <StatCard label="平均工具" value={overview ? ms(overview.avg_tool_ms) : '—'} />
-        <StatCard label="平均总耗时" value={overview ? ms(overview.latency_avg_ms) : '—'} />
+        <StatCard
+          label="延迟 P50"
+          value={overview ? ms(overview.latency_p50_ms) : '—'}
+          tip="对话总耗时的中位数：一半对话比它快、一半比它慢，代表典型体验"
+        />
+        <StatCard
+          label="延迟 P95"
+          value={overview ? ms(overview.latency_p95_ms) : '—'}
+          tip="对话总耗时的 95 分位：只有 5% 的对话比它更慢，用来看长尾卡顿"
+        />
+        <StatCard
+          label="平均 LLM"
+          value={overview ? ms(overview.avg_llm_ms) : '—'}
+          tip="每次对话里所有 LLM 调用累计耗时的平均值"
+        />
+        <StatCard
+          label="平均检索"
+          value={overview ? ms(overview.avg_retrieval_ms) : '—'}
+          tip="每次对话里知识库检索累计耗时的平均值"
+        />
+        <StatCard
+          label="平均工具"
+          value={overview ? ms(overview.avg_tool_ms) : '—'}
+          tip="每次对话里工具调用（不含知识库检索）累计耗时的平均值"
+        />
+        <StatCard
+          label="平均总耗时"
+          value={overview ? ms(overview.latency_avg_ms) : '—'}
+          tip="每次对话端到端总耗时的平均值（从开始到出最终答案）"
+        />
       </div>
 
       {/* 趋势：每日平均延迟 */}
@@ -316,10 +346,23 @@ function Segmented({ options, value, onChange }: SegmentedProps) {
   )
 }
 
-function StatCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function StatCard({
+  label,
+  value,
+  hint,
+  tip,
+}: {
+  label: string
+  value: string
+  hint?: string
+  tip?: string
+}) {
   return (
-    <div className="rounded-lg border border-border p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
+    <div className={cn('rounded-lg border border-border p-3', tip && 'cursor-help')} title={tip}>
+      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+        {label}
+        {tip && <Info className="h-3 w-3 opacity-50" aria-hidden />}
+      </div>
       <div className="mt-1 text-lg font-semibold tabular-nums">{value}</div>
       {hint && <div className="mt-0.5 text-[10px] text-amber-600 dark:text-amber-500">{hint}</div>}
     </div>
