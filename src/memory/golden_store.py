@@ -5,13 +5,13 @@
 LLM 自动生成候选写入（状态 pending），管理员在前端审核后合入正式评估集。
 
 一张表 ``rag_golden``：
-    id, query, expected_keywords(JSON list), expected_source_contains, note,
-    source('manual'|'ai'), status('pending'|'approved'|'rejected'),
+    id, query, expected_keywords(JSON list), expected_source, expected_source_contains,
+    type, note, source('manual'|'ai'), status('pending'|'approved'|'rejected'),
     doc_id(AI 生成时来源文档), created_at, updated_at
 
 评估脚本通过 ``list_for_eval`` 取 golden（默认只取 approved），字段对齐
 ``tools/rag_eval/runner.py`` 的黄金集格式（query / expected_keywords /
-expected_source_contains / note）。
+expected_source / expected_source_contains / note / type）。
 """
 
 from __future__ import annotations
@@ -48,6 +48,7 @@ class GoldenStore:
         self._conn.row_factory = sqlite3.Row
         self._lock = threading.Lock()
         self._create_tables()
+        self._migrate()
         logger.info("GoldenStore 初始化完成: %s", self._db_path)
 
     def _create_tables(self) -> None:
@@ -57,7 +58,9 @@ class GoldenStore:
                     id                       INTEGER PRIMARY KEY AUTOINCREMENT,
                     query                    TEXT NOT NULL,
                     expected_keywords        TEXT NOT NULL DEFAULT '[]',
+                    expected_source          TEXT NOT NULL DEFAULT '',
                     expected_source_contains TEXT NOT NULL DEFAULT '',
+                    type                     TEXT NOT NULL DEFAULT '',
                     note                     TEXT NOT NULL DEFAULT '',
                     source                   TEXT NOT NULL DEFAULT 'manual',
                     status                   TEXT NOT NULL DEFAULT 'approved',
@@ -67,6 +70,19 @@ class GoldenStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_golden_status ON rag_golden(status);
             """)
+
+    def _migrate(self) -> None:
+        """老库补列：expected_source / type 是后加的，旧库用 ADD COLUMN 补齐（纯追加，安全）。"""
+        with self._lock, self._conn:
+            cols = {
+                r["name"]
+                for r in self._conn.execute("PRAGMA table_info(rag_golden)").fetchall()
+            }
+            for col in ("expected_source", "type"):
+                if col not in cols:
+                    self._conn.execute(
+                        f"ALTER TABLE rag_golden ADD COLUMN {col} TEXT NOT NULL DEFAULT ''"
+                    )
 
     @staticmethod
     def _now() -> int:
@@ -94,7 +110,9 @@ class GoldenStore:
             "id": int(r["id"]),
             "query": r["query"],
             "expected_keywords": kws if isinstance(kws, list) else [],
+            "expected_source": r["expected_source"] or "",
             "expected_source_contains": r["expected_source_contains"] or "",
+            "type": r["type"] or "",
             "note": r["note"] or "",
             "source": r["source"],
             "status": r["status"],
@@ -114,6 +132,8 @@ class GoldenStore:
         source: str = SOURCE_MANUAL,
         status: str = STATUS_APPROVED,
         doc_id: str = "",
+        expected_source: str = "",
+        golden_type: str = "",
     ) -> int:
         """新增一条 golden，返回新行 id。query 为空抛 ValueError。"""
         q = (query or "").strip()
@@ -126,17 +146,18 @@ class GoldenStore:
         with self._lock, self._conn:
             cur = self._conn.execute(
                 "INSERT INTO rag_golden"
-                "(query, expected_keywords, expected_source_contains, note, "
-                " source, status, doc_id, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (q, kws, (expected_source_contains or "").strip(), (note or "").strip(),
-                 src, st, (doc_id or "").strip(), now, now),
+                "(query, expected_keywords, expected_source, expected_source_contains, "
+                " type, note, source, status, doc_id, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (q, kws, (expected_source or "").strip(),
+                 (expected_source_contains or "").strip(), (golden_type or "").strip(),
+                 (note or "").strip(), src, st, (doc_id or "").strip(), now, now),
             )
         return int(cur.lastrowid)
 
     def update(self, golden_id: int, **fields: Any) -> bool:
-        """按 id 局部更新。可改 query / expected_keywords / expected_source_contains
-        / note / status。无该行返回 False。"""
+        """按 id 局部更新。可改 query / expected_keywords / expected_source /
+        expected_source_contains / type / note / status。无该行返回 False。"""
         sets: list[str] = []
         params: list[Any] = []
         if "query" in fields:
@@ -148,9 +169,15 @@ class GoldenStore:
         if "expected_keywords" in fields:
             sets.append("expected_keywords = ?")
             params.append(json.dumps(self._normalize_keywords(fields["expected_keywords"]), ensure_ascii=False))
+        if "expected_source" in fields:
+            sets.append("expected_source = ?")
+            params.append((fields["expected_source"] or "").strip())
         if "expected_source_contains" in fields:
             sets.append("expected_source_contains = ?")
             params.append((fields["expected_source_contains"] or "").strip())
+        if "type" in fields:
+            sets.append("type = ?")
+            params.append((fields["type"] or "").strip())
         if "note" in fields:
             sets.append("note = ?")
             params.append((fields["note"] or "").strip())
@@ -252,8 +279,12 @@ class GoldenStore:
             item: dict[str, Any] = {"query": d["query"]}
             if d["expected_keywords"]:
                 item["expected_keywords"] = d["expected_keywords"]
+            if d["expected_source"]:
+                item["expected_source"] = d["expected_source"]
             if d["expected_source_contains"]:
                 item["expected_source_contains"] = d["expected_source_contains"]
+            if d["type"]:
+                item["type"] = d["type"]
             if d["note"]:
                 item["note"] = d["note"]
             out.append(item)
@@ -277,7 +308,9 @@ class GoldenStore:
             self.create(
                 query=q,
                 expected_keywords=it.get("expected_keywords"),
+                expected_source=it.get("expected_source", ""),
                 expected_source_contains=it.get("expected_source_contains", ""),
+                golden_type=it.get("type", ""),
                 note=it.get("note", ""),
                 source=source,
                 status=status,

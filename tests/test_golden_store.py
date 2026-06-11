@@ -118,3 +118,70 @@ def test_import_items_idempotent(store: GoldenStore) -> None:
     # 再次导入同集合：query 去重，新增 0
     assert store.import_items(items) == 0
     assert store.counts()["total"] == 2
+
+
+def test_expected_source_and_type_roundtrip(store: GoldenStore) -> None:
+    gid = store.create("q", ["k"], expected_source="resume.md", golden_type="baseline")
+    item = store.get(gid)
+    assert item["expected_source"] == "resume.md"
+    assert item["type"] == "baseline"
+    # 局部更新两个新字段
+    assert store.update(gid, expected_source="cv.md", type="hyde") is True
+    item2 = store.get(gid)
+    assert item2["expected_source"] == "cv.md"
+    assert item2["type"] == "hyde"
+
+
+def test_list_for_eval_includes_new_fields(store: GoldenStore) -> None:
+    store.create("q", ["a"], "src.md", expected_source="exact.md", golden_type="baseline")
+    item = store.list_for_eval()[0]
+    assert item["expected_source"] == "exact.md"
+    assert item["type"] == "baseline"
+    assert item["expected_source_contains"] == "src.md"
+
+
+def test_import_items_maps_new_fields(store: GoldenStore) -> None:
+    added = store.import_items([
+        {"query": "q1", "expected_source": "a.md", "type": "hyde"},
+    ])
+    assert added == 1
+    rows, _ = store.list()
+    assert rows[0]["expected_source"] == "a.md"
+    assert rows[0]["type"] == "hyde"
+
+
+def test_migration_adds_columns_to_old_db(tmp_path: Path) -> None:
+    """旧库（没有 expected_source / type 列）打开后应被 _migrate 自动补列。"""
+    import sqlite3
+
+    db = str(tmp_path / "old.db")
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE rag_golden (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            query TEXT NOT NULL,
+            expected_keywords TEXT NOT NULL DEFAULT '[]',
+            expected_source_contains TEXT NOT NULL DEFAULT '',
+            note TEXT NOT NULL DEFAULT '',
+            source TEXT NOT NULL DEFAULT 'manual',
+            status TEXT NOT NULL DEFAULT 'approved',
+            doc_id TEXT NOT NULL DEFAULT '',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        INSERT INTO rag_golden(query, created_at, updated_at) VALUES ('old-q', 1, 1);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    s = GoldenStore(db)
+    try:
+        item = s.get(1)
+        assert item is not None
+        assert item["query"] == "old-q"
+        assert item["expected_source"] == ""  # 补列默认空，旧数据不丢
+        assert item["type"] == ""
+    finally:
+        s.close()

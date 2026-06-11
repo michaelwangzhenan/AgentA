@@ -1,10 +1,14 @@
 """
 RAG 检索评估脚本（Iter-5）。
 
-跑前提：先 ingest 至少一遍知识库；脚本调用 src.rag.retriever.search 实际检索。
+跑前提：
+    1. 先 ingest 至少一遍知识库；脚本调用 src.rag.retriever.search 实际检索。
+    2. golden 唯一来源是 ``rag_golden.db``（iter_14 起），不再读 golden.json。
+       新环境是空库——先在「质量看板 → Golden 管理」导入 golden.json 或审核通过若干条。
+    默认只取 approved；置 EVAL_GOLDEN_USE_PENDING=true 可把未审核的 pending 也纳入。
 
 使用方式：
-    python -m tools.rag_eval.runner                                  # 跑默认 golden，仅终端汇总
+    python -m tools.rag_eval.runner                                  # 跑 db 里的 golden，仅终端汇总
     python -m tools.rag_eval.runner --no-rewriter                    # 关闭 query 改写（基线对比）
     python -m tools.rag_eval.runner --no-rerank                      # 关闭 reranker（真关，透传给 retriever）
     python -m tools.rag_eval.runner -o tools/rag_eval/reports/m3.md  # 同时落盘 Markdown + .log trace
@@ -32,7 +36,7 @@ RAG 检索评估脚本（Iter-5）。
 
 Markdown 报告结构（results-first：打开就能看到结果，无需滚动）：
     标题块                  时间戳 / git / python / provider
-    ## 核心指标             指标 → 值 表格
+    ## 核心指标  l            指标 → 值 表格
     ## 环境与配置           Embeddings / Reranker / BM25 / Query rewrite / Retrieval 等
     ## Miss 用例 (N)         未命中样本 + 期望 vs 实际 top-3，CI 回归定位最有用
 
@@ -95,9 +99,9 @@ from src.rag.retriever import search  # noqa: E402 — 同上
 
 logger = logging.getLogger(__name__)
 
-# 调试 / 切数据集时直接改这里。CLI 不再暴露 --golden 选项，避免 ingest_eval.sh
-# 之类批量脚本到处传路径，反而难追踪用了哪一份 golden。
-DEFAULT_GOLDEN = Path(__file__).parent / "golden.json"
+# golden 唯一来源是 rag_golden.db；这里只留库路径给报告 metadata 标注用。
+# CLI 不暴露 --golden 选项：增删改查统一走「质量看板 → Golden 管理」页。
+GOLDEN_DB_LABEL = config.RAG_GOLDEN_DB_PATH
 
 
 @dataclass
@@ -470,18 +474,15 @@ def evaluate(
     )
 
 
-def _load_golden(path: Path) -> list[dict[str, Any]]:
-    """读黄金集；不存在直接抛。example 回退已下线 —— 调试请直接编辑 DEFAULT_GOLDEN 常量。"""
-    if not path.exists():
-        raise FileNotFoundError(f"找不到黄金集: {path}")
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, list):
-        raise ValueError(f"黄金集必须是 list[item]，实际类型: {type(data)}")
-    for i, it in enumerate(data):
-        if "query" not in it or not it["query"]:
-            raise ValueError(f"item[{i}] 缺少 query 字段")
-    return data
+def _load_golden_from_db() -> list[dict[str, Any]]:
+    """从 ``rag_golden.db`` 取评估用 golden。
+
+    默认只取 approved；置 ``EVAL_GOLDEN_USE_PENDING=true`` 时把 pending 也纳入。
+    空库返回空列表，由调用方给"先导入 / 审核"的提示（本期起不再回退读 golden.json）。
+    """
+    from src.memory.golden_store import get_shared_store
+
+    return get_shared_store().list_for_eval(use_pending=config.EVAL_GOLDEN_USE_PENDING)
 
 
 def _print_report(rep: EvalReport, report_path: Path | None = None) -> None:
@@ -707,7 +708,14 @@ def main(argv: list[str] | None = None) -> int:
         fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
         logging.getLogger().addHandler(fh)
 
-    items = _load_golden(DEFAULT_GOLDEN)
+    items = _load_golden_from_db()
+    if not items:
+        scope = "approved / pending" if config.EVAL_GOLDEN_USE_PENDING else "approved"
+        print(
+            f"rag_golden.db（{config.RAG_GOLDEN_DB_PATH}）里没有可用的 golden（{scope} 为空）。\n"
+            "请先在「质量看板 → Golden 管理」导入 golden.json，或审核通过若干条后再跑评估。"
+        )
+        return 1
 
     k = config.RAG_TOP_K
     use_rewriter = (not args.no_rewriter) and config.RAG_QUERY_REWRITE_ENABLED
@@ -727,7 +735,7 @@ def main(argv: list[str] | None = None) -> int:
     # "实际是否生效"（query_rewriter 不可用会被 evaluate 自动降级），所以这里
     # 用 rep.* 而非命令行 args，避免 metadata 显示和实际行为不一致。
     rep.metadata = _collect_metadata(
-        golden_path=DEFAULT_GOLDEN,
+        golden_path=Path(GOLDEN_DB_LABEL),
         items=items,
         k=k,
         use_rewriter_eff=rep.use_rewriter,

@@ -104,7 +104,9 @@ def create_golden(
         gid = store.create(
             query=req.query,
             expected_keywords=req.expected_keywords,
+            expected_source=req.expected_source,
             expected_source_contains=req.expected_source_contains,
+            golden_type=req.type,
             note=req.note,
         )
     except ValueError as exc:

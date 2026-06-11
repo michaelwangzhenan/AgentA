@@ -5,22 +5,59 @@
 
 ### 1.1.1. 目标与价值
 
-让 AgentA 的质量**能用数据说话**：改动是变好还是变坏，靠跑评估出指标判断，而不是凭感觉；线上每次对话的耗时、token、成本**看得见、能定位**。这一层不增加业务面积，而是把工程成熟度做厚——求职叙事上比再铺一个业务更稀缺（"能度量一个 LLM 系统好不好，并系统性地改好、守住、压成本"）。
+让 AgentA 的质量**能用数据说话**：
 
-原始需求见 [iter_7_retro §3.1](iter_7_retro.md#31-评估--可观测闭环)，本节把它拆成可落地的能力项，并对照现状标出差距。
+- 改动是变好还是变坏，靠跑评估出指标判断，而不是凭感觉；
+- 线上每次对话的耗时、token、各阶段花在哪**看得见、能定位**；
+- 不加新业务，把工程成熟度做厚。
 
-### 1.1.2. 需求拆解
+### 1.1.2. 四块功能
 
-原始需求拆成五块能力：
+本期从用户能直接感知的角度分四块，各自解决一个问题：
 
-| 编号 | 能力 | 说明 |
+| 功能 | 一句话 | 解决什么 |
 |---|---|---|
-| N1 | 离线评估统一化 | 统一 golden（评估基准数据集）入口 + 补齐指标，跑一条命令出全量 Markdown 报告 |
-| N2 | 指标补全 | 检索 recall@k（前 k 召回率）/ MRR（Mean Reciprocal Rank，平均倒数排名）已有；新增 RAG faithfulness（答案忠实度，回答是否忠于检索资料、不编造）/ answer-relevance（答案相关度）；Agent 成功率、安全拦截率已有需归一 |
-| N3 | CI 回归检查点 | 把离线评估接进 CI，指标跌破阈值就拦住合并（现仅 perf 一项进了 CI） |
-| N4 | 入库自动更新 golden | RAG 入库时按入库资料调 LLM 自动生成 / 补充 golden，后台跑、用户不感知、log 可查 |
-| N5 | 在线可观测 trace | 每次 chat 记录检索 / LLM / tool 各阶段耗时、token、成本，写入结构化指标库（与 Markdown 报告职责分开） |
-| N6 | 看板 | 前端展示：概览 + 单次请求各阶段瀑布 + 成本 / 延迟趋势 |
+| 会话监控 | 每次对话的分阶段耗时 / token 采集下来，前端看概览 + 明细 + 阶段瀑布 | 线上慢在哪、错在哪，原来只能翻日志，现在看得见 |
+| Golden 管理 | RAG 评估基准（golden）转独立库，入库时自动生成候选 + 网页增删改查与审核 | golden 原来是手写 JSON、难维护；现在能自动攒、在线审 |
+| 离线评估 | 一条命令跑全部评估出一份总报告，报告在网页上看 | 各评估脚本散着跑、结果难汇总；现在一把跑、一份报告 |
+| CI 回归门禁 | CI 加一个 job，跑不耗 token 的评估子集，跌了就拦合并 | 评估指标退步原来没人拦，现在进 PR 门禁 |
+
+下面四节逐块说清"做什么"和"边界"，并对齐已落地的代码。
+
+#### 1.1.2.1. 会话监控
+
+- **采集**：每次对话按阶段记耗时——每轮 LLM 调用、每次工具调用、知识库检索单独算一档；连同 token、状态一起，对话结束一次性写库。采集走旁路，**出错只记日志、绝不打断对话**。
+- **存储**：复用 `usage.db`，新加两张表（一条对话一行 + 它的各阶段明细），不另开 db 文件。
+- **展示**：「会话监控」页给概览卡（对话数 / 错误率 / 延迟 P50 / P95 / 平均分阶段耗时）、每日平均延迟趋势、对话明细表，点一条能展开**阶段瀑布**看时间都花在哪。admin 可在「我的 / 全员」间切换。
+- **边界**：错误率口径是"对话跑完但中途冒过错误"的占比，顶层硬崩溃的请求不一定被计入，所以这个数是**偏低的下界**；不引入外部可观测平台（OpenTelemetry / Langfuse 等），存自有 sqlite 保持轻量。
+
+#### 1.1.2.2. Golden 管理
+
+- **独立库**：只把 **RAG golden** 转成一个独立 sqlite 库，每条带内容（问题 + 期望来源 + 期望关键词 + 分类）、来源（手写 / AI 生成）、状态（待审 / 通过 / 拒绝）。`tools/rag_eval/runner.py` 的数据源就此**切到 `rag_golden.db`，不再读 `golden.json`、也不回退**。
+- **golden.json 的去留**：文件**保留**在 repo 作"导入种子"，但代码不再直接读它；plan / quiz / skills / security 等其它 `dataset.json` **保持文件不动**。
+- **初始导入**：**不自动 seed**——新环境 / CI 是空库。admin 在管理页手动点「从 golden.json 导入」灌进库（导入即 approved）。
+- **空库行为**：`runner.py` 取不到可用 golden 时，给一条明确提示（"先去质量看板导入 / 审核"）后非零退出，不崩、不回退读 json。
+- **自动生成**：上传新资料入库成功后，后台调 LLM 按这篇资料出评估题，写成"待审 + AI 来源"。具体行为：
+  - **触发**：仅对**真正新入库**的文档触发（重复跳过 / 空文件不触发）；受开关控制，单文件出题条数有上限。
+  - **出题**：取文档正文（过长截断控 token），让 LLM 按内容出若干"用户可能真实提出、答案在文中能找到"的问题，每题配 2-4 个期望命中关键词；问题用资料本身的语言（中文资料出中文题，英文资料出英文题）。
+  - **入库**：每条写成"AI 来源 + 待审核"，期望来源（子串匹配）自动填成入库文档名；`expected_source`（精确）与 `type`（分类）留空，待人工审核时补。
+  - **不感知 + 软失败**：后台跑、不阻塞上传响应、用户无感；解析 / LLM / 写库任一步出错只记日志，绝不影响主入库链路。
+  - **要审核才生效**：自动生成的题默认不进评估，须管理员审核通过后才合入正式评估集。
+- **网页管理**：admin 专属页，可增删改查 + 审核改状态 + 从 `golden.json` 导入。
+- **评估取用**：默认只用"已通过"的 golden；`EVAL_GOLDEN_USE_PENDING` 开关可把"待审"也纳入。
+
+#### 1.1.2.3. 离线评估
+
+- **统一入口**：一条命令把现有各评估脚本（RAG 检索 + agent 各项）逐个拉起，按退出码判通过 / 失败，汇总成一份 Markdown 总报告；各脚本仍可单独跑。
+- **新指标**：补两个 RAG 答案质量评委——faithfulness（忠实度，答案是否忠于检索资料、不编造）、answer-relevance（相关度，答案是否切题），都复用现成的 0-5 分 LLM 评委机制。
+  > **现状（重要）**：这两个评委目前**只有函数实现 + 单元测试，尚未接入任何能跑真实分数的脚本**。要用起来需另写一个端到端入口（检索 → 生成答案 → 调评委 → 出报告）并登记进统一入口，属后续工作。
+- **报告浏览**：admin 可在网页上看历史 Markdown 报告。
+- **其它指标**：recall@k（前 k 召回率）/ MRR（Mean Reciprocal Rank，平均倒数排名）/ 安全拦截率 / 各类 LLM 评委已有，靠总报告统一成"通过 / 失败 + 关键指标"一张表呈现。
+
+#### 1.1.2.4. CI 回归门禁
+
+- CI 新增一个 job，跑统一入口的 `--ci` 子集——**只跑不耗 token 的确定性项**（当前就"安全拦截"一项）；有任一失败就非零退出拦住合并，并上传报告。
+- 耗 token 的（faithfulness、recall 等需真实 LLM / 真实知识库）**不进 PR 门禁**，留本地 / 手动跑全量。
 
 ### 1.1.3. 现状盘点（可复用资产）
 
@@ -33,66 +70,45 @@
 | LLM 评委 | `tools/agent_eval/judge/llm_judge.py` | `judge_with_llm()` 出 0-5 分 + 理由，可扩展 faithfulness 等 prompt |
 | token / 成本采集 | `src/memory/usage_store.py`（`usage.db`）+ `src/api/routes/usage.py` | 每次 run 一行（token + model），成本查询时按单价实时算 |
 | 成本看板雏形 | 前端「用量」页 `frontend/src/components/usage/` | 已有汇总卡 + 趋势图 + 明细 + CSV 导出 |
-| CI 门禁模式 | `.github/workflows/AgentA_CI.yml`（perf job） | 跑脚本 → grep 报告里 `FAIL` → 失败则 exit 1 → 上传 artifact |
-| 事件流 | `src/agent/core/event_bus.py`（`EventBus`） | 已有 tool / plan 各阶段事件，可作 trace 埋点起点 |
+| CI 门禁模式 | `.github/workflows/AgentA_CI.yml`（perf job） | 跑脚本 → 退出码 / grep 判失败 → exit 1 → 上传 artifact |
+| 事件流 | `src/agent/core/event_bus.py`（`EventBus`） | 已有 tool / plan 各阶段事件，作 trace 采集的数据来源 |
 
-### 1.1.4. 差距分析
-
-对照 N1-N6，标出"已有 / 部分 / 待建"：
-
-| 能力 | 现状 | 差距（待建部分） |
-|---|---|---|
-| N1 统一入口 | 各脚本可单独跑，但没有"一条命令出全量报告"的聚合层 | 聚合 runner + 汇总报告 |
-| N2 指标 | recall@k / MRR / 安全拦截率 / 各类 LLM-judge 已有 | faithfulness、answer-relevance 未实现；Agent 端到端成功率口径不统一 |
-| N3 CI 门禁 | 仅 perf 进 CI；recall / plan / security 等未进（需真实 KB + API key + 耗 token） | CI 扩展 + LLM 评估的成本控制策略 |
-| N4 入库更新 golden | ingest 链路纯入库，**无任何扩展点 / 后台任务 / 回调** | ingest 后置钩子 + 后台任务 + LLM 生成 golden + 写入策略 |
-| N5 trace | 有 `usage.db`（每 run 一行 token），有日志 `session_id` / `request_id`；**无分阶段耗时、无持久化 trace** | 分阶段计时埋点 + 结构化 trace 存储 |
-| N6 看板 | 有「用量」页（成本 / token） | 评估报告浏览、trace 瀑布、检索 / Agent 指标面板均无；缺只读后端 API |
-
-### 1.1.5. 范围与分档
-
-原始需求给了三档（最小 → 进阶 → 完整），本期需先定**做到哪一档**：
-
-| 档位 | 包含能力 | 大致工作量 |
-|---|---|---|
-| 最小 | N1 + N2 + N3（离线评估统一 + 指标补全 + CI 门禁） | 中，主要复用现有脚手架 |
-| 进阶 | 最小 + N5 + N6（trace + 看板） | 中-高，需新建 trace 存储 + 前端页 |
-| 完整 | 进阶 + N4（入库自动更新 golden）+ 指标趋势展示 | 高，需后台任务 + LLM 生成 + 失效策略 |
-
-明确**不做**（本期边界）：
+### 1.1.4. 范围与边界（不做）
 
 - 不引入外部可观测平台（OpenTelemetry / Langfuse 等），trace 存自有 sqlite，保持轻量。
-- 不做告警 / 通知（指标超阈值主动提醒）：完整档只做指标趋势展示，告警留后续。
-- 埋点必须**软失败**：采集 / 写指标出错只记 log，绝不阻断主对话链路。
+- 不做告警 / 通知（指标超阈值主动提醒），只做趋势展示，告警留后续。
+- 采集 / 写库必须**软失败**：出错只记日志，绝不打断主对话。
+- 只把 RAG golden 转独立库，其它 `dataset.json` 不动。
 
-### 1.1.6. 待确认决策点
+### 1.1.5. 已确认决策点
 
 下列决策有多条可行路径，已与用户确认（§1.6 工程公约）：
 
 | 编号 | 决策 | 结论 |
 |---|---|---|
-| D1 | 本期做到哪一档 | **完整**：N1~N6 全做 + 指标趋势展示（不含告警） |
-| D2 | trace / 指标存哪 | **复用 `usage.db`** 同库加 trace 表（保持简洁，少一个 db 文件） |
+| D1 | 本期做到哪一档 | **完整**：四块功能全做 + 指标趋势展示（不含告警） |
+| D2 | trace / 指标存哪 | **复用 `usage.db`** 同库加表（保持简洁，少一个 db 文件） |
 | D3 | LLM 评估如何进 CI 控成本 | CI **只跑不耗 token 的**（mock / 检索指标 / 安全拦截）；faithfulness 等 LLM 评估本地或手动跑，不进 PR 门禁 |
-| D4 | 入库自动更新 golden 的写入方式 | **入库时直接写入，但带状态标记**（来源=AI 生成、未审核）；新增**仅 admin 可见的 golden 管理页**，可在线 CRUD（增删改查 + 审核），评估时可按状态筛选 |
+| D4 | 入库自动更新 golden 的写入方式 | **入库时直接写入，但带状态标记**（来源 = AI 生成、未审核）；新增**仅 admin 可见的 golden 管理页**，可在线增删改查 + 审核，评估时可按状态筛选 |
 
 ## 1.2. 设计
 
-只讲"怎么做"的大方向，不抠实现细节。设计中冒出的几个小决策按"简洁优先"默认选定，列在 §1.2.7。
+只讲"怎么做"的大方向，不抠实现细节。小节顺序对齐 §1.2.1 的四块功能。设计中冒出的几个小决策按"简洁优先"默认选定，列在 §1.2.6。
 
 ### 1.2.1. 总体架构
 
 依赖方向守住：评估脚本与存储都在底层，表现层（api / 前端）向下依赖，不反向。新增模块：
 
-| 模块 | 位置 | 职责 |
-|---|---|---|
-| 评估聚合入口 | `tools/agent_eval/run_all.py` | 一条命令跑全部 eval，汇总成一份总报告 |
-| 新指标评委 | `tools/agent_eval/judge/`（扩展） | 新增 faithfulness / answer-relevance 两个评委 prompt |
-| trace 存储 | `src/memory/trace_store.py`（`TraceStore`，写 `usage.db`） | 每次 chat 各阶段耗时 / token / 成本落库 |
-| golden 存储 | `src/memory/golden_store.py`（`GoldenStore`，新 `golden.db`） | **仅 RAG golden** 转此库（带状态 + CRUD）；其余 `dataset.json` 不动 |
-| 入库生成钩子 | `src/rag/ingest.py`（后置回调）+ 后台任务 | 入库后调 LLM 生成 golden 候选 |
-| 只读 / 管理 API | `src/api/routes/eval.py` | golden CRUD（admin）+ trace / 报告只读 |
-| 看板前端 | `frontend/src/components/eval/` | 概览 + 单请求阶段瀑布 + 趋势；golden 管理页（admin） |
+| 模块 | 位置 | 职责 | 归属 |
+|---|---|---|---|
+| trace 存储 | `src/memory/trace_store.py`（`TraceStore`，写 `usage.db`） | 每次对话各阶段耗时 / token 落库 | 会话监控 |
+| golden 存储 | `src/memory/golden_store.py`（`GoldenStore`，独立 `rag_golden.db`） | **仅 RAG golden** 转此库（带来源 + 状态 + 增删改查）；其余 `dataset.json` 不动 | Golden 管理 |
+| 入库生成钩子 | `src/rag/golden_gen.py` + `src/rag/ingest.py` 后置回调 + 后台任务 | 入库后调 LLM 生成 golden 候选 | Golden 管理 |
+| 评估聚合入口 | `tools/agent_eval/run_all.py` | 一条命令跑全部评估，汇总成一份总报告 | 离线评估 |
+| 新指标评委 | `tools/agent_eval/judge/rag_metrics.py` | faithfulness / answer-relevance 两个评委 | 离线评估 |
+| 只读 / 管理 API | `src/api/routes/eval.py` | golden 增删改查（admin）+ trace / 报告只读 | 看板 / Golden |
+| 看板前端 | `frontend/src/components/eval/` | 会话监控（概览 + 阶段瀑布 + 趋势）+ golden 管理页（admin）+ 报告浏览 | 各功能 |
+| CI 门禁 | `.github/workflows/AgentA_CI.yml`（EVAL job） | 跑不耗 token 的评估子集，失败拦合并 | CI 门禁 |
 
 ```mermaid
 flowchart LR
@@ -100,63 +116,63 @@ flowchart LR
     chat[chat 主链路] -->|EventBus 各阶段| cap[trace 采集 软失败]
     cap --> tdb[(usage.db trace 表)]
     ingest[RAG 入库] -->|后台任务| gen[LLM 生成 golden 候选]
-    gen --> gdb[(RAG golden.db)]
+    gen --> gdb[(rag_golden.db)]
   end
   subgraph 离线
-    runall[run_all 聚合] --> scripts[各 eval 脚本] --> report[Markdown 总报告]
+    runall[run_all 聚合] --> scripts[各评估脚本] --> report[Markdown 总报告]
     gdb -.评估读 golden.-> scripts
   end
   subgraph 表现
     api[eval API] --> tdb
     api --> gdb
     api --> report
-    fe[看板 + golden 管理页] --> api
+    fe[会话监控 + golden 管理页 + 报告] --> api
   end
 ```
 
-### 1.2.2. 离线评估统一 + 指标补全（N1 / N2）
+### 1.2.2. 会话监控
 
-- **聚合入口**：`run_all.py` 顺序跑现有各 eval 脚本，收集各自结果，汇总成一份总报告（含每项 PASS/FAIL + 关键指标）。各脚本保持可单独跑，不重写。
-- **新指标**：faithfulness（答案是否忠于检索资料、不编造）、answer-relevance（答案是否切题），都用现成 `judge_with_llm()` 出 0-5 分 + 理由，新增两个 prompt 文件。Agent 成功率沿用现有 keyword / judge 口径，在总报告里归一展示。
+- **采集 + 存储**：复用现有 `EventBus` 事件 + `chat.py` 里 usage 采集那套旁路模式，按阶段（检索 / 每轮 LLM / 每次工具）记耗时；对话结束一次性写 `usage.db` 新表（一条对话一行 + 各阶段明细），与现有 `usage_events` 同库不同表。采集 / 写库出错只记日志、**绝不打断主对话**（与 `usage_store.record_usage` 一致的软失败）。
+- **后端**：`eval.py` 提供只读端点——概览汇总、单次对话各阶段瀑布、延迟 / 错误趋势、对话明细。admin 可查全员，普通用户只看自己。
+- **前端**：Sidebar 的「质量看板」页下「会话监控」标签，复用「用量」页的卡片 + 趋势图组件，新增阶段瀑布图。趋势只展示，不做告警。
 
-### 1.2.3. 在线 trace（N5）
+### 1.2.3. Golden 管理
 
-- **存储**：`usage.db` 加一张 trace 表（trace_id、session_id、user_id、阶段名、耗时 ms、token、成本、时间戳），与现有 `usage_events` 同库不同表。
-- **埋点**：复用现有 `EventBus` 事件 + `chat.py` 里 usage 采集那套旁路模式，按阶段（检索 / 每轮 LLM / 每次 tool）记耗时，run 结束一次性落库。
-- **红线**：采集 / 写库出错只记 log，**绝不阻断主对话**（与 `usage_store.record_usage` 一致的软失败）。
+- **golden 存储**：只把 **RAG golden** 转 `GoldenStore`（独立 sqlite `rag_golden.db`）。字段对齐 `runner.py` 黄金集：`query` + `expected_keywords`（命中关键词）+ `expected_source`（精确匹配来源）+ `expected_source_contains`（子串匹配来源）+ `type`（人工分类如 baseline / hyde，评估不参与、仅供切片分析）+ `note`，外加 `source`（manual / ai）/ `status`（pending / approved / rejected）/ 时间戳。`golden.json` 文件保留作导入种子，但代码不再直接读。
+- **数据源接入**：`runner.py` 经 `GoldenStore.list_for_eval(use_pending=EVAL_GOLDEN_USE_PENDING)` 取 golden，**不再读 `golden.json`、不回退**；空库给明确提示后非零退出。新环境 / CI 是空库，需先手动导入（不自动 seed）。
+- **自动生成**：`ingest_one` 后置回调触发后台任务（`asyncio.to_thread`，复用现有上传那套），按入库资料调 LLM 生成评估题，写入 `status=pending, source=ai`，`expected_source_contains` 自动填入库文档名。用户不感知，日志可查，出错软失败。
+- **管理**：admin 增删改查 API + 前端管理页（增删改查含新字段 + 审核改状态 + 从 `golden.json` 导入）。
+- **评估取用**：默认只用 `approved` 的 golden；`EVAL_GOLDEN_USE_PENDING` 开关是否纳入 `pending`（`rejected` 永不纳入）。
 
-### 1.2.4. 看板（N6）
+### 1.2.4. 离线评估
 
-- **后端**：`eval.py` 提供只读端点——概览汇总、单次请求各阶段瀑布数据、成本 / 延迟趋势、评估报告列表。
-- **前端**：Sidebar 加一个「质量看板」视图，页面复用现有「用量」页的卡片 + 趋势图组件，新增阶段瀑布图。趋势只展示，不做告警。
+- **聚合入口**：`run_all.py` 用子进程逐个拉起现有各评估脚本（RAG 检索 + agent 各项），按退出码判 PASS / FAIL，汇总成一份 Markdown 总报告（含每项结果 + 关键指标）。各脚本保持可单独跑，不重写。
+- **新指标评委**：faithfulness（答案是否忠于检索资料、不编造）、answer-relevance（答案是否切题），都用现成 `judge_with_llm()` 出 0-5 分 + 理由。
+  > **现状**：两个评委只实现了函数 + 单元测试，**还没接入任何能对 golden 跑真实分数的脚本**；要用需另写端到端入口（检索 → 生成答案 → 调评委 → 出报告）并登记进 `run_all`，属后续工作。
+- **报告浏览**：admin 可在「评估报告」标签看历史 Markdown 报告。
+- **其它指标**：recall@k / MRR / 安全拦截率 / 各类 LLM 评委已有，靠总报告统一成"PASS / FAIL + 关键指标"一张表呈现。
 
-### 1.2.5. 入库自动更新 golden（N4 / D4）
+### 1.2.5. CI 回归门禁
 
-- **golden 存储**：只把 **RAG golden** 转 `GoldenStore`（sqlite `golden.db`），字段含：内容（query + 期望，JSON）、来源（manual / ai）、状态（pending / approved / rejected）、时间戳。现有 `tools/rag_eval/golden.json` 作为初始导入；plan / quiz / skills / security 等 `dataset.json` 保持文件不动。
-- **生成**：`ingest_one` 后置回调触发后台任务（`asyncio.to_thread`，复用现有上传那套），按入库资料调 LLM 生成评估题，写入 `status=pending, source=ai`。用户不感知，log 可查。
-- **管理**：admin CRUD API + 前端管理页（增删改查 + 审核改状态）。
-- **评估取用**：默认只用 `approved` 的 golden；可配开关是否纳入 pending。
+- CI 新增一个 `EVAL` job，跑 `run_all --ci`——**只跑不耗 token 的确定性项**（当前仅"安全拦截 `--no-llm`"一项）。`run_all` 有任一 FAIL 即非零退出，直接用**退出码**当门禁（无需 grep），并上传总报告 artifact。
+- faithfulness / recall 等耗 token 的评估**不进 PR 门禁**，留 `run_all` 本地 / 手动跑全量。
 
-### 1.2.6. CI 门禁（N3）
-
-- CI 新增一个 eval job，**只跑不耗 token 的项**：检索指标（固定小 KB）、安全拦截率、judge 用 mock。沿用现有 perf 门禁模式（跑脚本 → grep 报告 `FAIL` → 失败 exit 1 → 传 artifact）。
-- faithfulness 等耗 token 的 LLM 评估**不进 PR 门禁**，留 `run_all` 本地 / 手动跑。
-
-### 1.2.7. 配置项（三处同步 `config.py / .env.example / .env`）
+### 1.2.6. 配置项（三处同步 `config.py / .env.example / .env`）
 
 | 配置项 | 用途 |
 |---|---|
+| `TRACE_ENABLED` | 是否采集会话监控 trace（默认 true，软失败） |
 | `RAG_GOLDEN_DB_PATH` | RAG golden 库路径 |
 | `EVAL_AUTO_GOLDEN_ENABLED` | 入库是否触发 LLM 自动生成 golden（默认 true） |
+| `EVAL_AUTO_GOLDEN_MAX_Q` | 单个文档自动生成 golden 候选的最大条数 |
 | `EVAL_GOLDEN_USE_PENDING` | 评估是否纳入未审核 golden（默认 false） |
-| `TRACE_ENABLED` | 是否采集在线 trace（默认 true，软失败） |
 
-设计中按"简洁优先"定的小决策：golden 用独立 sqlite（支持 CRUD + 状态）；后台任务用 `asyncio.to_thread`，不引任务队列；trace 只记大阶段（检索 / 每轮 LLM / 每次 tool），不做更细粒度。
+设计中按"简洁优先"定的小决策：golden 用独立 sqlite（支持增删改查 + 状态）；后台任务用 `asyncio.to_thread`，不引任务队列；trace 只记大阶段（检索 / 每轮 LLM / 每次工具），不做更细粒度。
 
-### 1.2.8. 测试 + 验收
+### 1.2.7. 测试 + 验收
 
-- **UT**：trace 采集软失败（写库异常不影响对话）、`GoldenStore` CRUD + 状态流转、聚合 runner 汇总、judge mock、ingest 钩子触发后台任务。
-- **验收标准**：`run_all` 一条命令出总报告；新指标有分数；chat 后 `usage.db` 有 trace；入库后 golden 库出现 pending 候选；admin 管理页可 CRUD + 审核；看板能看概览 / 瀑布 / 趋势；CI eval job 能拦回归。
+- **UT**：trace 采集软失败（写库异常不影响对话）、`GoldenStore` 增删改查 + 状态流转、聚合 runner 汇总、评委 mock、入库钩子触发后台任务。
+- **验收标准**：`run_all` 一条命令出总报告；对话后 `usage.db` 有 trace；入库后 golden 库出现 pending 候选；admin 管理页可增删改查 + 审核；会话监控能看概览 / 瀑布 / 趋势；CI 的 EVAL job 能拦回归。faithfulness / answer-relevance 因尚未接入跑分入口，本期只验到评委函数 + 单元测试层面。
 
 
 
@@ -197,7 +213,7 @@ flowchart LR
 | 成本看板雏形 | 前端「用量」页 `frontend/src/components/usage/` | 已有汇总卡 + 趋势图，降本看板可同构扩展 |
 | 向量化能力 | `src/rag/retriever.py` `_get_embedding_fn` + ChromaDB | 语义缓存的 query 向量化 + 相似度检索可复用现成 embedding + 向量库 |
 | 旁路软失败范式 | `chat.py` per-run usage 采集 + `record_usage` | 缓存读写 / 路由判定出错只记 log、不阻断主对话，可照搬此模式 |
-| KB 变更入口 | `src/rag/ingest.py`（`ingest_one` / `delete_kb_document` / `delete_all`） | C3 缓存失效可挂在这些写盘点之后（与 §1 N4 入库钩子同源） |
+| KB 变更入口 | `src/rag/ingest.py`（`ingest_one` / `delete_kb_document` / `delete_all`） | C3 缓存失效可挂在这些写盘点之后（与 §1 Golden 管理的入库钩子同源） |
 
 ### 2.1.4. 差距分析
 

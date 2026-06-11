@@ -11,7 +11,9 @@ class GoldenItem(BaseModel):
     id: int
     query: str
     expected_keywords: list[str]
-    expected_source_contains: str
+    expected_source: str           # 精确匹配 hit.source
+    expected_source_contains: str  # 子串匹配 hit.source
+    type: str                      # 人工分类标签（baseline / hyde…），评估不参与，仅供切片分析
     note: str
     source: str        # manual | ai
     status: str        # pending | approved | rejected
@@ -31,14 +33,18 @@ class GoldenList(BaseModel):
 class GoldenCreateRequest(BaseModel):
     query: str = Field(..., min_length=1)
     expected_keywords: list[str] = Field(default_factory=list)
+    expected_source: str = ""
     expected_source_contains: str = ""
+    type: str = ""
     note: str = ""
 
 
 class GoldenUpdateRequest(BaseModel):
     query: str | None = None
     expected_keywords: list[str] | None = None
+    expected_source: str | None = None
     expected_source_contains: str | None = None
+    type: str | None = None
     note: str | None = None
     status: str | None = None
 

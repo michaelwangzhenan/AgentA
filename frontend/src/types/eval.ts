@@ -7,7 +7,9 @@ export type GoldenItem = {
   id: number
   query: string
   expected_keywords: string[]
+  expected_source: string
   expected_source_contains: string
+  type: string
   note: string
   source: GoldenSource
   status: GoldenStatus
@@ -27,14 +29,18 @@ export type GoldenList = {
 export type GoldenCreateInput = {
   query: string
   expected_keywords: string[]
+  expected_source: string
   expected_source_contains: string
+  type: string
   note: string
 }
 
 export type GoldenUpdateInput = Partial<{
   query: string
   expected_keywords: string[]
+  expected_source: string
   expected_source_contains: string
+  type: string
   note: string
   status: GoldenStatus
 }>
