@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from collections.abc import Iterator
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -89,6 +89,39 @@ class TestRecordSoftFail:
         """store 抛异常时 record_security_event 不得向上抛（绝不阻断对话）。"""
         with patch.object(ses, "get_shared_store", side_effect=RuntimeError("boom")):
             ses.record_security_event(EVENT_TOOL, "x")  # 不抛即通过
+
+
+class TestMcpFetchSsrfGuard:
+    """MCP fetch.fetch 带 url 参数必须先过 SSRF 防御（与内置 fetch_url 同一道防线）。"""
+
+    def test_blocked_url_not_forwarded_and_recorded(self, store: SecurityEventStore) -> None:
+        import src.agent.tools as tools
+
+        ses.reset_shared_store_for_testing(store)
+        mgr = MagicMock()  # call_tool 不应被调用
+        try:
+            with patch("src.agent.core.mcp_manager.get_shared_manager", return_value=mgr):
+                res = tools._execute_mcp_tool("fetch.fetch", {"url": "http://127.0.0.1:8000"})
+            assert res.status == "error" and "安全策略" in res.content
+            mgr.call_tool.assert_not_called()
+            assert store.summary(0, int(time.time()) + 10)["by_type"]["ssrf"] == 1
+        finally:
+            ses.reset_shared_store_for_testing(None)
+
+    def test_safe_url_forwarded(self, store: SecurityEventStore) -> None:
+        import src.agent.tools as tools
+
+        ses.reset_shared_store_for_testing(store)
+        mgr = MagicMock()
+        mgr.call_tool.return_value = "正常网页正文"
+        try:
+            with patch("src.agent.core.mcp_manager.get_shared_manager", return_value=mgr):
+                res = tools._execute_mcp_tool("fetch.fetch", {"url": "https://8.8.8.8/"})
+            assert res.status == "ok"
+            mgr.call_tool.assert_called_once()
+            assert store.summary(0, int(time.time()) + 10)["by_type"]["ssrf"] == 0
+        finally:
+            ses.reset_shared_store_for_testing(None)
 
 
 # ── runtime API ──────────────────────────────────────────────────────────────

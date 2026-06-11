@@ -96,3 +96,11 @@
 | 测试 | `tests/test_security_event_store.py`（新） | 存储 + 软失败 + runtime API |
 
 **埋点方式决策（D1）**：拦截点直接记（读 `current_user_id`、懒 import store、逐条写、软失败）。理由：拦截低频、IO 可忽略；比 EventBus 聚合改动小、即时不丢。归属先只记 `user_id`。
+
+## 8. 实测发现并修复：MCP fetch 绕过 SSRF 防御 🔴
+
+手动验证实时拦截时发现：配了 MCP fetch-server 后，agent 用的是 MCP `fetch.fetch`（内置 `fetch_url` 被隐藏），而 `_execute_mcp_tool` **未过 `url_guard.is_url_safe`** —— `fetch.fetch` 可抓内网 / localhost / 云元数据（日志实测请求打到了 `127.0.0.1:8000`）。`url_guard.py` 注释本就要求「MCP fetch 与内置共用同一道防线」，代码漏接。
+
+**已修**：`_execute_mcp_tool` 转发前，对带 `url` 参数的 MCP 工具先跑 `is_url_safe`，拦下则返回 error + 记一条 `ssrf`（实时监控也能记到 MCP 路径的 SSRF 拦截）。`TestMcpFetchSsrfGuard` 2 条锁定（坏 url 不转发并记 ssrf / 安全 url 正常转发）。
+
+

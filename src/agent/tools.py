@@ -2299,6 +2299,23 @@ def _execute_mcp_tool(name: str, args: dict[str, Any]) -> ToolResult:
     from src.agent.core.mcp_manager import MCPCallError, get_shared_manager
     from src.agent.core.security_filter import scrub_injection, wrap_untrusted
 
+    # MCP fetch 类工具（fetch.fetch 等）带 url 参数：转发前先过 SSRF 防御，与内置
+    # fetch_url 共用 url_guard 同一道防线——否则 fetch.fetch 可绕过 SSRF 抓内网 / 元数据。
+    url_arg = args.get("url")
+    if isinstance(url_arg, str) and url_arg.strip():
+        from src.agent.core.url_guard import is_url_safe
+        if not is_url_safe(url_arg):
+            from src.memory.security_event_store import EVENT_SSRF, record_security_event
+            record_security_event(EVENT_SSRF, url_arg)
+            logger.warning("[tool] MCP %s 的 url 被 SSRF 防御拒绝：%s", name, url_arg)
+            return ToolResult(
+                status="error",
+                content=(
+                    f"URL 被安全策略拒绝（须为公网 http(s)，禁内网 IP / localhost / "
+                    f"file:// 等），收到：{url_arg!r}"
+                ),
+            )
+
     try:
         text = get_shared_manager().call_tool(name, args)
     except MCPCallError as exc:

@@ -6,9 +6,9 @@ import { ResourcePage } from '@/components/resources/ResourcePage'
 import { TraceDashboard } from './TraceDashboard'
 import { GoldenManager } from './GoldenManager'
 import { ReportsViewer } from './ReportsViewer'
-import { SecurityPanel } from './SecurityPanel'
+import { OfflineEval, RuntimeMonitor } from './SecurityPanel'
 
-type Tab = 'trace' | 'security' | 'golden' | 'reports'
+type Tab = 'trace' | 'security_runtime' | 'security_offline' | 'golden' | 'reports'
 
 export function QualityView() {
   const { isAdmin } = useAuth()
@@ -18,9 +18,10 @@ export function QualityView() {
     { value: 'trace', label: '会话监控' },
     ...(isAdmin
       ? ([
-          { value: 'golden', label: 'Golden 管理' },
+          { value: 'security_runtime', label: '实时安全监控' },
+          { value: 'security_offline', label: '离线安全评估' },
+          { value: 'golden', label: '知识库管理' },
           { value: 'reports', label: '评估报告' },
-          { value: 'security', label: '安全' },
         ] as { value: Tab; label: string }[])
       : []),
   ]
@@ -60,7 +61,8 @@ export function QualityView() {
         {/* 右侧内容 */}
         <div className="min-w-0 flex-1">
           {active === 'trace' && <TraceDashboard />}
-          {active === 'security' && isAdmin && <SecurityPanel />}
+          {active === 'security_runtime' && isAdmin && <RuntimeMonitor />}
+          {active === 'security_offline' && isAdmin && <OfflineEval />}
           {active === 'golden' && isAdmin && <GoldenManager />}
           {active === 'reports' && isAdmin && <ReportsViewer />}
         </div>

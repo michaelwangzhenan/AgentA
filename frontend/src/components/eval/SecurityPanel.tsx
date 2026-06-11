@@ -37,29 +37,8 @@ function pct(v: number): string {
 }
 
 // 顶部：质量看板入口，先展示线上真实拦截，再展示离线红队评估。
-export function SecurityPanel() {
-  return (
-    <div className="space-y-8">
-      <section className="space-y-3">
-        <div>
-          <h2 className="text-sm font-semibold">实时安全监控</h2>
-          <p className="text-xs text-muted-foreground">对话进行中真实发生的拦截（线上实况）</p>
-        </div>
-        <RuntimeMonitor />
-      </section>
-
-      <section className="space-y-3">
-        <div>
-          <h2 className="text-sm font-semibold">离线安全评估</h2>
-          <p className="text-xs text-muted-foreground">红队样本主动测防御，出拦截率 / 误拦率</p>
-        </div>
-        <OfflineEval />
-      </section>
-    </div>
-  )
-}
-
-function RuntimeMonitor() {
+// 实时安全监控页：对话进行中真实发生的拦截（线上实况）。
+export function RuntimeMonitor() {
   const [data, setData] = useState<SecurityRuntimeSummary | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -86,7 +65,10 @@ function RuntimeMonitor() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <span className="text-xs text-muted-foreground">近 30 天</span>
+        <div>
+          <h2 className="text-sm font-semibold">实时安全监控</h2>
+          <p className="text-xs text-muted-foreground">对话进行中真实发生的拦截（近 30 天）</p>
+        </div>
         <Button variant="outline" size="sm" onClick={refresh}>
           刷新
         </Button>
@@ -136,7 +118,8 @@ function RuntimeMonitor() {
   )
 }
 
-function OfflineEval() {
+// 离线安全评估页：红队样本主动测防御，出拦截率 / 误拦率。
+export function OfflineEval() {
   const [summary, setSummary] = useState<SecuritySummary | null>(null)
   const [trend, setTrend] = useState<SecurityTrend | null>(null)
   const [loading, setLoading] = useState(true)
@@ -165,7 +148,11 @@ function OfflineEval() {
   if (!summary || !summary.available) {
     return (
       <div className="space-y-3">
-        <div className="flex justify-end">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold">离线安全评估</h2>
+            <p className="text-xs text-muted-foreground">红队样本主动测防御，出拦截率 / 误拦率</p>
+          </div>
           <Button variant="outline" size="sm" onClick={refresh}>
             刷新
           </Button>
@@ -186,6 +173,10 @@ function OfflineEval() {
 
   return (
     <div className="space-y-5">
+      <div>
+        <h2 className="text-sm font-semibold">离线安全评估</h2>
+        <p className="text-xs text-muted-foreground">红队样本主动测防御，出拦截率 / 误拦率</p>
+      </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-xs text-muted-foreground">
           最近评估：{summary.timestamp || '—'}
@@ -193,7 +184,7 @@ function OfflineEval() {
           {summary.partial && (
             <span
               className="ml-2 inline-flex cursor-help items-center gap-0.5 rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-600 dark:text-amber-500"
-              title="只跑了部分攻击类别（如 --no-llm 跳过需 LLM 评判的类别）；分数仅覆盖跑过的类别，不能与全量结果直接比较"
+              title="只跑了部分攻击类别"
             >
               部分类别（{summary.kinds_run.join(', ') || '—'}）
               <AlertCircle className="h-3 w-3 shrink-0" />
@@ -294,7 +285,7 @@ function OfflineEval() {
                   {p.partial && (
                     <span
                       className="ml-1 inline-flex cursor-help items-center gap-0.5 align-middle text-amber-600 dark:text-amber-500"
-                      title="只跑了部分攻击类别（如 --no-llm 跳过需 LLM 评判的类别）；分数仅覆盖跑过的类别，不能与全量结果直接比较"
+                      title="只跑了部分攻击类别"
                     >
                       ·部分
                       <AlertCircle className="h-3 w-3 shrink-0" />

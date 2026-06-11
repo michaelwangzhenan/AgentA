@@ -24,7 +24,7 @@ export function SourcesPanel({ sources }: { sources: SourceLine[] }) {
           className={cn('h-3 w-3 transition-transform', !open && '-rotate-90')}
         />
         <BookText className="h-3 w-3" />
-        <span>来源 · {sources.length}</span>
+        <span>参考资料({sources.length}) :</span>
       </CollapsibleTrigger>
       <CollapsibleContent>
         <ol className="mt-1 space-y-1 rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-xs">
