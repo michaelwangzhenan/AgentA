@@ -31,6 +31,8 @@ export function QualityView() {
     <ResourcePage
       title="质量看板"
       subtitle="在线 trace 可观测 + RAG golden 管理 + 离线评估报告"
+      // 评估报告正文较长，单独放宽到 max-w-6xl；其余标签保持默认
+      maxWidthClassName={active === 'reports' ? 'max-w-6xl' : 'max-w-4xl'}
     >
       <div className="flex min-h-0 flex-1 gap-4">
         {/* 左侧竖向导航（同设置页样式） */}
