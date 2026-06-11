@@ -343,30 +343,51 @@ def test_eval_group_present_with_items(client: TestClient) -> None:
     } <= keys
 
 
-def test_judge_model_options_include_empty_and_models(client: TestClient) -> None:
+def test_judge_model_options_follow_routing_pool(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 评委可选项 = 空（跟随回答模型）+「模型选择」页的可用候选池
+    pool = sorted(_cfg.MODEL_CONFIGS.keys())[:2]
+    monkeypatch.setattr("src.llm.model_router.effective_pool", lambda: pool)
+
     body = client.get("/api/config").json()
     eval_g = next(g for g in body["groups"] if g["name"] == "eval")
     jm = next(it for it in eval_g["items"] if it["key"] == "EVAL_JUDGE_MODEL")
     assert jm["type"] == "enum_str"
-    # 空选项排第一（= 跟随回答模型），其后是全部 model key
-    assert jm["options"][0] == ""
-    assert set(_cfg.MODEL_CONFIGS.keys()) <= set(jm["options"])
+    assert jm["options"] == [""] + sorted(pool)
 
 
-def test_judge_model_patch_empty_and_valid(client: TestClient) -> None:
+def test_judge_model_patch_empty_and_valid(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pool = sorted(_cfg.MODEL_CONFIGS.keys())[:2]
+    monkeypatch.setattr("src.llm.model_router.effective_pool", lambda: pool)
+
     r = client.patch("/api/config/EVAL_JUDGE_MODEL", json={"value": ""})
     assert r.status_code == 200
     assert _cfg.EVAL_JUDGE_MODEL == ""
 
-    key = sorted(_cfg.MODEL_CONFIGS.keys())[0]
-    r2 = client.patch("/api/config/EVAL_JUDGE_MODEL", json={"value": key})
+    r2 = client.patch("/api/config/EVAL_JUDGE_MODEL", json={"value": pool[0]})
     assert r2.status_code == 200
-    assert _cfg.EVAL_JUDGE_MODEL == key
+    assert _cfg.EVAL_JUDGE_MODEL == pool[0]
 
 
-def test_judge_model_patch_invalid_400(client: TestClient) -> None:
+def test_judge_model_patch_outside_pool_400(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    all_models = sorted(_cfg.MODEL_CONFIGS.keys())
+    pool = all_models[:1]
+    monkeypatch.setattr("src.llm.model_router.effective_pool", lambda: pool)
+
+    # 未知模型一律 400
     r = client.patch("/api/config/EVAL_JUDGE_MODEL", json={"value": "__not_a_model__"})
     assert r.status_code == 400
+
+    # 已知但不在候选池内的模型也拒绝
+    outside = next((m for m in all_models if m not in pool), None)
+    if outside is not None:
+        r2 = client.patch("/api/config/EVAL_JUDGE_MODEL", json={"value": outside})
+        assert r2.status_code == 400
 
 
 def test_golden_db_path_hook_resets_shared_store(client: TestClient) -> None:

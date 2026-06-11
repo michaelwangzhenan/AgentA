@@ -57,6 +57,16 @@ class ConfigItem:
         return None
 
 
+def _judge_model_options() -> list[str]:
+    """评委模型可选项：空（=跟随回答模型）+「模型选择」页的可用候选池。
+
+    懒加载 model_router 避免 import 期循环依赖。
+    """
+    from src.llm.model_router import effective_pool
+
+    return [""] + sorted(effective_pool())
+
+
 REGISTRY: list[ConfigItem] = [
     # ─── LLM ──────────────────────────────────────────────────────────────
     ConfigItem(
@@ -523,8 +533,8 @@ REGISTRY: list[ConfigItem] = [
         section="离线评估",
         type=ItemType.ENUM_STR,
         brief="答案质量评委模型",
-        detail="runner --llm 跑 faithfulness / 相关度时评委用的模型；留空=跟随回答模型。建议选与被评模型不同的，避免同模型自评偏高。",
-        options_provider=lambda: [""] + sorted(_cfg.MODEL_CONFIGS.keys()),
+        detail="runner --llm 跑 faithfulness / 相关度时评委用的模型；留空=跟随回答模型。建议选与被评模型不同的，避免同模型自评偏高。只列出「模型选择」页的可用模型。",
+        options_provider=_judge_model_options,
         side_effect_hint="下一次跑评估脚本时生效",
     ),
     # ─── Log ──────────────────────────────────────────────────────────────

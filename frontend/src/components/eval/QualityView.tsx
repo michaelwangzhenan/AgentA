@@ -18,9 +18,9 @@ export function QualityView() {
     { value: 'trace', label: '会话监控' },
     ...(isAdmin
       ? ([
-          { value: 'security', label: '安全' },
           { value: 'golden', label: 'Golden 管理' },
           { value: 'reports', label: '评估报告' },
+          { value: 'security', label: '安全' },
         ] as { value: Tab; label: string }[])
       : []),
   ]
