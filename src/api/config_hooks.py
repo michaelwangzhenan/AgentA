@@ -77,8 +77,22 @@ def _on_mcp_changed(_old: Any, _new: Any) -> None:
         logger.warning("[config] MCP 重载失败: %s", e)
 
 
+def _on_golden_db_path_changed(_old: Any, new: Any) -> None:
+    """RAG_GOLDEN_DB_PATH 改后清掉 golden 单例，下次访问按新路径重建。
+
+    GoldenStore 是进程级缓存单例（构造时读 RAG_GOLDEN_DB_PATH），不重置则一直连旧库。
+    """
+    try:
+        from src.memory.golden_store import reset_shared_store
+        reset_shared_store()
+        logger.info("[config] RAG_GOLDEN_DB_PATH → %s，golden 单例已重置", new)
+    except Exception as e:
+        logger.warning("[config] 重置 golden 单例失败: %s", e)
+
+
 _HOOKS: dict[str, Callable[[Any, Any], None]] = {
     "LOG_LEVEL": _on_log_level_changed,
+    "RAG_GOLDEN_DB_PATH": _on_golden_db_path_changed,
     "IMP_METHOD": _on_imp_method_changed,
     "MCP_ENABLED": _on_mcp_changed,
     "MCP_CONFIG_FILE": _on_mcp_changed,

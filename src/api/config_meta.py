@@ -66,8 +66,10 @@ REGISTRY: list[ConfigItem] = [
         brief="HTTP 代理",
         detail="国外 provider（openai / grok / claude / gemini）走的 HTTP 代理，国内始终直连；留空不走代理（已开 VPN 可留空）。格式 http://host:port",
     ),
-    # 以下 3 项是 LLM 偏好的全局默认；聊天页 Composer 走 per-用户 /api/auth/llm-prefs，
-    # 未设置时回落到此。hidden 不在设置面板渲染，避免与聊天页控件重复。
+    # 以下 3 项是 LLM 偏好的全局默认：聊天页 Composer 走 per-用户 /api/auth/llm-prefs，
+    # 各用户自选、下一轮生效；未设置时才回落到这里的全局值。全局值只允许改 .env，
+    # 不开放 UI/API 改（editable=False → PATCH/reset 返回 404，override 文件里再出现也不应用）。
+    # 仍留在注册表里只为 /api/config 能读到它们当前值（hidden 不在设置面板渲染）。
     ConfigItem(
         key="ACTIVE_MODEL",
         group="llm",
@@ -75,6 +77,7 @@ REGISTRY: list[ConfigItem] = [
         brief="LLM 模型",
         detail="当前激活的模型（厂商从模型反推）；切换后下一次调用立即生效，无需重启。",
         options_provider=lambda: sorted(_cfg.MODEL_CONFIGS.keys()),
+        editable=False,
         hidden=True,
     ),
     ConfigItem(
@@ -83,6 +86,7 @@ REGISTRY: list[ConfigItem] = [
         type=ItemType.BOOL,
         brief="Extended Thinking",
         detail="开启后让模型先 reasoning 再答；支持 Claude / qwen / kimi / deepseek / glm / minimax，其他 provider 静默降级。",
+        editable=False,
         hidden=True,
     ),
     ConfigItem(
@@ -93,6 +97,7 @@ REGISTRY: list[ConfigItem] = [
         detail="thinking 阶段最多用多少 tokens（仅 Claude / qwen 消费此值，其余忽略）。简单 1024~3000；复杂 8000~16000；Agent 32000+。",
         min=512,
         max=64000,
+        editable=False,
         hidden=True,
     ),
     ConfigItem(
@@ -467,6 +472,61 @@ REGISTRY: list[ConfigItem] = [
         brief="反思补查",
         detail="综述成稿前评估信息缺口，按需再补查 1 轮；提升完整度但多花时间与 token。",
     ),
+    # ─── 评估 + 可观测 ────────────────────────────────────────────────────
+    ConfigItem(
+        key="TRACE_ENABLED",
+        group="eval",
+        section="会话监控",
+        type=ItemType.BOOL,
+        brief="采集对话 trace",
+        detail="是否采集每次对话的分阶段耗时 / token 写入 usage.db，供会话监控看板展示；出错只记日志、不影响对话。",
+    ),
+    ConfigItem(
+        key="RAG_GOLDEN_DB_PATH",
+        group="eval",
+        section="Golden 管理",
+        type=ItemType.PATH,
+        brief="Golden 库路径",
+        detail="RAG golden 评估库（rag_golden.db）的文件路径；相对项目根。",
+        side_effect_hint="改后下一次访问即按新路径重建 golden 库连接",
+    ),
+    ConfigItem(
+        key="EVAL_AUTO_GOLDEN_ENABLED",
+        group="eval",
+        section="Golden 管理",
+        type=ItemType.BOOL,
+        brief="入库自动生成 golden",
+        detail="RAG 文档入库后是否后台调 LLM 生成 golden 候选（状态 pending，待人工审核）；用户无感、出错软失败。",
+    ),
+    ConfigItem(
+        key="EVAL_AUTO_GOLDEN_MAX_Q",
+        group="eval",
+        section="Golden 管理",
+        type=ItemType.INT,
+        brief="单文档出题上限",
+        detail="入库单个文档自动生成 golden 候选的最大条数。",
+        min=1,
+        max=20,
+    ),
+    ConfigItem(
+        key="EVAL_GOLDEN_USE_PENDING",
+        group="eval",
+        section="离线评估",
+        type=ItemType.BOOL,
+        brief="评估纳入待审 golden",
+        detail="跑 RAG 评估时是否纳入未审核（pending）的 golden；默认只用已通过（approved）的。",
+        side_effect_hint="下一次跑评估脚本时生效",
+    ),
+    ConfigItem(
+        key="EVAL_JUDGE_MODEL",
+        group="eval",
+        section="离线评估",
+        type=ItemType.ENUM_STR,
+        brief="答案质量评委模型",
+        detail="runner --llm 跑 faithfulness / 相关度时评委用的模型；留空=跟随回答模型。建议选与被评模型不同的，避免同模型自评偏高。",
+        options_provider=lambda: [""] + sorted(_cfg.MODEL_CONFIGS.keys()),
+        side_effect_hint="下一次跑评估脚本时生效",
+    ),
     # ─── Log ──────────────────────────────────────────────────────────────
     ConfigItem(
         key="LOG_LEVEL",
@@ -488,6 +548,7 @@ GROUP_LABELS: dict[str, str] = {
     "security": "Security",
     "web": "Web",
     "research": "Deep Research",
+    "eval": "评估",
     "log": "Log",
 }
 

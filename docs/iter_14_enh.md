@@ -105,7 +105,8 @@
 | golden 存储 | `src/memory/golden_store.py`（`GoldenStore`，独立 `rag_golden.db`） | **仅 RAG golden** 转此库（带来源 + 状态 + 增删改查）；其余 `dataset.json` 不动 | Golden 管理 |
 | 入库生成钩子 | `src/rag/golden_gen.py` + `src/rag/ingest.py` 后置回调 + 后台任务 | 入库后调 LLM 生成 golden 候选 | Golden 管理 |
 | 评估聚合入口 | `tools/agent_eval/run_all.py` | 一条命令跑全部评估，汇总成一份总报告 | 离线评估 |
-| 新指标评委 | `tools/rag_eval/rag_judge.py` | faithfulness / answer-relevance 两个 RAG 评委，由 `runner --llm N` 接入 | 离线评估 |
+| 通用评委核心 | `tools/eval_common/llm_judge.py` | `judge_with_llm()` 出 0-5 分 + 理由，RAG / agent 各域共用 | 离线评估 |
+| 新指标评委 | `tools/rag_eval/rag_judge.py` | faithfulness / answer-relevance 两个 RAG 评委（依赖通用核心），由 `runner --llm N` 接入 | 离线评估 |
 | 只读 / 管理 API | `src/api/routes/eval.py` | golden 增删改查（admin）+ trace / 报告只读 | 看板 / Golden |
 | 看板前端 | `frontend/src/components/eval/` | 会话监控（概览 + 阶段瀑布 + 趋势）+ golden 管理页（admin）+ 报告浏览 | 各功能 |
 | CI 门禁 | `.github/workflows/AgentA_CI.yml`（EVAL job） | 跑不耗 token 的评估子集，失败拦合并 | CI 门禁 |
@@ -147,7 +148,8 @@ flowchart LR
 ### 1.2.4. 离线评估
 
 - **聚合入口**：`run_all.py` 用子进程逐个拉起现有各评估脚本（RAG 检索 + agent 各项），按退出码判 PASS / FAIL，汇总成一份 Markdown 总报告（含每项结果 + 关键指标）。各脚本保持可单独跑，不重写。
-- **新指标评委**：faithfulness（答案是否忠于检索资料、不编造）、answer-relevance（答案是否切题），都用现成 `judge_with_llm()` 出 0-5 分 + 理由。
+- **评委代码分层**：通用 0-5 分评委核心 `judge_with_llm()` 放 `tools/eval_common`（RAG / agent 各域共用，生产 `harness_manager` 的批改自检也用它）；RAG 专用的 faithfulness / 相关度评委放 `tools/rag_eval/rag_judge.py`，只依赖通用核心，不反向依赖 agent 评估目录。
+- **新指标评委**：faithfulness（答案是否忠于检索资料、不编造）、answer-relevance（答案是否切题），都用 `judge_with_llm()` 出 0-5 分 + 理由。
   > **接入方式**：RAG 评估脚本 `runner --llm N` 跑端到端链路（检索 → 用 `ACTIVE_MODEL` 生成答案 → 两个评委打分 → 报告出平均分 + 逐条），N 为最多评的 golden 条数（N≤0 全部）。评委用单独的 `EVAL_JUDGE_MODEL`（空则回落回答模型）防自评偏高。每条都调 LLM，耗 token，不进 CI。
 - **报告浏览**：admin 可在「评估报告」标签看历史 Markdown 报告。
 - **其它指标**：recall@k / MRR / 安全拦截率 / 各类 LLM 评委已有，靠总报告统一成"PASS / FAIL + 关键指标"一张表呈现。
@@ -157,16 +159,21 @@ flowchart LR
 - CI 新增一个 `EVAL` job，跑 `run_all --ci`——**只跑不耗 token 的确定性项**（当前仅"安全拦截 `--no-llm`"一项）。`run_all` 有任一 FAIL 即非零退出，直接用**退出码**当门禁（无需 grep），并上传总报告 artifact。
 - faithfulness / recall 等耗 token 的评估**不进 PR 门禁**，留 `run_all` 本地 / 手动跑全量。
 
-### 1.2.6. 配置项（三处同步 `config.py / .env.example / .env`）
+### 1.2.6. 配置项（config + .env + UI 设置页）
 
-| 配置项 | 用途 |
-|---|---|
-| `TRACE_ENABLED` | 是否采集会话监控 trace（默认 true，软失败） |
-| `RAG_GOLDEN_DB_PATH` | RAG golden 库路径 |
-| `EVAL_AUTO_GOLDEN_ENABLED` | 入库是否触发 LLM 自动生成 golden（默认 true） |
-| `EVAL_AUTO_GOLDEN_MAX_Q` | 单个文档自动生成 golden 候选的最大条数 |
-| `EVAL_GOLDEN_USE_PENDING` | 评估是否纳入未审核 golden（默认 false） |
-| `EVAL_JUDGE_MODEL` | 答案质量评委用的模型 id；空则回落回答模型，建议填与被评不同的防自评偏高 |
+下列配置三处同步（`config.py` / `.env.example` / `.env`），并都登记进设置页「评估」组，admin 可在线改、即时持久化到 `.agenta/config_overrides.json`。
+
+| 配置项 | 用途 | UI 控件 |
+|---|---|---|
+| `TRACE_ENABLED` | 是否采集会话监控 trace（默认 true，软失败） | 开关 |
+| `RAG_GOLDEN_DB_PATH` | RAG golden 库路径；改后 hook 重置库连接即时生效 | 路径 |
+| `EVAL_AUTO_GOLDEN_ENABLED` | 入库是否触发 LLM 自动生成 golden（默认 true） | 开关 |
+| `EVAL_AUTO_GOLDEN_MAX_Q` | 单个文档自动生成 golden 候选的最大条数 | 数字 |
+| `EVAL_GOLDEN_USE_PENDING` | 评估是否纳入未审核 golden（默认 false） | 开关 |
+| `EVAL_JUDGE_MODEL` | 答案质量评委模型；空=跟随回答模型，建议选与被评不同的防自评偏高 | 下拉（含空选项 + 全部 model） |
+
+- **回答模型**：评估生成答案用全局 `ACTIVE_MODEL`（环境变量名 `ACTIVE_MODEL`），CLI / 评估 / Web 未选时都回落到它。
+- **runner 读 override**：`EVAL_GOLDEN_USE_PENDING` / `EVAL_JUDGE_MODEL` 只被评估脚本（子进程）读，故 `runner` / `run_all` 启动时也应用 `config_overrides.json`，让设置页改的值对评估真正生效（单一来源）。
 
 设计中按"简洁优先"定的小决策：golden 用独立 sqlite（支持增删改查 + 状态）；后台任务用 `asyncio.to_thread`，不引任务队列；trace 只记大阶段（检索 / 每轮 LLM / 每次工具），不做更细粒度。
 
@@ -186,17 +193,13 @@ flowchart LR
 
 让 AgentA 在**不牺牲质量**的前提下，自动把对话 / RAG 的**延迟和成本压下来**：简单问题走小而便宜的模型，重复 / 相近的问法直接命中历史结果跳过重复检索与生成，并用看板把"省了多少"展示出来。
 
-这是 LLMOps（LLM 运维）里"成本治理"的一块，求职叙事上能接上 §1（评估 + 可观测）的成本数据，形成"既能度量成本、又能主动压成本"的完整故事。
-
-原始需求见 [iter_7_retro §3.2](iter_7_retro.md#32-模型路由--语义缓存--降本)，本节把它拆成可落地的能力项，并对照现状标出差距。
+这是 LLMOps（LLM 运维）里"成本治理"的一块，接上 §1（评估 + 可观测）的成本数据，形成"既能度量成本、又能主动压成本"的完整故事。
 
 ### 2.1.2. 需求拆解
 
-原始需求拆成四块能力（编号 C 表示本期"降本"能力，仅本节内有效）：
-
 | 编号 | 能力 | 说明 |
 |---|---|---|
-| C1 | 模型路由 | 按问题难度 / 类型选模型：简单问走便宜小模型（低 tier），复杂问走强模型（高 tier）。判定本身要快、可解释 |
+| C1 | 模型路由 | 按问题难度 / 类型选模型：简单问走便宜小模型，复杂问走强模型。判定本身要快、可解释 |
 | C2 | 语义缓存 | 相近 query 命中历史问答，跳过重复的检索 + LLM 生成，直接返回缓存答案 |
 | C3 | 缓存失效 | 缓存可能返回过期 / 不精确结果，需失效策略：知识库（KB）变更时作废相关缓存、缓存带过期时间 |
 | C4 | 降本看板 | 复用 §1 的 `usage.db` 成本数据，展示路由命中分布 + 缓存命中率 + 估算节省，对比"不优化时的成本" |
@@ -256,13 +259,13 @@ flowchart LR
 
 D3 路由作用方式细化（已确认）：
 
-1. **可用模型勾选**：在「配置 API key」页加勾选，只有勾中（已充值可用）的模型才进入本 feature 的路由候选池。
+1. **可用模型勾选**：在「配置 API key」页加勾选，只有勾中（已充值可用）的模型才进入本 feature 的路由候选池，候选池预过滤已挡掉"没配 key / 没充值"的模型。
 2. **只能向下路由**：用户选定某 LLM 后，路由只在候选池内向**更便宜**的模型选，不会向上升级。
-3. **auto 档启用**：选「auto」档时启用路由策略；手选具体模型时尊重用户（仍可在候选池内向下降本）。
+3. **auto 档启用**：选「auto」档时启用路由策略；用户手选具体模型时，只可在候选池内向下选择模型。
 4. **路由粒度 = 单次提问（run）**：每次用户提问开始时判定一次，整个 ReAct 多轮 LLM 调用沿用同一模型；同一会话的不同提问各自独立路由。不在循环内逐轮换模型——跨厂商中途换模型有 tool 格式 / 历史回传风险，且 `usage.db` 是一次 run 记一行一个 `model_id`。
-5. **运行时不可用 fallback**：候选池预过滤已挡掉"没配 key / 没充值"的模型；路由选中的便宜模型在调用时遇**瞬时错误（429 / 5xx / 超时，不含 400 这类请求本身错）**时回退重试一次——手选模型场景回退到**用户自选模型**（更高档、天然安全），auto 档无自选则回退到候选池**最高 tier** 的模型（默认值，可调）。为避开 run 内换厂商风险，fallback **仅在该 run 尚未跑 tool / 未改历史时**生效；循环中途失败照现状抛 error。
+5. **运行时不可用 fallback**：路由选中的便宜模型在调用时遇**瞬时错误（429 / 5xx / 超时，不含 400 这类请求本身错）**时回退重试一次：手选模型场景回退到**用户自选模型**，auto 档无自选则回退到候选池**最高** 模型（默认值，可调）。为避开 run 内换厂商风险，fallback **仅在该 run 尚未跑 tool / 未改历史时**生效；循环中途失败照现状抛 error。
 
-### 2.1.7. 与已有 LRU 缓存的区别（澄清）
+### 2.1.7. 本期语义缓存与已有 LRU 缓存的区别
 
 代码已有 `functools.lru_cache`（`query_rewriter.py` 改写结果、`retriever.py` query 编码、`reranker.py` 模型实例），但与本期语义缓存是两回事：
 

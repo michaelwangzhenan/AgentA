@@ -35,13 +35,13 @@ class TestConfig:
 
     def test_active_model_is_set(self) -> None:
         """ACTIVE_MODEL 必须有值"""
-        assert ACTIVE_MODEL, "LLM_MODEL 未在 .env 中配置"
+        assert ACTIVE_MODEL, "ACTIVE_MODEL 未在 .env 中配置"
 
     def test_active_model_is_supported(self) -> None:
         """ACTIVE_MODEL 必须是支持的值"""
         supported = set(config.MODEL_CONFIGS.keys())
         assert ACTIVE_MODEL in supported, (
-            f"LLM_MODEL='{ACTIVE_MODEL}' 不在支持列表 {supported} 中"
+            f"ACTIVE_MODEL='{ACTIVE_MODEL}' 不在支持列表 {supported} 中"
         )
 
     def test_get_active_model_returns_provider_and_model(self) -> None:
@@ -55,7 +55,7 @@ class TestConfig:
         """非法 model id 应抛出 ValueError"""
         original = config.ACTIVE_MODEL
         config.ACTIVE_MODEL = "invalid_model_xyz"
-        with pytest.raises(ValueError, match="不支持的 LLM_MODEL"):
+        with pytest.raises(ValueError, match="不支持的 ACTIVE_MODEL"):
             get_active_model()
         config.ACTIVE_MODEL = original  # 还原
 

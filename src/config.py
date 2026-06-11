@@ -357,8 +357,9 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
     "qwen2.5:7b": ModelConfig(provider="ollama", model_id="qwen2.5:7b", label="Qwen2.5 7B (本地)", tier="min"),
 }
 
-# 当前激活的模型，从环境变量读取（model id），默认 kimi-k2.5
-ACTIVE_MODEL: str = os.getenv("LLM_MODEL", "kimi-k2.5")
+# 全局默认 LLM 模型（model id，厂商从 MODEL_CONFIGS 反推）。CLI 直接用它；Web 端每用户在
+# 聊天页自选、未选时回落到此；评估脚本生成答案也用它。可选值见 MODEL_CONFIGS 的 key
+ACTIVE_MODEL: str = os.getenv("ACTIVE_MODEL", "kimi-k2.5")
 
 # ChromaDB 存储路径
 CHROMA_DB_PATH: str = os.getenv("CHROMA_DB_PATH", "./chroma_db")
@@ -796,7 +797,7 @@ def get_active_model() -> "tuple[ProviderConfig, ModelConfig]":
     if model is None:
         supported = ", ".join(MODEL_CONFIGS.keys())
         raise ValueError(
-            f"不支持的 LLM_MODEL: '{model_id}'，支持的值为: {supported}"
+            f"不支持的 ACTIVE_MODEL: '{model_id}'，支持的值为: {supported}"
         )
     provider = PROVIDER_CONFIGS.get(model.provider)
     if provider is None:

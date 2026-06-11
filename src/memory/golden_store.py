@@ -346,6 +346,16 @@ def get_shared_store() -> GoldenStore:
     return _shared_store
 
 
+def reset_shared_store() -> None:
+    """清掉进程级单例，下次 get_shared_store() 按当前 RAG_GOLDEN_DB_PATH 重建。
+
+    供 RAG_GOLDEN_DB_PATH 在线改动后的 config hook 调用，让新路径即时生效。
+    """
+    global _shared_store
+    with _shared_lock:
+        _shared_store = None
+
+
 def reset_shared_store_for_testing(store: GoldenStore | None = None) -> None:
     """UT 专用：注入 mock store / 重置为 None。生产代码不要调用。"""
     global _shared_store
