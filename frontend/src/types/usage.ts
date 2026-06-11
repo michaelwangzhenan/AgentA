@@ -124,6 +124,9 @@ export type SavingsSummary = {
   cache_count: number
   cache_saved: number
   total_saved: number
+  cache_lookups: number
+  cache_hits: number
+  cache_hit_rate: number
 }
 
 export type SavingsSeriesRow = {

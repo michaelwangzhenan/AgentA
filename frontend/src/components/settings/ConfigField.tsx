@@ -19,10 +19,12 @@ export type ConfigFieldProps = {
   onReset: () => void
   /** 当前是否在保存中（含 debounce 等待） */
   saving?: boolean
+  /** 依赖项未满足时灰显并禁止交互（如开关关闭、模式不匹配） */
+  disabled?: boolean
 }
 
 export function ConfigField(props: ConfigFieldProps) {
-  const { item, localValue, error, onChange, onReset, saving } = props
+  const { item, localValue, error, onChange, onReset, saving, disabled } = props
   const value = localValue !== undefined ? localValue : item.value
 
   return (
@@ -78,7 +80,10 @@ export function ConfigField(props: ConfigFieldProps) {
         </div>
       </div>
 
-      <div className="mt-2">
+      <div
+        className={cn('mt-2', disabled && 'pointer-events-none opacity-50')}
+        aria-disabled={disabled || undefined}
+      >
         <FieldControl item={item} value={value} onChange={onChange} />
       </div>
 

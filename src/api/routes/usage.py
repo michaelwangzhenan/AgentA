@@ -429,6 +429,9 @@ class SavingsSummary(BaseModel):
     cache_count: int
     cache_saved: float
     total_saved: float
+    cache_lookups: int      # 可缓存请求总数（命中率分母）
+    cache_hits: int         # 其中命中数
+    cache_hit_rate: float   # 命中率 0~1；分母为 0 时为 0
 
 
 class SavingsSeriesRow(BaseModel):
@@ -448,18 +451,26 @@ class SavingsSeries(BaseModel):
 
 def _savings_summary(store: UsageStore, start: int, end: int, user_id: int | None) -> SavingsSummary:
     agg = store.aggregate_savings(start, end, user_id=user_id)
+    look = store.aggregate_cache_lookups(start, end, user_id=user_id)
+    lookups, hits, cache_saved = look["lookups"], look["hits"], look["saved"]
+    # 缓存的次数 / 节省 / 命中率统一以 cache_lookups 为准，三者口径一致不打架
     return SavingsSummary(
         start=start, end=end, range="", currency=_cfg.USAGE_CURRENCY,
         route_count=agg["route_count"], route_saved=round(agg["route_saved"], 6),
-        cache_count=agg["cache_count"], cache_saved=round(agg["cache_saved"], 6),
-        total_saved=round(agg["route_saved"] + agg["cache_saved"], 6),
+        cache_count=hits, cache_saved=round(cache_saved, 6),
+        total_saved=round(agg["route_saved"] + cache_saved, 6),
+        cache_lookups=lookups, cache_hits=hits,
+        cache_hit_rate=round(hits / lookups, 4) if lookups > 0 else 0.0,
     )
 
 
 def _savings_series(store: UsageStore, start: int, end: int, user_id: int | None) -> SavingsSeries:
+    # route 仍取 saving_events；cache 改取 cache_lookups，与汇总卡片同口径
+    raw = [r for r in store.savings_series(start, end, user_id=user_id) if r["kind"] == "route"]
+    raw += store.cache_lookups_series(start, end, user_id=user_id)
     rows = [
         SavingsSeriesRow(date=r["day"], kind=r["kind"], count=r["count"], saved=round(r["saved"], 6))
-        for r in store.savings_series(start, end, user_id=user_id)
+        for r in raw
     ]
     return SavingsSeries(
         start=start, end=end, range="", currency=_cfg.USAGE_CURRENCY, rows=rows,

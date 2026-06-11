@@ -34,6 +34,7 @@ from src.memory.usage_store import (
     cost_of,
     get_shared_store,
     merged_pricing,
+    record_cache_lookup,
     record_saving,
     record_usage,
 )
@@ -61,6 +62,10 @@ _AGENT_SEMAPHORE = threading.BoundedSemaphore(_cfg.MAX_CONCURRENT_AGENT_RUNS)
 # 视为"瞬时"的 LLM 错误（限流 / 网关 / 超时）→ 路由降级模型遇此可回退基准重试。
 # 4xx 只认 408 超时 / 425 too-early / 429 限流，其余 4xx 多是请求本身错，不重试。
 _TRANSIENT_STATUS = {408, 425, 429}
+
+# 可缓存的"只读检索"工具：用了这些仍可写缓存（KB 变更会全量作废缓存兜底）。
+# 联网搜索 / 文件写 / MCP 等带实时性或副作用的工具一律不可缓存。
+_CACHEABLE_TOOLS = {"search_knowledge"}
 
 
 def _is_transient_llm_error(exc: Exception) -> bool:
@@ -98,7 +103,12 @@ def _make_usage_capture() -> tuple[dict[str, Any], Any]:
     holder: dict[str, Any] = {}
 
     def _capture(event: Any) -> None:
-        if getattr(event, "type", None) == "final_answer":
+        et = getattr(event, "type", None)
+        if et == "tool_call_start":
+            name = (getattr(event, "payload", None) or {}).get("name")
+            if name:
+                holder.setdefault("tool_names", set()).add(name)
+        elif et == "final_answer":
             payload = getattr(event, "payload", None) or {}
             holder["usage"] = payload.get("usage")
             holder["text"] = payload.get("text")
@@ -136,22 +146,52 @@ def _record_route_saving(user_id: int, decision: RouteDecision, usage: Any) -> N
         record_saving(user_id, "route", decision.baseline, decision.model_id, saved, prompt + comp)
 
 
-def _record_cache_saving(user_id: int, would_use_model: str, query: str, answer: str) -> None:
+def _estimate_cache_saving(would_use_model: str, query: str, answer: str) -> float:
     """缓存命中的估算节省 = 本应用 would_use_model 完整生成的成本（按答案长度粗估）。"""
     pricing = merged_pricing(get_shared_store())
     prompt = _estimate_tokens(query)
     comp = _estimate_tokens(answer)
-    saved = cost_of(would_use_model, prompt, comp, pricing)
-    record_saving(user_id, "cache", would_use_model, "cache", saved, prompt + comp)
+    return cost_of(would_use_model, prompt, comp, pricing)
+
+
+def _log_cache_skip_query(fresh: bool, skip_cache: bool, is_deep: bool = False) -> None:
+    """记录"为何不查缓存"，便于排查"两轮相同问题为何没命中"。整体关了就别刷屏。"""
+    if not _cfg.SEMANTIC_CACHE_ENABLED:
+        return
+    if is_deep:
+        logger.info("[cache] 跳过查询：Deep Research（永不缓存）")
+    elif skip_cache:
+        logger.info("[cache] 跳过查询：重新生成（skip_cache，强制重答）")
+    elif not fresh:
+        logger.info("[cache] 跳过查询：非单轮起步（会话已有历史，仅开场问题查缓存）")
 
 
 def _maybe_store_cache(
-    fresh: bool, holder: dict[str, Any], query: str, user_id: int, model_id: str
+    cache_on: bool, holder: dict[str, Any], query: str, user_id: int, model_id: str
 ) -> None:
-    """run 结束后按可缓存条件写语义缓存：单轮起步 + 无工具 + 未注入个性化 + 有答案。"""
+    """run 结束后按可缓存条件写语义缓存：单轮起步 + 无工具 + 未注入个性化 + 有答案。
+
+    不满足时记一条 info 说明原因 —— 否则用户只看到"下次还是没命中"，无从排查。
+    """
+    if not cache_on:
+        return  # 查询阶段已记过"为何不查"，写入沿用同一判定，不再重复刷屏
     answer = holder.get("text")
-    if not (fresh and answer and not holder.get("used_tools") and not holder.get("personalized")):
+    if not answer:
+        logger.info("[cache] 不写入：本轮无最终答案")
         return
+    if holder.get("personalized"):
+        logger.info("[cache] 不写入：本轮注入了个性化（答案因人而异，不缓存）")
+        return
+    # 工具判定：只有"全是只读检索工具"才可缓存；联网 / 写操作等不可缓存。
+    # 拿不到工具名单却报 used_tools（非默认实现）时保守不写。
+    tool_names = holder.get("tool_names") or set()
+    if holder.get("used_tools") or tool_names:
+        non_cacheable = (tool_names - _CACHEABLE_TOOLS) if tool_names else {"<未知工具>"}
+        if non_cacheable:
+            logger.info(
+                "[cache] 不写入：本轮用了不可缓存的工具 %s（仅纯检索可缓存）", sorted(non_cacheable)
+            )
+            return
     semantic_cache.store_cached(query, answer, user_id, model_id=model_id)
 
 
@@ -176,16 +216,21 @@ def chat(
 
     decision = model_router.route(req.message, prefs.active_model)
     used_model = decision.model_id
-    logger.info("[/api/chat] 路由：%s", decision.reason)
+    logger.info("[/api/chat] 路由：模型=%s（%s）", used_model, decision.reason)
 
-    # 语义缓存：单轮起步先查，命中即跳过整次 run
-    if fresh:
+    # 语义缓存：单轮起步先查，命中即跳过整次 run（「重新生成」勾 skip_cache 时不查不写）
+    cache_on = _cfg.SEMANTIC_CACHE_ENABLED and fresh and not req.skip_cache
+    if not cache_on:
+        _log_cache_skip_query(fresh, req.skip_cache)
+    if cache_on:
         cached = semantic_cache.lookup_cached(req.message, user["id"])
+        # 命中 / 未命中 + 命中估算节省一并记进 cache_lookups（缓存统计唯一口径）
+        saved = _estimate_cache_saving(used_model, req.message, cached) if cached is not None else 0.0
+        record_cache_lookup(user["id"], cached is not None, saved=saved)
         if cached is not None:
             history.append(session_id, {"role": "user", "content": req.message}, user_id=user["id"])
             history.append(session_id, {"role": "assistant", "content": cached}, user_id=user["id"])
-            _record_cache_saving(user["id"], used_model, req.message, cached)
-            return ChatResponse(reply=cached, session_id=session_id)
+            return ChatResponse(reply=cached, session_id=session_id, model="", cached=True)
 
     trace_id = str(uuid.uuid4())
 
@@ -229,8 +274,8 @@ def chat(
     )
     if used_model == decision.model_id:  # 未 fallback 才记路由节省
         _record_route_saving(user["id"], decision, usage)
-    _maybe_store_cache(fresh, usage_holder, req.message, user["id"], used_model)
-    return ChatResponse(reply=reply, session_id=session_id)
+    _maybe_store_cache(cache_on, usage_holder, req.message, user["id"], used_model)
+    return ChatResponse(reply=reply, session_id=session_id, model=used_model, cached=False)
 
 
 # ─── SSE 流式 ────────────────────────────────────────────────────
@@ -296,15 +341,19 @@ async def chat_stream(
     else:
         decision = model_router.route(req.message, prefs.active_model)
         used_model = decision.model_id
-        logger.info("[/api/chat/stream] 路由：%s", decision.reason)
+        logger.info("[/api/chat/stream] 路由：模型=%s（%s）", used_model, decision.reason)
 
-    # 语义缓存命中：直接两帧返回，不跑 agent（Deep Research 不查缓存）
-    if fresh and not is_deep:
+    # 语义缓存命中：直接两帧返回，不跑 agent（Deep Research / skip_cache 不查缓存）
+    cache_on = _cfg.SEMANTIC_CACHE_ENABLED and fresh and not is_deep and not req.skip_cache
+    if not cache_on:
+        _log_cache_skip_query(fresh, req.skip_cache, is_deep)
+    if cache_on:
         cached = semantic_cache.lookup_cached(req.message, user["id"])
+        saved = _estimate_cache_saving(used_model, req.message, cached) if cached is not None else 0.0
+        record_cache_lookup(user["id"], cached is not None, saved=saved)
         if cached is not None:
             history.append(session_id, {"role": "user", "content": req.message}, user_id=user["id"])
             history.append(session_id, {"role": "assistant", "content": cached}, user_id=user["id"])
-            _record_cache_saving(user["id"], used_model, req.message, cached)
 
             async def _cached_gen():
                 yield _sse_frame("token_chunk", {"text": cached})
@@ -327,7 +376,11 @@ async def chat_stream(
 
     def _on_event(event: Any) -> None:
         et = getattr(event, "type", None)
-        if et == "final_answer":
+        if et == "tool_call_start":
+            name = (getattr(event, "payload", None) or {}).get("name")
+            if name:
+                usage_holder.setdefault("tool_names", set()).add(name)
+        elif et == "final_answer":
             payload = getattr(event, "payload", None) or {}
             usage_holder["usage"] = payload.get("usage")
             usage_holder["text"] = payload.get("text")
@@ -339,6 +392,12 @@ async def chat_stream(
         except Exception:
             logger.exception("[/api/chat/stream] sanitize 事件失败 type=%s", getattr(event, "type", "?"))
             return
+        # 透明度：在 final_answer 帧带上本次实际应答模型 + 是否被降级，供前端气泡标注
+        if et == "final_answer" and isinstance(frame.get("payload"), dict):
+            frame["payload"]["model"] = used_model
+            frame["payload"]["downgraded"] = bool(
+                decision.downgraded and used_model == decision.model_id
+            )
         if et == "error" and _state["suppress"]:
             _state["held_errors"].append(frame)
             return
@@ -398,7 +457,7 @@ async def chat_stream(
             )
             if used_model == decision.model_id:
                 _record_route_saving(user["id"], decision, usage_holder.get("usage"))
-            _maybe_store_cache(fresh, usage_holder, req.message, user["id"], used_model)
+            _maybe_store_cache(cache_on, usage_holder, req.message, user["id"], used_model)
             await queue.put(_STREAM_SENTINEL)
 
     run_task = asyncio.create_task(_drive_agent())

@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from src.api.deps import get_agent
 from src.api.main import app
+from src.api.routes import chat as chat_mod
 
 
 def _mock_agent(reply: str = "test reply", raises: Exception | None = None) -> MagicMock:
@@ -92,3 +93,57 @@ def test_chat_without_session_id_keeps_agent_default():
 
     assert r.status_code == 200
     assert mock.session_id == "default-uuid"
+
+
+# ── 语义缓存：skip_cache 绕过 + 命中率采集 ─────────────────────────────────────
+
+
+def test_skip_cache_bypasses_lookup_and_telemetry(monkeypatch):
+    """skip_cache=true（重新生成）：不查缓存、不记命中率分母，直接跑 agent。"""
+    mock = _mock_agent("fresh answer")
+    app.dependency_overrides[get_agent] = lambda: mock
+    lookup = MagicMock(return_value=None)
+    rec = MagicMock()
+    monkeypatch.setattr(chat_mod.semantic_cache, "lookup_cached", lookup)
+    monkeypatch.setattr(chat_mod, "record_cache_lookup", rec)
+
+    r = client.post("/api/chat", json={"message": "hi", "skip_cache": True})
+
+    assert r.status_code == 200
+    assert r.json()["reply"] == "fresh answer"
+    lookup.assert_not_called()
+    rec.assert_not_called()
+
+
+def test_fresh_query_records_cache_lookup(monkeypatch):
+    """默认（单轮起步）会查缓存并记一次命中率分母。"""
+    mock = _mock_agent("answer")
+    app.dependency_overrides[get_agent] = lambda: mock
+    lookup = MagicMock(return_value=None)
+    rec = MagicMock()
+    monkeypatch.setattr(chat_mod._cfg, "SEMANTIC_CACHE_ENABLED", True)
+    monkeypatch.setattr(chat_mod.semantic_cache, "lookup_cached", lookup)
+    monkeypatch.setattr(chat_mod, "record_cache_lookup", rec)
+
+    r = client.post("/api/chat", json={"message": "hi"})
+
+    assert r.status_code == 200
+    lookup.assert_called_once()
+    rec.assert_called_once()
+
+
+def test_cache_hit_returns_cached_flag(monkeypatch):
+    """缓存命中：直接返回缓存答案，cached=True 且不跑 agent。"""
+    mock = _mock_agent("should-not-run")
+    app.dependency_overrides[get_agent] = lambda: mock
+    monkeypatch.setattr(chat_mod._cfg, "SEMANTIC_CACHE_ENABLED", True)
+    monkeypatch.setattr(chat_mod.semantic_cache, "lookup_cached", lambda *a, **k: "cached answer")
+    monkeypatch.setattr(chat_mod, "record_cache_lookup", MagicMock())
+
+    r = client.post("/api/chat", json={"message": "hi"})
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["reply"] == "cached answer"
+    assert body["cached"] is True
+    mock.run.assert_not_called()

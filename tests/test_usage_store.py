@@ -127,6 +127,63 @@ def test_delete_all_for_user_isolated(store: UsageStore) -> None:
     assert sum(r["count"] for r in store.aggregate_by_model(now - 3600, now + 3600, user_id=2)) == 1
 
 
+# ── 缓存命中率采集（cache_lookups） ────────────────────────────────────────────
+
+
+def test_cache_lookup_aggregate_counts_hits_and_misses(store: UsageStore) -> None:
+    store.record_cache_lookup(1, hit=True, saved=0.3)
+    store.record_cache_lookup(1, hit=False)
+    store.record_cache_lookup(1, hit=True, saved=0.2)
+    now = int(time.time())
+    agg = store.aggregate_cache_lookups(now - 3600, now + 3600, user_id=1)
+    assert agg["lookups"] == 3
+    assert agg["hits"] == 2
+    assert agg["saved"] == pytest.approx(0.5)
+
+
+def test_cache_lookup_miss_records_no_saving(store: UsageStore) -> None:
+    # 未命中即便传了 saved 也记 0（节省只算命中的）
+    store.record_cache_lookup(1, hit=False, saved=9.9)
+    now = int(time.time())
+    assert store.aggregate_cache_lookups(now - 3600, now + 3600, user_id=1)["saved"] == 0.0
+
+
+def test_cache_lookup_series_groups_hits_by_day(store: UsageStore) -> None:
+    store.record_cache_lookup(1, hit=True, saved=0.3)
+    store.record_cache_lookup(1, hit=False)
+    now = int(time.time())
+    rows = store.cache_lookups_series(now - 3600, now + 3600, user_id=1)
+    assert len(rows) == 1
+    assert rows[0]["kind"] == "cache"
+    assert rows[0]["count"] == 1
+    assert rows[0]["saved"] == pytest.approx(0.3)
+
+
+def test_cache_lookup_per_user_filter(store: UsageStore) -> None:
+    store.record_cache_lookup(1, hit=True)
+    store.record_cache_lookup(2, hit=False)
+    now = int(time.time())
+    agg1 = store.aggregate_cache_lookups(now - 3600, now + 3600, user_id=1)
+    agg_all = store.aggregate_cache_lookups(now - 3600, now + 3600)
+    assert (agg1["lookups"], agg1["hits"]) == (1, 1)
+    assert (agg_all["lookups"], agg_all["hits"]) == (2, 1)
+
+
+def test_cache_lookup_empty_returns_zero(store: UsageStore) -> None:
+    now = int(time.time())
+    agg = store.aggregate_cache_lookups(now - 3600, now + 3600)
+    assert (agg["lookups"], agg["hits"], agg["saved"]) == (0, 0, 0.0)
+
+
+def test_delete_all_for_user_clears_cache_lookups(store: UsageStore) -> None:
+    store.record_cache_lookup(1, hit=True)
+    store.record_cache_lookup(2, hit=True)
+    store.delete_all_for_user(1)
+    now = int(time.time())
+    assert store.aggregate_cache_lookups(now - 3600, now + 3600, user_id=1)["lookups"] == 0
+    assert store.aggregate_cache_lookups(now - 3600, now + 3600, user_id=2)["lookups"] == 1
+
+
 # ── 单价覆盖 + 合并 + 成本 ─────────────────────────────────────────────────────
 
 

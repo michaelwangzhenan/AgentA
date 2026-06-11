@@ -1,17 +1,16 @@
 import { useState } from 'react'
-import { KeyRound, KeySquare, Route, SlidersHorizontal, User, Users, UserX } from 'lucide-react'
+import { KeyRound, KeySquare, SlidersHorizontal, User, Users, UserX } from 'lucide-react'
 
 import { ProfileSettings } from '@/components/settings/ProfileSettings'
 import { PasswordSettings } from '@/components/settings/PasswordSettings'
 import { AccountDeletion } from '@/components/settings/AccountDeletion'
 import { ApiKeysConfig } from '@/components/settings/ApiKeysConfig'
-import { RoutingPoolConfig } from '@/components/settings/RoutingPoolConfig'
 import { SettingsView } from '@/components/settings/SettingsView'
 import { UserManagement } from '@/components/settings/UserManagement'
 import { useAuth } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 
-type Section = 'profile' | 'password' | 'system' | 'apikeys' | 'routing' | 'users' | 'account'
+type Section = 'profile' | 'password' | 'system' | 'apikeys' | 'users' | 'account'
 
 type NavItem = {
   id: Section
@@ -26,8 +25,8 @@ type NavGroup = {
   items: NavItem[]
 }
 
-// 分组顺序遵循常见习惯：先“账户”（个人高频项），再“系统”（admin 管理项，
-// 相关的 API 密钥 / 模型选择相邻摆放），最后单独的“危险区域”。
+// 分组顺序遵循常见习惯：先“账户”（个人高频项），再“系统”（admin 管理项；
+// 路由 / 缓存配置已并入「系统配置」的「降本」组），最后单独的“危险区域”。
 const NAV_GROUPS: NavGroup[] = [
   {
     heading: '账户',
@@ -41,7 +40,6 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'system', label: '系统配置', icon: SlidersHorizontal, adminOnly: true },
       { id: 'apikeys', label: 'API 密钥', icon: KeySquare, adminOnly: true },
-      { id: 'routing', label: '模型选择', icon: Route, adminOnly: true },
       { id: 'users', label: '用户管理', icon: Users, adminOnly: true },
     ],
   },
@@ -138,15 +136,6 @@ export function SettingsPage() {
                 description="为各 LLM 厂商与 web 搜索配置密钥，保存后立即生效。"
               />
               <ApiKeysConfig />
-            </div>
-          )}
-          {section === 'routing' && isAdmin && (
-            <div className="mx-auto max-w-2xl">
-              <PageHeader
-                title="模型选择"
-                description="选定参与自动路由的候选模型，控制成本与可用性。"
-              />
-              <RoutingPoolConfig />
             </div>
           )}
           {section === 'users' && isAdmin && (

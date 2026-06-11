@@ -146,9 +146,14 @@ class StreamAbortedError extends Error {}
 export async function streamChat(
   message: string,
   handlers: StreamHandlers,
-  options: { sessionId?: string; signal?: AbortSignal; mode?: ChatMode } = {},
+  options: {
+    sessionId?: string
+    signal?: AbortSignal
+    mode?: ChatMode
+    skipCache?: boolean
+  } = {},
 ): Promise<void> {
-  const { sessionId, signal, mode } = options
+  const { sessionId, signal, mode, skipCache } = options
   try {
     await fetchEventSource('/api/chat/stream', {
       method: 'POST',
@@ -158,6 +163,7 @@ export async function streamChat(
         message,
         ...(sessionId ? { session_id: sessionId } : {}),
         ...(mode ? { mode } : {}),
+        ...(skipCache ? { skip_cache: true } : {}),
       } satisfies ChatRequest),
       signal,
       openWhenHidden: true,

@@ -48,29 +48,42 @@ def test_rule_difficulty_medium():
 
 
 def test_easy_query_downgrades_to_cheapest(fake_catalog):
-    d = model_router.route("什么是 RAG", "exp", enabled=True, mode="rule")
+    # auto 档才路由：简单问题从池内最高档降到最便宜
+    d = model_router.route("什么是 RAG", model_router.AUTO_MODEL, enabled=True, mode="rule")
     assert d.model_id == "cheap"
     assert d.baseline == "exp"
     assert d.downgraded is True
 
 
 def test_hard_query_keeps_baseline(fake_catalog):
-    d = model_router.route("请分析并推导这个算法的复杂度权衡" * 5, "exp", enabled=True, mode="rule")
+    d = model_router.route(
+        "请分析并推导这个算法的复杂度权衡" * 5, model_router.AUTO_MODEL, enabled=True, mode="rule"
+    )
     assert d.model_id == "exp"
     assert d.downgraded is False
 
 
-def test_never_route_above_selected(fake_catalog):
-    # 基准已是最便宜档，无更便宜可选 → 不降级
-    d = model_router.route("请分析并比较架构权衡" * 5, "cheap", enabled=True, mode="rule")
-    assert d.model_id == "cheap"
+def test_never_route_above_baseline(fake_catalog):
+    # 候选池仅最便宜档可达时不会向上升级（auto 基准=exp，难题目标=exp 但池里也有 cheap）
+    d = model_router.route(
+        "请分析并比较架构权衡" * 5, model_router.AUTO_MODEL, enabled=True, mode="rule"
+    )
+    assert model_router._tier_rank(d.model_id) <= model_router._tier_rank(d.baseline)
+
+
+def test_selected_concrete_model_locked(fake_catalog):
+    # 手选具体模型 = 精确锁定，简单问题也不降级
+    d = model_router.route("什么是 RAG", "mid", enabled=True, mode="rule")
+    assert d.model_id == "mid"
+    assert d.baseline == "mid"
     assert d.downgraded is False
 
 
-def test_selected_mid_downgrades_within_cap(fake_catalog):
-    d = model_router.route("什么是 RAG", "mid", enabled=True, mode="rule")
-    assert d.model_id == "cheap"  # 不会越过 mid 选 exp
-    assert d.baseline == "mid"
+def test_selected_top_model_locked_on_easy(fake_catalog):
+    # 手选最高档遇简单问题仍锁定，不降到 cheap
+    d = model_router.route("什么是 RAG", "exp", enabled=True, mode="rule")
+    assert d.model_id == "exp"
+    assert d.downgraded is False
 
 
 def test_routing_disabled_returns_baseline(fake_catalog):
@@ -87,7 +100,9 @@ def test_auto_baseline_is_pool_top(fake_catalog):
 
 
 def test_classifier_empty_model_falls_back_to_rule(fake_catalog):
-    d = model_router.route("什么是 RAG", "exp", enabled=True, mode="classifier", classifier_model="")
+    d = model_router.route(
+        "什么是 RAG", model_router.AUTO_MODEL, enabled=True, mode="classifier", classifier_model=""
+    )
     assert d.model_id == "cheap"
     assert "rule" in d.mode
 

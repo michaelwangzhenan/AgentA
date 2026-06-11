@@ -87,7 +87,24 @@ def test_no_store_when_not_fresh(captured):
 
 
 def test_no_store_when_used_tools(captured):
+    # 报了 used_tools 但拿不到工具名单（非默认实现）→ 保守不写
     chat_mod._maybe_store_cache(True, _holder(used_tools=True), "q", 1, "m")
+    assert captured == []
+
+
+def test_store_when_only_search_knowledge(captured):
+    # 只用了纯检索工具 → 仍可缓存（KB 变更会全量作废兜底）
+    h = _holder(used_tools=True)
+    h["tool_names"] = {"search_knowledge"}
+    chat_mod._maybe_store_cache(True, h, "q", 1, "m")
+    assert len(captured) == 1
+
+
+def test_no_store_when_non_cacheable_tool(captured):
+    # 夹带了联网搜索等不可缓存工具 → 不写
+    h = _holder(used_tools=True)
+    h["tool_names"] = {"search_knowledge", "web_search"}
+    chat_mod._maybe_store_cache(True, h, "q", 1, "m")
     assert captured == []
 
 

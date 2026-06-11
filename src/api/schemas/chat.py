@@ -15,8 +15,14 @@ class ChatRequest(BaseModel):
         None,
         description="对话模式；deep_research 走 ResearchEngine 深度研究，缺省 / chat 为普通对话",
     )
+    skip_cache: bool = Field(
+        False,
+        description="是否跳过语义缓存（前端「重新生成」勾选）：不查也不写缓存，用当前选定模型重答",
+    )
 
 
 class ChatResponse(BaseModel):
     reply: str = Field(..., description="Agent 最终回答")
     session_id: str = Field(..., description="当前 Agent 实例的 session id")
+    model: str = Field("", description="本次实际应答的模型 id；缓存命中时为空")
+    cached: bool = Field(False, description="本次回答是否直接来自语义缓存")

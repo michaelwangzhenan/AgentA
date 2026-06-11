@@ -87,6 +87,34 @@ def test_get_active_model_options_match_registry(client: TestClient) -> None:
     assert model["options"] == sorted(_cfg.MODEL_CONFIGS.keys())
 
 
+def test_routing_and_cache_split_into_two_groups(client: TestClient) -> None:
+    body = client.get("/api/config").json()
+    by_name = {g["name"]: g for g in body["groups"]}
+
+    routing = by_name["model_routing"]
+    assert routing["label"] == "模型路由"
+    assert {it["key"] for it in routing["items"]} == {
+        "MODEL_ROUTING_ENABLED",
+        "MODEL_ROUTING_MODE",
+        "MODEL_ROUTING_CLASSIFIER_MODEL",
+    }
+
+    cache = by_name["semantic_cache"]
+    assert cache["label"] == "语义缓存"
+    cache_keys = {it["key"] for it in cache["items"]}
+    assert {
+        "SEMANTIC_CACHE_ENABLED",
+        "SEMANTIC_CACHE_THRESHOLD",
+        "SEMANTIC_CACHE_TTL_DAYS",
+    } <= cache_keys
+    # COLLECTION 属内部项，隐藏不展示
+    coll = next(it for it in cache["items"] if it["key"] == "SEMANTIC_CACHE_COLLECTION")
+    assert coll["hidden"] is True
+
+    # 旧的合并组已不存在
+    assert "jiangben" not in by_name
+
+
 def test_models_catalog_endpoint(client: TestClient) -> None:
     body = client.get("/api/config/models").json()
     assert body["active"] == _cfg.ACTIVE_MODEL

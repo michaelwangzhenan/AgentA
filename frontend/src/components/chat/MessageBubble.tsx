@@ -298,6 +298,8 @@ function AssistantBubble({
           </div>
         ) : null}
 
+        <AnswerMeta message={message} />
+
         <SourcesPanel sources={sources} />
 
         {message.error ? (
@@ -371,6 +373,36 @@ function StreamingCursor() {
   return (
     <span className="ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 animate-pulse bg-foreground/70 align-middle" />
   )
+}
+
+/** 回答下方的降本标注：命中语义缓存标「缓存」，auto 路由降级标实际应答模型。 */
+function AnswerMeta({ message }: { message: AssistantMessage }) {
+  if (message.streaming) return null
+  if (message.cached) {
+    return (
+      <div className="px-1">
+        <span
+          className="inline-flex items-center rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400"
+          title="本回答直接来自语义缓存（相近问题的历史答案）；点「重新生成」可绕过缓存重新作答。"
+        >
+          缓存
+        </span>
+      </div>
+    )
+  }
+  if (message.downgraded && message.model) {
+    return (
+      <div className="px-1">
+        <span
+          className="inline-flex items-center rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-medium text-sky-600 dark:text-sky-400"
+          title="auto 模式按问题难度自动降级到更便宜的模型作答；这是本次实际应答的模型。"
+        >
+          {message.model}
+        </span>
+      </div>
+    )
+  }
+  return null
 }
 
 function IconBtn({

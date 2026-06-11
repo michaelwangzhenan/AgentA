@@ -58,10 +58,17 @@ class ConfigItem:
 
 
 def _judge_model_options() -> list[str]:
-    """评委模型可选项：空（=跟随回答模型）+「模型选择」页的可用候选池。
+    """评委模型可选项：空（=跟随回答模型）+「降本」组路由候选池的可用模型。
 
     懒加载 model_router 避免 import 期循环依赖。
     """
+    from src.llm.model_router import effective_pool
+
+    return [""] + sorted(effective_pool())
+
+
+def _classifier_model_options() -> list[str]:
+    """难度分类器模型可选项：空（=不调分类器）+ 路由候选池的可用模型。"""
     from src.llm.model_router import effective_pool
 
     return [""] + sorted(effective_pool())
@@ -546,11 +553,71 @@ REGISTRY: list[ConfigItem] = [
         detail="日志输出级别。",
         options=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
     ),
+    # ─── 模型路由（降本） ───────────────────────────────────────────────────
+    ConfigItem(
+        key="MODEL_ROUTING_ENABLED",
+        group="model_routing",
+        type=ItemType.BOOL,
+        brief="启用模型路由",
+        detail="选 auto 档时按问题难度在候选池内向更便宜的模型降级（手选具体模型不路由）。关闭则始终用所选 / 默认模型。",
+    ),
+    ConfigItem(
+        key="MODEL_ROUTING_MODE",
+        group="model_routing",
+        type=ItemType.ENUM_STR,
+        brief="难度判定方式",
+        detail="rule=关键词 / 长度规则（零开销）；classifier=调小模型打分（多一次小调用）；hybrid=规则拿不准时才调分类器。",
+        options=("rule", "classifier", "hybrid"),
+    ),
+    ConfigItem(
+        key="MODEL_ROUTING_CLASSIFIER_MODEL",
+        group="model_routing",
+        type=ItemType.ENUM_STR,
+        brief="难度分类器模型",
+        detail="classifier / hybrid 模式下给问题难度打分的小模型；留空=不调分类器（回落规则）。只列出候选池的可用模型。",
+        options_provider=_classifier_model_options,
+    ),
+    # ─── 语义缓存（降本） ───────────────────────────────────────────────────
+    ConfigItem(
+        key="SEMANTIC_CACHE_ENABLED",
+        group="semantic_cache",
+        type=ItemType.BOOL,
+        brief="启用语义缓存",
+        detail="相近问法命中历史答案，跳过整次检索 + 生成；仅对单轮起步、无个性化、且只用纯检索（无联网 / 写操作）的问答生效。软失败。",
+    ),
+    ConfigItem(
+        key="SEMANTIC_CACHE_THRESHOLD",
+        group="semantic_cache",
+        type=ItemType.FLOAT,
+        brief="命中相似度阈值",
+        detail="query 向量相似度 ≥ 此值才算命中。越高越严（误命中少、命中率低），越低越松。",
+        min=0.0,
+        max=1.0,
+    ),
+    ConfigItem(
+        key="SEMANTIC_CACHE_TTL_DAYS",
+        group="semantic_cache",
+        type=ItemType.INT,
+        brief="缓存过期天数",
+        detail="缓存条目写入后多少天过期；过期条目查询时惰性删除、按未命中处理。",
+        min=1,
+        max=365,
+    ),
+    ConfigItem(
+        key="SEMANTIC_CACHE_COLLECTION",
+        group="semantic_cache",
+        type=ItemType.STRING,
+        brief="缓存 collection 名",
+        detail="语义缓存用的 ChromaDB collection 名；改名会弃用旧缓存，属内部项。",
+        hidden=True,
+    ),
 ]
 
 
 GROUP_LABELS: dict[str, str] = {
     "llm": "LLM",
+    "model_routing": "模型路由",
+    "semantic_cache": "语义缓存",
     "rag": "RAG",
     "memory": "Memory",
     "rules": "Rules",

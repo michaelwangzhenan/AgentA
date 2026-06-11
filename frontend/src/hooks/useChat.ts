@@ -68,6 +68,9 @@ function snapshot(m: AssistantMessage): AssistantVersion {
     plan: m.plan,
     timeline: m.timeline,
     error: m.error,
+    model: m.model,
+    cached: m.cached,
+    downgraded: m.downgraded,
   }
 }
 
@@ -126,7 +129,13 @@ export function useChat({ sessionId, onSettled }: Options) {
 
   // ─── 流式核心：把一段文本流进指定 assistant 消息 ───────────────────────
   const streamInto = useCallback(
-    async (text: string, assistantId: string, sid: string, mode?: ChatMode) => {
+    async (
+      text: string,
+      assistantId: string,
+      sid: string,
+      mode?: ChatMode,
+      skipCache?: boolean,
+    ) => {
       setInFlight(true)
       const ctrl = new AbortController()
       streamCtrlRef.current = ctrl
@@ -357,6 +366,9 @@ export function useChat({ sessionId, onSettled }: Options) {
                     ...m,
                     content: m.content || ev.payload.text,
                     streaming: false,
+                    model: ev.payload.model ?? m.model,
+                    cached: ev.payload.cached ?? false,
+                    downgraded: ev.payload.downgraded ?? false,
                     research: m.research ? { ...m.research, phase: 'done' } : m.research,
                   }))
                   break
@@ -397,7 +409,7 @@ export function useChat({ sessionId, onSettled }: Options) {
               })
             },
           },
-          { sessionId: sid, signal: ctrl.signal, mode },
+          { sessionId: sid, signal: ctrl.signal, mode, skipCache },
         )
       } catch {
         // onError 已处理
@@ -484,7 +496,8 @@ export function useChat({ sessionId, onSettled }: Options) {
         }
         return [...kept, editedUser, assistantMsg]
       })
-      void streamInto(newText, assistantMsg.id, sessionId)
+      // 编辑重发 = 要新答案：跳过语义缓存，用当前选定模型重答
+      void streamInto(newText, assistantMsg.id, sessionId, undefined, true)
     },
     [sessionId, streamInto],
   )
@@ -532,10 +545,14 @@ export function useChat({ sessionId, onSettled }: Options) {
             error: null,
             streaming: true,
             createdAt: Date.now(),
+            model: undefined,
+            cached: false,
+            downgraded: false,
           }
         })
       })
-      void streamInto(userMsg.rawContent ?? userMsg.content, assistantId, sessionId)
+      // 重新生成 = 要新答案：跳过语义缓存（否则单轮起步会命中旧缓存原样返回），用当前选定模型
+      void streamInto(userMsg.rawContent ?? userMsg.content, assistantId, sessionId, undefined, true)
     },
     [sessionId, streamInto],
   )

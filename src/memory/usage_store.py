@@ -85,7 +85,22 @@ class UsageStore:
                     ON saving_events(user_id, created_at);
                 CREATE INDEX IF NOT EXISTS idx_saving_time
                     ON saving_events(created_at);
+                CREATE TABLE IF NOT EXISTS cache_lookups (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id     INTEGER NOT NULL,
+                    created_at  INTEGER NOT NULL,
+                    hit         INTEGER NOT NULL DEFAULT 0,
+                    saved       REAL    NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS idx_cache_lookup_time
+                    ON cache_lookups(created_at);
             """)
+            # 旧库补列：cache_lookups 早期无 saved（缓存的次数/节省/命中率统一以此表为准）
+            cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(cache_lookups)")}
+            if "saved" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE cache_lookups ADD COLUMN saved REAL NOT NULL DEFAULT 0"
+                )
 
     @staticmethod
     def _now() -> int:
@@ -390,16 +405,77 @@ class UsageStore:
             for r in rows
         ]
 
+    # ── 缓存命中率（语义缓存的命中 / 未命中分母） ─────────────────────────────────
+
+    def record_cache_lookup(
+        self, user_id: int, hit: bool, saved: float = 0.0, created_at: int | None = None
+    ) -> None:
+        """记录一次"可缓存请求"的查缓存结果（命中 / 未命中 + 命中时估算节省）。旁路调用。
+
+        缓存的次数 / 节省 / 命中率统一只看这张表，避免与 saving_events 跨表对不上。
+        """
+        ts = int(created_at) if created_at is not None else self._now()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO cache_lookups(user_id, created_at, hit, saved) VALUES (?, ?, ?, ?)",
+                (int(user_id), ts, 1 if hit else 0, float(saved or 0.0) if hit else 0.0),
+            )
+
+    def aggregate_cache_lookups(
+        self, start_ts: int, end_ts: int, user_id: int | None = None
+    ) -> dict[str, Any]:
+        """汇总可缓存请求总数（分母）、命中数（分子）、命中估算节省。"""
+        sql = (
+            "SELECT COUNT(*) AS lookups, SUM(hit) AS hits, SUM(saved) AS saved "
+            "FROM cache_lookups WHERE created_at >= ? AND created_at < ?"
+        )
+        params: list[Any] = [int(start_ts), int(end_ts)]
+        if user_id is not None:
+            sql += " AND user_id = ?"
+            params.append(int(user_id))
+        with self._lock:
+            r = self._conn.execute(sql, params).fetchone()
+        return {
+            "lookups": int(r["lookups"] or 0),
+            "hits": int(r["hits"] or 0),
+            "saved": float(r["saved"] or 0.0),
+        }
+
+    def cache_lookups_series(
+        self, start_ts: int, end_ts: int, user_id: int | None = None
+    ) -> list[dict[str, Any]]:
+        """按天聚合缓存命中数 + 节省（趋势图原料；只统计命中行）。"""
+        sql = (
+            "SELECT strftime('%Y-%m-%d', created_at, 'unixepoch', 'localtime') AS day, "
+            "COUNT(*) AS cnt, SUM(saved) AS saved "
+            "FROM cache_lookups WHERE hit = 1 AND created_at >= ? AND created_at < ?"
+        )
+        params: list[Any] = [int(start_ts), int(end_ts)]
+        if user_id is not None:
+            sql += " AND user_id = ?"
+            params.append(int(user_id))
+        sql += " GROUP BY day ORDER BY day ASC"
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [
+            {"day": r["day"], "kind": "cache",
+             "count": int(r["cnt"] or 0), "saved": float(r["saved"] or 0.0)}
+            for r in rows
+        ]
+
     # ── 级联清理 ──────────────────────────────────────────────────────────────
 
     def delete_all_for_user(self, user_id: int) -> int:
-        """删除某用户的全部用量 + 降本记录（注销 / admin 删号时级联调用）。返回 usage 删除条数。"""
+        """删除某用户的全部用量 + 降本 + 缓存查询记录（注销 / admin 删号时级联调用）。返回 usage 删除条数。"""
         with self._lock, self._conn:
             cur = self._conn.execute(
                 "DELETE FROM usage_events WHERE user_id = ?", (int(user_id),)
             )
             self._conn.execute(
                 "DELETE FROM saving_events WHERE user_id = ?", (int(user_id),)
+            )
+            self._conn.execute(
+                "DELETE FROM cache_lookups WHERE user_id = ?", (int(user_id),)
             )
         return cur.rowcount
 
@@ -508,3 +584,11 @@ def record_saving(
         )
     except Exception:
         logger.warning("[usage] record_saving 失败（已忽略）", exc_info=True)
+
+
+def record_cache_lookup(user_id: int, hit: bool, saved: float = 0.0) -> None:
+    """记录一次可缓存请求的查缓存结果（命中率分母 + 命中节省）；**异常只记日志、绝不抛**（旁路）。"""
+    try:
+        get_shared_store().record_cache_lookup(user_id=user_id, hit=hit, saved=saved)
+    except Exception:
+        logger.warning("[usage] record_cache_lookup 失败（已忽略）", exc_info=True)

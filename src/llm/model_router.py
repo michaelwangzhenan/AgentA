@@ -6,8 +6,8 @@
   2. **路由判定**：按 ``MODEL_ROUTING_MODE`` 用规则 / 小模型分类器估计难度，映射到目标
      档位（tier），再在池内选不弱于目标、且**不高于用户基准档位**的最便宜模型。
 
-只向下、不向上：手选模型时基准=该模型，auto 时基准=池内最高档。判定 / 调用出错一律
-软失败回落基准模型，绝不阻断主链路。
+手选具体模型 = 精确锁定，**不路由**（严格用该模型）；仅 auto 档启用向下路由，基准=池内
+最高档，只向下不向上。判定 / 调用出错一律软失败回落基准模型，绝不阻断主链路。
 """
 
 from __future__ import annotations
@@ -156,11 +156,11 @@ def _classify_difficulty_llm(query: str, classifier_model: str) -> str | None:
         if not m:
             return None
         score = int(m.group())
-        if score <= 2:
-            return "easy"
-        if score >= 4:
-            return "hard"
-        return "medium"
+        difficulty = "easy" if score <= 2 else "hard" if score >= 4 else "medium"
+        logger.info(
+            "[router] 难度分类器 %s 判定 score=%d → %s", classifier_model, score, difficulty
+        )
+        return difficulty
     except Exception:
         logger.warning("[router] 难度分类器调用失败（已忽略，回落规则）", exc_info=True)
         return None
@@ -232,9 +232,13 @@ def route(
     pool = effective_pool()
     baseline = _resolve_baseline(selected_model, pool)
 
-    # 未启用 / 手选模型不在配置范围：直接用基准，不路由
+    # 未启用：直接用基准，不路由
     if not enabled:
-        return RouteDecision(baseline, baseline, False, "", "off", "路由未启用")
+        return RouteDecision(baseline, baseline, False, "", "off", f"路由未启用，用 {baseline}")
+
+    # 手选具体模型 = 精确锁定，不路由（仅 auto 档才向下降级）
+    if selected_model and selected_model != AUTO_MODEL and selected_model in config.MODEL_CONFIGS:
+        return RouteDecision(baseline, baseline, False, "", mode, f"手选 {baseline}，精确锁定不路由")
 
     base_rank = _tier_rank(baseline)
     # 只考虑池内"不强于基准"的模型（含基准本身作为下限）
@@ -242,7 +246,9 @@ def route(
     if baseline not in candidates:
         candidates.append(baseline)
     if len(candidates) <= 1:
-        return RouteDecision(baseline, baseline, False, "", mode, "候选池内无更便宜可选模型")
+        return RouteDecision(
+            baseline, baseline, False, "", mode, f"候选池无比 {baseline} 更便宜的模型"
+        )
 
     difficulty, used_mode = _difficulty(query, mode, classifier_model)
     target_rank = min(_TIER_ORDER.index(_DIFFICULTY_TO_TIER[difficulty]), base_rank)

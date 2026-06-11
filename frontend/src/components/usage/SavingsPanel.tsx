@@ -62,12 +62,17 @@ export function SavingsPanel({ scope }: { scope: Scope }) {
         ))}
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <Stat label="累计节省" value={summary ? formatCost(summary.total_saved, currency) : '—'} accent />
         <Stat label="路由降级次数" value={summary ? fullNumber(summary.route_count) : '—'} />
         <Stat label="路由节省" value={summary ? formatCost(summary.route_saved, currency) : '—'} />
-        <Stat label="缓存命中次数" value={summary ? fullNumber(summary.cache_count) : '—'} />
+        <Stat label="缓存命中次数" value={summary ? fullNumber(summary.cache_hits) : '—'} />
         <Stat label="缓存节省" value={summary ? formatCost(summary.cache_saved, currency) : '—'} />
+        <Stat
+          label="缓存命中率"
+          value={summary ? formatHitRate(summary) : '—'}
+          hint={summary ? `${fullNumber(summary.cache_hits)} / ${fullNumber(summary.cache_lookups)} 次可缓存请求` : undefined}
+        />
       </div>
 
       <section className="rounded-lg border border-border p-4">
@@ -110,9 +115,24 @@ export function SavingsPanel({ scope }: { scope: Scope }) {
   )
 }
 
-function Stat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+function formatHitRate(s: SavingsSummary): string {
+  if (s.cache_lookups <= 0) return '—'
+  return `${(s.cache_hit_rate * 100).toFixed(1)}%`
+}
+
+function Stat({
+  label,
+  value,
+  accent,
+  hint,
+}: {
+  label: string
+  value: string
+  accent?: boolean
+  hint?: string
+}) {
   return (
-    <div className="rounded-lg border border-border p-3">
+    <div className="rounded-lg border border-border p-3" title={hint}>
       <div className="text-xs text-muted-foreground">{label}</div>
       <div
         className={cn(
@@ -122,6 +142,7 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
       >
         {value}
       </div>
+      {hint ? <div className="mt-0.5 text-[10px] text-muted-foreground">{hint}</div> : null}
     </div>
   )
 }

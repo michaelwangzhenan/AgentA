@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { ResourcePage } from '@/components/resources/ResourcePage'
 import { ConfigField } from '@/components/settings/ConfigField'
+import { RoutingPoolConfig } from '@/components/settings/RoutingPoolConfig'
 import { getConfig, patchConfig, reloadConfig, resetConfig } from '@/api/client'
 import type { ConfigGroupView, ConfigItemView } from '@/types/config'
 import { cn } from '@/lib/utils'
@@ -379,6 +380,27 @@ export function SettingsView({ embedded = false }: { embedded?: boolean } = {}) 
             )}
 
             {visibleGroups.map((g) => {
+              // 路由 / 缓存页：配置项有依赖关系，按当前值灰显不适用项
+              const curVal = (key: string): unknown => {
+                const it = g.items.find((i) => i.key === key)
+                const e = edits[key]
+                return e ? e.value : it?.value
+              }
+              const disabledFor = (item: ConfigItemView): boolean => {
+                if (g.name === 'model_routing') {
+                  if (item.key === 'MODEL_ROUTING_ENABLED') return false
+                  if (!curVal('MODEL_ROUTING_ENABLED')) return true
+                  return (
+                    item.key === 'MODEL_ROUTING_CLASSIFIER_MODEL' &&
+                    curVal('MODEL_ROUTING_MODE') === 'rule'
+                  )
+                }
+                if (g.name === 'semantic_cache') {
+                  if (item.key === 'SEMANTIC_CACHE_ENABLED') return false
+                  return !curVal('SEMANTIC_CACHE_ENABLED')
+                }
+                return false
+              }
               const renderField = (item: ConfigItemView) => {
                 const edit = edits[item.key]
                 return (
@@ -388,6 +410,7 @@ export function SettingsView({ embedded = false }: { embedded?: boolean } = {}) 
                     localValue={edit?.value}
                     error={edit?.error ?? null}
                     saving={edit?.saving}
+                    disabled={disabledFor(item)}
                     onChange={(v) => setLocalValue(item, v)}
                     onReset={() => resetItem(item)}
                   />
@@ -419,6 +442,17 @@ export function SettingsView({ embedded = false }: { embedded?: boolean } = {}) 
                         {items.map(renderField)}
                       </div>
                     ),
+                  )}
+                  {/* 模型路由页：三个配置项在上，候选池单独成卡放在下面 */}
+                  {g.name === 'model_routing' && (
+                    <div className="overflow-hidden rounded-lg border border-border/60 bg-muted/20">
+                      <div className="border-b border-border/60 bg-muted/40 px-3 py-1.5 text-xs font-semibold tracking-wide text-muted-foreground">
+                        候选池
+                      </div>
+                      <div className="p-3">
+                        <RoutingPoolConfig />
+                      </div>
+                    </div>
                   )}
                 </section>
               )

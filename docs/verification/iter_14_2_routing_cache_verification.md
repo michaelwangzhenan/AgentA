@@ -68,3 +68,48 @@ pytest -q tests/test_model_router.py tests/test_semantic_cache.py tests/test_sav
 # 前端类型
 cd frontend && npx tsc --noEmit -p tsconfig.json
 ```
+
+## 6. 增量验收：路由锁定 / 透明度 / 重新生成 / 命中率 / 配置 UI
+
+> 验收时间：2026-06-11。本轮按 §2.2 讨论结论落实「手选锁定 / 缓存与模型透明 / 重新生成绕过缓存 / 命中率度量 / 配置项搬进系统配置」。
+
+### 6.1 结论速览
+
+| 维度 | 结果 |
+|---|---|
+| 后端 UT（`pytest -q`） | **1566 passed, 133 deselected** |
+| 前端 typecheck（`tsc --noEmit`） | **0 error** |
+| 新增 / 改动 UT | usage_store 命中率 4 条、api_chat skip_cache/命中 3 条、api_config 降本组 1 条、model_router 锁定 2 条（改写 3 条）|
+| P0/P1 review | **无遗留**（详 §6.4） |
+
+### 6.2 改动逐项核对
+
+| 需求 | 实现 | 验收证据 |
+|---|---|---|
+| 手选具体模型 = 精确锁定，不路由；仅 auto 降级 | `model_router.route()` 对非 auto 且在 `MODEL_CONFIGS` 内的选择早退（`downgraded=False`） | `test_selected_concrete_model_locked` / `test_selected_top_model_locked_on_easy` / `test_easy_query_downgrades_to_cheapest`（auto 才降） |
+| 命中缓存 / 实际模型对用户透明 | 流式 `final_answer` 帧透传 `model` + `downgraded`；缓存命中帧带 `cached`；前端气泡 `AnswerMeta` 标「缓存」/ 实际模型 | `tsc` 通过；`test_cache_hit_returns_cached_flag`（非流式 `cached=True`）|
+| 重新生成绕过缓存、用当前模型 | `ChatRequest.skip_cache`；前端 `regenerate` / `editResend` 传 `skipCache=true`，命中 `cache_on=False` | `test_skip_cache_bypasses_lookup_and_telemetry`（不查不记）|
+| 命中率度量（含分母） | `usage_store.cache_lookups` 表 + `record_cache_lookup` / `aggregate_cache_lookups`；`/api/usage/savings` 增 `cache_lookups/hits/hit_rate`；看板加「缓存命中率」卡片 | `test_cache_lookup_*` 4 条 + `test_fresh_query_records_cache_lookup` |
+| 7 项配置搬进「系统配置」（拆「模型路由」「语义缓存」两页） | `config_meta` 加 `model_routing` / `semantic_cache` 两组，`SEMANTIC_CACHE_COLLECTION` 隐藏；候选池单独成卡放「模型路由」页配置项下方；依赖项条件灰显；移除独立「模型选择」导航页 | `test_routing_and_cache_split_into_two_groups`；`tsc` 通过 |
+
+### 6.3 改动文件
+
+| 层 | 文件 | 说明 |
+|---|---|---|
+| 路由 | `src/llm/model_router.py` | 手选具体模型早退锁定 |
+| 编排 | `src/api/routes/chat.py` / `schemas/chat.py` | `skip_cache` 入参；查缓存记 hit/miss 分母；流式 `final_answer` 帧透传实际模型 |
+| 采集 | `src/memory/usage_store.py` | `cache_lookups` 表 + 记录 / 聚合 + 删号级联清 |
+| API | `src/api/routes/usage.py` | `SavingsSummary` 增命中率字段 |
+| 配置 | `src/api/config_meta.py` | `jiangben` 组 7 项 + 分类器模型动态候选 |
+| 前端 | `settings/{SettingsView,ConfigField,SettingsPage}.tsx`、`chat/MessageBubble.tsx`、`hooks/useChat.ts`、`api/client.ts`、`types/{chat,usage}.ts`、`usage/SavingsPanel.tsx` | 降本组渲染 + 候选池嵌入 + 条件灰显；气泡徽章；重新生成绕缓存；命中率卡片 |
+| 测试 | `tests/test_{model_router,usage_store,api_chat,api_config}.py` | 新增 / 改写 UT |
+
+### 6.4 Review 发现与处理
+
+| 级别 | 现象 | 处理 |
+|---|---|---|
+| — | 手选锁定后 `downgraded=False` → 流式不再为手选模型做瞬时错误回退 | 符合「精确锁定」语义：仅 auto 降级的模型才回退基准 |
+| — | 历史回看消息无 `model`/`cached` 字段 | `AnswerMeta` 对 `undefined` 渲染 null，不显示徽章（徽章仅对实时回答） |
+| P2（已知限制） | 命中率适用面窄（开个性化的用户基本不命中） | 已按设计「先量再说」：看板暴露真实命中率，据数据再决定是否放宽 |
+
+未发现 P0 / P1。

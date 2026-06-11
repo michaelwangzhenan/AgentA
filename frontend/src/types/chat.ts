@@ -6,11 +6,15 @@ export type ChatRequest = {
   message: string
   session_id?: string
   mode?: ChatMode
+  /** 「重新生成」时为 true：跳过语义缓存，用当前选定模型重答 */
+  skip_cache?: boolean
 }
 
 export type ChatResponse = {
   reply: string
   session_id: string
+  model?: string
+  cached?: boolean
 }
 
 // ─── Step 2：流式事件帧 ─────────────────────────────────────────────────
@@ -55,6 +59,12 @@ export type AgentStreamEvent =
         text: string
         usage?: TokenUsage | null
         aborted_by_user?: boolean
+        /** 本次实际应答的模型 id（auto 路由后可能与所选不同） */
+        model?: string
+        /** auto 档是否被向下降级到更便宜的模型 */
+        downgraded?: boolean
+        /** 是否直接来自语义缓存 */
+        cached?: boolean
       }
     }
   | {
@@ -173,6 +183,9 @@ export type AssistantVersion = {
   plan: PlanStep[] | null
   timeline: TimelineItem[]
   error: string | null
+  model?: string
+  cached?: boolean
+  downgraded?: boolean
 }
 
 export type AssistantMessage = {
@@ -189,6 +202,12 @@ export type AssistantMessage = {
   /** regenerate 产生的历史版本快照（含当前）；缺省 / 长度<2 时不显示切换器 */
   versions?: AssistantVersion[]
   versionIndex?: number
+  /** 本次实际应答模型 id；auto 路由降级时与所选不同 */
+  model?: string
+  /** 回答是否直接来自语义缓存 */
+  cached?: boolean
+  /** auto 档是否被向下降级 */
+  downgraded?: boolean
 }
 
 /** 用户消息里携带的附件（仅用于展示卡片；正文已内联进 rawContent 发给后端） */
