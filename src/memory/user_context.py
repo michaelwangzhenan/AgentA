@@ -10,6 +10,9 @@
 
 contextvars 在同一线程内有效；`run_in_executor` 不会自动复制上下文，所以流式
 chat 在 executor 线程入口要再 set 一次（见 routes/chat.py）。
+
+本模块放在 `src/memory/`：与「按用户隔离的持久化」同属一层，供各 `*Store` 与
+API / Agent 依赖，避免与 `src/agent/core` 的「core」混名。
 """
 
 from __future__ import annotations

@@ -29,7 +29,7 @@ import pytest
 
 import src.config as _cfg
 from src.agent.core.memory_manager import MemoryManager
-from src.core.user_context import current_user_id
+from src.memory.user_context import current_user_id
 
 # 测试上下文未 set_current_user → current_user_id() 回落到 config.DEFAULT_USER_ID。
 # try_extract 在主线程取出 uid 后显式传给 upsert / load_all。

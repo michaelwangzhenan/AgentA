@@ -65,7 +65,7 @@ def get_active_rules() -> str | None:
     if not _cfg.USER_RULES_ENABLED:
         return None
     try:
-        from src.core.user_context import current_user_id
+        from src.memory.user_context import current_user_id
         from src.memory.user_store import get_shared_store as _get_user_store
         text = _get_user_store().get_rules(current_user_id())
     except Exception as exc:

@@ -170,7 +170,7 @@ def record_security_event(event_type: str, detail: str) -> None:
     读 `current_user_id()` 作归属；**异常只记日志、绝不抛**——绝不阻断主对话。
     """
     try:
-        from src.core.user_context import current_user_id
+        from src.memory.user_context import current_user_id
 
         get_shared_store().record(event_type, detail, current_user_id())
     except Exception:  # noqa: BLE001 — 埋点旁路，绝不影响对话

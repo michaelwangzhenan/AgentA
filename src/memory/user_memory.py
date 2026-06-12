@@ -41,7 +41,7 @@ from typing import Any, Protocol, runtime_checkable
 
 # prompt injection 风险模式：物理位置统一在 src/agent/core/security_filter，本模块 import 复用
 from src.agent.core.security_filter import _INJECTION_PATTERNS
-from src.core.user_context import current_user_id
+from src.memory.user_context import current_user_id
 
 logger = logging.getLogger(__name__)
 

@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from src.api.deps import get_security_event_store
 from src.api.main import app
-from src.core.user_context import use_user
+from src.memory.user_context import use_user
 from src.memory import security_event_store as ses
 from src.memory.security_event_store import (
     EVENT_SCRUB,

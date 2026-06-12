@@ -21,7 +21,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
 
 import src.config as _cfg
-from src.core.user_context import set_current_user
+from src.memory.user_context import set_current_user
 from src.agent.agent import Agent
 from src.agent.agent_api import AgentAPI
 from src.agent.core.mcp_manager import MCPManager, get_shared_manager

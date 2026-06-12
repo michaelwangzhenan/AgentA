@@ -14,7 +14,7 @@ import threading
 from typing import Any, Callable
 
 import src.config as _cfg
-from src.core.user_context import current_user_id
+from src.memory.user_context import current_user_id
 from src.memory.chat_history import ChatHistoryStore
 from src.memory.user_memory import (
     UserMemoryStore,

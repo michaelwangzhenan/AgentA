@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any
 
 import src.config as config
-from src.core.user_context import current_user_id
+from src.memory.user_context import current_user_id
 
 logger = logging.getLogger(__name__)
 

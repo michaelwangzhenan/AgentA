@@ -21,7 +21,7 @@ from sse_starlette.sse import EventSourceResponse
 
 import src.config as _cfg
 from src.agent.agent_api import AgentAPI
-from src.core.user_context import use_user
+from src.memory.user_context import use_user
 from src.api.deps import get_agent, get_chat_history, get_current_user, get_user_store
 from src.api.routes.auth import effective_llm_prefs
 from src.api.schemas.chat import ChatRequest, ChatResponse

@@ -60,7 +60,7 @@ Review 方式讨论:
 | 编号 | 优先级 | 位置 | 问题 | 建议 |
 |---|---|---|---|---|
 | G1 | P1 ✅已修复 | `agent.py` import `src.cli.skill_loader` | Agent core 反向依赖表现层 `src/cli/`（iter_2 §4.4 #5 登记，未消除） | `skill_loader.py` 经 `git mv` 迁至新建 `src/skills/`，agent / api / cli / main / eval 全部改引 `src.skills.skill_loader`。复查：`src/agent` 下已无任何 `src.cli` import |
-| G2 | P1 ✅已修复 | `chat_history` / `user_memory` / `learning_plan_store` / `quiz_store` / `srs_store` import `src.agent.core.user_context` | 依赖层（`*Store`）反向感知 helper 层，方向倒置 | `user_context.py` 迁至新建 `src/core/`（最底层共享原语层），5 个 store + `chat.py` + `agent.py` 改引 `src.core.user_context`。复查：`src/memory` 下已无 `src.agent.core.user_context` import（仅余 G3 的 `security_filter`，属 P2） |
+| G2 | P1 ✅已修复 | `chat_history` / `user_memory` / `learning_plan_store` / `quiz_store` / `srs_store` import `src.agent.core.user_context` | 依赖层（`*Store`）反向感知 helper 层，方向倒置 | 先迁出 `agent.core`：`user_context.py` 独立为 `src/core/`（当时最底层共享原语），各 store + `chat.py` + `agent` 改引 `src.core.user_context`。复查：`src/memory` 下已无 `src.agent.core.user_context` import（仅余 G3 的 `security_filter`，属 P2）。**后续**：再并入 `src/memory/user_context.py` 并删除 `src/core/`，消「双 core」歧义且与按用户隔离的持久化同包。 |
 | G3 | P2 | `user_memory.py:42` import `security_filter._INJECTION_PATTERNS` | 跨模块 import 私有符号（下划线开头） | `security_filter` 暴露公开接口（如 `contains_injection()`），调用方不碰私有变量 |
 
 ### 1.3.2. src/llm
@@ -150,7 +150,7 @@ P1（本期已全部修完 ✅）：
 | 编号 | 一句话 | 状态 |
 |---|---|---|
 | G1 / C1 | `skill_loader` 从 `src/cli/` 搬到新建 `src/skills/`，解除 core→表现层反向依赖 | ✅ 已修复（一处改动同时解 G1、C1） |
-| G2 | `user_context` 下沉到新建 `src/core/`，解除 `*Store`→`agent.core` 反向依赖 | ✅ 已修复 |
+| G2 | `user_context` 先下沉到 `src/core/` 解除 `*Store`→`agent.core` 反转，后并入 `src/memory/user_context.py` 并删 `src/core/` | ✅ 已修复 |
 | R1 | BM25 缓存陈旧：ingest/delete 改用与 retriever 同一共享实例，删死函数 `reload_index`（换 `drop_index`） | ✅ 已修复 |
 | M1 / A3 / API2 | 4 个无锁 store 补 `threading.Lock`，并发正确性统一（API2 的策略收敛留 P2） | ✅ 已修复 |
 
@@ -164,7 +164,7 @@ P2 进度：
 
 实现要点（已落地）：
 - G1/C1：`skill_loader.py` → 新建 `src/skills/`（独立一层），`cli` / `agent` / `api` / `main` / eval 脚本都向它依赖。
-- G2：`user_context.py` → 新建 `src/core/`（最底层共享原语，不依赖业务层），store 与 agent 都向下依赖。
+- G2：`user_context.py` 先 → `src/core/`（当时最底层共享原语），再 → `src/memory/user_context.py`（与按用户隔离的持久化同包，消「双 core」），store 与 agent 均向下依赖。
 - R1：根因解法——让 ingest 与 retriever 共用 `get_index` 单实例（不再各 `load_or_new` 造成双实例），`delete_all` 用 `drop_index` 清缓存。
 - M1：4 个 store 补 `threading.Lock`，与 `user_store` 对齐；非重入死锁逐一核对规避。
 
