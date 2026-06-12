@@ -24,11 +24,11 @@ CLI 用法（三个原语：读 / 写 / 抹）：
 
 子命令对照：
     status    只读：chunks / bm25 来自 chroma + bm25 文件；model / docs_dirs 来自本脚本
-              维护的 sidecar JSON（chroma_db/ingest_history.json），未记录显示 unknown。
+              维护的 sidecar JSON（CHROMA_DB_PATH 下 ingest_history.json），未记录显示 unknown。
     ingest    底层调 src.rag.ingest.ingest_all，本身就是幂等增量：内容未变（content_sha1
               一致）的文件自动跳过；新增 / 修改的文件重 embed；删除的文件不会回收孤儿 chunks。
               成功后把 (alias, model, docs_dir, 时间) 写进 sidecar 历史。
-    clear     不带 -m 时直接 rm -rf 整个 chroma_db 目录（含历史孤儿 segment），并清掉 BM25 / sidecar；
+    clear     不带 -m 时直接 rm -rf 整个 Chroma 持久化根目录（含历史孤儿 segment），并清掉 BM25 / sidecar；
               带 -m alias 时只 drop 该 collection，并自动清理磁盘上不再被任何 collection 引用的
               孤儿 UUID 目录（包括刚 drop 掉的那个 vector segment）。均需输入 yes 二次确认。
               想做"全量重建"就：clear → ingest，两步显式。
@@ -42,7 +42,7 @@ CLI 用法（三个原语：读 / 写 / 抹）：
     - 改了 CHUNK_SIZE / CHUNK_OVERLAP 等切分参数后，由于 content_sha1 没变 ingest 会跳过旧文件，
       此时需要先 clear 再 ingest 才能让新切分生效。
     - 孤儿清理原理：Chroma 的 client.delete_collection() 只动 catalog（chroma.sqlite3 内的 collections /
-      segments 表），不会 unlink 已落盘的 chroma_db/<uuid>/ vector segment 目录。本脚本 clear 时会反查
+      segments 表），不会 unlink 已落盘的持久化根下 <uuid>/ vector segment 目录。本脚本 clear 时会反查
       sqlite 的 segments 表，把磁盘上不在活跃 VECTOR 段集合里的 UUID 目录全部物理删除，避免越攒越多。
 """
 from __future__ import annotations
@@ -58,7 +58,7 @@ import textwrap
 from datetime import datetime
 from pathlib import Path
 
-# Chroma 把每个 segment 落成 chroma_db/<uuid>/ 这种目录；用正则识别 UUID 形态，
+# Chroma 把每个 segment 落成持久化根下 <uuid>/ 这种目录；用正则识别 UUID 形态，
 # 避免误删 bm25_*.pkl / chroma.sqlite3 / ingest_history.json 等其它 sibling 文件。
 _UUID_DIR_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
@@ -89,8 +89,8 @@ logger = logging.getLogger("ingestion")
 
 # ── sidecar：本脚本独家维护的入库历史 ─────────────────────────────────────────
 # 设计意图：把"上次入库用的 model_name + docs_dir + 时间戳"落到一个独立 JSON 文件，
-# 避免侵入 src/rag/ingest.py（产品代码保持纯净）。文件落在 chroma_db 目录下，与向量库
-# 同生命周期：chroma_db 被删 → 历史也理应失效；clear 命令也会一并抹掉。
+# 避免侵入 src/rag/ingest.py（产品代码保持纯净）。文件落在 CHROMA_DB_PATH 目录下，与向量库
+# 同生命周期：整库被删 → 历史也理应失效；clear 命令也会一并抹掉。
 #
 # 文件格式 v1：
 #   {
@@ -110,7 +110,7 @@ _HISTORY_MAX_DIRS_PER_COLL = 5
 
 
 def _history_path() -> Path:
-    """sidecar 文件位置：chroma_db/ingest_history.json。"""
+    """sidecar 文件位置：CHROMA_DB_PATH/ingest_history.json。"""
     return Path(config.CHROMA_DB_PATH).resolve() / "ingest_history.json"
 
 
@@ -234,7 +234,7 @@ def _cmd_status(_args: argparse.Namespace) -> int:
 
     数据来源分两类：
       - chunks / bm25：实时从 ChromaDB collection.count() 与 BM25 pickle 文件读
-      - model / docs_dirs：本脚本维护的 sidecar JSON（chroma_db/ingest_history.json）；
+      - model / docs_dirs：本脚本维护的 sidecar JSON（CHROMA_DB_PATH/ingest_history.json）；
         从未通过本脚本 ingest 过的 collection 显示 unknown
     全程只读，不加载 embedding 模型、不触发任何下载。
     """
@@ -398,9 +398,9 @@ def _drop_collection_and_bm25(client, coll_name: str) -> tuple[bool, bool]:
 # Chroma 的 PersistentClient.delete_collection() 只改 chroma.sqlite3 里的 catalog
 # （collections / segments 两张表），不会 unlink 已落盘的 vector segment 目录。
 # 每次 clear → ingest 循环都会在磁盘上多留几个 UUID 目录，越攒越多。下面这组工具
-# 就是把"sqlite 里已经不在的 vector 段"对应的 chroma_db/<uuid>/ 目录物理删掉。
+# 就是把"sqlite 里已经不在的 vector 段"对应的持久化根下 <uuid>/ 目录物理删掉。
 def _list_uuid_dirs(chroma_root: Path) -> list[Path]:
-    """列出 chroma_db 下所有 UUID 命名的子目录（即 Chroma 的 segment 目录）。
+    """列出 Chroma 持久化根下所有 UUID 命名的子目录（即 Chroma 的 segment 目录）。
 
     严格走 `_UUID_DIR_RE` 匹配，避免误删 bm25_*.pkl / chroma.sqlite3 等 sibling 文件。
     """
@@ -413,7 +413,7 @@ def _get_live_vector_segment_ids(chroma_root: Path) -> set[str] | None:
     """从 chroma.sqlite3 反查所有活跃 VECTOR 段的 UUID。
 
     Chroma 的 segments 表里每个 collection 通常有 2 条记录：
-      - scope=VECTOR    → HNSW 段，对应 chroma_db/<uuid>/ 目录（要落盘）
+      - scope=VECTOR    → HNSW 段，对应持久化根下 <uuid>/ 目录（要落盘）
       - scope=METADATA  → 直接存在 sqlite 内部表，不占目录
     判定"磁盘 UUID 目录是否孤儿"，比较 VECTOR 段集合即可。
 
@@ -439,7 +439,7 @@ def _get_live_vector_segment_ids(chroma_root: Path) -> set[str] | None:
 
 
 def _cleanup_orphan_segments(chroma_root: Path) -> list[str]:
-    """把 chroma_db 下不再被任何 collection 引用的 VECTOR 段目录物理删除。
+    """把持久化根下不再被任何 collection 引用的 VECTOR 段目录物理删除。
 
     返回被删的目录名列表（短 UUID 字符串）。
 
@@ -464,7 +464,7 @@ def _cleanup_orphan_segments(chroma_root: Path) -> list[str]:
 
 
 def _nuke_chroma_root(chroma_root: Path | None = None) -> tuple[bool, Path]:
-    """全量 clear 用：物理删除整个 chroma_db 目录。
+    """全量 clear 用：物理删除整个 Chroma 持久化根目录。
 
     刻意不通过 chroma client API 走 delete_collection 再一个个清——直接 rm -rf
     最干净，能一次抹掉 catalog / 当前 segments / 历史孤儿 / sidecar / WAL 等全部文件，
@@ -505,8 +505,8 @@ def _cmd_clear(args: argparse.Namespace) -> int:
     清空 collection + BM25 索引 + sidecar 历史，并清理磁盘上孤儿 segment 目录。
 
     两种模式：
-      - 不带 -m（全量）：直接 rm -rf 整个 chroma_db 目录，等价"出厂重置"。
-                        额外清掉 BM25 索引文件（可能落在 BM25_INDEX_DIR 而非 chroma_db）
+      - 不带 -m（全量）：直接 rm -rf 整个 Chroma 持久化根目录，等价"出厂重置"。
+                        额外清掉 BM25 索引文件（可能落在 BM25_INDEX_DIR 而非持久化根）
                         与 sidecar，不会再留任何残留。
       - 带 -m alias（单库）：通过 chroma client 走 delete_collection；删完后用 sqlite
                             反查"剩余活跃 VECTOR 段集合"，把磁盘上不在集合里的 UUID 目录
@@ -526,7 +526,7 @@ def _cmd_clear(args: argparse.Namespace) -> int:
         scope_label = f"指定 alias={alias} (collection={coll})"
     else:
         targets = [(a, c) for a, (_m, c) in config.EMBEDDING_MODELS.items()]
-        scope_label = f"全部 {len(targets)} 个 collection（rm -rf 整个 chroma_db）"
+        scope_label = f"全部 {len(targets)} 个 collection（rm -rf 整个向量库目录）"
 
     print(f"⚠️  即将清空 {scope_label}（向量 + BM25 索引 + sidecar 历史，不可恢复）：")
     for alias, coll in targets:
@@ -542,7 +542,7 @@ def _cmd_clear(args: argparse.Namespace) -> int:
     # 整库 rm 比一个个 delete_collection 干净得多：catalog / 当前 / 历史 segments /
     # WAL / sidecar 一锅端，Windows 上也没有"client 还没释放 sqlite 句柄"的烦恼。
     if not target_alias:
-        # BM25 索引可能不在 chroma_db 里（BM25_INDEX_DIR 独立目录），先单独干掉
+        # BM25 索引可能不在持久化根里（BM25_INDEX_DIR 独立目录），先单独干掉
         from src.rag.bm25_index import get_index_path
         for alias, coll in targets:
             p = get_index_path(coll)
@@ -559,16 +559,16 @@ def _cmd_clear(args: argparse.Namespace) -> int:
         flag = "✓" if nuked else "·"
         print(f"  [{flag}chroma] rm -rf {root}")
 
-        # sidecar 默认就落在 chroma_db 内，整库 rm 已经一并清掉；
+        # sidecar 默认就落在持久化根内，整库 rm 已经一并清掉；
         # 若用户改过路径或目录还在，再兜底删一次条目（_drop_history 自己幂等）
         if _history_path().exists():
             _drop_history()
-        print(f"  [✓sidecar] 已随 chroma_db 整库清除")
+        print(f"  [✓sidecar] 已随向量库整库清除")
 
         if nuked:
-            print("✅ 清空完成（chroma_db 已物理删除，无任何残留）。")
+            print(f"✅ 清空完成（{root} 已物理删除，无任何残留）。")
             return 0
-        print("⚠️  rm -rf 部分失败；请关闭占用进程后重跑，或手动删除 chroma_db。")
+        print(f"⚠️  rm -rf 部分失败；请关闭占用进程后重跑，或手动删除 {root}。")
         return 1
 
     # ── 2b. 单 alias 分支：API drop + 孤儿 segment 清理 ───────────────────────
@@ -683,8 +683,8 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "清空 ChromaDB collection、对应 bm25_<collection>.pkl 索引以及 sidecar 历史条目，"
             "并同步清理磁盘上 Chroma 不会自己回收的 vector segment 目录残留。\n"
-            "  - 不带 -m：直接 rm -rf 整个 chroma_db 目录（最干净，含历史孤儿、WAL、catalog 全部清零），"
-            "BM25 索引若不在 chroma_db 内则单独删除，sidecar 一并清除。\n"
+            "  - 不带 -m：直接 rm -rf 整个 Chroma 持久化根目录（最干净，含历史孤儿、WAL、catalog 全部清零），"
+            "BM25 索引若不在持久化根内则单独删除，sidecar 一并清除。\n"
             "  - 带 -m alias：通过 chroma 客户端 drop 单个 collection；若 collection 确认已空，"
             "用 sqlite 反查活跃 VECTOR 段集合，把磁盘上不在集合里的 UUID 目录全部 rm -rf"
             "（含刚 drop 的那个，以及历史遗留的孤儿）。sidecar 只移除对应条目。\n"

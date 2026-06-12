@@ -1,6 +1,6 @@
 """Token 用量统计存储层（iter_11）。
 
-每用户独立的 token 用量记录，独立 SQLite（默认 ``./sqlite_db/usage.db``），与会话 /
+每用户独立的 token 用量记录，独立 SQLite（默认 ``./db/sqlite/usage.db``），与会话 /
 记忆等业务库分开，便于单独备份 / 清理。
 
 口径：**一次 ``Agent.run()`` 记一行**（per-run，是 PYTHON / LANGCHAIN / AUTOGPT 三种

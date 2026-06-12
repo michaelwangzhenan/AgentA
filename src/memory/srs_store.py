@@ -1,7 +1,7 @@
 """
 SRS 主动复习调度持久化模块 —— SQLite 存储层
 
-将 SM-2 调度的卡片状态持久化到本地独立 SQLite（默认 ./sqlite_db/srs.db）。
+将 SM-2 调度的卡片状态持久化到本地独立 SQLite（默认 ./db/sqlite/srs.db）。
 卡片来源：① quiz_question — 错题进 SRS 复习；② manual — 用户手动加自定义卡
 （正面 Q + 背面 A）。learning_task 暂不进 SRS。
 

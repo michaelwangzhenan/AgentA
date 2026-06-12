@@ -8,7 +8,7 @@ BM25 倒排索引（自实现，零外部依赖）
       pickle 持久化），自己写更直接。
 
 工作机制：
-    - 与 ChromaDB collection 一一对应，索引文件 bm25_<collection>.pkl 存于 chroma_db 旁；
+    - 与 ChromaDB collection 一一对应，索引文件 bm25_<collection>.pkl 默认存于 BM25_INDEX_DIR（如 ./db/bm25）；
     - 入库（ingest）时与 chroma 共享 ids/documents/metadatas，方便后续 RRF 按 id 对齐；
     - 分词器：英文走 whitespace + lowercase；中文走 bigram（连续 2 字符）；混合自动并行。
 
@@ -271,7 +271,7 @@ class BM25Index:
 def get_index_path(collection_name: str) -> Path:
     """
     BM25 索引文件路径，命名 bm25_<collection>.pkl。
-    BM25_INDEX_DIR 配置为空时与 CHROMA_DB_PATH 同级目录。
+    BM25_INDEX_DIR 配置为空时回落到 CHROMA_DB_PATH 同目录。
     """
     base_str = config.BM25_INDEX_DIR or config.CHROMA_DB_PATH
     base = Path(base_str).resolve()

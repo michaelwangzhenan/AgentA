@@ -16,9 +16,11 @@ datasets/data_en/*
 datasets/data_en/test/*
 !datasets/data_en/test/test_sample.*
 
-# ChromaDB 向量索引（自动生成）
+# 本地运行期数据（向量库 / SQLite / BM25；默认见 src/config.py，可经 .env 改路径）
+db/
+# 旧版默认路径（仍 .gitignore，便于本地未迁移的仓库）
 chroma_db/
-# BM25 倒排索引（自动生成，Iter-2）
+# BM25 倒排索引（旧默认可能在仓库根 bm25_index/；新默认在 db/bm25/）
 bm25_index/
 
 # RAG 评估报告 / 自定义黄金集（自动生成 / 个人数据，Iter-5）
@@ -30,7 +32,7 @@ tools/rag_eval/golden.json
 tools/agent_eval/reports/*
 !tools/agent_eval/reports/.gitkeep
 
-# 对话历史数据库目录（自动生成）
+# 对话历史等 SQLite（旧默认 ./sqlite_db/）
 sqlite_db/
 history/
 

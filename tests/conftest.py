@@ -94,7 +94,7 @@ def _isolated_agent_memory(tmp_path, _neutralize_runtime_overrides):
     _agent_module._cfg.SEMANTIC_CACHE_ENABLED = False
 
     # ── 业务 store 单例全局兜底隔离 ─────────────────────────────────────────────
-    # 这些 store 的 get_shared_store() 默认指向真实 ./sqlite_db/*.db。不全局兜底的话，
+    # 这些 store 的 get_shared_store() 默认指向真实 ./db/sqlite/*.db。不全局兜底的话，
     # 任何走 agent.run / execute_tool / API 而忘了自己隔离的测试会静默读写真实库
     # —— 例如 Agent.run 经 build_active_study_plan_block 只读真实 learning.db。
     # 各测试文件原有的文件内 reset / dependency_overrides 仍在测试体内覆盖本兜底，互不冲突。

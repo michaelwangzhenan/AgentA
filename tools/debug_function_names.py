@@ -8,10 +8,12 @@ from pathlib import Path
 # 加 src 到 path 让我们能 import 当前 tools 注册
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import src.config as config
+
 VALID = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 # 1. 扫所有 messages 里的 tool_calls
-conn = sqlite3.connect("sqlite_db/chat_history.db")
+conn = sqlite3.connect(config.MEMORY_DB_PATH)
 conn.row_factory = sqlite3.Row
 rows = conn.execute(
     "SELECT session_id, role, content, tool_calls FROM messages "

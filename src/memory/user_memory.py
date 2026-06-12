@@ -274,7 +274,7 @@ class UserMemoryStore:
         """创建 user_memories 表（幂等）+ fail-fast 检测旧 schema。
 
         不做向后兼容迁移：旧的结构化 schema（category/key/value）请手动删除
-        `./sqlite_db/user_memory.db` 重建。建表后做一次 PRAGMA 自检，缺 text 列
+        `./db/sqlite/user_memory.db` 重建。建表后做一次 PRAGMA 自检，缺 text 列
         （= 旧结构化库）时抛带操作指引的 RuntimeError，而非裸 OperationalError。
         """
         with self._lock, self._conn:
@@ -292,7 +292,7 @@ class UserMemoryStore:
             if "text" not in cols:
                 raise RuntimeError(
                     "user_memory.db schema 已过期（旧版结构化记忆），"
-                    "请删除 ./sqlite_db/user_memory.db 后重启。"
+                    "请删除 ./db/sqlite/user_memory.db 后重启。"
                 )
             self._conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_user_memories_user

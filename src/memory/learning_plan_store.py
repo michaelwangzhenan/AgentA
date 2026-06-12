@@ -2,7 +2,7 @@
 学习计划持久化模块 —— SQLite 存储层
 
 将用户的学习计划（learning_plans）与学习任务（learning_tasks）持久化到本地独立的
-SQLite 数据库（默认 ./sqlite_db/learning.db）。区别于 plan-execute 那种"单次问答内
+SQLite 数据库（默认 ./db/sqlite/learning.db）。区别于 plan-execute 那种"单次问答内
 用完即弃 plan"（寄生 messages），学习计划是**跨 session 长期持久化的 plan**，按周/月级
 生命周期管理。
 
@@ -74,7 +74,7 @@ class LearningPlanStore:
         初始化存储，自动创建数据库文件和表结构。
 
         Args:
-            db_path: SQLite 文件路径，默认 ./sqlite_db/learning.db。
+            db_path: SQLite 文件路径，默认 ./db/sqlite/learning.db。
         """
         self._db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)

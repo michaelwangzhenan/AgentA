@@ -2,7 +2,7 @@
 Quiz 出题持久化模块 —— SQLite 存储层
 
 将 Agent 给用户生成的 quiz_set + 每道 quiz_question 持久化到本地 SQLite
-（默认 ./sqlite_db/quiz.db）。区别于学习计划的"周/月级长期目标跟踪"，quiz 是"周期性
+（默认 ./db/sqlite/quiz.db）。区别于学习计划的"周/月级长期目标跟踪"，quiz 是"周期性
 自检练习"：一次性出 5-15 题、用户作答后批改、跨 session 留档用于复盘 / 喂 SRS 复习。
 
 表结构：

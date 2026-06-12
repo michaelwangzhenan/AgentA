@@ -81,7 +81,7 @@ git checkout autogpt
 
 ### gitignore 的东西不会自动带过去
 
-worktree 的工作区是全新一份文件，只包含 git **跟踪**的内容。被 `.gitignore` 忽略的本地文件（如 `.env`、虚拟环境、`sqlite_db/`、`node_modules/`）**不会出现在新 worktree 里**，需要自己准备：
+worktree 的工作区是全新一份文件，只包含 git **跟踪**的内容。被 `.gitignore` 忽略的本地文件（如 `.env`、虚拟环境、`db/`、`sqlite_db/`、`node_modules/`）**不会出现在新 worktree 里**，需要自己准备：
 
 - **`.env`**：直接拷过去即可。
 

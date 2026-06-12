@@ -425,7 +425,7 @@ def test_golden_db_path_hook_resets_shared_store(client: TestClient) -> None:
     try:
         r = client.patch(
             "/api/config/RAG_GOLDEN_DB_PATH",
-            json={"value": "./sqlite_db/rag_golden_test.db"},
+            json={"value": "./db/sqlite/rag_golden_test.db"},
         )
         assert r.status_code == 200
         assert golden_store._shared_store is None

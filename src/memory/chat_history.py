@@ -59,7 +59,7 @@ class ChatHistoryStore:
         初始化存储，自动创建数据库文件和表结构。
 
         Args:
-            db_path: SQLite 文件路径，默认 ./sqlite_db/chat_history.db。
+            db_path: SQLite 文件路径，默认 ./db/sqlite/chat_history.db。
         """
         self._db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)

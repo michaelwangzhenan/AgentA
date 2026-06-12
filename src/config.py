@@ -361,17 +361,17 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
 # 聊天页自选、未选时回落到此；评估脚本生成答案也用它。可选值见 MODEL_CONFIGS 的 key
 ACTIVE_MODEL: str = os.getenv("ACTIVE_MODEL", "kimi-k2.5")
 
-# ChromaDB 存储路径
-CHROMA_DB_PATH: str = os.getenv("CHROMA_DB_PATH", "./chroma_db")
+# ChromaDB 存储路径（仅向量库元数据 + 段目录；BM25 默认另见 BM25_INDEX_DIR）
+CHROMA_DB_PATH: str = os.getenv("CHROMA_DB_PATH", "./db/chroma")
 
 # 对话历史 SQLite 路径，可通过 .env 中的 MEMORY_DB_PATH 覆盖
-MEMORY_DB_PATH: str = os.getenv("MEMORY_DB_PATH", "./sqlite_db/chat_history.db")
+MEMORY_DB_PATH: str = os.getenv("MEMORY_DB_PATH", "./db/sqlite/chat_history.db")
 
 # ── 多用户 / 认证 ────────────────────────────────────────────────────────────
 # 是否启用多用户认证（可选值：true / false）；false 时不校验登录，全部落到 DEFAULT_USER_ID
 AUTH_ENABLED: bool = os.getenv("AUTH_ENABLED", "true").lower() == "true"
 # 账号 / 登录态 / 每用户 rules 的 SQLite 路径
-AUTH_DB_PATH: str = os.getenv("AUTH_DB_PATH", "./sqlite_db/auth.db")
+AUTH_DB_PATH: str = os.getenv("AUTH_DB_PATH", "./db/sqlite/auth.db")
 # 该用户名注册后自动成为 admin，其余均为普通用户
 AUTH_ADMIN_USERNAME: str = os.getenv("AUTH_ADMIN_USERNAME", "admin")
 # 登录态有效天数
@@ -383,7 +383,7 @@ DEFAULT_USER_ID: int = int(os.getenv("DEFAULT_USER_ID", "1"))
 
 # ── Token 用量统计 ──────────────────────────────────────────────────────────
 # token 用量记录数据库路径
-USAGE_DB_PATH: str = os.getenv("USAGE_DB_PATH", "./sqlite_db/usage.db")
+USAGE_DB_PATH: str = os.getenv("USAGE_DB_PATH", "./db/sqlite/usage.db")
 # 估算成本展示用的币种符号（可选值：任意符号，如 ¥ / $）
 USAGE_CURRENCY: str = os.getenv("USAGE_CURRENCY", "¥")
 # 内置默认单价 {model_id: (输入价, 输出价)}，单位：每 1M token，币种见 USAGE_CURRENCY。
@@ -442,7 +442,7 @@ MODEL_PRICING_DEFAULTS: dict[str, tuple[float, float]] = {
 # 写入复用 usage.db 的 trace 表。出错只记日志、不影响对话（可选值：true / false）
 TRACE_ENABLED: bool = os.getenv("TRACE_ENABLED", "true").lower() == "true"
 # RAG golden 数据集库路径（带来源 / 审核状态，支持在线 CRUD）
-RAG_GOLDEN_DB_PATH: str = os.getenv("RAG_GOLDEN_DB_PATH", "./sqlite_db/rag_golden.db")
+RAG_GOLDEN_DB_PATH: str = os.getenv("RAG_GOLDEN_DB_PATH", "./db/sqlite/rag_golden.db")
 # RAG 入库后是否调 LLM 自动生成 golden 候选（后台运行；可选值：true / false）
 EVAL_AUTO_GOLDEN_ENABLED: bool = os.getenv("EVAL_AUTO_GOLDEN_ENABLED", "true").lower() == "true"
 # 入库单个文档自动生成 golden 候选的最大条数
@@ -650,8 +650,8 @@ BM25_K1: float = float(os.getenv("BM25_K1", "1.5"))
 BM25_B: float = float(os.getenv("BM25_B", "0.75"))
 # RRF 融合常数 k，论文推荐 60；越大越平滑（rank 之间差异被压制），越小越极端
 RRF_K: int = int(os.getenv("RRF_K", "60"))
-# BM25 索引存储目录；为空则与 CHROMA_DB_PATH 同级，保持工程目录干净
-BM25_INDEX_DIR: str = os.getenv("BM25_INDEX_DIR", "")
+# BM25 索引目录（bm25_<collection>.pkl）；留空则回落到 CHROMA_DB_PATH 同目录
+BM25_INDEX_DIR: str = os.getenv("BM25_INDEX_DIR", "./db/bm25")
 
 # ── PDF OCR 兜底（Iter-4） ──────────────────────────────────────────────────
 # 当 PDF 文本层提取的"平均每页字符数"低于阈值时，自动尝试 OCR（rapidocr-onnxruntime）。
@@ -692,7 +692,7 @@ THINKING_BUDGET: int = int(os.getenv("THINKING_BUDGET", "8000"))
 # true 开启跨 session 记忆功能；false 完全禁用（不读取也不写入）
 USER_MEMORY_ENABLED: bool = os.getenv("USER_MEMORY_ENABLED", "false").lower() == "true"
 # 用户记忆 SQLite 数据库路径（与对话历史独立存储）
-USER_MEMORY_DB_PATH: str = os.getenv("USER_MEMORY_DB_PATH", "./sqlite_db/user_memory.db")
+USER_MEMORY_DB_PATH: str = os.getenv("USER_MEMORY_DB_PATH", "./db/sqlite/user_memory.db")
 # 注入 system prompt 的记忆文本最大字符数（防止占用过多 context）
 USER_MEMORY_MAX_CHARS: int = int(os.getenv("USER_MEMORY_MAX_CHARS", "1500"))
 # true 每次对话结束后自动提取记忆（每轮额外一次 LLM 调用，默认关闭需手动开启）
@@ -702,13 +702,13 @@ USER_MEMORY_EXTRACT_EVERY_N: int = int(os.getenv("USER_MEMORY_EXTRACT_EVERY_N", 
 
 # ── 学习计划配置 ────────────────────────────────────────────────
 # 学习计划 SQLite 数据库路径（与对话历史 / 用户记忆独立存储，便于单独 backup / migration）
-LEARNING_PLAN_DB_PATH: str = os.getenv("LEARNING_PLAN_DB_PATH", "./sqlite_db/learning.db")
+LEARNING_PLAN_DB_PATH: str = os.getenv("LEARNING_PLAN_DB_PATH", "./db/sqlite/learning.db")
 # 注入 system prompt 的 active 学习计划文本最大字符数（超出截断）
 LEARNING_PLAN_MAX_INJECT_CHARS: int = int(os.getenv("LEARNING_PLAN_MAX_INJECT_CHARS", "1500"))
 
 # ── Quiz 出题配置 ───────────────────────────────────────────────
 # Quiz SQLite 路径（独立文件，便于单独 backup / migration）
-QUIZ_DB_PATH: str = os.getenv("QUIZ_DB_PATH", "./sqlite_db/quiz.db")
+QUIZ_DB_PATH: str = os.getenv("QUIZ_DB_PATH", "./db/sqlite/quiz.db")
 # create_quiz 默认题数（未传 num_questions 时使用；可选值 5-15）
 QUIZ_DEFAULT_NUM_QUESTIONS: int = int(os.getenv("QUIZ_DEFAULT_NUM_QUESTIONS", "10"))
 # /quiz list / query_quiz_history 默认返回条数上限
@@ -716,7 +716,7 @@ QUIZ_HISTORY_LIST_LIMIT: int = int(os.getenv("QUIZ_HISTORY_LIST_LIMIT", "20"))
 
 # ── SRS 主动复习配置 ────────────────────────────────────────────
 # SRS SQLite 路径（独立文件，单表 srs_cards）
-SRS_DB_PATH: str = os.getenv("SRS_DB_PATH", "./sqlite_db/srs.db")
+SRS_DB_PATH: str = os.getenv("SRS_DB_PATH", "./db/sqlite/srs.db")
 # /srs due / query_srs_due 默认返回条数上限
 SRS_DEFAULT_DUE_QUERY_LIMIT: int = int(os.getenv("SRS_DEFAULT_DUE_QUERY_LIMIT", "20"))
 # SM-2 算法：repetitions=1 时的 interval（首次复习答对的下次回炉天数）
