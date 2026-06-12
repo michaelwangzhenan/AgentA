@@ -1,36 +1,81 @@
----
-description: AgentA 项目工程公约 — 代码注释 / 文件命名 / 测试 / 文档同步 / AI 决策边界 / AI ↔ 用户交互节奏。所有针对本仓库的代码生成与修改都要遵守。
-alwaysApply: true
----
+# 1. AgentA 工程公约
 
-# AgentA 工程公约
+- 本项目是 RAG + Agent 工程，作者看重：**简洁可读**
+- 本仓库所有代码和文档都需按本规则执行
+- **执行如果遇到冲突，必须获得用户同意**
 
-本项目是个人学习用 RAG + Agent 实验工程，作者优先级：**简洁可读 > 全面**。所有为本仓库写代码或文档的 AI agent / 协作者都需按本规则执行。**违反时被简化掉，而不是被讨论。**
+## 1.1. 开发规范
 
-## 1. 语言规范
+### 1.1.1. 需求分析规范
+- 开始一个新任务时，先讨论需求；**需求未经用户确认前，不进入设计、不写代码**
+- 豁免：改错别字、调参数、单文件小修等 trivial 任务可跳过完整需求分析，一句话说清即可
+- 产物：默认写在对话里；任务较大或跨多步时落到 `docs/iter_XX.md`
+- 顺序：先产出需求初稿 → 再用 AskQuestion（给推荐选项）跟用户讨论决策点
+- 需求写明（每项精炼，1-3 句，不堆长文）
+  - 功能：从用户角度描述功能，不要堆砌技术名词
+  - 目标：要做什么、做成什么样
+  - 价值：为什么做、有什么收益
+  - 风险：可能有什么负面影响
+  - 现状：当前什么状态、哪些可复用、哪些要新做
+- 完成标志：用户明确认可需求后，才进入 §1.1.2 设计
 
-### 1.1 中英文选择
+### 1.1.2. 设计规范
+- 需求确认后进入设计；**设计未经用户确认前，不写代码**
+- 豁免：trivial 任务（见 §1.1.1）可跳过完整设计
+- 产物：写进需求同一份 `docs/iter_XX.md`，设计单列一节
+- 顺序：先出设计初稿 → 再用 AskQuestion（给推荐选项）讨论决策点
+- 设计写明（精炼，优先 mermaid / 表格，不堆长文）
+  - 总体框架：mermaid 图
+  - 数据 / 接口改动：DB schema、API schema、Pydantic 模型的增改
+  - 影响面：是否动 schema、是否破坏兼容（按 §1.6 该问就问）
+  - 配置项改动：按 §1.3.4 新增配置规范执行
+  - 可观测性：本期怎么验证 / 调试（日志、验证脚本等）
+  - 实现步骤：作为 §1.1.3 TodoWrite 的来源
+- 完成标志：用户明确认可设计后，才进入实现
 
-默认是用中文。
+### 1.1.3. 复杂任务行动准则
+
+当用户要求**一次性实施需求和设计里的多项功能**时（如"全部实现"、"全部落实"、"开始实现"、"照设计做"等），按下面步骤行动：
+
+- 前置：§1.1.1 需求、§1.1.2 设计的已经完成并得到用户认可
+- 先对照**需求与设计**核对范围，不遗漏任何一项
+- 改动较大时，自己拆步骤并建 TodoWrite（参考设计的实现步骤）
+- 实现阶段一次性做完，不无谓停顿；但遇破坏性操作（删 DB / 改 schema / 删文件）仍按 §1.6 必须先问用户
+- 其余有多条路径的决策：先按业内标准做法处理，并把决策过程记到 `docs/iter_XX.md`
+- 代码完成后做详细 Review，并解决 P0/P1问题
+- 撰写人工测试方案（包括操作步骤和验收标准）到 `docs/iter_XX.md`，
+- 按人工测试方案进行验收，报告写到 `docs/verification/iter_XX_verification.md`
+
+
+### 1.1.4. worktree 开发注意事项
+
+判断当前是不是在 worktree（额外工作目录，原理见 `docs/knowledge/worktree.md`），如果是，则按下面规则执行：
+
+- **复用主目录的虚拟环境**：不要重装环境，直接激活主目录那个 `AgentA\.venv\Scripts\Activate.ps1`。例外：当前分支要改依赖才在 worktree 里单独建 venv。
+- **`.env` 要自己拷**：测试跑 LLM 前先从主目录拷过来。
+
+### 1.1.5. 提交代码
+- **只提交自己本期的改动**，不提交别人的代码
+- 尽量**一句话概括**所有内容，不要一条条的细列。
+- 一句话太长，要按内容**换行**，不要强行在一行里写完。
+
+
+## 1.2. 语言规范
+
+本规范适用：**AI Agent 对话/思考、文档写作、代码注释等**，
+**默认都使用中文。**
+
+### 1.2.1. 中英文选择
 
 **保持单一语言**：中文叙述里不要随手夹英文词；只有以下情况才允许保留英文：
 
 1. **代码标识符 / API 名**：`get_tools()` / `chat_history` / `EventBus`
-2. **行业专有名词**：`RAG` / `LLM` / `ReAct` / `RAG` / `prompt injection` / `ReWoo`
-3. **翻译后不准确或带歧义**：当中文译法不止一种或译后失真时保留英文 + 首次出现给个中文解释
-
-| ❌ 中英夹杂 | ✅ 单一语言 |
-|---|---|
-| 单 query 内 ephemeral plan | 单次问答内**用完即弃**的 plan |
-| pending / active / archived 状态 | 待执行 / 进行中 / 已归档（首次出现可加括号原文） |
-| LLM 自主 trigger plan | LLM 自主**触发** plan |
-| over-engineering for MVP | **过度设计**（MVP 阶段不必要） |
+2. **行业专有名词**：`RAG` / `LLM` / `ReAct` / `prompt injection` / `ReWoo`
+3. **翻译后不准确或带歧义**：当中文译法不止一种或译后失真时保留英文 + 首次出现给中文解释
 
 判定准则：能用中文准确表达就用中文；保留英文必须满足上面 3 条之一。
 
-### 1.2 用词要易懂
-
-包括：书写文档， 对话回复， 代码注释
+### 1.2.2. 用词要易懂
 
 避免拗口、过度抽象的工程化词；能用日常词就不用术语：
 
@@ -40,9 +85,10 @@ alwaysApply: true
 | 编号契约 | 编号规则 |
 | 落盘 | 存储 / 写入 |
 | 强约束 | 必须 / 强制 |
-| 闭环 | 完整流程 / 跑通；标题里 "评估闭环" 一律改 "评估方法" |
+| 闭环 | 完整流程 / 跑通 |
 | 卡口 | 检查点 |
 | 雏形 | 初稿 |
+| 心智 / 心智模型 / 心智底色 / 心智负担 / 心智锚点 | 理解 / 概念 / 基础认识 / 思路 |
 
 例外：**架构层面**的"接口约定"等已成行业术语场景可保留（如 design.md 描述 Protocol 设计），但日常描述用通俗词。
 
@@ -56,87 +102,97 @@ alwaysApply: true
 
 判定准则：你描述的是**操作系统 / 并发原语**层面的等待？是 → 用；否 → 换通俗词。代码 identifier 保持英文，但中文文档 / 注释里指代其语义时一律换通俗词。
 
-### 1.3 缩写
+**自造词三类**（写之前问自己：这搭配是行业里真有人用，还是我自己拼的？）：
 
-第一次用的缩写时要进行 inline 解释说明。
+| 模式 | ❌ 自造 | ✅ 通俗 |
+|---|---|---|
+| 动词 + 名词硬拼 | `跑环境` | `运行环境` |
+| 跨行业借词 | `起手`（麻将） | `起步` |
+| 省略致缺主语 | `V8 引擎封装` | `基于 V8 引擎` |
 
+### 1.2.3. 英文缩写
+
+英文缩写：**首次使用时**要给出全称和对应中文（行内给出）。
 如：MRR（Mean Reciprocal Rank, 平均倒数排名）
 
-## 2. 代码规范
+## 1.3. 代码规范
 
-### 2.1 配置项注释（src/config.py）
+### 1.3.1. 文件 / 模块命名
 
-只写**配置项本身的意义和可选值**，不写设计思想 / 历史背景 / Phase 来源。每项 1-2 行注释足够。
+后端（Python）：
 
-```python
-# ✅ 好：说明意义 + 类型 / 默认行为
-# 是否启用用户 rules 注入（每用户一份，存数据库；可选值：true / false）
-USER_RULES_ENABLED: bool = os.getenv("USER_RULES_ENABLED", "true").lower() == "true"
+| 类型 | 位置 | 命名 |
+|---|---|---|
+| Agent 核心组件 | `src/agent/core/` | `*_manager.py` / `*_engine.py` / `*_policy.py` / `*_bus.py` / `*_loader.py` |
+| 数据持久化 | `src/memory/` | `<name>.py`，含 `<Name>Store` 类（如 `UserMemoryStore`） |
+| RAG 流程 | `src/rag/` | `<task>.py`（如 `ingest.py` / `golden_gen.py`） |
+| LLM 调用入口 | `src/llm/` | `provider.py` 里一个 `chat(...)` 为主出口；模型相关另放（如 `model_router.py`） |
+| API 路由 | `src/api/routes/<feature>.py` | 每文件一个 `router = APIRouter(prefix="/<feature>")`，在 `src/api/main.py` 注册 |
+| API 请求 / 响应模型 | `src/api/schemas/<feature>.py` | Pydantic 模型，文件名与对应路由同名 |
+| API 公共依赖 | `src/api/deps.py` | 鉴权等 `Depends`（如 `get_current_user` / `require_admin`） |
+| 配置项 | `src/config.py` | `os.getenv("XXX", ...)`；多处同步见 [§1.3.4 新增配置规范](#134-新增配置规范) |
+| CLI 命令处理 | `src/cli/handlers.py` | `handle_<command>` 函数 |
+| 评估脚本 | `tools/agent_eval/<feature>/` | `<task>.py`（如 `recall_golden.py` / `perf_eval.py`） |
+| 单元测试 | `tests/test_<module>.py` | Test 类名 `Test<Behavior>`，方法 `test_<scenario>` |
 
-# 单用户 rules 文本最大字符数；写入超出此值的 PUT /api/rules 返回 400
-USER_RULES_MAX_CHARS: int = int(os.getenv("USER_RULES_MAX_CHARS", "4000"))
-```
+前端（React / TypeScript）：
 
-```python
-# ❌ 差：解释设计思想 / Phase / 跟其他模块的关系
-# 用户偏好（详 iter_2_agent.md §4.9.3）：每用户一份存 auth.db.user_rules，每轮即时读并
-# 注入到 system prompt 的 <user_rules> 块。与 user_memory（动态学到的偏好）
-# 形成两层：rules 是稳定基础设定，memory 在其之后注入做临时覆写。
-USER_RULES_ENABLED: bool = ...
-```
+| 类型 | 位置 | 命名 |
+|---|---|---|
+| 业务组件 | `frontend/src/components/<area>/` | 文件与组件同名、大驼峰 `.tsx`（如 `chat/ChatView.tsx`）；`<area>` 按领域分（chat / kb / usage / settings / business / resources …） |
+| 基础 UI 控件 | `frontend/src/components/ui/` | 小写文件名（如 `button.tsx` / `dialog.tsx`），只放无业务逻辑的通用控件 |
+| 类型定义 | `frontend/src/types/<feature>.ts` | 小写文件，按 feature 拆（如 `routing.ts` / `usage.ts`） |
+| 接口调用 | `frontend/src/api/client.ts` | 统一出口，导出 `getXxx` / `putXxx` 等函数 |
+| React hook | `frontend/src/hooks/use<Name>.ts` | `use` 前缀、小驼峰（如 `useChat.ts`） |
+| 通用工具 / Context | `frontend/src/lib/` | 小写文件（如 `auth.tsx` / `theme.tsx` / `utils.ts`） |
 
-### 2.2 函数 / 类 docstring
+开新文件前先确认归属：能在已有文件里加就别另起新文件；确需新增上表没有的类型，先在本表补一行约定再落地。
+  
+
+### 1.3.2. 函数 / 类 docstring
 
 - **函数**：1 句话讲做什么；参数 / 返回 / 异常需要时再列，不需要时不要硬凑
 - **类**：1-2 句话讲职责边界；不复述模块 docstring
 - 避免"逐行复述代码"的 docstring，例如 `def upsert(...)` 写成 "Upserts a record"
 
-### 2.3 注释规范
+
+### 1.3.3. 代码注释规范
 
 - 解释**为什么**这么写，不解释**什么代码做了什么**
 - ❌ `# 自增计数器` `# 调用 LLM` `# 返回结果`
 - ✅ `# 显式触发不消耗也不重置 auto 计数器 —— 两条流水线独立`
 
-### 2.4. 配置同步
 
-代码 / 配置 / CLI 命令改动时同步更新：
+### 1.3.4. 新增配置规范
 
-| 改动类型 | 同步到 |
-|---|---|
-| 新 config 项 | `src/config.py` **+ `.env.example` + `.env`（三处必须同步）** |
-| 新 CLI 命令 | `src/cli/ui.py` help + `src/cli/tab_complete.py` |
-| 评估工具 | 评估报告使用Markdown格式，不用JSON |
+同步更新以下各处：
 
-**强制：新 config 项三处同步**
+- `.env`：放到合适分类，没有合适分类就加新类别，放到结尾
+- `.env.example`：**永远**与 `.env` 对齐，但**一定要数据脱敏**
+- `src/config.py`：同步更新
+- UI 界面：同步更新，并满足
+  - 功能近似 / 相关的配置放在一起
+  - 同一类的配置用框框在一起
+  - 悬浮提示要复查：简洁明了，看了之后知道有什么用、怎么配置
+- 代码里加载 `.env` 配置时，要确保立即生效
 
-新增 `os.getenv("XXX", ...)` 时**必须**同步三个文件，缺一不可：
-
-| 文件 | 内容 | 不同步的后果 |
-|---|---|---|
-| `src/config.py` | 定义 + 注释（按 §2.1 风格） | — |
-| `.env.example` | 列出 key + 默认值 + 用途短注释 | 新用户克隆仓库后不知道有这项可调 |
-| `.env` | 实际值（即便用默认值也写一行注释提示存在） | **当前运行环境漏配，跑到这段代码时取默认值而不是用户期望值**；尤其涉及 API key / 路径 / feature flag 时会静默走错分支 |
-
-`.env` 不进 git（被 `.gitignore` 忽略），但**本地必须有这行**。AI 改完 `config.py` 必须主动检查 `.env` 是否已含对应 key；缺则补一行（值用 `.env.example` 默认值），不要等用户运行时才发现。
-
-### 2.5 文件 / 模块命名
-
-| 类型 | 位置 | 命名 |
-|---|---|---|
-| Agent core helper | `src/agent/core/` | `*_manager.py` / `*_engine.py` / `*_policy.py` / `*_bus.py` / `*_loader.py` |
-| 数据持久化 | `src/memory/` | `<name>.py` 含 `<Name>Store` 类（如 `UserMemoryStore`） |
-| CLI 命令处理 | `src/cli/handlers.py` | `handle_<command>` 函数 |
-| LLM 调用入口 | `src/llm/provider.py` | 一个 `chat(...)` 函数为主出口 |
-| 评估脚本 | `tools/agent_eval/<feature>/` | `<task>.py`（如 `recall_golden.py` / `perf_eval.py`） |
-| 评估报告 | `tools/agent_eval/reports/` | `<feature>-<target>-<YYYYMMDD-HHMMSS>.md`（**强制 Markdown，禁 JSON**，详 iter_2_agent.md §4.10） |
-| 单元测试 | `tests/test_<module>.py` | Test 类名 `Test<Behavior>`，方法 `test_<scenario>` |
-
-不允许引入新的 helper / store / manager 类型时再开新文件；先尝试在已有文件添加。
+**配置项注释准则**
+- 每个配置项独立注释
+- 只写**配置项本身的意义和可选值**，不写设计思想 / 历史背景 / Phase 来源；每项 1-2 行注释足够
+- 参考已有注释风格
 
 
-### 2.6 写文档不要想当然（让读者读懂）
 
+## 1.4. 文档规范
+### 1.4.1. 写文档是让人看的
 读者不一定按你写文档的顺序看，跳进任意一节都该能读懂。任何"心照不宣"的代号 / 缩写都得给出处。
+
+**强约束**：
+
+- 任何 `C1/C3/C4` / `A1/A2` / `D1/D2` / `Q1/Q2` / `S0x/R0x/C0x` 等代号引用，**当前节没定义就必须 cross-ref 定义出处**（用 `[§x.y](#anchor)`）
+- 跨节引用 `Step N` 必须带节号；同节紧邻段内可省
+- 章节标题里不带未定义代号
+
 
 | 反模式 | ❌ 想当然写法 | ✅ 显式上下文写法 |
 |---|---|---|
@@ -146,14 +202,9 @@ USER_RULES_ENABLED: bool = ...
 | **章节标题带未定义代号** | `## 5.1. C4 企业内 Q&A` | `## 5.1. 企业内 Q&A` |
 | **历史代号未清理** | 重写需求后留早期代号引用没删 | 改名时全文 grep 同步；早期代号留到 `_历史参照_` 段，正文一律用新词 |
 
-**强约束**：
 
-- 任何 `C1/C3/C4` / `A1/A2` / `D1/D2` / `Q1/Q2` / `S0x/R0x/C0x` 等代号引用，**当前节没定义就必须 cross-ref 定义出处**（用 `[§x.y](#anchor)`）
-- 跨节引用 `Step N` 必须带节号；同节紧邻段内可省
-- 章节标题里不带未定义代号
-- 评估 case id（如 `M01-lang-zh` / `S05-negative-greet`）允许在脚本输出 / dataset.json 里裸用，**写进文档**时必须紧邻一句话说明该 case 测什么
 
-## 3. 设计文档写作约束
+### 1.4.2. 设计文档写作约束
 
 本约束主要用于`docs/design.md`的写作，确保文档的清晰性和可读性。
 
@@ -176,15 +227,17 @@ USER_RULES_ENABLED: bool = ...
 | `CREATE TABLE user_memories (id INTEGER PRIMARY KEY ...)` 代码块 | 用 Markdown 表格表达字段 / 类型 / 用途 |
 
 
-## 4. 测试
+## 1.5. 测试
 
+- 测试环境在 `.venv/`，不要用系统环境
 - 用 `pytest`，markers 在 `pytest.ini` 里 deselect 默认 integration / langchain / autogpt / extended_providers — 跑 `pytest -q` 默认走 fast UT 集
 - 用 `MagicMock` mock 外部依赖（LLM / DB / 文件 IO），不要在 UT 里真发 LLM call
-- 评估脚本（recall / perf）放 `tools/agent_eval/`，不放 `tests/`
+- UT 过程中产生的临时文档，临时数据（db里），在UT结束后删除
+- 评估脚本放 `tools/`，不放 `tests/`
 - 新加 feature 必须有 UT 覆盖核心路径；触发节流 / 顺序约定这类"行为约束"要有独立 Test 类锁住
 
 
-## 5. AI 决策边界（遇歧途必须 ask）
+## 1.6. AI 决策边界
 
 执行任务时遇到下表所列**有多条可行路径**的决策，**先用 AskQuestion 让用户拍板，不要默认替用户选** — 尤其不要默认选"看起来更保守 / 更兼容"的路径。本项目的工程偏好是**简洁 > 兼容**，不是反过来。
 
@@ -194,11 +247,10 @@ USER_RULES_ENABLED: bool = ...
 | **破坏性操作**（删 DB / 删未跟踪文件 / 改 schema / `git clean`） | 默认替用户执行 | 先列出受影响范围 + 是否可逆，让用户确认后才动 |
 | **scope 蔓延**（用户问 A，是否顺手处理相关 B） | 默认顺手做完 | "B 现在也处理一下吗？还是这次只动 A？" |
 
-## 6. 红线（违反 = 必须修正）
+**例外**: 执行 **§1.1.3 复杂任务** 时，非破坏性的决策无需让用户确认，但要按要求记录决策过程；破坏性操作不在例外内，仍须先问。
 
-- ❌ 评估报告落 JSON / CSV / TSV
+## 1.7. 红线（绝对不能做的事）
+- ❌ 删除非自己编写的代码
 - ❌ `tools/agent_eval/reports/` 下批量删除文件（禁止主动清理 reports/目录）
 - ❌ `tools/agent_eval/**` entry point 不调 `load_dotenv()`（会导致 LLM 调用 401）
-- ❌ 新增 `os.getenv(...)` 只改 `src/config.py`，不同步 `.env.example` 和 `.env`
 - ❌ 不问用户就默认选向后兼容路径 / 默认执行破坏性操作 / 默认 scope 蔓延
-- ❌ config 注释解释设计思想 / Phase 来源（违反本文件 §2.1

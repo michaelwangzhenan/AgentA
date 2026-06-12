@@ -1,16 +1,17 @@
 # 1. 文档更新
 design
-readme
+README
 用户手册
 代码指南：design中的部分移过来
 V1.0 总结
+
 项目介绍材料
 PPT
 
 # 2. 优化
 ## 2.1. 功能 Review
 ## 2.2. 工具更新
-UT精简
+## 2.3. db tools
 
 # 3. 新功能
 ## 3.1. workflow
