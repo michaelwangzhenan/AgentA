@@ -3,7 +3,6 @@ design
 README
 用户手册
 代码指南：design中的部分移过来
-V1.0 总结
 
 项目介绍材料
 PPT
