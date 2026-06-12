@@ -248,6 +248,7 @@ def test_upload_ingest_exception_returns_500(
     assert "embedding model offline" in r.json()["detail"]
 
 
+@pytest.mark.slow  # 真实 sleep 等待超时
 def test_upload_ingest_timeout_returns_504(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

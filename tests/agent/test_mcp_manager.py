@@ -204,6 +204,7 @@ class TestStartAll:
         finally:
             mgr.shutdown()
 
+    @pytest.mark.slow  # 真实等待超时
     def test_connect_timeout_marks_server_failed(
         self, monkeypatch: pytest.MonkeyPatch, short_connect_timeout: None,
     ) -> None:
@@ -370,6 +371,7 @@ class TestCallTool:
         finally:
             mgr.shutdown()
 
+    @pytest.mark.slow  # 真实等待超时
     def test_call_timeout_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         sess = FakeSession(
             tools=[FakeTool("slow_tool")],

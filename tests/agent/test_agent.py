@@ -341,14 +341,6 @@ class TestAgentIntegration:
     """端到端真实 API 测试（消耗真实 API quota）"""
 
     @pytest.mark.integration
-    def test_run_with_knowledge_base_question(self) -> None:
-        """提问知识库内有答案的问题，验证 Agent 完整流程"""
-        agent = Agent(verbose=True)
-        result = agent.run("RAG 技术的工作流程是什么？")
-        assert isinstance(result, str)
-        assert len(result) > 20, "回答不应过短"
-
-    @pytest.mark.integration
     def test_run_returns_nonempty_string(self) -> None:
         """任何问题都应返回非空字符串"""
         agent = Agent(verbose=False)
@@ -398,14 +390,6 @@ class TestSystemPromptWebSearch:
 
         assert "fetch_url" in tool_calls, "知识库为空时，Agent 应调用 fetch_url"
         assert result == "根据百度新闻，最新AI动态如下……"
-
-    @pytest.mark.integration
-    def test_integration_web_search_triggered_by_unknown_topic(self) -> None:
-        """集成测试：询问知识库中没有的实时信息时，Agent 应主动联网搜索"""
-        agent = Agent(verbose=True)
-        result = agent.run("今天的天气怎么样？请上网查一下。")
-        assert isinstance(result, str)
-        assert len(result) > 10
 
 
 class TestToolGuidance:

@@ -138,38 +138,22 @@ class TestAllProviders:
             )
             assert m.model_id, f"模型 '{mid}' 的 model_id 为空"
 
-    # 默认只跑 kimi + qwen；其余 6 个厂商标 extended_providers，默认 deselect。
-    # 跑全量：pytest -m "extended_providers" tests/test_llm.py
-    @pytest.mark.parametrize("provider", [
-        "kimi", "qwen",
-        pytest.param("deepseek", marks=pytest.mark.extended_providers),
-        pytest.param("minimax",  marks=pytest.mark.extended_providers),
-        pytest.param("glm",      marks=pytest.mark.extended_providers),
-        pytest.param("openai",   marks=pytest.mark.extended_providers),
-        pytest.param("grok",     marks=pytest.mark.extended_providers),
-        pytest.param("claude",   marks=pytest.mark.extended_providers),
-    ])
-    def test_provider_has_base_url(self, provider: str) -> None:
-        """每个厂商都必须配置 base_url（claude 除外，走原生 SDK）。"""
-        cfg = config.PROVIDER_CONFIGS[provider]
-        if provider != "claude":
-            assert cfg.base_url, f"[{provider}] base_url 未配置"
+    def test_all_providers_have_base_url(self) -> None:
+        """所有厂商都必须配置 base_url（claude 走原生 SDK、ollama 本地除外）。"""
+        for name, cfg in config.PROVIDER_CONFIGS.items():
+            if name in ("claude", "ollama"):
+                continue
+            assert cfg.base_url, f"[{name}] base_url 未配置"
 
-    @pytest.mark.parametrize("provider", [
-        "kimi", "qwen",
-        pytest.param("deepseek", marks=pytest.mark.extended_providers),
-        pytest.param("minimax",  marks=pytest.mark.extended_providers),
-        pytest.param("glm",      marks=pytest.mark.extended_providers),
-        pytest.param("openai",   marks=pytest.mark.extended_providers),
-        pytest.param("grok",     marks=pytest.mark.extended_providers),
-        pytest.param("claude",   marks=pytest.mark.extended_providers),
-    ])
-    def test_provider_api_key_not_empty(self, provider: str) -> None:
-        """每个非 ollama 厂商的 api_key 都必须在 .env 中配置"""
-        cfg = config.PROVIDER_CONFIGS[provider]
-        assert cfg.api_key, (
-            f"[{provider}] api_key 为空，请在 .env 中配置对应的 KEY"
-        )
+    def test_default_providers_api_key_not_empty(self) -> None:
+        """默认必配的 kimi / qwen 厂商 api_key 必须在 .env 中配置。
+
+        其余厂商按需配置，不在默认 UT 里强校验（要验全部走真实连通性 integration 测试）。
+        """
+        for provider in ("kimi", "qwen"):
+            assert config.PROVIDER_CONFIGS[provider].api_key, (
+                f"[{provider}] api_key 为空，请在 .env 中配置对应的 KEY"
+            )
 
     @pytest.mark.integration
     @pytest.mark.parametrize("provider", [
@@ -218,17 +202,12 @@ class TestModelConfigExtraBody:
         m = config.MODEL_CONFIGS["kimi-k2.5"]
         assert m.extra_body == {"thinking": {"type": "disabled"}}
 
-    @pytest.mark.parametrize("name", [
-        pytest.param("deepseek-chat",     marks=pytest.mark.extended_providers),
-        pytest.param("gpt-4o",            marks=pytest.mark.extended_providers),
-        pytest.param("claude-sonnet-4-5", marks=pytest.mark.extended_providers),
-        pytest.param("glm-4-flash",       marks=pytest.mark.extended_providers),
-        pytest.param("MiniMax-Text-01",   marks=pytest.mark.extended_providers),
-    ])
-    def test_other_models_have_no_extra_body(self, name: str) -> None:
-        """除 qwen / kimi 外的模型不需要 extra_body，应为 None。"""
-        m = config.MODEL_CONFIGS[name]
-        assert m.extra_body is None, f"[{name}] extra_body 应为 None"
+    def test_only_kimi_qwen_have_extra_body(self) -> None:
+        """只有 kimi / qwen 系模型用 extra_body 关 thinking，其余厂商的模型应为 None。"""
+        for mid, m in config.MODEL_CONFIGS.items():
+            if m.provider in ("kimi", "qwen"):
+                continue  # 这两家按模型需要关 thinking，不在此强校验
+            assert m.extra_body is None, f"[{mid}] extra_body 应为 None"
 
     def test_thinking_enabled_is_bool(self) -> None:
         """THINKING_ENABLED 应为 bool 类型。"""
@@ -306,3 +285,35 @@ class TestCallWithThinking:
             assert kwargs.get("tools") == dummy_tools
         finally:
             config.ACTIVE_MODEL = original
+
+
+class TestUTLLMModel:
+    """UT 专用配置 resolve_ut_llm_model()：UT 跑真实 LLM 时该用哪个 model。"""
+
+    def test_empty_falls_back_to_active_model(self) -> None:
+        """UT_LLM_MODEL 为空 → 回落 ACTIVE_MODEL。"""
+        orig = config.UT_LLM_MODEL
+        config.UT_LLM_MODEL = ""
+        try:
+            assert config.resolve_ut_llm_model() == config.ACTIVE_MODEL
+        finally:
+            config.UT_LLM_MODEL = orig
+
+    def test_valid_model_used(self) -> None:
+        """UT_LLM_MODEL 合法 → 用它。"""
+        orig = config.UT_LLM_MODEL
+        target = next(iter(config.MODEL_CONFIGS))
+        config.UT_LLM_MODEL = target
+        try:
+            assert config.resolve_ut_llm_model() == target
+        finally:
+            config.UT_LLM_MODEL = orig
+
+    def test_invalid_model_falls_back(self) -> None:
+        """UT_LLM_MODEL 非法 → 回落 ACTIVE_MODEL。"""
+        orig = config.UT_LLM_MODEL
+        config.UT_LLM_MODEL = "__not_a_real_model__"
+        try:
+            assert config.resolve_ut_llm_model() == config.ACTIVE_MODEL
+        finally:
+            config.UT_LLM_MODEL = orig

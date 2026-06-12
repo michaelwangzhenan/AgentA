@@ -13,7 +13,7 @@ import pytest
 from src.rag.parser import parse_file, SUPPORTED_EXTENSIONS
 
 # 测试文档目录（test_sample.* 实际存放在 datasets/data_en/test/ 下）
-DOCS_DIR = Path(__file__).parent.parent / "datasets" / "data_en" / "test"
+DOCS_DIR = Path(__file__).resolve().parents[2] / "datasets" / "data_en" / "test"
 
 
 class TestSupportedExtensions:
@@ -74,6 +74,7 @@ class TestParseHtml:
         assert "ChromaDB" in result
 
 
+@pytest.mark.slow  # 真实加载 python-docx 解析 Office 文件，慢
 class TestParseDocx:
     def test_parse_docx_returns_nonempty_string(self) -> None:
         result = parse_file(DOCS_DIR / "test_sample.docx")
@@ -85,6 +86,7 @@ class TestParseDocx:
         assert "LLM" in result
 
 
+@pytest.mark.slow  # 真实加载 python-pptx 解析 Office 文件，慢
 class TestParsePptx:
     def test_parse_pptx_returns_nonempty_string(self) -> None:
         result = parse_file(DOCS_DIR / "test_sample.pptx")
@@ -102,6 +104,7 @@ class TestParsePptx:
         assert "Agent" in result
 
 
+@pytest.mark.slow  # 真实加载 openpyxl 解析 Office 文件，慢
 class TestParseXlsx:
     def test_parse_xlsx_returns_nonempty_string(self) -> None:
         result = parse_file(DOCS_DIR / "test_sample.xlsx")

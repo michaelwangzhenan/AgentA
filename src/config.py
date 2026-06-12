@@ -865,3 +865,14 @@ MCP_CONNECT_TIMEOUT_SEC: int = int(os.getenv("MCP_CONNECT_TIMEOUT_SEC", "10"))
 
 # 单次 tools/call 调用超时（秒，整数）
 MCP_CALL_TIMEOUT_SEC: int = int(os.getenv("MCP_CALL_TIMEOUT_SEC", "30"))
+
+# ── UT 测试专用 ──────────────────────────────────────────────
+# UT 跑真实 LLM 调用（integration 档）时用的 model id；空则回落 ACTIVE_MODEL。
+# 用于把测试统一指到一个便宜 / 快的模型，避免动用生产默认模型（取值见 MODEL_CONFIGS 的 key）
+UT_LLM_MODEL: str = os.getenv("UT_LLM_MODEL", "")
+
+
+def resolve_ut_llm_model() -> str:
+    """解析 UT 真实 LLM 测试该用的 model id：UT_LLM_MODEL 合法则用它，否则回落 ACTIVE_MODEL。"""
+    model = UT_LLM_MODEL or ACTIVE_MODEL
+    return model if model in MODEL_CONFIGS else ACTIVE_MODEL

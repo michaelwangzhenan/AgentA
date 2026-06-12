@@ -227,7 +227,7 @@ class TestRealAgentaSkills:
     """对仓库 .agenta/skills/ 真实目录的烟雾测试（防止 example-skill / study-planner / quiz-maker 退化）"""
 
     def test_repo_skills_loadable(self) -> None:
-        repo_skills = Path(__file__).resolve().parents[1] / ".agenta" / "skills"
+        repo_skills = Path(__file__).resolve().parents[2] / ".agenta" / "skills"
         if not repo_skills.is_dir():
             pytest.skip(".agenta/skills 目录不存在，跳过")
         result = scan_skills(repo_skills)
@@ -243,7 +243,7 @@ class TestRealAgentaSkills:
 
     def test_srs_review_skill_metadata(self) -> None:
         """Phase 2.4 srs-review skill 的 frontmatter 完整可解析（含 description 含 4 个 tool 名）。"""
-        repo_skills = Path(__file__).resolve().parents[1] / ".agenta" / "skills"
+        repo_skills = Path(__file__).resolve().parents[2] / ".agenta" / "skills"
         if not repo_skills.is_dir():
             pytest.skip(".agenta/skills 目录不存在，跳过")
         result = scan_skills(repo_skills)

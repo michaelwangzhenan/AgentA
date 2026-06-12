@@ -93,6 +93,43 @@ def _isolated_agent_memory(tmp_path, _neutralize_runtime_overrides):
     _orig_cache = _agent_module._cfg.SEMANTIC_CACHE_ENABLED
     _agent_module._cfg.SEMANTIC_CACHE_ENABLED = False
 
+    # ── 业务 store 单例全局兜底隔离 ─────────────────────────────────────────────
+    # 这些 store 的 get_shared_store() 默认指向真实 ./sqlite_db/*.db。不全局兜底的话，
+    # 任何走 agent.run / execute_tool / API 而忘了自己隔离的测试会静默读写真实库
+    # —— 例如 Agent.run 经 build_active_study_plan_block 只读真实 learning.db。
+    # 各测试文件原有的文件内 reset / dependency_overrides 仍在测试体内覆盖本兜底，互不冲突。
+    from src.memory import (
+        golden_store,
+        learning_plan_store,
+        quiz_store,
+        security_event_store,
+        semantic_cache,
+        srs_store,
+        trace_store,
+        usage_store,
+        user_store,
+    )
+
+    # 用独立 in-memory SQLite（":memory:"）建临时实例：避免每个测试建 8 个磁盘库的 IO 开销。
+    # 各调用方最终都读模块全局 _shared_store，reset 后无论 import 方式都拿到临时库 → 覆盖完整。
+    _store_specs = [
+        (learning_plan_store, learning_plan_store.LearningPlanStore),
+        (quiz_store, quiz_store.QuizStore),
+        (srs_store, srs_store.SRSStore),
+        (usage_store, usage_store.UsageStore),
+        (golden_store, golden_store.GoldenStore),
+        (trace_store, trace_store.TraceStore),
+        (security_event_store, security_event_store.SecurityEventStore),
+        (user_store, user_store.UserStore),
+    ]
+    _tmp_stores = []
+    for _mod, _cls in _store_specs:
+        _s = _cls(":memory:")
+        _mod.reset_shared_store_for_testing(_s)
+        _tmp_stores.append((_mod, _s))
+    # 语义缓存依赖进程级 ChromaDB，不便建临时实例；置空单例即可（enabled 已关）
+    semantic_cache.reset_shared_store_for_testing(None)
+
     yield
 
     # ── 恢复原始状态 ──────────────────────────────────────────────────────────
@@ -101,4 +138,23 @@ def _isolated_agent_memory(tmp_path, _neutralize_runtime_overrides):
     _agent_module._cfg.USER_MEMORY_ENABLED = _orig_enabled
     _agent_module._cfg.USER_MEMORY_AUTO_EXTRACT = _orig_auto
     _agent_module._cfg.SEMANTIC_CACHE_ENABLED = _orig_cache
+    for _mod, _s in _tmp_stores:
+        _mod.reset_shared_store_for_testing(None)
+        try:
+            _s.close()
+        except Exception:
+            pass
+    semantic_cache.reset_shared_store_for_testing(None)
     mem.close()
+
+
+@pytest.fixture
+def ut_llm_model() -> str:
+    """integration（真实 LLM）测试用的 model id。
+
+    UT_LLM_MODEL 配了且合法就用它，否则回落 ACTIVE_MODEL —— 便于把测试统一指到便宜 /
+    快的模型，不动用生产默认模型。integration 测试用 `config.use_llm_prefs(ut_llm_model)` 接入。
+    """
+    import src.config as _cfg
+
+    return _cfg.resolve_ut_llm_model()
