@@ -1,4 +1,4 @@
-# AgentA
+# 1. AgentA
 
 [![CI](https://github.com/michaelwangzhenan/AgentA/actions/workflows/AgentA_CI.yml/badge.svg)](https://github.com/michaelwangzhenan/AgentA/actions/workflows/AgentA_CI.yml)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB)
@@ -14,7 +14,7 @@
 
 ---
 
-## 演示
+## 1.1. 演示
 
 <!-- TODO: 把下方占位图替换为实际截图 / GIF，建议存放路径 docs/assets/ -->
 
@@ -27,7 +27,7 @@
 
 ---
 
-## 项目数据一览
+## 1.2. 项目数据一览
 
 | 维度 | 规模 |
 |---|---|
@@ -43,7 +43,7 @@
 
 ---
 
-## 整体架构
+## 1.3. 整体架构
 
 - 三层职责：表现层 / Agent Core / RAG
 - 两套接口：`AgentAPI` / `RetrieverAPI`
@@ -100,9 +100,9 @@ flowchart TB
 
 ---
 
-## 1. 核心能力
+## 1.4. 核心能力
 
-### 1.1 进阶 RAG 检索
+### 1.4.1. 1.1 进阶 RAG 检索
 
 | 能力 | 说明 |
 |---|---|
@@ -114,7 +114,7 @@ flowchart TB
 | **召回可溯源** | • 回答正文带 `[n]` 标号<br>• 末尾 `— sources —` 块写明文件 / 章节 / 页号<br>• 同源 chunk 自动合并，编号受控防幻觉 |
 | **评估方法** | • 内置黄金集 + `hit@1 / hit@3 / hit@k` / `MRR`（Mean Reciprocal Rank，平均倒数排名）<br>• 每次调优产物保存为 Markdown 报告（含 Miss 用例诊断），便于跨轮 diff |
 
-### 1.2 Agent 能力
+### 1.4.2. 1.2 Agent 能力
 
 | 能力 | 说明 |
 |---|---|
@@ -133,7 +133,7 @@ flowchart TB
 - **测试批改**：作答后自动批改 + 留档复盘
 - **主动复习**：基于 SM-2 算法的 SRS（Spaced Repetition System，间隔重复）卡片调度
 
-### 1.3 多形态交互
+### 1.4.3. 1.3 多形态交互
 
 | 形态 | 入口 | 适用场景 |
 |---|---|---|
@@ -143,7 +143,7 @@ flowchart TB
 
 三种形态共用同一个 `AgentAPI`，通过 `EventBus` 推送统一的 Agent Event（thinking / tool_call / tool_result / message / error），表现层只关心渲染。
 
-### 1.4 三套 Agent 实现（同接口可切换）
+### 1.4.4. 1.4 三套 Agent 实现（同接口可切换）
 
 `IMP_METHOD` 一行配置即可切换底层实现，方便横向对比与学习不同框架的设计取舍：
 
@@ -157,17 +157,17 @@ flowchart TB
 
 ---
 
-## 2. 工程化质量
+## 1.5. 工程化质量
 
 为保证个人项目也维持生产级工程素养，从一开始就建立了**测试 / 评估 / CI** 三道质量门：
 
-### 2.1 测试体系
+### 1.5.1. 2.1 测试体系
 
 - **46 个 pytest 测试文件**覆盖 Agent core / RAG / Memory / CLI / Tools 全模块
 - 用 `MagicMock` 隔离外部依赖（LLM / DB / 文件 IO），默认快速集 1-2 分钟跑完
 - 通过 `pytest.ini` marker 分档：`fast`（默认） / `ext`（含 7 个 LLM provider） / `int`（需真实 API key 的集成测试）
 
-### 2.2 评估方法（不是只跑通）
+### 1.5.2. 2.2 评估方法（不是只跑通）
 
 | 评估对象 | 黄金集位置 | 指标 |
 |---|---|---|
@@ -183,7 +183,7 @@ flowchart TB
 
 所有评估结果统一保存到 `tools/{rag,agent}_eval/reports/` 下的 **Markdown 报告**（强制不用 JSON / CSV），方便跨轮对比与人工 review。
 
-### 2.3 CI / CD
+### 1.5.3. 2.3 CI / CD
 
 GitHub Actions（`.github/workflows/AgentA_CI.yml`）每次 push / PR 自动执行：
 
@@ -192,9 +192,9 @@ GitHub Actions（`.github/workflows/AgentA_CI.yml`）每次 push / PR 自动执�
 
 ---
 
-## 3. 快速开始
+## 1.6. 快速开始
 
-### 3.1 环境准备
+### 1.6.1. 3.1 环境准备
 
 ```bash
 python -m venv .venv
@@ -206,18 +206,18 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3.2 配置环境变量
+### 1.6.2. 3.2 配置环境变量
 
 ```bash
 cp .env.example .env
 # 填入：LLM_PROVIDER 以及对应的 *_API_KEY
 ```
 
-### 3.3 下载 Embedding / Reranker 模型
+### 1.6.3. 3.3 下载 Embedding / Reranker 模型
 
 参考 [5.3 模型下载](#53-模型下载)。
 
-### 3.4 准备 MCP server（可选）
+### 1.6.4. 3.4 准备 MCP server（可选）
 
 如开启 MCP（`MCP_ENABLED=true`），挂载两个默认 server: fetch和 filesystem，需准备好运行环境。否则启动时这两个 server 会连接失败（agent 仍能正常跑）。
 
@@ -226,7 +226,7 @@ cp .env.example .env
 | **fetch** | Python | 抓网页 → markdown | `pip install -r requirements.txt` 已含 `mcp-server-fetch`，无需额外操作 |
 | **filesystem** | Node | 读 / 写 / 列工作区文件 | 需先装 [Node.js](https://nodejs.org)（含 `npx`）；装好后**手动先跑一次，**预下载该包（`npx -y @modelcontextprotocol/server-filesystem`） |
 
-### 3.5 启动 AgentA
+### 1.6.5. 3.5 启动 AgentA
 
 首次使用先入库（详见 [5.1 RAG 入库](#51-rag-入库)）：
 
@@ -250,7 +250,7 @@ python main.py
 
 ---
 
-## 4. 主要配置
+## 1.7. 主要配置
 
 `.env` 中常用的关键项（完整说明见 `.env.example`）：
 
@@ -282,9 +282,9 @@ MCP_ENABLED=true                  # 启用 MCP 接入（.agenta/mcp/config.json�
 
 ---
 
-## 5. 实用工具
+## 1.8. 实用工具
 
-### 5.1 RAG 入库
+### 1.8.1. 5.1 RAG 入库
 
 `tools/rag_cli.py` 把 `./datasets/` 下文档灌入向量库 + BM25 索引，并提供清库与状态查询：
 
@@ -296,7 +296,7 @@ python -m tools.rag_cli clear                                  # 清空全部 co
 python -m tools.rag_cli clear -m m3                            # 只清空指定 alias
 ```
 
-### 5.2 RAG 评估
+### 1.8.2. 5.2 RAG 评估
 
 基于 `tools/rag_eval/golden.json` 黄金集计算 `hit@1 / hit@3 / hit@k` / `MRR`，结果默认保存到 `tools/rag_eval/reports/`：
 
@@ -309,7 +309,7 @@ python -m tools.rag_eval.runner -o tools/rag_eval/reports/x.md # 保存 Markdown
 
 <a id="53-模型下载"></a>
 
-### 5.3 模型下载
+### 1.8.3. 5.3 模型下载
 
 `tools/download_models.py` 按编号下载所需 Embedding / Reranker，自带多镜像 fallback：
 
@@ -319,30 +319,9 @@ python -m tools.download_models -l   # 仅查看清单与缓存状态
 python -m tools.download_models 3    # 下载指定模型（编号详见 -l 输出）
 ```
 
-### 5.4 单元测试
-
-`tools/ut.sh` 封装 pytest 调用，分两类：**档位**（按 marker 过滤）+ **模块**（按文件，调试用）：
-
-```bash
-bash tools/ut.sh -h          # 查看帮助
-bash tools/ut.sh -fast       # 默认 case，跳过 integration/langchain/autogpt/extended_providers
-bash tools/ut.sh -ext        # 默认 + 其余 7 个 LLM provider
-bash tools/ut.sh -int        # 仅集成测试（需 .env 中相应真实 API key）
-bash tools/ut.sh -all        # 全部 case
-```
-
 > Windows 用户也可直接 `python -m pytest tests/`，效果等同 `-fast`（pytest.ini 已配 marker 过滤）。
 
-### 5.5 UI 调试
-
-`tools/ui_debug.ps1`（Windows / PowerShell）一键拉起 Chainlit + cloudflared 隧道，自动把临时公网 URL 复制到剪贴板，方便手机或外部设备调试：
-
-```powershell
-.\tools\ui_debug.ps1                 # 默认 8000 端口
-.\tools\ui_debug.ps1 -Port 8080      # 自定义端口
-```
-
-### 5.6 Agent 能力评估
+### 1.8.4. 5.6 Agent 能力评估
 
 10 套独立评估脚本，全部报告统一保存到 `tools/agent_eval/reports/`，命名 `<feature>-<YYYYMMDD-HHMMSS>.md`：
 
@@ -386,7 +365,7 @@ python -m tools.agent_eval.perf_eval --target all
 
 ---
 
-## 文档导读
+## 1.9. 文档导读
 
 | 文档 | 类型 | 内容 |
 |---|---|---|

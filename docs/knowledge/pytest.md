@@ -39,11 +39,10 @@ pytest 靠**命名约定**自动找测试，不需要手动注册：
 
 | 目录 | 对应 src | 目录 | 对应 src |
 |---|---|---|---|
-| `tests/agent/` | `src/agent`(+core) | `tests/memory/` | `src/memory` |
-| `tests/api/` | `src/api` | `tests/rag/` | `src/rag` |
+| `tests/agent/` | `src/agent`（含 `core`：如 `security_filter` / `url_guard` / tool 黑名单） | `tests/memory/` | `src/memory`（含 `security_event_store`） |
+| `tests/api/` | `src/api`（含安全红队侧车与路由相关 UT，如 `test_security_adversarial`） | `tests/rag/` | `src/rag` |
 | `tests/cli/` | `src/cli` | `tests/skills/` | `src/skills` |
-| `tests/llm/` | `src/llm` | `tests/security/` | 安全相关（关注点内聚） |
-| `tests/optional/` | langchain/autogpt 备用实现（默认不收集，见 §1.7） | | |
+| `tests/llm/` | `src/llm` | `tests/optional/` | langchain/autogpt 备用实现（默认不收集，见 §1.7） |
 
 ---
 

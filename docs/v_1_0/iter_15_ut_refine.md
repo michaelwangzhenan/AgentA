@@ -135,17 +135,17 @@ flowchart TD
 
 | 目标目录 | 对应 src | 测试文件 |
 |---|---|---|
-| `tests/agent/` | `src/agent` + `src/agent/core` | test_agent, test_agent_protocol, test_agent_events, test_agent_concurrency, test_agent_active_plan_injection, test_tools, test_tools_mcp_integration, test_tool_call_engine, test_plan_manager, test_plan_permission, test_system_prompt, test_event_bus, test_harness_manager, test_harness_integration, test_research_engine, test_memory_manager, test_history_manager, test_srs_scheduler, test_mcp_manager, test_mcp_config |
-| `tests/api/` | `src/api` | test_api_*（health, srs, quizzes, kb, eval, mcp, usage, config, keys, chat, chat_stream, memory, rules, plans, sessions, skills）, test_chat_routing |
+| `tests/agent/` | `src/agent` + `src/agent/core` | test_agent, test_agent_protocol, test_agent_events, test_agent_concurrency, test_agent_active_plan_injection, test_tools, test_tools_mcp_integration, test_tool_call_engine, test_plan_manager, test_plan_permission, test_system_prompt, test_event_bus, test_harness_manager, test_harness_integration, test_research_engine, test_memory_manager, test_history_manager, test_srs_scheduler, test_mcp_manager, test_mcp_config, **test_security_filter**, **test_url_guard**, **test_tool_blocklist** |
+| `tests/api/` | `src/api` | test_api_*（health, srs, quizzes, kb, eval, mcp, usage, config, keys, chat, chat_stream, memory, rules, plans, sessions, skills）, test_chat_routing, **test_security_adversarial** |
 | `tests/cli/` | `src/cli` | test_cli_handlers, test_cli_handlers_thinking, test_cli_handlers_study, test_cli_handlers_quiz, test_cli_handlers_srs, test_cli_handlers_mcp |
 | `tests/llm/` | `src/llm` | test_llm, test_model_router, test_llm_judge_helper, test_llm_provider_sanitize |
-| `tests/memory/` | `src/memory` | test_memory, test_user_memory, test_save_history, test_user_store, test_usage_store, test_savings_store, test_learning_plan_store, test_quiz_store, test_srs_store, test_golden_store, test_trace_store, test_semantic_cache, test_data_isolation |
+| `tests/memory/` | `src/memory` | test_memory, test_user_memory, test_save_history, test_user_store, test_usage_store, test_savings_store, test_learning_plan_store, test_quiz_store, test_srs_store, test_golden_store, test_trace_store, test_semantic_cache, test_data_isolation, **test_security_event_store** |
 | `tests/rag/` | `src/rag` | test_rag, test_rag_judge, test_golden_gen, test_citation_builder, test_format_search_results, test_parser, test_runner_answer_quality |
 | `tests/skills/` | `src/skills` | test_skill_loader |
-| `tests/security/` | `src/agent/core`（安全相关，关注点内聚） | test_security_filter, test_security_adversarial, test_security_event_store, test_url_guard, test_tool_blocklist |
+| （已并入上表） | `src/agent/core`、`src/memory`、`tools/…` + `src/api` | 原 `tests/security/`：`test_security_filter` / `test_url_guard` / `test_tool_blocklist` → `tests/agent/`；`test_security_event_store` → `tests/memory/`；`test_security_adversarial`（红队 API + runner）→ `tests/api/`（见 iter_16） |
 | `tests/optional/`（**类别 A**，不被默认扫描） | 备用实现 | test_langchain_agent, test_autogpt_agent |
 
-- **决策（记录）**：`security` 单列子目录（不塞进 agent）——5 个文件关注点内聚、便于整体看安全回归；这是对「严格对齐 src」的有意偏离。
+- **决策（记录，iter_16 修订）**：取消 `tests/security/` 单列，安全 UT 按**被测代码所在包**归入 `tests/agent/`、`tests/memory/`、`tests/api/`，与 `src/` 对齐；不再保留「为内聚而偏离 src」的独立目录。
 - **决策（记录）**：`agent/core` 的测试归 `tests/agent/`（不再下沉一级），保持 1 级深度、最简洁。
 - `conftest.py` 留在 `tests/` 根（autouse fixture 对所有子目录生效）。
 
