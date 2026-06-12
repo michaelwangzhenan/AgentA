@@ -37,7 +37,7 @@
 
 | 层 | 文件 | 说明 |
 |---|---|---|
-| 配置 | `src/config.py` / `.env` / `.env.example` / `src/api/config_meta.py` | 7 项 `DEEP_RESEARCH_*`（开关 / 子问题数 / 并行数 / 子代理轮次 / 单代理来源上限 / 总来源上限 / 反思开关），含 UI「Deep Research」分组 |
+| 配置 | `src/config.py` / `.env` / `.env.example` / `src/api/runtime/config_meta.py` | 7 项 `DEEP_RESEARCH_*`（开关 / 子问题数 / 并行数 / 子代理轮次 / 单代理来源上限 / 总来源上限 / 反思开关），含 UI「Deep Research」分组 |
 | 事件 | `src/agent/core/event_bus.py` | 7 个 `research_*` 事件常量 + 注册进 `ALL_EVENT_TYPES` |
 | 引用 | `src/agent/core/citation_builder.py` | `Citation` 加 `url`/`title`；`register_web()`（哨兵 key 防撞 KB）；`_render_one` web 分支 |
 | 工具 | `src/agent/tools.py` | `web_search`/`fetch_url` 接 `citation_builder`（`cite_web` 门控）；`get_research_tools()` 限定 3 检索工具 |

@@ -1,4 +1,4 @@
-// 跟后端 src/api/schemas/config.py + src/api/config_meta.py 对齐
+// 跟后端 src/api/schemas/config.py + src/api/runtime/config_meta.py 对齐
 
 export type ConfigItemType =
   | 'bool'

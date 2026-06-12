@@ -21,8 +21,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 import src.config as _cfg
-from src.api import config_overrides
-from src.api.config_meta import REGISTRY
+from src.api.runtime import config_overrides
+from src.api.runtime.config_meta import REGISTRY
 from src.api.main import app
 from src.memory import golden_store
 

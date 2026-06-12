@@ -35,7 +35,7 @@ def _snapshot_initial() -> None:
     global _snapshot_taken
     if _snapshot_taken:
         return
-    from src.api.config_meta import REGISTRY
+    from .config_meta import REGISTRY
     for item in REGISTRY:
         if item.editable:
             _initial_values[item.key] = getattr(_cfg, item.key, None)
@@ -120,8 +120,8 @@ def reload_from_file() -> dict[str, Any]:
 
     返回 `{key: (old_value, new_value)}` 描述本次实际变化的 key。
     """
-    from src.api import config_hooks
-    from src.api.config_meta import REGISTRY
+    from . import config_hooks
+    from .config_meta import REGISTRY
 
     changed: dict[str, tuple[Any, Any]] = {}
     with _lock:

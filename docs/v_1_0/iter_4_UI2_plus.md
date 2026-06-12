@@ -104,9 +104,9 @@ flowchart LR
 
 | Step | 内容 | 关键产物 |
 |---|---|---|
-| **1. metadata registry** | 集中描述每项的：key / 类型 / 默认值 / 取值范围 / 简要说明 / 详细说明 / 副作用提示 / 危险标记。`GET /api/config` 返回"当前值 + metadata"组合 | `src/api/config_meta.py` + 扩展 `ConfigResponse` |
+| **1. metadata registry** | 集中描述每项的：key / 类型 / 默认值 / 取值范围 / 简要说明 / 详细说明 / 副作用提示 / 危险标记。`GET /api/config` 返回"当前值 + metadata"组合 | `src/api/runtime/config_meta.py` + 扩展 `ConfigResponse` |
 | **2. 写端点 + 持久化** | `PATCH /api/config` 接收 `{key, value}`、Pydantic 校验、运行时写回 `src.config` 模块属性；持久化到 `.agenta/config_overrides.json`；启动时优先加载该文件覆盖 `os.getenv` 默认值 | `routes/config.py` + 新增 overrides loader |
-| **3. 副作用 hook** | 按 key 注册"改后触发什么"：`active_provider` → 重建 LLM client；`MCP_*` → manager reload；`LOG_LEVEL` → `logging.setLevel`；embedding / reranker → 清模型缓存；其他无副作用项 noop | `src/api/config_hooks.py` |
+| **3. 副作用 hook** | 按 key 注册"改后触发什么"：`active_provider` → 重建 LLM client；`MCP_*` → manager reload；`LOG_LEVEL` → `logging.setLevel`；embedding / reranker → 清模型缓存；其他无副作用项 noop | `src/api/runtime/config_hooks.py` |
 | **4. 前端重构** | 控件工厂（按 metadata.type 渲染 Switch / RadioGroup / Select / NumberInput / Input / Textarea）+ 顶部搜索 + 分组导航 + dirty 状态 + info Tooltip + 行内校验报错 + 重置按钮 + 副作用提示 toast + 危险项二次确认 Dialog | 重写 `frontend/src/components/settings/SettingsView.tsx`，拆出控件子组件 |
 | **5. 测试 + 验收** | 后端 UT 覆盖每组至少 1 个 key 的：读 / 写 / 校验失败 / 持久化 / 副作用 hook 触发；端到端手测走 §1.1.2 F 4 类副作用提示 + §E 危险二次确认 | 扩充 `tests/test_api_config.py` + §1.3 |
 
@@ -141,7 +141,7 @@ flowchart LR
 | API key | 不写进 registry，UI 不可见 | 与 §1.1.3 决定一致；防泄漏的红线在 routes/config.py + UT 双层兜底 |
 | 暂不暴露的项 | `IMP_METHOD` / `AUTOGPT_*` / `HARNESS_*` / `BM25_*` / `RAG_DENSE_MIN_SCORE_*` / `QUIZ_DEFAULT_*` / `SRS_*` / `LEARNING_PLAN_*` / `THINKING_BUDGET_*` 子项等 | 操作 / 调优内部参数，非典型用户面板需求；想改可走 `.env` |
 
-**当前 registry 覆盖范围**：8 组 27 个 key。新增 key 的成本：在 `src/api/config_meta.py` `REGISTRY` 列表加一条 `ConfigItem`，无需改前端。
+**当前 registry 覆盖范围**：8 组 27 个 key。新增 key 的成本：在 `src/api/runtime/config_meta.py` `REGISTRY` 列表加一条 `ConfigItem`，无需改前端。
 
 ## 1.3. 1.3 人工验收
 

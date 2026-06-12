@@ -874,7 +874,7 @@ def main(argv: list[str] | None = None) -> int:
     # UI 设置页改的配置持久化在 .agenta/config_overrides.json；runner 作为独立子进程默认
     # 不读它，这里显式应用，让 UI 改的 EVAL_JUDGE_MODEL / EVAL_GOLDEN_USE_PENDING 等生效。
     try:
-        from src.api import config_overrides
+        from src.api.runtime import config_overrides
         config_overrides.apply_overrides()
     except Exception as e:  # noqa: BLE001 — 应用失败用默认配置继续，不阻断评估
         logger.warning("[eval] 应用 config override 失败（用默认配置继续）：%s", e)

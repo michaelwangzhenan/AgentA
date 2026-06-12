@@ -13,9 +13,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
 import src.config as _cfg
-from src.api import config_hooks, config_overrides
 from src.api.deps import get_current_user, require_admin
-from src.api.config_meta import (
+from src.api.runtime import config_hooks, config_overrides
+from src.api.runtime.config_meta import (
     GROUP_LABELS,
     REGISTRY,
     ConfigItem,

@@ -9,7 +9,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from src.api import api_keys as _store
+from src.api.runtime import api_keys as _store
 from src.api.deps import require_admin
 from src.api.schemas.api_keys import (
     ApiKeysResponse,

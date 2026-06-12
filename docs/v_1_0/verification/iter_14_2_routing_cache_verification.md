@@ -100,7 +100,7 @@ cd frontend && npx tsc --noEmit -p tsconfig.json
 | 编排 | `src/api/routes/chat.py` / `schemas/chat.py` | `skip_cache` 入参；查缓存记 hit/miss 分母；流式 `final_answer` 帧透传实际模型 |
 | 采集 | `src/memory/usage_store.py` | `cache_lookups` 表 + 记录 / 聚合 + 删号级联清 |
 | API | `src/api/routes/usage.py` | `SavingsSummary` 增命中率字段 |
-| 配置 | `src/api/config_meta.py` | `jiangben` 组 7 项 + 分类器模型动态候选 |
+| 配置 | `src/api/runtime/config_meta.py` | `jiangben` 组 7 项 + 分类器模型动态候选 |
 | 前端 | `settings/{SettingsView,ConfigField,SettingsPage}.tsx`、`chat/MessageBubble.tsx`、`hooks/useChat.ts`、`api/client.ts`、`types/{chat,usage}.ts`、`usage/SavingsPanel.tsx` | 降本组渲染 + 候选池嵌入 + 条件灰显；气泡徽章；重新生成绕缓存；命中率卡片 |
 | 测试 | `tests/test_{model_router,usage_store,api_chat,api_config}.py` | 新增 / 改写 UT |
 

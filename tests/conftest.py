@@ -51,7 +51,7 @@ def _neutralize_runtime_overrides():
     不删 override 文件（`reset_for_test` 会 unlink 文件，会清掉开发者的真实配置，故不用它）。
     snapshot 未建立（没 import 过 main）时为 no-op，此时本来也无污染。
     """
-    from src.api import config_overrides as _ov
+    from src.api.runtime import config_overrides as _ov
 
     if _ov._snapshot_taken:
         for key, val in _ov._initial_values.items():

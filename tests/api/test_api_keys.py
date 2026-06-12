@@ -20,7 +20,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import src.config as _cfg
-from src.api import api_keys as _store
+from src.api.runtime import api_keys as _store
 from src.api.deps import get_user_store
 from src.api.main import app
 from src.memory.user_store import UserStore

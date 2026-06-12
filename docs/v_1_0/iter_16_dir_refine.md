@@ -66,13 +66,11 @@
 
 ---
 
-### P1：`src/api` 根部的 `api_keys.py` 与 `routes/api_keys.py` 并存
+### P1：`src/api` 根部的非路由模块（已处理）
 
-**现象**：路由模块与同级其他单文件职责需打开文件才能区分。
+**原现象**：`api_keys.py` 与 `routes/api_keys.py` 同名不同责；`config_*.py` 与路由混在 `src/api/` 根下，导航成本高。
 
-**影响**：命名上容易误以为「只有 routes 里才有 keys 相关逻辑」，**导航成本略高**。
-
-**改进方向（讨论）**：把非路由模块收到子目录（例如 `services/`、`lib/`、`helpers/`）或改名体现非路由职责（与团队现有风格对齐即可）。
+**处理**：`api_keys.py`、`config_hooks.py`、`config_meta.py`、`config_overrides.py` 迁入 **`src/api/runtime/`**；HTTP 仍在 `routes/`。import 统一为 `src.api.runtime` / `src.api.runtime.config_meta`。
 
 ---
 
@@ -118,7 +116,7 @@
 |------|------|
 | **可维护** | API 与前端分层良好；`tests/` 已与 `src` 对齐；若再出现根目录与子包双轨用例需及时合并。 |
 | **易扩展** | 新路由、新 `memory` store、新前端领域目录都有明确「落点」；`tools` 需补一条命名约定以免继续分叉。 |
-| **可迭代** | 小步演进友好；大重构建议顺序：**`tests/` 已与 src 对齐** → **`src/core` 已并入 memory** → 再处理 `src/api` 根部杂文件 → 最后考虑运行期目录聚合。 |
+| **可迭代** | 小步演进友好；**`tests/`、`src/core`、`src/api` 运行时模块归位** 已推进；余下为 `tools` 命名与运行期目录约定等。 |
 
 ---
 
@@ -126,7 +124,7 @@
 
 1. ~~**治理 `tests/`**~~：**已落实**（mirror `src`，见上文 P0）。
 2. ~~**消解 `src/core` 与 `src/agent/core` 的泛名冲突**~~：**已落实**——`user_context.py` 迁入 `src/memory/`，删除 `src/core/`。
-3. **整理 `src/api` 根目录单文件职责**（非路由逻辑归位）。
+3. ~~**整理 `src/api` 根目录单文件职责**~~：**已落实**——`api_keys` 与 `config_*` 迁入 `src/api/runtime/`（见上文 P1）。
 4. **`tools` 命名规则文档化或轻度重排**。
 5. **（可选）运行期目录约定**：数据根变量 + `.gitignore` 说明即可，不必强行物理合并。
 

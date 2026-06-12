@@ -159,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     # 应用 UI 设置页持久化的 config override（.agenta/config_overrides.json），让 UI 改的
     # 评估相关配置在聚合入口及其报告里也生效（各子进程脚本各自再应用一次，互不影响）。
     try:
-        from src.api import config_overrides
+        from src.api.runtime import config_overrides
         config_overrides.apply_overrides()
     except Exception:  # noqa: BLE001 — 应用失败用默认配置继续
         pass
