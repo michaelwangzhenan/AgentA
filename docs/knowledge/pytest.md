@@ -12,7 +12,7 @@ Python 生态最主流的单元测试框架。AgentA 全部 UT 用它，测试�
 |---|---|---|
 | 装 | `pip install pytest` | AgentA 已在 `.venv/` 装好，不要用系统环境 |
 | 跑全部（默认集） | `pytest` | 读 `pytest.ini`，递归收集 `tests/` 各子目录的 `test_*.py` |
-| 跑单个文件 | `pytest tests/skills/test_skill_loader.py` | 调试单模块最常用 |
+| 跑单个文件 | `pytest tests/skills/test_skills_skill_loader.py` | 调试单模块最常用 |
 | 跑单个目录 | `pytest tests/memory` | 只跑某一层（按 src 分包，见 §1.2） |
 
 AgentA 里固定用虚拟环境跑：
@@ -40,7 +40,7 @@ pytest 靠**命名约定**自动找测试，不需要手动注册：
 | 目录 | 对应 src | 目录 | 对应 src |
 |---|---|---|---|
 | `tests/agent/` | `src/agent`（含 `core`：如 `security_filter` / `url_guard` / tool 黑名单） | `tests/memory/` | `src/memory`（含 `security_event_store`） |
-| `tests/api/` | `src/api`（含安全红队侧车与路由相关 UT，如 `test_security_adversarial`） | `tests/rag/` | `src/rag` |
+| `tests/api/` | `src/api`（文件名建议统一为 `test_api_*.py`，含红队与路由等） | `tests/rag/` | `src/rag`（建议 `test_rag_*.py`） |
 | `tests/cli/` | `src/cli` | `tests/skills/` | `src/skills` |
 | `tests/llm/` | `src/llm` | `tests/optional/` | langchain/autogpt 备用实现（默认不收集，见 §1.7） |
 

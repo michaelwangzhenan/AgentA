@@ -23,7 +23,7 @@
 | A1 | `run_all` 一条命令出总报告 | 跑 `python -m tools.agent_eval.run_all --ci` | ✅ 生成 `reports/run-all-20260610-104102.md`，含每项 PASS/FAIL + 关键指标 |
 | A2 | 新指标（faithfulness / answer-relevance）有分数 | `test_judge_rag_metrics`（mock LLM 返回 JSON，校验解析出 0-5 分 + 理由） | ✅ UT 覆盖；真实分数需带 API key 手动跑 |
 | A3 | chat 后 `usage.db` 有 trace | `test_trace_store`（`TraceCollector` 从事件流建 span + `record_trace`/`record_trace_safe` 落库 + 查询） | ✅ UT 覆盖采集→落库→读取全链路；真实对话 trace 需起服务手动复核 |
-| A4 | 入库后 golden 库出现 pending 候选 | `test_golden_gen`（mock LLM 生成候选，写 `status=pending, source=ai`）+ `test_api_kb` 上传钩子 | ✅ UT 覆盖；真实入库生成需带 API key 手动跑 |
+| A4 | 入库后 golden 库出现 pending 候选 | `test_rag_golden_gen`（mock LLM 生成候选，写 `status=pending, source=ai`）+ `test_api_kb` 上传钩子 | ✅ UT 覆盖；真实入库生成需带 API key 手动跑 |
 | A5 | admin 管理页可 CRUD + 审核 | `test_api_eval`（golden 增删改查 + 改状态 + 按状态筛选 + 非 admin 拒绝）+ 前端 `GoldenManager.tsx` | ✅ 后端 UT + 前端组件齐备 |
 | A6 | 看板能看概览 / 瀑布 / 趋势 | `test_api_eval`（overview / series / list / detail 端点）+ 前端 `TraceDashboard.tsx` | ✅ 后端 UT + 前端组件齐备 |
 | A7 | CI eval job 能拦回归 | `.github/workflows/AgentA_CI.yml` 新增 EVAL job，跑 `run_all --ci`、grep `FAIL` 失败即 exit 1、传 artifact | ✅ 沿用 perf 门禁模式 |

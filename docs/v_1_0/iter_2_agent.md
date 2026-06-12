@@ -228,7 +228,7 @@ Review 完整实现 @AgentA 目录
 | `tests/test_history_manager.py` | 11 | `_load_truncated_history` 截断 / 空历史 / system 过滤 / SQL 粗粒度上限 + `_collect_skill_pairs` skill 组保护 |
 | `tests/test_memory_manager.py` | 10 | `Agent.run` 注入 `<user_context>` 三态 + `_try_extract_memories` 五种触发分支 + 异常静默 |
 | `tests/test_event_callbacks.py` | 13（含 2 xfail） | `set_thinking/token_callback` 安装/重置/替换 + `_on_thinking_chunk` 透传 + EventBus 未抽出前的扇出/隔离 placeholder |
-| `tests/test_format_search_results.py` | 12 | 空 hits / score vs distance / 多 hit 分隔 / retrievers / heading_path / page_no |
+| `tests/rag/test_rag_format_search_results.py` | 12 | 空 hits / score vs distance / 多 hit 分隔 / retrievers / heading_path / page_no |
 | `tests/test_agent_protocol.py` | 12（含 1 skip + 1 xfail） | Python & AutoGPT 的 `run / activate_skill / session_id` 签名一致；事件接口当前分布；EventBus 未对齐前的 xfail 锁定 |
 
 **对4.5 重构信号约定**：
@@ -1427,7 +1427,7 @@ sequenceDiagram
 | **B UI** | 2 | `main.py` 启动后 `print` "已发现 N 个 skill: [name1, name2]"；failed 非空时 print 红色失败列表 + 路径 + reason | `main.py` |
 | **B UI** | 3 | `chainlit_app.py` 启动 callback 同步打印（保持双端一致） | `chainlit_app.py` |
 | **C 业务** | 4 | 新增 `study-planner` 真实 skill：frontmatter（`name / description / when_to_use`）+ 两周复习模板 body + 默认结合 RAG 召回个人 KB | `.agenta/skills/study-planner/SKILL.md`（新） |
-| **D UT** | 5 | `tests/test_skill_loader.py`：scan / parse / yaml 错 / 缺 frontmatter / 同名冲突 / failed 字段格式 | `tests/test_skill_loader.py`（新或扩） |
+| **D UT** | 5 | `tests/skills/test_skills_skill_loader.py`：scan / parse / yaml 错 / 缺 frontmatter / 同名冲突 / failed 字段格式 | `tests/skills/test_skills_skill_loader.py`（新或扩） |
 | **D UT** | 5.1 | `main.py` 启动打印逻辑 UT（capsys 抓 stdout，覆盖 0 skill / N skill / 含 failed 三场景） | 同上 |
 | **E 评估** | 6 | 新增 `tools/agent_eval/skills/recall_skill.py`：复用 phase 1.2 / 1.4 framework；判据 = LLM 是否调 `load_skill` + 调对了哪个 | `tools/agent_eval/skills/recall_skill.py`（新） |
 | **E 评估** | 7 | golden dataset（8 case）：4 positive（study-planner ×2 + example-skill ×2）+ 4 negative（纯闲聊 / 纯 RAG 不需激活 skill / 与 skill 主题相邻但不该激活 / `/manual` 已激活就别再自主激活）；阈值 ≥ 80% | `tools/agent_eval/skills/dataset.json`（新） |
@@ -1443,7 +1443,7 @@ sequenceDiagram
 | CLI 启动 + /reload-skills | `main.py`：启动段把 banner 显式 print；`/reload-skills` 复用同一函数 |
 | Chainlit 启动 + /reload-skills | `chainlit_app.py:on_chat_start()` 同步打印 banner 到欢迎消息；`/reload-skills` 命令同步走 |
 | 真实业务 skill | `.agenta/skills/study-planner/SKILL.md`（新）：name + 触发关键词丰富的 description；body 含 when_to_use / 输出原则 / 短/长两套模板 / 流程约束 / 反模式，引用规则参照 phase 1.4 默认机制 |
-| 加载器 UT 扩展 | `tests/test_skill_loader.py`：新增 3 个测试类共 8 case — `TestScanResultFailures`（4 case：yaml 错 / frontmatter 不闭合 / name 兜底 / 多失败按顺序）+ `TestFormatScanBanner`（3 case：empty / loaded only / 含 failed 块）+ `TestRealAgentaSkills`（1 case：仓库内置 example-skill / study-planner 0 失败） |
+| 加载器 UT 扩展 | `tests/skills/test_skills_skill_loader.py`：新增 3 个测试类共 8 case — `TestScanResultFailures`（4 case：yaml 错 / frontmatter 不闭合 / name 兜底 / 多失败按顺序）+ `TestFormatScanBanner`（3 case：empty / loaded only / 含 failed 块）+ `TestRealAgentaSkills`（1 case：仓库内置 example-skill / study-planner 0 失败） |
 | 评估脚本 | `tools/agent_eval/skills/recall_skill.py`（新）：扫真实 skills → 拼 base + catalog system_prompt → 单步 `chat()` with `tools=get_tools(skill_bodies)` → 解析 `tool_calls` 抽 `load_skill(name=…)` 列表 → positive 判命中 / negative 判未触发；存储 markdown 报告（核心指标 / 分组指标 / 全 case 总览 / Fail 详情，复用 `recall_golden.py` 风格） |
 | Golden dataset | `tools/agent_eval/skills/dataset.json`（新）：8 case，4 positive（study-planner ×3 中/速成/英文 + example-skill 规范问 ×1）+ 4 negative（greet / 纯事实 RAG / 相邻主题书单 / trivia） |
 | design.md / README | `docs/design.md` 新增 §3.7 Skills 框架（5 子节：数据来源 / 渐进披露 L1+L2 / 失败可见性 / 与 Rules+引用关系 / 评估方法 + Mermaid sequenceDiagram）；`README.md §1.2 Agent` 把"Skills 加载"bullet 改写为"Skills 框架"，覆盖启动回显 / 主动认出 / 引用复用三点新增能力 |
@@ -1453,7 +1453,7 @@ sequenceDiagram
 **Step 4 · UT 结果**
 
 ```text
-tests/test_skill_loader.py
+tests/skills/test_skills_skill_loader.py
 30 passed
 （净增 8：TestScanResultFailures 4 + TestFormatScanBanner 3 + TestRealAgentaSkills 1）
 
@@ -1485,7 +1485,7 @@ AI 跑过的单 case 烟雾（验证脚本不崩）：
 
 **Step 6 · design.md 同步**
 
-新增 [`design.md §3.7 Skills 框架`](design.md#37-skills-框架agentskills)：5 子节 — 数据来源与生命周期（含 `ScanResult` 结构）/ 渐进披露 L1+L2（Mermaid 时序）/ 失败可见性三通道 / 与 §3.5 Rules + §3.6 引用的关系（按用户主权约定 + 引用复用是免费的）/ 评估方法（test_skill_loader 30 case + recall_skill 8 case ≥ 80%）。`README.md §1.2 Agent` "Skills 加载" bullet 改写为 "Skills 框架"，三点新增能力一句话覆盖。
+新增 [`design.md §3.7 Skills 框架`](design.md#37-skills-框架agentskills)：5 子节 — 数据来源与生命周期（含 `ScanResult` 结构）/ 渐进披露 L1+L2（Mermaid 时序）/ 失败可见性三通道 / 与 §3.5 Rules + §3.6 引用的关系（按用户主权约定 + 引用复用是免费的）/ 评估方法（test_skills_skill_loader 30 case + recall_skill 8 case ≥ 80%）。`README.md §1.2 Agent` "Skills 加载" bullet 改写为 "Skills 框架"，三点新增能力一句话覆盖。
 
 **Punt 项**：H1（catalog 未同步）→ [§4.13.1 #9](#4131-deferred-backlog暂时不做)。L3 / 跨 catalog / 热重载 等本期不动项详 [§4.13.1 #7 #8](#4131-deferred-backlog暂时不做) 与 [§4.13.2 #21-#24](#4132-dropped永久不做)。
 
@@ -1937,7 +1937,7 @@ Phase 2.2 初版按"路线 A：自动注入 active plan"实现 —— 只要 DB 
 | 4 | 新建 `.agenta/skills/quiz-maker/SKILL.md`（D7 嵌套：`make_plan(steps=[解析意图/查KB/出题/落库])` → 各步对应 tool）+ "批改工作流"（用户作答 → LLM 拼 `user_answers` dict → 调 `grade_quiz`）+ "查历史工作流" + 反模式清单 + 用户呈现层模板（题目展示 / 批改结果展示） | G3 + G10 + D7 | [`.agenta/skills/quiz-maker/SKILL.md`](../.agenta/skills/quiz-maker/SKILL.md) | + ~150 行 |
 | 5 | CLI `/quiz` 命令组：`list` / `show <quiz_set_id>` / `del <quiz_set_id>` + `_QUIZ_USAGE` 帮助 + `_format_quiz_brief` / `_print_quiz_list` / `_print_quiz_detail` / `_parse_quiz_id` helper + `handle_quiz` 主分发 + main.py case 路由 + tab 补全 + ui.py HELP_TEXT 同步 | G5 + D2 | [`src/cli/handlers.py`](../src/cli/handlers.py) + [`main.py`](../main.py) + [`src/cli/tab_complete.py`](../src/cli/tab_complete.py) + [`src/cli/ui.py`](../src/cli/ui.py) | + ~180 行 |
 | 6 | Phase 2.3 评估器：`tools/agent_eval/quiz/dataset.json` 10 case（5 create：RAG / 5G NR / Python / ML 面试 / PMP + 3 negative：闲聊 / 单事实查 / "教我 X"歧义 + 2 grade case：标答对错混合）+ `eval_quiz.py`（双判定：触发识别率 + plan 质量 LLM-judge + 可选 grade 质量 judge；复用 `judge_with_llm` 第 3 次）+ `_QUIZ_QUALITY_CRITERIA`（相关性 / 难度 / 答案可推导 / 覆盖度）+ `_GRADE_QUALITY_CRITERIA`（识别 / 评分公平 / 反馈具体）；entry point 顶部 `load_dotenv(override=True)` | G6 + G7 + G8 + D6 | 新建 [`tools/agent_eval/quiz/__init__.py`](../tools/agent_eval/quiz/__init__.py) + [`tools/agent_eval/quiz/dataset.json`](../tools/agent_eval/quiz/dataset.json) + [`tools/agent_eval/quiz/eval_quiz.py`](../tools/agent_eval/quiz/eval_quiz.py) | + ~450 行 |
-| 7 | UT 全套：`QuizStore` CRUD / 三业务 tool 函数 / CLI 命令 / skill catalog（quiz-maker 是否被 scan_skills 发现） | 所有 G | 新建 [`tests/test_quiz_store.py`](../tests/test_quiz_store.py) ~30 case + [`tests/test_quiz_tools.py`](../tests/test_quiz_tools.py) ~25 case + [`tests/test_cli_handlers_quiz.py`](../tests/test_cli_handlers_quiz.py) ~15 case + 扩 [`tests/test_skill_loader.py`](../tests/test_skill_loader.py)（已有，加 1 case 确认 quiz-maker 被发现） | + ~600 行 |
+| 7 | UT 全套：`QuizStore` CRUD / 三业务 tool 函数 / CLI 命令 / skill catalog（quiz-maker 是否被 scan_skills 发现） | 所有 G | 新建 [`tests/test_quiz_store.py`](../tests/test_quiz_store.py) ~30 case + [`tests/test_quiz_tools.py`](../tests/test_quiz_tools.py) ~25 case + [`tests/test_cli_handlers_quiz.py`](../tests/test_cli_handlers_quiz.py) ~15 case + 扩 [`tests/skills/test_skills_skill_loader.py`](../tests/skills/test_skills_skill_loader.py)（已有，加 1 case 确认 quiz-maker 被发现） | + ~600 行 |
 | 8 | 全量回归 + smoke 跑 evaluator（`--no-judge` 解析 dataset / `--case <id>` 单跑）+ ReadLints | — | `pytest -q --ignore=tests/test_rag.py --ignore=tests/test_llm.py` 应净增 ~70（543 + 70 = ~613）；0 退化 | — |
 | 9 | design.md 同步：新增 §3.10 测验业务（6-7 子节，仿 §3.9 学习计划业务结构）+ §5 IMP 表加 `QuizStore` 依赖行 + `tools.py` 加 Phase 2.3 三 tool 备注；iter_2.md Step 3-6 落地 | 所有 G | [`docs/design.md`](design.md) + [`docs/iter_2_agent.md`](iter_2_agent.md) | + ~300 行 |
 
@@ -1953,7 +1953,7 @@ Phase 2.2 初版按"路线 A：自动注入 active plan"实现 —— 只要 DB 
 | `quiz-maker` skill（G3 + G10 + D7） | 新建 [`.agenta/skills/quiz-maker/SKILL.md`](../.agenta/skills/quiz-maker/SKILL.md) 200 行：触发条件 + 6 类意图 × tool 映射表 + D5 嵌套工作流（`make_plan(steps=[解析意图 / 查 KB / 60% MCQ + 40% 简答组题 / 落库 4 步])` → 各步对应 tool）+ create_quiz questions 严格格式约束 + 批改工作流（用户题号 → question_id 映射 → grade_quiz）+ 查历史工作流 + 反模式清单 + 用户呈现层模板（题目展示 / 批改结果展示）；description 字段含三新 tool 名 + D5 嵌套关键字 |
 | CLI `/quiz` 命令组（G5 + D2） | [`src/cli/handlers.py`](../src/cli/handlers.py) 加 `_QUIZ_USAGE` + `_format_quiz_brief` / `_print_quiz_list`（含 plan_id 过滤路径）/ `_print_quiz_detail`（含批改细节）/ `_parse_quiz_id` 4 helper + `handle_quiz(store, cmd_parts)` 主函数（match `list` / `show` / `del` 三子命令；`del` 二次确认）；[`main.py`](../main.py) 加 `case "/quiz"` 路由复用 `get_shared_store()`；[`src/cli/tab_complete.py`](../src/cli/tab_complete.py) 加 5 个 `/quiz*` 补全项；[`src/cli/ui.py`](../src/cli/ui.py) HELP_TEXT 加 4 行测验命令说明 |
 | Phase 2.3 评估器（G6 + G7 + G8 + D6 第 3 次复用） | 新建 [`tools/agent_eval/quiz/__init__.py`](../tools/agent_eval/quiz/__init__.py) 空 + [`tools/agent_eval/quiz/dataset.json`](../tools/agent_eval/quiz/dataset.json) 12 case（6 create：RAG / Python / ML / 5G NR / plan stage / Transformer 复习 + 2 history：列测验 / 错题复盘 + 4 negative：定义查询 / 闲聊 / 学习计划新建 / 概念对比）+ [`tools/agent_eval/quiz/eval_quiz.py`](../tools/agent_eval/quiz/eval_quiz.py) 460 行：仿 `eval_learning_plan.py` 套路 — `_EVAL_SYSTEM_PROMPT`（quiz-maker 模拟 + 学习计划 vs 测验边界引导）+ `_PLAN_QUALITY_CRITERIA`（4 维：意图解析 / KB 检索 / 出题组织 60/40 / 落库步骤）+ `_judge_recall` 加 history category 第三路径 + 双阈值退出码（识别率 ≥ 80% AND plan 质量均分 ≥ 4.0/5）；顶部 `load_dotenv(override=True)` |
-| UT 全套（覆盖所有 G） | 新建 3 个测试文件 + 扩 1 个 — [`tests/test_quiz_store.py`](../tests/test_quiz_store.py) 29 case（基本 CRUD 11 / update_grading 7 / lifecycle 5 / list_quiz_sets 5 / context manager 1）+ [`tests/test_quiz_tools.py`](../tests/test_quiz_tools.py) 43 case（schema 5 / create_quiz 10 含 plan goal 派生 + LearningPlanStore mock / grade_quiz 7 含 MCQ 归一化 + short answer judge mock / query_quiz_history 8 三路径 / 路由 1 / MCQ 归一化 helper 7 / 简答 judge 5）+ [`tests/test_cli_handlers_quiz.py`](../tests/test_cli_handlers_quiz.py) 18 case（list 6 含 plan 过滤 / show 7 含批改细节 / del 4 含 confirm mock / unknown 1）+ 扩 [`tests/test_skill_loader.py`](../tests/test_skill_loader.py) `TestRealAgentaSkills::test_repo_skills_loadable` 加 `quiz-maker in result.loaded` 断言 |
+| UT 全套（覆盖所有 G） | 新建 3 个测试文件 + 扩 1 个 — [`tests/test_quiz_store.py`](../tests/test_quiz_store.py) 29 case（基本 CRUD 11 / update_grading 7 / lifecycle 5 / list_quiz_sets 5 / context manager 1）+ [`tests/test_quiz_tools.py`](../tests/test_quiz_tools.py) 43 case（schema 5 / create_quiz 10 含 plan goal 派生 + LearningPlanStore mock / grade_quiz 7 含 MCQ 归一化 + short answer judge mock / query_quiz_history 8 三路径 / 路由 1 / MCQ 归一化 helper 7 / 简答 judge 5）+ [`tests/test_cli_handlers_quiz.py`](../tests/test_cli_handlers_quiz.py) 18 case（list 6 含 plan 过滤 / show 7 含批改细节 / del 4 含 confirm mock / unknown 1）+ 扩 [`tests/skills/test_skills_skill_loader.py`](../tests/skills/test_skills_skill_loader.py) `TestRealAgentaSkills::test_repo_skills_loadable` 加 `quiz-maker in result.loaded` 断言 |
 
 **Step 4 · UT 结果**
 
@@ -1963,7 +1963,7 @@ Phase 2.2 初版按"路线 A：自动注入 active plan"实现 —— 只要 DB 
   tests/test_quiz_tools.py             43 passed
   tests/test_cli_handlers_quiz.py      18 passed
 扩展测试文件（1 个）：
-  tests/test_skill_loader.py           +1 case（quiz-maker 自动发现断言）
+  tests/skills/test_skills_skill_loader.py           +1 case（quiz-maker 自动发现断言）
 
 全量回归：python -m pytest -q
 → 677 passed, 2 failed, 110 deselected, 3 warnings in 71.73s
@@ -2084,7 +2084,7 @@ python -m tools.agent_eval.quiz.eval_quiz --no-judge   # 仅触发识别
 | 5 | 新建 `.agenta/skills/srs-review/SKILL.md`（仿 quiz-maker SKILL 结构）+ quiz-maker SKILL 加"错题进 SRS"钩子段（在批改工作流末尾） | G4 + G5 + D5 + D7 | 新建 [`.agenta/skills/srs-review/SKILL.md`](../.agenta/skills/srs-review/SKILL.md)（~180 行）；改 [`.agenta/skills/quiz-maker/SKILL.md`](../.agenta/skills/quiz-maker/SKILL.md)（+ ~20 行） | + ~200 行 |
 | 6 | CLI `/srs` 命令组：`list [active\|suspended]` / `due` / `show <id>` / `stats` / `del <id>` + `_SRS_USAGE` + `_format_card_brief` / `_print_card_list` / `_print_card_detail` / `_parse_card_id` helper + `handle_srs` 主分发 + main.py case 路由 + tab 补全 + ui.py HELP_TEXT | G6 + G7 | [`src/cli/handlers.py`](../src/cli/handlers.py) + [`main.py`](../main.py) + [`src/cli/tab_complete.py`](../src/cli/tab_complete.py) + [`src/cli/ui.py`](../src/cli/ui.py) | + ~200 行 |
 | 7 | Phase 2.4 evaluator + golden set：仿 [`eval_quiz.py`](../tools/agent_eval/quiz/eval_quiz.py) 套路 — `_EVAL_SYSTEM_PROMPT` 内嵌 srs-review skill 模拟段 + 触发识别 judge + `judge_with_llm` 第 4 次复用（review path 不调 judge — D6 决策）+ Markdown 报告 + 双阈值退出码（触发识别率 ≥ 80%；SM-2 算法对齐由 UT 单独保 ≥ 95% 分支覆盖） | G8 + D6 复用 | 新建 [`tools/agent_eval/srs/__init__.py`](../tools/agent_eval/srs/__init__.py) + [`tools/agent_eval/srs/dataset.json`](../tools/agent_eval/srs/dataset.json) 12 case（5 due 查询 + 3 add_to_srs + 2 review + 2 negative）+ [`tools/agent_eval/srs/eval_srs.py`](../tools/agent_eval/srs/eval_srs.py) | + ~450 行 |
-| 8 | UT 全套：`SRSStore` CRUD / SM-2 算法核心（含 Anki 对齐表 ≥ 20 case 锁公式） / 4 业务 tool / CLI `/srs` 命令 / skill_loader 自动发现 srs-review / quiz → SRS 钩子集成测 | 所有 G | 新建 [`tests/test_srs_store.py`](../tests/test_srs_store.py) ~30 case + [`tests/test_srs_scheduler.py`](../tests/test_srs_scheduler.py) ~25 case + [`tests/test_srs_tools.py`](../tests/test_srs_tools.py) ~30 case + [`tests/test_cli_handlers_srs.py`](../tests/test_cli_handlers_srs.py) ~15 case + 扩 [`tests/test_skill_loader.py`](../tests/test_skill_loader.py) +1 case（srs-review 自动发现）| + ~700 行 |
+| 8 | UT 全套：`SRSStore` CRUD / SM-2 算法核心（含 Anki 对齐表 ≥ 20 case 锁公式） / 4 业务 tool / CLI `/srs` 命令 / skill_loader 自动发现 srs-review / quiz → SRS 钩子集成测 | 所有 G | 新建 [`tests/test_srs_store.py`](../tests/test_srs_store.py) ~30 case + [`tests/test_srs_scheduler.py`](../tests/test_srs_scheduler.py) ~25 case + [`tests/test_srs_tools.py`](../tests/test_srs_tools.py) ~30 case + [`tests/test_cli_handlers_srs.py`](../tests/test_cli_handlers_srs.py) ~15 case + 扩 [`tests/skills/test_skills_skill_loader.py`](../tests/skills/test_skills_skill_loader.py) +1 case（srs-review 自动发现）| + ~700 行 |
 | 9 | 全量回归 + smoke 跑 evaluator（`--no-judge` + `--case <id>`）+ ReadLints；design.md 同步：新增 §3.11 SRS 业务（5-6 子节，仿 §3.9 / §3.10 结构）+ §5 IMP 表加 `SRSStore` + `srs_scheduler` 依赖行 + `tools.py` 行加 Phase 2.4 四 tool 备注；iter_2.md Step 3-6 落地 | 所有 G | `pytest -q --ignore=...` 应净增 ~100（677 + ~100 = ~777，0 业务退化）；[`docs/design.md`](design.md) + [`docs/iter_2_agent.md`](iter_2_agent.md) | + ~400 行 |
 
 **SM-2 公式快速预览**（D1 + D4 实现要点，留 Step 3 细节）：
@@ -2122,7 +2122,7 @@ UT 锁公式：对照 Anki 默认调度行为表 ≥ 20 case（初次 / 第二�
 | 5 | `.agenta/skills/srs-review/SKILL.md`（新建）+ `quiz-maker/SKILL.md` 改 | +200 | +208 | srs-review 含完整复习工作流 + manual 卡 + quiz 钩子；quiz-maker 批改末尾加"加 SRS"建议段 |
 | 6 | `src/cli/handlers.py` + `main.py` + `tab_complete.py` + `ui.py` | +200 | +172 | `handle_srs` + 5 helper + main.py case 1 行 + tab 补全 9 个新条目 + ui.py HELP 6 行 |
 | 7 | `tools/agent_eval/srs/`（新建）| +450 | +405 | `__init__.py` + `dataset.json` 12 case + `eval_srs.py`（不调 judge，单触发识别指标）|
-| 8 | `tests/test_srs_*.py`（4 新文件）+ 扩 `test_skill_loader.py` | +700 | +775 | 详 Step 4 |
+| 8 | `tests/test_srs_*.py`（4 新文件）+ 扩 `test_skills_skill_loader.py` | +700 | +775 | 详 Step 4 |
 | 9 | `docs/design.md` + `docs/iter_2_agent.md` | +400 | +180 | design.md §3.11 SRS 业务（7 子节）+ §5 IMP 表 2 行；iter_2.md Step 3-6 落地段 |
 
 **关键实现取舍记录**
@@ -2140,9 +2140,9 @@ UT 锁公式：对照 Anki 默认调度行为表 ≥ 20 case（初次 / 第二�
 | [`tests/test_srs_scheduler.py`](../tests/test_srs_scheduler.py) | 40 | parse_rating（4 档 + 大小写容忍 + 非法 raise）+ 4 档路径全覆盖（again 重置 / hard penalty 0.8 / good 主公式 / easy bonus 1.3）+ SM-2 阶段公式（reps=1→1d / reps=2→6d / reps≥3→prev×ease）+ 边界保护（ease ≥ 1.3 / interval ≥ 1）+ next_review_at ISO 格式 + Anki 序关系锁定（again < hard < good < easy）|
 | [`tests/test_srs_tools.py`](../tests/test_srs_tools.py) | 28 | JSON Schema 完整性（4 tool 名 / enum / required）+ add_to_srs（manual / quiz_question 批量 / 防重复 / 部分跳过）+ query_srs_due（摘要 / detail / empty / limit / 非法 limit）+ review_srs_card（4 档 + 非法 + 不存在 / suspended 拒）+ query_srs_stats（empty / 有卡）+ execute_tool 路由全覆盖 |
 | [`tests/test_cli_handlers_srs.py`](../tests/test_cli_handlers_srs.py) | 19 | `/srs` 无参 / list active|suspended / due 空与非空 / show 详情 / stats / del confirm yes|no / 非法 id / 未知子命令 |
-| 扩 [`tests/test_skill_loader.py`](../tests/test_skill_loader.py) | +2 | 仓库内置 4 个 skill 全 loaded（含 srs-review）+ srs-review body 含 4 个 SRS tool 名 |
+| 扩 [`tests/skills/test_skills_skill_loader.py`](../tests/skills/test_skills_skill_loader.py) | +2 | 仓库内置 4 个 skill 全 loaded（含 srs-review）+ srs-review body 含 4 个 SRS tool 名 |
 
-**实际数字**：净增 **126 个 UT case**（39 + 40 + 28 + 19 + 0 store 校验 + 仓库 skill +2，合并入 test_skill_loader）；全量回归 `pytest -q` = **824 passed / 3 skipped / 0 failed** in 63s（Phase 2.3 基线 698 → Phase 2.4 824，净增 126，0 业务退化）。
+**实际数字**：净增 **126 个 UT case**（39 + 40 + 28 + 19 + 0 store 校验 + 仓库 skill +2，合并入 test_skills_skill_loader）；全量回归 `pytest -q` = **824 passed / 3 skipped / 0 failed** in 63s（Phase 2.3 基线 698 → Phase 2.4 824，净增 126，0 业务退化）。
 
 **Step 5 · 评估闭环**
 

@@ -33,7 +33,7 @@
 
 ### 需求1：目录重组 ✅
 79 个测试文件 `git mv` 到 `tests/{agent,api,cli,llm,memory,rag,skills,security,optional}/`（保留 git 历史）。
-- 修正移动副作用：`test_parser.py` / `test_skill_loader.py` 里基于 `__file__` 的相对路径（多一级目录）已改 `parents[2]`。
+- 修正移动副作用：`test_rag_parser.py` / `test_skills_skill_loader.py` 里基于 `__file__` 的相对路径（多一级目录）已改 `parents[2]`。
 
 ### 需求2：UT 专用配置 ✅
 新增 `UT_LLM_MODEL`（config.py + .env + .env.example）+ `resolve_ut_llm_model()` + conftest `ut_llm_model` fixture。

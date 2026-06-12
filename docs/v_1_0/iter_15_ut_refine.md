@@ -48,7 +48,7 @@
 |---|---|---|
 | 12.3+12.2+3.0s | `test_api_kb.py` 三个 upload | 真实文件入库（embedding/ChromaDB） |
 | 8.2s | `test_api_chat.py::test_chat_missing_message_returns_422` | 仅测 422 却付 app 启动开销 |
-| 4.3/2.7/2.4s | `test_parser.py` xlsx/pptx/docx | 真实解析 Office 文件 |
+| 4.3/2.7/2.4s | `tests/rag/test_rag_parser.py` xlsx/pptx/docx | 真实解析 Office 文件 |
 | 2.0+0.5s | `test_mcp_manager.py` 两个 timeout | 真实 sleep 等超时 |
 
 ---
@@ -136,13 +136,13 @@ flowchart TD
 | 目标目录 | 对应 src | 测试文件 |
 |---|---|---|
 | `tests/agent/` | `src/agent` + `src/agent/core` | test_agent, test_agent_protocol, test_agent_events, test_agent_concurrency, test_agent_active_plan_injection, test_tools, test_tools_mcp_integration, test_tool_call_engine, test_plan_manager, test_plan_permission, test_system_prompt, test_event_bus, test_harness_manager, test_harness_integration, test_research_engine, test_memory_manager, test_history_manager, test_srs_scheduler, test_mcp_manager, test_mcp_config, **test_security_filter**, **test_url_guard**, **test_tool_blocklist** |
-| `tests/api/` | `src/api` | test_api_*（health, srs, quizzes, kb, eval, mcp, usage, config, keys, chat, chat_stream, memory, rules, plans, sessions, skills）, test_chat_routing, **test_security_adversarial** |
+| `tests/api/` | `src/api` | test_api_*（含 chat_routing、security_adversarial 等，统一 `test_api_` 前缀） |
 | `tests/cli/` | `src/cli` | test_cli_handlers, test_cli_handlers_thinking, test_cli_handlers_study, test_cli_handlers_quiz, test_cli_handlers_srs, test_cli_handlers_mcp |
-| `tests/llm/` | `src/llm` | test_llm, test_model_router, test_llm_judge_helper, test_llm_provider_sanitize |
+| `tests/llm/` | `src/llm` | test_llm, test_llm_model_router, test_llm_judge_helper, test_llm_provider_sanitize |
 | `tests/memory/` | `src/memory` | test_memory, test_user_memory, test_save_history, test_user_store, test_usage_store, test_savings_store, test_learning_plan_store, test_quiz_store, test_srs_store, test_golden_store, test_trace_store, test_semantic_cache, test_data_isolation, **test_security_event_store** |
-| `tests/rag/` | `src/rag` | test_rag, test_rag_judge, test_golden_gen, test_citation_builder, test_format_search_results, test_parser, test_runner_answer_quality |
-| `tests/skills/` | `src/skills` | test_skill_loader |
-| （已并入上表） | `src/agent/core`、`src/memory`、`tools/…` + `src/api` | 原 `tests/security/`：`test_security_filter` / `test_url_guard` / `test_tool_blocklist` → `tests/agent/`；`test_security_event_store` → `tests/memory/`；`test_security_adversarial`（红队 API + runner）→ `tests/api/`（见 iter_16） |
+| `tests/rag/` | `src/rag` | test_rag, test_rag_judge, test_rag_golden_gen, test_rag_format_search_results, test_rag_parser, test_rag_runner_answer_quality（`test_citation_builder` 在 `tests/agent/`） |
+| `tests/skills/` | `src/skills` | test_skills_skill_loader |
+| （已并入上表） | `src/agent/core`、`src/memory`、`tools/…` + `src/api` | 原 `tests/security/`：`test_security_filter` / `test_url_guard` / `test_tool_blocklist` → `tests/agent/`；`test_security_event_store` → `tests/memory/`；红队 API + runner → `tests/api/test_api_security_adversarial.py`（见 iter_16） |
 | `tests/optional/`（**类别 A**，不被默认扫描） | 备用实现 | test_langchain_agent, test_autogpt_agent |
 
 - **决策（记录，iter_16 修订）**：取消 `tests/security/` 单列，安全 UT 按**被测代码所在包**归入 `tests/agent/`、`tests/memory/`、`tests/api/`，与 `src/` 对齐；不再保留「为内聚而偏离 src」的独立目录。

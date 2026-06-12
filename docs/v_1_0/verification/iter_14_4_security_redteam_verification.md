@@ -8,7 +8,7 @@
 
 | 维度 | 结果 |
 |---|---|
-| 后端 UT（`pytest -q`） | **1585 passed, 133 deselected**（含 `test_security_adversarial.py` 25 条 + `test_security_event_store.py` 9 条） |
+| 后端 UT（`pytest -q`） | **1585 passed, 133 deselected**（含 `test_api_security_adversarial.py` 25 条 + `test_security_event_store.py` 11 条） |
 | 评估器 `--no-llm`（确定性子集） | **24/24 PASS**（15 tool_blocklist + 9 ssrf），拦截率 100% / 误拦率 0% |
 | CI 门禁（`run_all --ci`） | **PASS**：安全拦截子集含 ssrf，退出码 0 |
 | 数据集规模 | 38 → **75 例**（新增 ssrf 9 / info_leak 6 / direct+4 / rag+2 / web+2 / tool+2） |
@@ -42,7 +42,7 @@
 | 前端类型 | `frontend/src/types/eval.ts` | 对齐上述 4 个安全类型 |
 | 前端接口 | `frontend/src/api/client.ts` | `getSecuritySummary` / `getSecurityTrend` |
 | 前端 UI | `frontend/src/components/eval/SecurityPanel.tsx`（新）/ `QualityView.tsx` | 总指标卡 + 逐类分项表 + 趋势；QualityView 加「安全」tab |
-| 测试 | `tests/test_security_adversarial.py`（新） | ssrf/info_leak runner、指标聚合、sidecar、`--no-llm` 口径、安全 API（含路径隔离 monkeypatch） |
+| 测试 | `tests/api/test_api_security_adversarial.py` | ssrf/info_leak runner、指标聚合、sidecar、`--no-llm` 口径、安全 API（含路径隔离 monkeypatch） |
 
 ## 4. Review 发现与处理
 

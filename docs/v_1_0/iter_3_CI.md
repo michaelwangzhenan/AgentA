@@ -239,7 +239,7 @@ jobs:
 |---|---|---|---|
 | 1 | 新建 `.github/workflows/` 目录，写入 §3.3 的 `AgentA_CI.yml` | 文件存在 | ✅ |
 | 2 | commit + push 触发首跑 | GH Actions tab 看到 run 起来 | ✅ |
-| 3 | 修首跑暴露的 fixture 缺失：`tests/test_parser.py` 依赖的 6 个 `datasets/data_en/test/test_sample.*` 被 `.gitignore` 屏蔽，逐层放行加白名单（`.gitignore:14-20`） | `git check-ignore -v` 命中 `!datasets/data_en/test/test_sample.*` 这一行 | ✅ |
+| 3 | 修首跑暴露的 fixture 缺失：`tests/rag/test_rag_parser.py` 依赖的 6 个 `datasets/data_en/test/test_sample.*` 被 `.gitignore` 屏蔽，逐层放行加白名单（`.gitignore:14-20`） | `git check-ignore -v` 命中 `!datasets/data_en/test/test_sample.*` 这一行 | ✅ |
 | 4 | 再次 push，确认绿 | run 详情 `1057 passed, 3 skipped, 110 deselected`；首跑 3m10s（含 pip 装依赖 2m14s），后续 pip cache 命中可压到 1m 内 | ✅ |
 | 5 | README 顶部加 CI 状态 badge（替换 `**Badges(TBD)**` 占位） | 仓库主页 README 顶部显示绿底徽章 | ✅ |
 | 6 | 加 Perf regression 第二个 job 并行（`tools/agent_eval/perf_eval.py`）；emoji 判据 ✅/❌ 改 `PASS/FAIL` 文本 | 2 个 job 并行跑通；artifact 上传 `perf-reports` | ✅ |

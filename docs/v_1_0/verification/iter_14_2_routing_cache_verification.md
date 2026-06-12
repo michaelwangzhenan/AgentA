@@ -21,8 +21,8 @@
 
 | 编号 | 标准 | 验收方式 | 结果 |
 |---|---|---|---|
-| V1 | auto 档下简单问路由到更便宜模型、复杂问不降级 | `test_model_router`：`test_auto_baseline_is_pool_top` / `test_easy_query_downgrades_to_cheapest` / `test_hard_query_keeps_baseline` | ✅ UT 锁定规则映射 + 向下约束 |
-| V2 | 手选模型遇瞬时错误回退到自选模型 | `test_chat_routing` 瞬时错误判定 + `chat.py` fallback 编排（fresh + downgraded + transient → 回退 `decision.baseline`） | ✅ 判定逻辑 UT 覆盖；端到端回退需真实 LLM 触发 429/5xx 手动复核 |
+| V1 | auto 档下简单问路由到更便宜模型、复杂问不降级 | `test_llm_model_router`：`test_auto_baseline_is_pool_top` / `test_easy_query_downgrades_to_cheapest` / `test_hard_query_keeps_baseline` | ✅ UT 锁定规则映射 + 向下约束 |
+| V2 | 手选模型遇瞬时错误回退到自选模型 | `test_api_chat_routing` 瞬时错误判定 + `chat.py` fallback 编排（fresh + downgraded + transient → 回退 `decision.baseline`） | ✅ 判定逻辑 UT 覆盖；端到端回退需真实 LLM 触发 429/5xx 手动复核 |
 | V3 | 相近问法命中缓存、延迟显著下降 | `test_semantic_cache`：`test_put_then_hit` / `test_miss_below_threshold`（阈值边界） | ✅ 存取 + 阈值逻辑 UT 覆盖；真实相似度命中需起服务 + 真实 embedding 手动复核 |
 | V4 | KB 更新后相关缓存失效、不返回过期答案 | `ingest.py` 三处写盘后调 `invalidate_all_soft`（全量作废）+ `test_semantic_cache` 过期惰性删除 | ✅ 失效钩子接入 + 过期过滤 UT 覆盖 |
 | V5 | 跨用户查不到彼此缓存 | `test_semantic_cache::test_user_isolation`（`where={"user_id"}` 过滤） | ✅ UT 锁定按 `user_id` 隔离 |
@@ -64,7 +64,7 @@
 # 后端全量（fast 集）
 pytest -q
 # 本期新增
-pytest -q tests/test_model_router.py tests/test_semantic_cache.py tests/test_savings_store.py tests/test_chat_routing.py
+pytest -q tests/llm/test_llm_model_router.py tests/memory/test_semantic_cache.py tests/memory/test_savings_store.py tests/api/test_api_chat_routing.py
 # 前端类型
 cd frontend && npx tsc --noEmit -p tsconfig.json
 ```

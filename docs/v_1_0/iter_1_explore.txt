@@ -222,7 +222,7 @@ ToDo List：
   t -not: .venv\Scripts\python -m pytest -m "not integration" -v
   t -module_name: 分别对应下面的 case
     .venv\Scripts\python -m pytest tests/test_llm.py           # LLM 配置 & Provider
-    .venv\Scripts\python -m pytest tests/test_parser.py        # 文档解析（7 种格式）
+    .venv\Scripts\python -m pytest tests/rag/test_rag_parser.py        # 文档解析（7 种格式）
     .venv\Scripts\python -m pytest tests/test_rag.py           # 分块 & 双语检索 & Reranker
     .venv\Scripts\python -m pytest tests/test_tools.py         # 工具层（search/fetch）
     .venv\Scripts\python -m pytest tests/test_agent.py         # Agent ReAct 循环

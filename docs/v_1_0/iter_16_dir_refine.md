@@ -51,7 +51,7 @@
 
 **iter_16 已落实（本仓库当前态）**：
 
-- 已删除 `tests/security/`，其中用例按被测模块迁入：`tests/agent/`（`security_filter`、`url_guard`、tool 黑名单）、`tests/memory/`（`security_event_store`）、`tests/api/`（`test_security_adversarial`，含路由与 `tools.agent_eval.security` runner）。
+- 已删除 `tests/security/`，其中用例按被测模块迁入：`tests/agent/`（`security_filter`、`url_guard`、tool 黑名单）、`tests/memory/`（`security_event_store`）、`tests/api/test_api_security_adversarial.py`（含路由与 `tools.agent_eval.security` runner）。
 - `tests/` 根目录仅保留 `conftest.py`、包级 `__init__.py` 等与收集配置相关文件；**若其它工作区仍残留根级 `tests/test_*.py` 与上表子目录重复，应删除根级副本，只保留子目录内一份。**
 
 ---

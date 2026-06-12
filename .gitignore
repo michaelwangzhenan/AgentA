@@ -8,7 +8,7 @@
 
 # ── 私有数据（本地知识库内容）──────────────────────────────────
 # 数据集根目录：英文/多语在 datasets/data_en，中文在 datasets/data_zh
-# 白名单用于 tests/test_parser.py 的 fixture（CI 必需），也是新用户克隆仓库后的 demo 样本。
+# 白名单用于 tests/rag/test_rag_parser.py 的 fixture（CI 必需），也是新用户克隆仓库后的 demo 样本。
 datasets/*
 !datasets/data_en/
 datasets/data_en/*
