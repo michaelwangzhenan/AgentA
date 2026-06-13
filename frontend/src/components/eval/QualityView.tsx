@@ -20,8 +20,8 @@ export function QualityView() {
       ? ([
           { value: 'security_runtime', label: '实时安全监控' },
           { value: 'security_offline', label: '离线安全评估' },
-          { value: 'golden', label: '知识库管理' },
-          { value: 'reports', label: '评估报告' },
+          { value: 'golden', label: 'Golden 管理' },
+          { value: 'reports', label: '综合评估报告' },
         ] as { value: Tab; label: string }[])
       : []),
   ]
