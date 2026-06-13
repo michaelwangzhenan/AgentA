@@ -47,11 +47,11 @@ python tools/db_show.py bm25                            # 各 bm25_*.pkl 规模
 
 # 3. Web UI
 
-把 CLI 的只读巡检能力搬到 Web 上：新增一页「DB 秀」，让管理员不进终端也能逐层查看 Chroma / BM25 / SQLite 的结构与内容。
+把 CLI 的只读巡检能力搬到 Web 上：新增一页「数据库」，让管理员不进终端也能逐层查看 Chroma / BM25 / SQLite 的结构与内容。
 
 ## 3.1. 需求
 
-- **功能**：新增「DB 秀」页，左侧分三类（Chroma / BM25 / SQLite），每类支持**逐层下钻**——从「列表」到「某一项」再到「单条详情」，看到结构与具体内容。
+- **功能**：新增「数据库」页，左侧分三类（Chroma / BM25 / SQLite），每类支持**逐层下钻**——从「列表」到「某一项」再到「单条详情」，看到结构与具体内容。
 - **目标**：不开终端、不写 SQL，就能巡检三类后台数据；与 `tools/db_show.py` **同源**（共用后端读逻辑，口径一致）。
 - **价值**：排查"数据是否合理"（如本期发现的 kb_m3 向量段异常、dense/BM25 条数不一致）时有可视入口，降低运维门槛。
 - **风险**：暴露后台数据 → 必须**仅管理员可见 + 全程只读 + 敏感字段不外泄**；大库需分页，避免一次拉全量拖垮前后端。
@@ -70,7 +70,7 @@ python tools/db_show.py bm25                            # 各 bm25_*.pkl 规模
 ```mermaid
 flowchart LR
     subgraph FE[前端 React]
-        Nav["Sidebar: DB 秀 (admin)"] --> View[DBShowView]
+        Nav["Sidebar: 数据库 (admin)"] --> View[DBShowView]
         View --> TabC[Chroma 面板]
         View --> TabB[BM25 面板]
         View --> TabS[SQLite 面板]
@@ -126,7 +126,7 @@ stateDiagram-v2
 
 ## 3.5. 可观测性与验证
 
-- 前端：本地 `./i start` 后用 admin 账号进「DB 秀」，逐类点到 L3。
+- 前端：本地 `./i start` 后用 admin 账号进「数据库」，逐类点到 L3。
 - 后端：接口可独立用 `pytest tests/api/test_api_*.py` 覆盖（mock 读逻辑，不依赖真实大库）。
 
 ## 3.6. 决策结论
@@ -147,7 +147,7 @@ stateDiagram-v2
 | 复用读逻辑 | `src/db_inspect.py`（新） | Chroma/BM25/SQLite 只读 + 分页 + 脱敏；CLI 与 API 共用 |
 | 后端路由 | `src/api/routes/db_admin.py`（新）+ `src/api/main.py` 注册 | `/api/admin/db/*`，全部 GET、`require_admin` |
 | CLI | `tools/db_show.py` | 改为委托 `db_inspect`，输出口径不变 |
-| 前端类型/接口 | `frontend/src/types/dbAdmin.ts`、`api/client.ts` | DB 秀响应类型与 8 个 GET 封装 |
+| 前端类型/接口 | `frontend/src/types/dbAdmin.ts`、`api/client.ts` | 数据库响应类型与 8 个 GET 封装 |
 | 前端页面 | `frontend/src/components/admin/DBShowView.tsx` + `Sidebar.tsx` + `App.tsx` | 三类面板 + 三层下钻 + 面包屑 + 分页；admin-only 入口 |
 | 测试 | `tests/test_db_inspect.py`、`tests/api/test_api_db_admin.py`、`tests/tools/test_db_show.py` | 读逻辑/HTTP 封装/CLI 共 21 项 |
 
@@ -159,7 +159,7 @@ stateDiagram-v2
 
 | 步骤 | 操作 | 验收标准 |
 |------|------|----------|
-| 1 | 侧栏出现「DB 秀」（仅 admin） | 非 admin 看不到该入口 |
+| 1 | 侧栏出现「数据库」（仅 admin） | 非 admin 看不到该入口 |
 | 2 | Chroma → 点 `kb_zh` → 点某条 | 列表显示条数/维度；详情显示正文全文 + metadata |
 | 3 | Chroma 选 `kb_m3` | 列表维度显示「—」不报错（坏向量段降级），仍可浏览条目 |
 | 4 | BM25 → 点某索引 → 点某块 | 显示块数/k1/b；详情有正文 + tokens 数 |
@@ -170,7 +170,7 @@ stateDiagram-v2
 
 # 4. UI 工具升级（入库时间 / 过滤 / 排序）
 
-在 DB 秀（§3）的 L2 列表上做增量，**只针对 Chroma 与 BM25**（两者结构一致、共享 metadata）；SQLite 不在本期。**维持只读**——不加删除。
+在 数据库（§3）的 L2 列表上做增量，**只针对 Chroma 与 BM25**（两者结构一致、共享 metadata）；SQLite 不在本期。**维持只读**——不加删除。
 
 ## 4.1. 范围决策
 
@@ -205,3 +205,31 @@ stateDiagram-v2
 - 全程只读 + `require_admin`。
 - Chroma 时间段过滤靠 `ingested_at`，无该字段的旧数据会被排除（已确认可接受）。
 - 坏向量段（历史 `kb_m3`）不取 embeddings，过滤 / 列表读不到就跳过、不报错。
+
+# 5. 数据清理（维护）
+
+解决 SQLite 事件类表只增不减、dev/测试噪声越积越多的问题。DB 秀新增 admin「维护」面板，提供**受控的破坏性清理**；原始表视图仍只读。写路径独立在 `src/db_maintain.py`（可写连接），与只读的 `db_inspect` 分开。
+
+## 5.1. 能力
+
+| 能力 | 说明 |
+|------|------|
+| 保留期清理 | 删事件 / 日志类表早于保留天数 N 的行：`usage_events`、`agent_traces`、`cache_lookups`、`saving_events`、`security_events`（按 `created_at`）；`trace_spans` 删所属 trace 已不在保留窗的 span；`auth_sessions` 删过期的。**不动**对话 / 记忆 / 计划等用户内容 |
+| 按 user_id 清数据 | 删该用户在各表的数据，子表（messages 按 session、learning_tasks 按 plan、quiz_questions 按 set、trace_spans 按 trace）级联。**不删 `users` 账号行**（删账号走用户管理入口） |
+| VACUUM | 对全部库执行 VACUUM 回收磁盘（删行不自动缩文件） |
+
+## 5.2. 流程与安全
+
+- **先预览再确认**：每个清理先调 `*/preview`（GET）返回各表「将删行数」，确认后才调执行（POST）。
+- **二次确认**：执行前弹 AlertDialog；完成后 toast 报删除结果。
+- 仅 `require_admin`；保留天数有下限（≥1）校验；删除走绑定参数；表 / 库不存在自动跳过。
+
+接口：
+
+| 方法 | 路径 | 作用 |
+|------|------|------|
+| GET | `/admin/db/maintenance/prune/preview?days=N` | 保留期清理预览 |
+| POST | `/admin/db/maintenance/prune` | 执行保留期清理 |
+| GET | `/admin/db/maintenance/purge-user/preview?user_id=X` | 按用户清理预览 |
+| POST | `/admin/db/maintenance/purge-user` | 执行按用户清理 |
+| POST | `/admin/db/maintenance/vacuum` | VACUUM（可指定 `db_key`，省略为全部） |

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""DB 秀：只读巡检 Chroma / SQLite / BM25 的管理员 API。
+"""数据库：只读巡检 Chroma / SQLite / BM25 的管理员 API。
 
 读逻辑全部委托 src.db_inspect（与 tools/db_show.py CLI 共用）；本文件只负责
 HTTP 封装与 404 处理。全部 GET、只读，依赖 require_admin。
@@ -12,7 +12,9 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 import src.db_inspect as inspect
+import src.db_maintain as maintain
 from src.api.deps import require_admin
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -109,10 +111,59 @@ def sqlite_table_rows(
     table: str,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    user_id: int | None = Query(default=None),
+    time_col: str | None = Query(default=None),
+    ts_from: int | None = Query(default=None),
+    ts_to: int | None = Query(default=None),
+    sort_by: str | None = Query(default=None),
+    desc: bool = Query(default=False),
 ) -> dict:
-    data = inspect.sqlite_table_rows(db_key, table, limit=limit, offset=offset)
+    data = inspect.sqlite_table_rows(
+        db_key, table, limit=limit, offset=offset,
+        user_id=user_id, time_col=time_col, ts_from=ts_from, ts_to=ts_to,
+        sort_by=sort_by, desc=desc,
+    )
     if data is None:
         raise HTTPException(status_code=404, detail=f"库不存在: {db_key}")
     if data.get("error"):
         raise HTTPException(status_code=404, detail=data["error"])
     return data
+
+
+# ── 维护（破坏性，admin）────────────────────────────────────────────────────
+
+class PruneRequest(BaseModel):
+    days: int = Field(ge=1)
+
+
+class PurgeUserRequest(BaseModel):
+    user_id: int
+
+
+class VacuumRequest(BaseModel):
+    db_key: str | None = None
+
+
+@router.get("/maintenance/prune/preview")
+def prune_preview(days: int = Query(ge=1)) -> dict:
+    return maintain.prune_preview(days)
+
+
+@router.post("/maintenance/prune")
+def prune(req: PruneRequest) -> dict:
+    return maintain.prune(req.days)
+
+
+@router.get("/maintenance/purge-user/preview")
+def purge_user_preview(user_id: int = Query(...)) -> dict:
+    return maintain.purge_user_preview(user_id)
+
+
+@router.post("/maintenance/purge-user")
+def purge_user(req: PurgeUserRequest) -> dict:
+    return maintain.purge_user(req.user_id)
+
+
+@router.post("/maintenance/vacuum")
+def vacuum(req: VacuumRequest) -> dict:
+    return maintain.vacuum(req.db_key)

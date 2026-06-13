@@ -229,7 +229,7 @@ export function Sidebar(props: SidebarProps) {
         {isAdmin && (
           <ViewNavButton
             icon={<Database className="h-4 w-4" />}
-            label="DB 秀"
+            label="数据库"
             active={activeView === 'dbshow'}
             onClick={() => onSwitchView('dbshow')}
           />

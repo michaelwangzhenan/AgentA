@@ -1,4 +1,4 @@
-// DB 秀（/admin/db/*）类型，与后端 src/db_inspect.py 返回结构对齐。
+// 数据库（/admin/db/*）类型，与后端 src/db_inspect.py 返回结构对齐。
 
 export type Metadata = Record<string, unknown> | null
 
@@ -104,6 +104,29 @@ export type SqliteDatabase = {
 
 export type SqliteDatabases = {
   databases: SqliteDatabase[]
+}
+
+// ── 维护（清理）──────────────────────────────────────────────────────────
+export type MaintCount = { db: string; table: string; count: number }
+
+export type PruneResult = {
+  days?: number
+  cutoff?: number
+  items: MaintCount[]
+  total: number
+  executed?: boolean
+  error?: string
+}
+
+export type PurgeResult = {
+  user_id?: number
+  items: MaintCount[]
+  total: number
+  executed?: boolean
+}
+
+export type VacuumResult = {
+  results: { db: string; ok: boolean; freed_bytes?: number; size?: number; error?: string }[]
 }
 
 export type SqliteTableRows = {

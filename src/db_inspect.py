@@ -7,7 +7,9 @@ CLI（`tools/db_show.py`）与 API（`/admin/db/*`）共用本模块，保证两
 from __future__ import annotations
 
 import pickle
+import re
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 import src.config as config
@@ -434,9 +436,40 @@ def _resolve_db_key(db_key: str) -> Path | None:
     return None
 
 
-def sqlite_table_rows(db_key: str, table: str, limit: int = 50, offset: int = 0) -> dict | None:
+def _quote_ident(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _col_is_iso(conn: sqlite3.Connection, qtable: str, col: str) -> bool:
+    """探一条非空值判断该列是不是 ISO 时间文本（影响时间段过滤的比较方式）。"""
+    row = conn.execute(
+        f"SELECT {_quote_ident(col)} FROM {qtable} WHERE {_quote_ident(col)} IS NOT NULL LIMIT 1"
+    ).fetchone()
+    v = row[0] if row else None
+    return isinstance(v, str) and bool(re.match(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}", v))
+
+
+def _epoch_to_local_iso(ts: int) -> str:
+    return datetime.fromtimestamp(ts).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def sqlite_table_rows(
+    db_key: str,
+    table: str,
+    limit: int = 50,
+    offset: int = 0,
+    *,
+    user_id: int | None = None,
+    time_col: str | None = None,
+    ts_from: int | None = None,
+    ts_to: int | None = None,
+    sort_by: str | None = None,
+    desc: bool = False,
+) -> dict | None:
     """L2/L3：表数据分页；敏感列（口令/密钥/hash 等）值脱敏为 ***。
 
+    支持按 `user_id`（精确）和某时间列范围过滤，以及按列排序——列名一律按该表真实列
+    白名单校验后再拼 SQL，值走绑定参数。时间列自动识别 ISO 文本 / epoch 数字两种存法。
     库不存在返回 None；表名非法返回 {error}。
     """
     path = _resolve_db_key(db_key)
@@ -451,10 +484,34 @@ def sqlite_table_rows(db_key: str, table: str, limit: int = 50, offset: int = 0)
         }
         if table not in valid:
             return {"db_key": db_key, "table": table, "error": "表不存在"}
-        quoted = f'"{table.replace(chr(34), chr(34) + chr(34))}"'
-        total = int(conn.execute(f"SELECT COUNT(*) FROM {quoted}").fetchone()[0])
-        cur = conn.execute(f"SELECT * FROM {quoted} LIMIT ? OFFSET ?", (limit, offset))
-        columns = [c[0] for c in cur.description]
+        qtable = _quote_ident(table)
+        columns = [c[0] for c in conn.execute(f"SELECT * FROM {qtable} LIMIT 0").description]
+        colset = set(columns)
+
+        clauses: list[str] = []
+        params: list = []
+        if user_id is not None and "user_id" in colset:
+            clauses.append('"user_id" = ?')
+            params.append(user_id)
+        if time_col in colset and (ts_from is not None or ts_to is not None):
+            iso = _col_is_iso(conn, qtable, time_col)
+            if ts_from is not None:
+                clauses.append(f"{_quote_ident(time_col)} >= ?")
+                params.append(_epoch_to_local_iso(ts_from) if iso else ts_from)
+            if ts_to is not None:
+                clauses.append(f"{_quote_ident(time_col)} <= ?")
+                params.append(_epoch_to_local_iso(ts_to) if iso else ts_to)
+        where_sql = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+
+        order_sql = ""
+        if sort_by in colset:
+            order_sql = f" ORDER BY {_quote_ident(sort_by)} {'DESC' if desc else 'ASC'}"
+
+        total = int(conn.execute(f"SELECT COUNT(*) FROM {qtable}{where_sql}", params).fetchone()[0])
+        cur = conn.execute(
+            f"SELECT * FROM {qtable}{where_sql}{order_sql} LIMIT ? OFFSET ?",
+            [*params, limit, offset],
+        )
         sensitive = {c for c in columns if is_sensitive_column(c)}
         rows = []
         for raw in cur.fetchall():

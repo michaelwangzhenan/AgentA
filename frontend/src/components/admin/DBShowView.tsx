@@ -1,8 +1,19 @@
 import { useEffect, useState } from 'react'
 import { ChevronRight, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { cn } from '@/lib/utils'
 import { ResourcePage } from '@/components/resources/ResourcePage'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import {
   getBm25Doc,
   getBm25Docs,
@@ -10,8 +21,14 @@ import {
   getChromaCollections,
   getChromaItem,
   getChromaItems,
+  getPrunePreview,
+  getPurgeUserPreview,
   getSqliteDatabases,
   getSqliteTableRows,
+  listUsers,
+  runPrune,
+  runPurgeUser,
+  runVacuum,
 } from '@/api/client'
 import type {
   Bm25DocDetail,
@@ -21,14 +38,18 @@ import type {
   ChromaItemDetail,
   ChromaItemsPage,
   Metadata,
+  PruneResult,
+  PurgeResult,
   SqliteDatabases,
   SqliteTableRows,
+  VacuumResult,
 } from '@/types/dbAdmin'
+import type { UserInfo } from '@/types/auth'
 
-type Tab = 'chroma' | 'bm25' | 'sqlite'
+type Tab = 'chroma' | 'bm25' | 'sqlite' | 'maintenance'
 
 // 后端 limit 上限 200，候选项不超过它
-const PAGE_SIZE_OPTIONS = [20, 50, 100, 200] as const
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 200] as const
 const DEFAULT_PAGE_SIZE = 50
 // 与后端 db_inspect.CHROMA_SCAN_CAP 对齐，仅用于 truncated 提示文案
 const CHROMA_SCAN_CAP_HINT = 20000
@@ -39,11 +60,12 @@ export function DBShowView() {
     { value: 'chroma', label: 'Chroma' },
     { value: 'bm25', label: 'BM25' },
     { value: 'sqlite', label: 'SQLite' },
+    { value: 'maintenance', label: '维护' },
   ]
 
   return (
     <ResourcePage
-      title="DB 秀"
+      title="数据库"
       subtitle="Chroma / BM25 / SQLite 的结构与内容"
       maxWidthClassName="max-w-6xl"
     >
@@ -72,6 +94,7 @@ export function DBShowView() {
           {tab === 'chroma' && <ChromaPanel />}
           {tab === 'bm25' && <Bm25Panel />}
           {tab === 'sqlite' && <SqlitePanel />}
+          {tab === 'maintenance' && <MaintenancePanel />}
         </div>
       </div>
     </ResourcePage>
@@ -309,7 +332,7 @@ function ChunkRow({
         </span>
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           {extra}
-          {showTime && <Pill>入库 {fmtTime(metaStr(metadata, 'ingested_at'))}</Pill>}
+          {showTime && <Pill>入库时间 {fmtTime(metaStr(metadata, 'ingested_at'))}</Pill>}
           {chunk && <Pill>{chunk}</Pill>}
           {lang && <Pill>{lang}</Pill>}
           {lines && <Pill>{lines}</Pill>}
@@ -484,7 +507,7 @@ function ChromaFilterBar({
         />
       </label>
       <label className="flex items-center gap-1 text-muted-foreground">
-        入库
+        入库时间
         <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inputCls} />
         –
         <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inputCls} />
@@ -928,14 +951,33 @@ function Bm25DocView({
 
 // ── SQLite 面板 ────────────────────────────────────────────────────────────
 
+type SqliteFilters = { userId?: number; timeCol?: string; tsFrom?: number; tsTo?: number }
+type SqliteSort = { by?: string; desc: boolean }
+
 function SqlitePanel() {
   const [dbSel, setDbSel] = useState<{ key: string; file: string } | null>(null)
   const [table, setTable] = useState<string | null>(null)
   const [offset, setOffset] = useState(0)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
+  const [filters, setFilters] = useState<SqliteFilters>({})
+  const [sort, setSort] = useState<SqliteSort>({ desc: true })
   const changePageSize = (n: number) => {
     setPageSize(n)
     setOffset(0)
+  }
+  const changeFilters = (f: SqliteFilters) => {
+    setFilters(f)
+    setOffset(0)
+  }
+  const changeSort = (s: SqliteSort) => {
+    setSort(s)
+    setOffset(0)
+  }
+  const openTable = (t: string) => {
+    setTable(t)
+    setOffset(0)
+    setFilters({})
+    setSort({ desc: true })
   }
 
   if (dbSel && table) {
@@ -946,6 +988,10 @@ function SqlitePanel() {
         setOffset={setOffset}
         pageSize={pageSize}
         onPageSize={changePageSize}
+        filters={filters}
+        onFilters={changeFilters}
+        sort={sort}
+        onSort={changeSort}
         onBack={() => {
           setTable(null)
           setOffset(0)
@@ -960,14 +1006,7 @@ function SqlitePanel() {
   }
   if (dbSel) {
     return (
-      <SqliteTables
-        db={dbSel}
-        onOpen={(t) => {
-          setTable(t)
-          setOffset(0)
-        }}
-        onRoot={() => setDbSel(null)}
-      />
+      <SqliteTables db={dbSel} onOpen={openTable} onRoot={() => setDbSel(null)} />
     )
   }
   return <SqliteDbList onOpen={(key, file) => setDbSel({ key, file })} />
@@ -978,11 +1017,11 @@ const DB_LABELS: Record<string, string> = {
   chat_history: '对话历史',
   auth: '认证',
   usage: '用量统计',
-  rag_golden: 'RAG 评估 Golden',
+  rag_golden: 'RAG 评估 Golden集',
   user_memory: '用户记忆',
   learning: '学习计划',
   quiz: '测验',
-  srs: '间隔重复（SRS）',
+  srs: '复习（SRS）',
 }
 
 // 从完整文件路径取所在目录（兼容 Windows 反斜杠与 POSIX 斜杠）
@@ -1106,6 +1145,117 @@ function SqliteTables({
   )
 }
 
+// 时间列范围 / user_id 过滤 + 排序条；可选列依据该表实际列动态显示
+function SqliteFilterBar({
+  columns,
+  filters,
+  sort,
+  onFilters,
+  onSort,
+}: {
+  columns: string[]
+  filters: SqliteFilters
+  sort: SqliteSort
+  onFilters: (f: SqliteFilters) => void
+  onSort: (s: SqliteSort) => void
+}) {
+  const hasUserId = columns.includes('user_id')
+  const timeCols = columns.filter(isTimeCol)
+  const [userId, setUserId] = useState(filters.userId != null ? String(filters.userId) : '')
+  const [timeCol, setTimeCol] = useState(filters.timeCol ?? timeCols[0] ?? '')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+
+  if (!hasUserId && timeCols.length === 0) return null
+
+  const sortFields = [...(hasUserId ? ['user_id'] : []), ...timeCols]
+  const inputCls = 'rounded-md border border-border bg-background px-2 py-1 text-foreground'
+
+  const apply = () => {
+    const uid = userId.trim()
+    onFilters({
+      userId: uid === '' ? undefined : Number(uid),
+      timeCol: timeCol || undefined,
+      tsFrom: dateToEpoch(from, false),
+      tsTo: dateToEpoch(to, true),
+    })
+  }
+  const clear = () => {
+    setUserId('')
+    setFrom('')
+    setTo('')
+    onFilters({})
+  }
+
+  return (
+    <div className="mb-3 flex flex-col gap-2 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        {hasUserId && (
+          <label className="flex items-center gap-1 text-muted-foreground">
+            user_id
+            <input
+              value={userId}
+              inputMode="numeric"
+              onChange={(e) => setUserId(e.target.value.replace(/[^0-9]/g, ''))}
+              onKeyDown={(e) => e.key === 'Enter' && apply()}
+              placeholder="精确"
+              className={cn(inputCls, 'w-20')}
+            />
+          </label>
+        )}
+        {timeCols.length > 0 && (
+          <label className="flex items-center gap-1 text-muted-foreground">
+            <select value={timeCol} onChange={(e) => setTimeCol(e.target.value)} className={inputCls}>
+              {timeCols.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inputCls} />
+            –
+            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inputCls} />
+          </label>
+        )}
+        <button type="button" onClick={apply} className="rounded-md border border-border px-2 py-1 hover:bg-muted/50">
+          查询
+        </button>
+        <button
+          type="button"
+          onClick={clear}
+          className="rounded-md border border-border px-2 py-1 text-muted-foreground hover:bg-muted/50"
+        >
+          清除
+        </button>
+      </div>
+      <label className="flex items-center gap-1 text-muted-foreground">
+        排序
+        <select
+          value={sort.by ?? ''}
+          onChange={(e) => onSort({ ...sort, by: e.target.value || undefined })}
+          className={inputCls}
+        >
+          <option value="">默认</option>
+          {sortFields.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => onSort({ ...sort, desc: !sort.desc })}
+          disabled={!sort.by}
+          className="rounded-md border border-border px-2 py-1 hover:bg-muted/50 disabled:opacity-40"
+          title={sort.desc ? '降序' : '升序'}
+        >
+          {sort.desc ? '↓' : '↑'}
+        </button>
+      </label>
+    </div>
+  )
+}
+
 // L3：表数据
 function SqliteRows({
   sel,
@@ -1113,6 +1263,10 @@ function SqliteRows({
   setOffset,
   pageSize,
   onPageSize,
+  filters,
+  onFilters,
+  sort,
+  onSort,
   onBack,
   onRoot,
 }: {
@@ -1121,13 +1275,34 @@ function SqliteRows({
   setOffset: (n: number) => void
   pageSize: number
   onPageSize: (n: number) => void
+  filters: SqliteFilters
+  onFilters: (f: SqliteFilters) => void
+  sort: SqliteSort
+  onSort: (s: SqliteSort) => void
   onBack: () => void
   onRoot: () => void
 }) {
+  const [detail, setDetail] = useState<Record<string, unknown> | null>(null)
+  const fKey = `${filters.userId ?? ''}|${filters.timeCol ?? ''}|${filters.tsFrom ?? ''}|${filters.tsTo ?? ''}`
   const { data, loading, error } = useAsync<SqliteTableRows>(
-    () => getSqliteTableRows(sel.dbKey, sel.table, { limit: pageSize, offset }),
-    `${sel.dbKey}:${sel.table}:${pageSize}:${offset}`,
+    () =>
+      getSqliteTableRows(sel.dbKey, sel.table, {
+        limit: pageSize,
+        offset,
+        userId: filters.userId,
+        timeCol: filters.timeCol,
+        tsFrom: filters.tsFrom,
+        tsTo: filters.tsTo,
+        sortBy: sort.by,
+        desc: sort.desc,
+      }),
+    `${sel.dbKey}:${sel.table}:${pageSize}:${offset}:${fKey}:${sort.by ?? ''}:${sort.desc}`,
   )
+  // user_id → 用户名 映射（用 admin 用户列表）；auth.db 的 users 表本身不标注
+  const { data: users } = useAsync<UserInfo[]>(listUsers, 'sqlite-user-map')
+  const userMap: Record<string, string> = {}
+  for (const u of users ?? []) userMap[String(u.id)] = u.username
+  const annotateUser = !(sel.dbKey === 'auth' && sel.table === 'users')
   return (
     <div>
       <Breadcrumb
@@ -1141,10 +1316,46 @@ function SqliteRows({
       {error && <ErrorNote msg={error} />}
       {data && !loading && (
         <>
+          <SqliteFilterBar
+            columns={data.columns}
+            filters={filters}
+            sort={sort}
+            onFilters={onFilters}
+            onSort={onSort}
+          />
           {data.masked_columns.length > 0 && (
             <p className="mb-2 text-xs text-muted-foreground">
               已脱敏列：{data.masked_columns.join(', ')}
             </p>
+          )}
+          {detail && (
+            <div className="mb-3 rounded-md border border-border p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-medium">行详情</span>
+                <button
+                  type="button"
+                  onClick={() => setDetail(null)}
+                  className="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-muted/50"
+                >
+                  关闭
+                </button>
+              </div>
+              <dl className="space-y-1.5 text-sm">
+                {data.columns.map((c) => {
+                  const ann = annotateUserId(c, detail[c], userMap, annotateUser)
+                  return (
+                    <div key={c} className="grid grid-cols-[10rem_1fr] gap-2">
+                      <dt className="truncate font-mono text-xs text-muted-foreground" title={c}>
+                        {c}
+                      </dt>
+                      <dd className="min-w-0">
+                        {ann ? <span>{ann}</span> : <SqliteDetailValue col={c} value={detail[c]} />}
+                      </dd>
+                    </div>
+                  )
+                })}
+              </dl>
+            </div>
           )}
           <Pager
             total={data.total}
@@ -1154,10 +1365,12 @@ function SqliteRows({
             onPageSize={onPageSize}
             className="mb-3"
           />
+          <p className="mb-1 text-xs text-muted-foreground">点击任一行查看完整字段</p>
           <div className="overflow-x-auto rounded-md border border-border">
             <table className="w-full text-left text-sm">
-              <thead className="bg-muted/30 text-xs text-muted-foreground">
+              <thead className="sticky top-0 z-10 bg-muted text-xs text-muted-foreground">
                 <tr>
+                  <th className="px-3 py-1.5 font-medium">#</th>
                   {data.columns.map((c) => (
                     <th key={c} className="whitespace-nowrap px-3 py-1.5 font-medium">
                       {c}
@@ -1167,12 +1380,34 @@ function SqliteRows({
               </thead>
               <tbody>
                 {data.rows.map((row, i) => (
-                  <tr key={i} className="border-t border-border align-top">
-                    {data.columns.map((c) => (
-                      <td key={c} className="max-w-xs truncate px-3 py-1.5" title={fmtCell(row[c])}>
-                        {fmtCell(row[c])}
-                      </td>
-                    ))}
+                  <tr
+                    key={i}
+                    onClick={() => setDetail(row)}
+                    className={cn(
+                      'cursor-pointer border-t border-border align-top hover:bg-accent/40',
+                      i % 2 === 1 && 'bg-muted/20',
+                    )}
+                  >
+                    <td className="px-3 py-1.5 text-xs text-muted-foreground">{offset + i + 1}</td>
+                    {data.columns.map((c) => {
+                      const isId = c === 'id' || c.toLowerCase().endsWith('_id')
+                      const ann = annotateUserId(c, row[c], userMap, annotateUser)
+                      const isNum = !ann && typeof row[c] === 'number' && !isTimeCol(c)
+                      const text = ann ?? fmtSqliteCell(c, row[c])
+                      return (
+                        <td
+                          key={c}
+                          className={cn(
+                            'max-w-xs truncate px-3 py-1.5',
+                            isId && 'font-mono text-xs',
+                            isNum && 'text-right tabular-nums',
+                          )}
+                          title={text}
+                        >
+                          {text}
+                        </td>
+                      )
+                    })}
                   </tr>
                 ))}
               </tbody>
@@ -1196,4 +1431,356 @@ function fmtCell(v: unknown): string {
   if (v === null || v === undefined) return ''
   if (typeof v === 'object') return JSON.stringify(v)
   return String(v)
+}
+
+// ── 维护面板（破坏性，admin）──────────────────────────────────────────────
+
+function MaintCountsTable({ items, total }: { items: { db: string; table: string; count: number }[]; total: number }) {
+  const nonZero = items.filter((i) => i.count > 0)
+  if (total === 0) return <p className="text-sm text-muted-foreground">没有符合条件的数据。</p>
+  return (
+    <div className="rounded-md border border-border">
+      <table className="w-full text-left text-sm">
+        <thead className="bg-muted/30 text-xs text-muted-foreground">
+          <tr>
+            <th className="px-3 py-1.5 font-medium">库</th>
+            <th className="px-3 py-1.5 font-medium">表</th>
+            <th className="px-3 py-1.5 text-right font-medium">将删行数</th>
+          </tr>
+        </thead>
+        <tbody>
+          {nonZero.map((i) => (
+            <tr key={`${i.db}.${i.table}`} className="border-t border-border">
+              <td className="px-3 py-1.5">{i.db}</td>
+              <td className="px-3 py-1.5">{i.table}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{i.count}</td>
+            </tr>
+          ))}
+          <tr className="border-t border-border font-medium">
+            <td className="px-3 py-1.5" colSpan={2}>
+              合计
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{total}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function Card({ title, desc, children }: { title: string; desc: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-md border border-border p-4">
+      <h3 className="text-sm font-medium">{title}</h3>
+      <p className="mb-3 mt-0.5 text-xs text-muted-foreground">{desc}</p>
+      {children}
+    </section>
+  )
+}
+
+const btnCls = 'rounded-md border border-border px-2.5 py-1 hover:bg-muted/50 disabled:opacity-40'
+const dangerBtnCls =
+  'rounded-md bg-destructive px-2.5 py-1 text-destructive-foreground hover:bg-destructive/90 disabled:opacity-40'
+const inputCls = 'rounded-md border border-border bg-background px-2 py-1 text-foreground'
+
+function PrunePanel() {
+  const [days, setDays] = useState('90')
+  const [preview, setPreview] = useState<PruneResult | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [confirm, setConfirm] = useState(false)
+
+  const doPreview = async () => {
+    setBusy(true)
+    try {
+      setPreview(await getPrunePreview(Number(days)))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '预览失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+  const doRun = async () => {
+    setBusy(true)
+    try {
+      const r = await runPrune(Number(days))
+      toast.success(`已清理 ${r.total} 行`)
+      setPreview(null)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '清理失败')
+    } finally {
+      setBusy(false)
+      setConfirm(false)
+    }
+  }
+
+  return (
+    <Card
+      title="保留期清理"
+      desc="删除事件 / 日志类表中早于保留天数的行（usage_events、agent_traces、trace_spans、cache_lookups、saving_events、security_events）+ 过期登录会话。不动对话、记忆等用户内容。"
+    >
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+        <label className="flex items-center gap-1 text-muted-foreground">
+          保留天数
+          <input
+            value={days}
+            inputMode="numeric"
+            onChange={(e) => setDays(e.target.value.replace(/[^0-9]/g, ''))}
+            className={cn(inputCls, 'w-20')}
+          />
+        </label>
+        <button type="button" onClick={doPreview} disabled={busy || !days} className={btnCls}>
+          预览
+        </button>
+        <button
+          type="button"
+          onClick={() => setConfirm(true)}
+          disabled={busy || !preview || preview.total === 0}
+          className={dangerBtnCls}
+        >
+          执行清理
+        </button>
+      </div>
+      {preview && <MaintCountsTable items={preview.items} total={preview.total} />}
+      <ConfirmDialog
+        open={confirm}
+        onOpenChange={setConfirm}
+        title="确认清理？"
+        desc={`将删除约 ${preview?.total ?? 0} 行（保留 ${days} 天内），不可恢复。`}
+        onConfirm={doRun}
+      />
+    </Card>
+  )
+}
+
+function PurgeUserPanel() {
+  const [uid, setUid] = useState('')
+  const [preview, setPreview] = useState<PurgeResult | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [confirm, setConfirm] = useState(false)
+
+  const doPreview = async () => {
+    setBusy(true)
+    try {
+      setPreview(await getPurgeUserPreview(Number(uid)))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '预览失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+  const doRun = async () => {
+    setBusy(true)
+    try {
+      const r = await runPurgeUser(Number(uid))
+      toast.success(`已清理 user_id=${uid} 的 ${r.total} 行`)
+      setPreview(null)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '清理失败')
+    } finally {
+      setBusy(false)
+      setConfirm(false)
+    }
+  }
+
+  return (
+    <Card
+      title="按 user_id 清理数据"
+      desc="删除该用户在各表的数据（会话/消息、用量、记忆、计划、测验、SRS、设置等，含子表级联）。不删 users 账号行本身。"
+    >
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+        <label className="flex items-center gap-1 text-muted-foreground">
+          user_id
+          <input
+            value={uid}
+            inputMode="numeric"
+            onChange={(e) => setUid(e.target.value.replace(/[^0-9]/g, ''))}
+            className={cn(inputCls, 'w-20')}
+          />
+        </label>
+        <button type="button" onClick={doPreview} disabled={busy || !uid} className={btnCls}>
+          预览
+        </button>
+        <button
+          type="button"
+          onClick={() => setConfirm(true)}
+          disabled={busy || !preview || preview.total === 0}
+          className={dangerBtnCls}
+        >
+          执行清理
+        </button>
+      </div>
+      {preview && <MaintCountsTable items={preview.items} total={preview.total} />}
+      <ConfirmDialog
+        open={confirm}
+        onOpenChange={setConfirm}
+        title="确认清理？"
+        desc={`将删除 user_id=${uid} 的约 ${preview?.total ?? 0} 行数据，不可恢复。`}
+        onConfirm={doRun}
+      />
+    </Card>
+  )
+}
+
+function VacuumPanel() {
+  const [busy, setBusy] = useState(false)
+  const [confirm, setConfirm] = useState(false)
+  const [result, setResult] = useState<VacuumResult | null>(null)
+
+  const doRun = async () => {
+    setBusy(true)
+    try {
+      const r = await runVacuum()
+      setResult(r)
+      const freed = r.results.reduce((s, x) => s + (x.freed_bytes ?? 0), 0)
+      toast.success(`VACUUM 完成，回收 ${freed} 字节`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'VACUUM 失败')
+    } finally {
+      setBusy(false)
+      setConfirm(false)
+    }
+  }
+
+  return (
+    <Card title="VACUUM 回收空间" desc="对全部 SQLite 库执行 VACUUM，回收删除后未释放的磁盘空间。期间相关库会被独占写锁。">
+      <button type="button" onClick={() => setConfirm(true)} disabled={busy} className={btnCls}>
+        对全部库执行 VACUUM
+      </button>
+      {result && (
+        <ul className="mt-3 space-y-0.5 text-sm">
+          {result.results.map((x) => (
+            <li key={x.db} className="text-muted-foreground">
+              {x.db}：{x.ok ? `回收 ${x.freed_bytes ?? 0} 字节` : `失败（${x.error}）`}
+            </li>
+          ))}
+        </ul>
+      )}
+      <ConfirmDialog
+        open={confirm}
+        onOpenChange={setConfirm}
+        title="确认 VACUUM？"
+        desc="将对全部 SQLite 库执行 VACUUM，期间短暂占用写锁。"
+        onConfirm={doRun}
+      />
+    </Card>
+  )
+}
+
+function ConfirmDialog({
+  open,
+  onOpenChange,
+  title,
+  desc,
+  onConfirm,
+}: {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  title: string
+  desc: string
+  onConfirm: () => void
+}) {
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription>{desc}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>取消</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            onClick={onConfirm}
+          >
+            确认
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
+function MaintenancePanel() {
+  return (
+    <div className="space-y-4">
+      <PrunePanel />
+      <PurgeUserPanel />
+      <VacuumPanel />
+    </div>
+  )
+}
+
+// 时间列：列名以 _at 结尾或就叫 timestamp
+function isTimeCol(col: string): boolean {
+  const c = col.toLowerCase()
+  return c.endsWith('_at') || c === 'timestamp' || c.includes('expires')
+}
+
+// 时间值 → 可读串：数字/数字串按 epoch；ISO 串把日期与时间间的 T 换成空格。非时间值返回 null。
+function fmtTimeCell(v: unknown): string | null {
+  if (typeof v === 'number') return Number.isFinite(v) && v > 0 ? fmtTime(v) : null
+  if (typeof v === 'string' && v) {
+    if (!Number.isNaN(Number(v))) return fmtTime(Number(v))
+    const m = v.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2})?)/)
+    if (m) return `${m[1]} ${m[2]}`
+  }
+  return null
+}
+
+// 表格单元格短展示：时间列渲染成可读时间，其余截断
+function fmtSqliteCell(col: string, v: unknown): string {
+  if (isTimeCol(col)) {
+    const t = fmtTimeCell(v)
+    if (t) return t
+  }
+  return fmtCell(v)
+}
+
+// 与后端 config.DEFAULT_USER_ID 默认值对齐：CLI / 关认证时的兜底身份，users 表里通常没有对应行
+const DEFAULT_USER_ID = 1
+
+// user_id 列：值后拼用户名，如 "4 (Admin)"；兜底身份标 "(默认/CLI)"；其余未知/未启用返回 null
+function annotateUserId(
+  col: string,
+  v: unknown,
+  userMap: Record<string, string>,
+  enabled: boolean,
+): string | null {
+  if (!enabled || col !== 'user_id' || v == null || v === '') return null
+  const name = userMap[String(v)]
+  if (name) return `${v} (${name})`
+  if (String(v) === String(DEFAULT_USER_ID)) return `${v} (默认/CLI)`
+  return null
+}
+
+// JSON 字符串 → 美化串；非 JSON 返回 null
+function tryPrettyJson(s: string): string | null {
+  const t = s.trim()
+  if (!(t.startsWith('{') || t.startsWith('['))) return null
+  try {
+    return JSON.stringify(JSON.parse(t), null, 2)
+  } catch {
+    return null
+  }
+}
+
+// 行详情里单个值的完整展示：时间格式化；JSON 字符串美化
+function SqliteDetailValue({ col, value }: { col: string; value: unknown }) {
+  if (isTimeCol(col)) {
+    const t = fmtTimeCell(value)
+    if (t) {
+      return (
+        <span>
+          {t} <span className="text-xs text-muted-foreground">({String(value)})</span>
+        </span>
+      )
+    }
+  }
+  const s = fmtCell(value)
+  const pretty = tryPrettyJson(s)
+  if (pretty) {
+    return <pre className="overflow-x-auto rounded-md bg-muted/50 p-2 text-xs leading-relaxed">{pretty}</pre>
+  }
+  if (!s) return <span className="text-muted-foreground">（空）</span>
+  return <span className="whitespace-pre-wrap break-words">{s}</span>
 }

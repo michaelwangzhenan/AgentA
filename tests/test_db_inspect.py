@@ -72,6 +72,58 @@ def test_sqlite_table_rows_unknown_db(tmp_path, monkeypatch):
     assert inspect.sqlite_table_rows("ghost", "t", limit=10, offset=0) is None
 
 
+def _make_events_db(path):
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE ev (id INTEGER, user_id INTEGER, created_at INTEGER, ts TEXT)")
+    conn.executemany(
+        "INSERT INTO ev VALUES (?,?,?,?)",
+        [
+            (1, 1, 100, "2026-06-07T10:00:00"),
+            (2, 4, 300, "2026-06-07T12:00:00"),
+            (3, 4, 200, "2026-06-07T11:00:00"),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_sqlite_filter_user_id(tmp_path, monkeypatch):
+    db = tmp_path / "usage.db"
+    _make_events_db(db)
+    monkeypatch.setattr(inspect, "sqlite_db_files", lambda: [("USAGE_DB_PATH", db)])
+    out = inspect.sqlite_table_rows("usage", "ev", user_id=4)
+    assert out["total"] == 2
+    assert {r["id"] for r in out["rows"]} == {2, 3}
+
+
+def test_sqlite_sort_by_epoch_desc(tmp_path, monkeypatch):
+    db = tmp_path / "usage.db"
+    _make_events_db(db)
+    monkeypatch.setattr(inspect, "sqlite_db_files", lambda: [("USAGE_DB_PATH", db)])
+    out = inspect.sqlite_table_rows("usage", "ev", sort_by="created_at", desc=True)
+    assert [r["id"] for r in out["rows"]] == [2, 3, 1]
+
+
+def test_sqlite_time_range_epoch(tmp_path, monkeypatch):
+    db = tmp_path / "usage.db"
+    _make_events_db(db)
+    monkeypatch.setattr(inspect, "sqlite_db_files", lambda: [("USAGE_DB_PATH", db)])
+    out = inspect.sqlite_table_rows("usage", "ev", time_col="created_at", ts_from=150, ts_to=250)
+    assert [r["id"] for r in out["rows"]] == [3]
+
+
+def test_sqlite_time_range_iso_col(tmp_path, monkeypatch):
+    # ts 列是 ISO 文本，epoch 边界会转成本地 ISO 串比较
+    db = tmp_path / "usage.db"
+    _make_events_db(db)
+    monkeypatch.setattr(inspect, "sqlite_db_files", lambda: [("USAGE_DB_PATH", db)])
+    import time as _t
+    base = int(_t.mktime(_t.strptime("2026-06-07T10:30:00", "%Y-%m-%dT%H:%M:%S")))
+    end = int(_t.mktime(_t.strptime("2026-06-07T11:30:00", "%Y-%m-%dT%H:%M:%S")))
+    out = inspect.sqlite_table_rows("usage", "ev", time_col="ts", ts_from=base, ts_to=end)
+    assert [r["id"] for r in out["rows"]] == [3]
+
+
 def _rows():
     return [
         {"id": "a", "document": "hello world", "metadata": {"filename": "alpha.md", "ingested_at": 100}},

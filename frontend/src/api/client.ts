@@ -81,8 +81,11 @@ import type {
   ChromaItemDetail,
   ChromaItemsPage,
   ItemsQuery,
+  PruneResult,
+  PurgeResult,
   SqliteDatabases,
   SqliteTableRows,
+  VacuumResult,
 } from '@/types/dbAdmin'
 import type {
   GoldenCreateInput,
@@ -1063,7 +1066,7 @@ export async function getSecurityRuntimeSummary(
   return (await res.json()) as SecurityRuntimeSummary
 }
 
-// ─── DB 秀（/admin/db/*，仅 admin，只读）────────────────────────────────
+// ─── 数据库（/admin/db/*，仅 admin，只读）────────────────────────────────
 
 export async function getChromaCollections(): Promise<ChromaCollections> {
   const res = await apiFetch('/api/admin/db/chroma/collections')
@@ -1143,14 +1146,76 @@ export async function getSqliteDatabases(): Promise<SqliteDatabases> {
   return (await res.json()) as SqliteDatabases
 }
 
+export type SqliteRowsQuery = {
+  limit?: number
+  offset?: number
+  userId?: number
+  timeCol?: string
+  tsFrom?: number
+  tsTo?: number
+  sortBy?: string
+  desc?: boolean
+}
+
+// ── DB 维护（破坏性，admin）──────────────────────────────────────────────
+
+export async function getPrunePreview(days: number): Promise<PruneResult> {
+  const res = await apiFetch(`/api/admin/db/maintenance/prune/preview?days=${days}`)
+  await _ensureOk(res)
+  return (await res.json()) as PruneResult
+}
+
+export async function runPrune(days: number): Promise<PruneResult> {
+  const res = await apiFetch('/api/admin/db/maintenance/prune', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ days }),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as PruneResult
+}
+
+export async function getPurgeUserPreview(userId: number): Promise<PurgeResult> {
+  const res = await apiFetch(`/api/admin/db/maintenance/purge-user/preview?user_id=${userId}`)
+  await _ensureOk(res)
+  return (await res.json()) as PurgeResult
+}
+
+export async function runPurgeUser(userId: number): Promise<PurgeResult> {
+  const res = await apiFetch('/api/admin/db/maintenance/purge-user', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId }),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as PurgeResult
+}
+
+export async function runVacuum(dbKey?: string): Promise<VacuumResult> {
+  const res = await apiFetch('/api/admin/db/maintenance/vacuum', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(dbKey ? { db_key: dbKey } : {}),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as VacuumResult
+}
+
 export async function getSqliteTableRows(
   dbKey: string,
   table: string,
-  opts: { limit?: number; offset?: number } = {},
+  opts: SqliteRowsQuery = {},
 ): Promise<SqliteTableRows> {
-  const { limit = 50, offset = 0 } = opts
+  const { limit = 50, offset = 0, userId, timeCol, tsFrom, tsTo, sortBy, desc } = opts
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  if (userId != null) params.set('user_id', String(userId))
+  if (timeCol) params.set('time_col', timeCol)
+  if (tsFrom != null) params.set('ts_from', String(tsFrom))
+  if (tsTo != null) params.set('ts_to', String(tsTo))
+  if (sortBy) params.set('sort_by', sortBy)
+  if (desc) params.set('desc', 'true')
   const res = await apiFetch(
-    `/api/admin/db/sqlite/${encodeURIComponent(dbKey)}/${encodeURIComponent(table)}?limit=${limit}&offset=${offset}`,
+    `/api/admin/db/sqlite/${encodeURIComponent(dbKey)}/${encodeURIComponent(table)}?${params.toString()}`,
   )
   await _ensureOk(res)
   return (await res.json()) as SqliteTableRows

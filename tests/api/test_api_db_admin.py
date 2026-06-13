@@ -1,4 +1,4 @@
-"""DB 秀 /admin/db/* 端点 UT：mock src.db_inspect，只验证 HTTP 封装与 404。
+"""数据库 /admin/db/* 端点 UT：mock src.db_inspect，只验证 HTTP 封装与 404。
 
 鉴权由 conftest 的 _disable_auth_by_default 兜底为 admin。
 """
@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import src.api.routes.db_admin as db_admin
+import src.db_maintain as maintain
 from src.api.main import app
 
 
@@ -131,3 +132,39 @@ def test_sqlite_table_rows_bad_table_404(client, monkeypatch):
     )
     r = client.get("/api/admin/db/sqlite/auth/x")
     assert r.status_code == 404
+
+
+def test_maintenance_prune_preview(client, monkeypatch):
+    monkeypatch.setattr(maintain, "prune_preview", lambda days: {"days": days, "items": [], "total": 0})
+    r = client.get("/api/admin/db/maintenance/prune/preview?days=30")
+    assert r.status_code == 200
+    assert r.json()["days"] == 30
+
+
+def test_maintenance_prune_rejects_zero_days(client):
+    # days 有 ge=1 校验
+    r = client.get("/api/admin/db/maintenance/prune/preview?days=0")
+    assert r.status_code == 422
+
+
+def test_maintenance_prune_execute(client, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(maintain, "prune", lambda days: captured.update(days=days) or {"total": 5})
+    r = client.post("/api/admin/db/maintenance/prune", json={"days": 7})
+    assert r.status_code == 200
+    assert captured["days"] == 7
+
+
+def test_maintenance_purge_user_execute(client, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(maintain, "purge_user", lambda uid: captured.update(uid=uid) or {"total": 3})
+    r = client.post("/api/admin/db/maintenance/purge-user", json={"user_id": 1})
+    assert r.status_code == 200
+    assert captured["uid"] == 1
+
+
+def test_maintenance_vacuum(client, monkeypatch):
+    monkeypatch.setattr(maintain, "vacuum", lambda db_key: {"results": [{"db": db_key or "all", "ok": True}]})
+    r = client.post("/api/admin/db/maintenance/vacuum", json={})
+    assert r.status_code == 200
+    assert r.json()["results"][0]["ok"] is True
