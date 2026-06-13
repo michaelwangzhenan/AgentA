@@ -446,6 +446,14 @@ REGISTRY: list[ConfigItem] = [
         min=1,
         max=500,
     ),
+    ConfigItem(
+        key="BACKUP_DIR",
+        group="web",
+        type=ItemType.PATH,
+        brief="备份目录",
+        detail="运行时数据备份 zip 的保存位置；相对项目根。备份含明文密钥，请勿放入公共网盘。",
+        side_effect_hint="仅影响新备份，已生成的快照留在原目录",
+    ),
     # ─── Deep Research ────────────────────────────────────────────────────
     ConfigItem(
         key="DEEP_RESEARCH_ENABLED",

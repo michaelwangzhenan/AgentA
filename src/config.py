@@ -578,6 +578,9 @@ WEB_MAX_UPLOAD_MB: int = int(os.getenv("WEB_MAX_UPLOAD_MB", "10"))
 # 注意：超时只让 client 解套，后台 thread 仍会跑完（同步代码无法真取消）
 WEB_INGEST_TIMEOUT_SEC: int = int(os.getenv("WEB_INGEST_TIMEOUT_SEC", "60"))
 
+# 运行时数据备份目录（tools/backup.py 与 /admin/backup 生成的 zip 落此；含明文密钥，已 gitignore）
+BACKUP_DIR: str = os.getenv("BACKUP_DIR", "./backups")
+
 # RAG 检索返回的最大文档片段数
 # Iter-2 默认从 5 提升到 8：枚举/对比类问题 5 条往往不够；当前 LLM 上下文 8K~32K 富裕。
 RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "8"))

@@ -1,0 +1,274 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  AlertTriangle,
+  Download,
+  HardDriveDownload,
+  Loader2,
+  RotateCcw,
+  Trash2,
+  UploadCloud,
+} from 'lucide-react'
+import { toast } from 'sonner'
+
+import { ResourcePage } from '@/components/resources/ResourcePage'
+import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
+  backupDownloadUrl,
+  createBackup,
+  deleteBackup,
+  listBackups,
+  restoreBackup,
+} from '@/api/client'
+import type { BackupSnapshot } from '@/types/backup'
+
+function fmtSize(n: number): string {
+  const units = ['B', 'KB', 'MB', 'GB']
+  let v = n
+  for (const u of units) {
+    if (v < 1024 || u === 'GB') return `${v.toFixed(1)}${u}`
+    v /= 1024
+  }
+  return `${n}B`
+}
+
+function fmtTimestamp(ts: string): string {
+  // 形如 20260613-120000 → 2026-06-13 12:00:00
+  const m = ts.match(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/)
+  if (!m) return ts
+  return `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}`
+}
+
+export function BackupView() {
+  const [snapshots, setSnapshots] = useState<BackupSnapshot[]>([])
+  const [loading, setLoading] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [skipVectors, setSkipVectors] = useState(false)
+  const [restoring, setRestoring] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const [pendingFile, setPendingFile] = useState<File | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await listBackups()
+      setSnapshots(res.items)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '加载备份列表失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  async function handleCreate() {
+    setCreating(true)
+    try {
+      const snap = await createBackup(skipVectors)
+      toast.success(`已生成备份：${snap.file_count} 个文件，${fmtSize(snap.zip_bytes)}`)
+      await refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '生成备份失败')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  async function handleDelete(name: string) {
+    setDeleteTarget(null)
+    try {
+      await deleteBackup(name)
+      toast.success('已删除备份')
+      await refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '删除失败')
+    }
+  }
+
+  async function handleRestore(file: File) {
+    setPendingFile(null)
+    setRestoring(true)
+    try {
+      const res = await restoreBackup(file)
+      toast.success(res.message, { duration: 8000 })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '还原失败')
+    } finally {
+      setRestoring(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  return (
+    <ResourcePage
+      title="备份与恢复"
+      subtitle="管理运行时数据备份（配置 / 数据库 / 向量库 / 报告 / 编辑器配置）"
+      maxWidthClassName="max-w-4xl"
+    >
+      <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto pb-6">
+        {/* 含明文密钥警示 */}
+        <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>备份含明文密钥（.env / api_keys.json），请妥善保管，勿上传公共网盘。</span>
+        </div>
+
+        {/* 生成备份 */}
+        <section className="space-y-3 rounded-lg border border-border p-4">
+          <h3 className="flex items-center gap-2 text-sm font-semibold">
+            <HardDriveDownload className="h-4 w-4" /> 生成备份
+          </h3>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Switch checked={skipVectors} onCheckedChange={setSkipVectors} id="skip-vectors" />
+            <label htmlFor="skip-vectors" className="cursor-pointer">
+              跳过向量库 / 索引（体积大，约 100MB）
+            </label>
+          </div>
+          <Button onClick={handleCreate} disabled={creating}>
+            {creating ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
+            生成备份
+          </Button>
+        </section>
+
+        {/* 快照列表 */}
+        <section className="space-y-3 rounded-lg border border-border p-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold">备份快照</h3>
+            <Button variant="ghost" size="sm" onClick={() => void refresh()} disabled={loading}>
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : '刷新'}
+            </Button>
+          </div>
+          {snapshots.length === 0 ? (
+            <p className="text-sm text-muted-foreground">暂无备份。</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-left text-muted-foreground">
+                    <th className="py-2 pr-3 font-medium">时间</th>
+                    <th className="py-2 pr-3 font-medium">文件数</th>
+                    <th className="py-2 pr-3 font-medium">大小</th>
+                    <th className="py-2 pr-3 font-medium">向量库</th>
+                    <th className="py-2 pr-3 font-medium">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {snapshots.map((s) => (
+                    <tr key={s.name} className="border-b border-border/50">
+                      <td className="py-2 pr-3">{fmtTimestamp(s.timestamp)}</td>
+                      <td className="py-2 pr-3">{s.file_count}</td>
+                      <td className="py-2 pr-3">{fmtSize(s.zip_bytes)}</td>
+                      <td className="py-2 pr-3">{s.include_vectors ? '含' : '不含'}</td>
+                      <td className="py-2 pr-3">
+                        <div className="flex items-center gap-1">
+                          <a
+                            href={backupDownloadUrl(s.name)}
+                            download
+                            className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs hover:bg-muted"
+                          >
+                            <Download className="h-3.5 w-3.5" /> 下载
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => setDeleteTarget(s.name)}
+                            className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" /> 删除
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        {/* 还原 */}
+        <section className="space-y-3 rounded-lg border border-destructive/40 p-4">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-destructive">
+            <RotateCcw className="h-4 w-4" /> 从备份还原
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            上传备份 zip 会<strong className="text-destructive">覆盖</strong>服务器上的
+            .env / 数据库等文件。还原后建议重启后端以加载新数据。
+          </p>
+          <div className="flex items-center gap-3">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".zip"
+              disabled={restoring}
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) setPendingFile(f)
+              }}
+              className="text-sm file:mr-3 file:cursor-pointer file:rounded file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm"
+            />
+            {restoring ? (
+              <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" /> 还原中…
+              </span>
+            ) : null}
+          </div>
+        </section>
+      </div>
+
+      {/* 删除确认 */}
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除备份</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定删除 {deleteTarget}？此操作不可恢复。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={() => deleteTarget && void handleDelete(deleteTarget)}>
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 还原确认 */}
+      <AlertDialog open={pendingFile !== null} onOpenChange={(o) => !o && setPendingFile(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <UploadCloud className="h-4 w-4" /> 确认还原
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              即将用 <strong>{pendingFile?.name}</strong> 覆盖服务器现有的 .env / 数据库 /
+              向量库等文件，且不可撤销。还原后请重启后端。确定继续？
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => pendingFile && void handleRestore(pendingFile)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              确认还原
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </ResourcePage>
+  )
+}

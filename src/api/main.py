@@ -43,6 +43,7 @@ from src.api.routes import (  # noqa: E402
     admin,
     api_keys as api_keys_route,
     auth,
+    backup as backup_route,
     chat,
     config as config_route,
     eval as eval_route,
@@ -138,3 +139,4 @@ app.include_router(srs.router, prefix="/api", tags=["srs"])
 app.include_router(usage.router, prefix="/api", tags=["usage"])
 app.include_router(routing.router, prefix="/api", tags=["routing"])
 app.include_router(eval_route.router, prefix="/api", tags=["eval"])
+app.include_router(backup_route.router, prefix="/api", tags=["backup"])

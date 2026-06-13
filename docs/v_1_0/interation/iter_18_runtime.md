@@ -254,3 +254,114 @@ flowchart LR
 | 还原确认拦截 | 同上但输入 `n` | 打印"已取消"，不写任何文件 |
 | 强制还原 | `restore --zip <zip> --force` | 跳过确认直接还原 |
 | 敏感提醒 | 任意一次 backup 结束 | 打印"备份含明文密钥，请妥善保管"提醒 |
+
+
+# 5. WEB UI 工具
+新增一页 "备份与恢复"，用于管理备份数据。
+
+## 5.1. 需求
+- **功能**：admin 在 Web 上一键生成备份、查看快照列表、下载到本地、删除旧快照，并能上传备份 zip 还原回服务器。
+- **目标**：不用命令行也能完成备份 / 恢复，降低日常备份与换机门槛。
+- **价值**：图形化、低门槛；admin 一处集中管理运行时数据。
+- **风险**：① 备份含明文密钥，经 HTTP 下载有外泄面（admin 鉴权缓解）；② 还原覆盖服务器 `.env`/`db/` 且服务运行中——需路径校验防穿越 + 停服 / 重启提醒；③ 含向量库时体积大（~96MB），下载 / 上传耗时。
+- **现状**：已有 CLI `tools/backup.py`；可参考 admin API 模式（`db_admin.py` + `require_admin`）与前端 admin 页（`DBShowView.tsx`）。
+
+### 5.1.1. 决策记录
+| 决策点 | 选择 |
+|---|---|
+| Web 操作范围 | 生成 + 列表 + 下载 + 删除 + **还原（上传 zip）** |
+| 敏感数据（A 类） | 照旧包含，页面明确警示"含明文密钥" |
+| 代码复用 | 备份核心抽到 `src/runtime_backup.py`，CLI 与 API 共用（仿 `db_inspect`） |
+| 服务端备份目录 | 新增配置 `BACKUP_DIR`（默认 `./backups`），加入 `.gitignore` |
+
+## 5.2. 设计
+
+### 5.2.1. 总体框架
+```mermaid
+flowchart LR
+    subgraph FE[前端 BackupView（admin 页）]
+      G[生成/列表/下载/删除/还原]
+    end
+    subgraph API[src/api/routes/backup.py · require_admin]
+      EP[/admin/backup/*/]
+    end
+    CLI[tools/backup.py] --> CORE
+    G -->|/api| EP --> CORE[src/runtime_backup.py<br/>清单/备份/还原/列表/安全校验]
+    CORE --> FS[(BACKUP_DIR<br/>agenta-backup-*.zip)]
+```
+
+### 5.2.2. 代码重构（复用）
+把现有 `tools/backup.py` 的核心函数（`build_plan` / `create_backup` / `read_manifest` / `restore_backup` / `list_snapshots` + 新增安全校验）下沉到 `src/runtime_backup.py`；`tools/backup.py` 改成薄 CLI 包装（仿 `db_show.py` → `db_inspect.py`）。现有 UT 路径相应调整、保持通过。
+
+### 5.2.3. 配置
+新增 `BACKUP_DIR`（默认 `./backups`）。按 §1.3.4 四处同步：`.env`、`.env.example`、`src/config.py`、UI 设置页；并在 `.gitignore` 加 `backups/`。
+
+### 5.2.4. API（全部 `require_admin`，前缀 `/admin/backup`）
+| 方法 | 路径 | 作用 |
+|---|---|---|
+| POST | `/admin/backup/create` | 触发生成，body `{skip_vectors}`，返回新快照 manifest 摘要 |
+| GET | `/admin/backup/list` | 列出 `BACKUP_DIR` 下快照摘要 |
+| GET | `/admin/backup/download/{name}` | 下载指定 zip（`FileResponse`） |
+| DELETE | `/admin/backup/{name}` | 删除指定快照 |
+| POST | `/admin/backup/restore` | multipart 上传 zip → 校验 → 还原，返回还原文件数 + 重启提醒 |
+
+`{name}` 强校验：必须匹配 `agenta-backup-<时间戳>.zip`，禁止含路径分隔符 / `..`（防穿越读删任意文件）。
+
+### 5.2.5. 还原安全（重点）
+- 上传 zip 落临时文件 → 读 `backup-manifest.json` → 逐条校验每个 `restore` 目标：必须是**相对路径**、规范化（resolve）后**仍在项目根内**；拒绝 `external` 条目、绝对路径、`..` 穿越。任一不合法 → 整体 400 拒绝。
+- 还原是破坏性操作：前端二次确认（输入确认词）才提交。
+- 覆盖运行中的 db 文件后，已打开的连接可能仍指旧文件（Windows 下还可能因占用写失败）。还原响应里返回"建议还原后重启后端"提醒，前端醒目展示。
+
+### 5.2.6. 前端
+- 新增 admin 页 `frontend/src/components/admin/BackupView.tsx`，挂到侧边栏 admin 区（`isAdmin` 门）。
+- `frontend/src/api/client.ts` 加备份相关函数；`frontend/src/types/backup.ts` 定义类型。
+- 页面区块：①生成区（`skip-vectors` 开关 + "含明文密钥"警示）；②快照表（时间 / 文件数 / 大小 / 是否含向量库 + 下载 / 删除）；③还原区（上传 zip + 确认输入 + 停服 / 重启提醒）。
+
+### 5.2.7. 影响面与可观测性
+- 新增：`src/runtime_backup.py`、`src/api/routes/backup.py`、`src/api/schemas/backup.py`、前端 1 页 + types + client 函数；重构 `tools/backup.py`。
+- 不动现有 DB schema 与其它 API；新增配置项 `BACKUP_DIR` 四处同步。
+- **可观测 / 验证**：API UT 覆盖 create / list / download / delete / restore + **路径穿越拒绝**；`runtime_backup` 往返一致 UT 从 `tests/tools` 迁到 `tests/test_runtime_backup.py`；前端手测。
+
+### 5.2.8. 实现步骤
+1. 抽 `src/runtime_backup.py`，`tools/backup.py` 改薄包装；迁移 / 跑通备份核心 UT。
+2. 加 `BACKUP_DIR` 配置（四处同步 + `.gitignore` 加 `backups/`）。
+3. 新增 `src/api/schemas/backup.py` + `src/api/routes/backup.py`，在 `main.py` 注册。
+4. 实现还原路径安全校验 + UT（含穿越拒绝用例）。
+5. 前端 `BackupView` + `client` + `types` + 侧边栏接入。
+6. API UT + 前端手测；撰写人工测试方案到本节；验收。
+
+## 5.3. 实现与验收
+
+### 5.3.1. 落地清单
+| 文件 | 内容 |
+|---|---|
+| `src/runtime_backup.py` | 备份核心（清单 / 备份 / 还原 / 列表 / `validate_restore_targets` 安全校验），CLI 与 API 共用 |
+| `tools/backup.py` | 改为薄 CLI 包装，调 `src.runtime_backup` |
+| `src/api/schemas/backup.py` | 请求 / 响应模型 |
+| `src/api/routes/backup.py` | `/admin/backup/*` 五端点，`require_admin`，文件名 + 还原路径双重安全校验 |
+| `src/api/main.py` | 注册 `backup_route` |
+| `src/config.py` / `.env` / `.env.example` / `config_meta.py` / `.gitignore` | 新增 `BACKUP_DIR`（默认 `./backups`）四处同步 + 忽略 `backups/` |
+| `frontend/.../admin/BackupView.tsx` + `types/backup.ts` + `api/client.ts` + `Sidebar.tsx` + `App.tsx` | admin 页（生成 / 列表 / 下载 / 删除 / 还原）+ 侧边栏入口 |
+| `tests/test_runtime_backup.py` / `tests/api/test_api_backup.py` | 核心往返 + 安全校验 UT / 端点 UT |
+
+实现说明：还原读到内存后写回（大向量库备份约 100MB，自托管场景可接受）；还原前用 `validate_restore_targets` 拒绝 `external`/绝对/`..` 目标；下载 / 删除的文件名用正则 `agenta-backup-<时间戳>.zip` 限定防穿越。
+
+### 5.3.2. 自测结果
+- 全量 `pytest -q`：1617 passed, 33 deselected（含 runtime_backup 7 + backup API 11）。
+- 前端 `tsc --noEmit`：通过。
+
+### 5.3.3. 人工测试方案
+admin 登录后进入侧边栏「备份与恢复」。还原务必在隔离副本验证，勿在生产目录直接覆盖。
+
+| 用例 | 操作步骤 | 验收标准 |
+|---|---|---|
+| 生成备份 | 点「生成备份」 | 列表出现新快照（时间 / 文件数 / 大小 / 含向量库）；toast 提示成功 |
+| 跳过向量库 | 打开「跳过向量库」开关后生成 | 新快照标「不含」向量库、体积明显更小 |
+| 下载 | 点某快照「下载」 | 浏览器下载到 `agenta-backup-<ts>.zip`，可正常解压 |
+| 删除 | 点「删除」→ 确认 | 二次确认后该行消失；取消则保留 |
+| 还原（隔离） | 在隔离副本里上传一个 zip → 确认 | toast 显示还原文件数 + 重启提醒；目标文件被覆盖 |
+| 还原确认拦截 | 选文件后点「取消」 | 不发起还原、不覆盖任何文件 |
+| 非法备份 | 上传一个非 zip / 无 manifest 的文件 | 提示「无效备份」，HTTP 400，无文件写入 |
+| 路径穿越拦截 | 上传 manifest 含 `../` 目标的 zip | 提示「含不安全路径，已拒绝」，HTTP 400，项目外无文件生成 |
+| 权限 | 用非 admin 账号访问 | 侧边栏无「备份与恢复」入口；直接调 API 返回 403 |
+| 含明文密钥提醒 | 进入页面 | 顶部常驻黄色警示「备份含明文密钥」 |

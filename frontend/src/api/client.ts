@@ -88,6 +88,11 @@ import type {
   TraceOverview,
   TraceSeries,
 } from '@/types/eval'
+import type {
+  BackupListResponse,
+  BackupSnapshot,
+  RestoreResponse,
+} from '@/types/backup'
 
 // ─── 401 全局处理 ──────────────────────────────────────────────────────
 // 登录态失效时，由 AuthProvider 注册回调把界面切回登录页。
@@ -1045,4 +1050,45 @@ export async function getSecurityRuntimeSummary(
   const res = await apiFetch(`/api/eval/security/runtime/summary?range=${range}&limit=${limit}`)
   await _ensureOk(res)
   return (await res.json()) as SecurityRuntimeSummary
+}
+
+// ─── 运行时数据备份（/admin/backup/*，仅 admin）────────────────────────
+
+export async function listBackups(): Promise<BackupListResponse> {
+  const res = await apiFetch('/api/admin/backup/list')
+  await _ensureOk(res)
+  return (await res.json()) as BackupListResponse
+}
+
+export async function createBackup(skipVectors: boolean): Promise<BackupSnapshot> {
+  const res = await apiFetch('/api/admin/backup/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ skip_vectors: skipVectors }),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as BackupSnapshot
+}
+
+export async function deleteBackup(name: string): Promise<void> {
+  const res = await apiFetch(`/api/admin/backup/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  })
+  await _ensureOk(res)
+}
+
+export async function restoreBackup(file: File): Promise<RestoreResponse> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await apiFetch('/api/admin/backup/restore', {
+    method: 'POST',
+    body: form,
+  })
+  await _ensureOk(res)
+  return (await res.json()) as RestoreResponse
+}
+
+// 下载走浏览器原生导航（GET + cookie 凭证），返回拼好的 URL 供 <a> 使用。
+export function backupDownloadUrl(name: string): string {
+  return `/api/admin/backup/download/${encodeURIComponent(name)}`
 }

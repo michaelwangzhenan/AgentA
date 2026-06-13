@@ -1,27 +1,15 @@
-"""tools/backup.py 验收：清单构建、备份/还原往返一致、SQLite 在线备份、list 摘要。"""
+"""src/runtime_backup.py 验收：清单构建、备份/还原往返、SQLite 在线备份、还原路径安全校验。"""
 from __future__ import annotations
 
-import importlib.util
 import sqlite3
 import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
+import src.runtime_backup as rb
 
-ROOT = Path(__file__).resolve().parents[2]
-
-
-@pytest.fixture(scope="module")
-def backup():
-    path = ROOT / "tools" / "backup.py"
-    spec = importlib.util.spec_from_file_location("backup_cli", path)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["backup_cli"] = mod
-    spec.loader.exec_module(mod)
-    return mod
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _make_fake_root(root: Path) -> None:
@@ -60,7 +48,95 @@ def _fake_config(root: Path) -> SimpleNamespace:
     )
 
 
-def test_help_exits_zero():
+def test_skip_vectors_drops_c(tmp_path):
+    root = tmp_path / "proj"
+    root.mkdir()
+    _make_fake_root(root)
+    cfg = _fake_config(root)
+    with_c = [c for c, _, _ in rb.build_plan(root, cfg, skip_vectors=False)]
+    without_c = [c for c, _, _ in rb.build_plan(root, cfg, skip_vectors=True)]
+    assert "C" in with_c
+    assert "C" not in without_c
+
+
+def test_roundtrip_restores_all(tmp_path):
+    root = tmp_path / "proj"
+    root.mkdir()
+    _make_fake_root(root)
+    cfg = _fake_config(root)
+
+    plan = rb.build_plan(root, cfg, skip_vectors=False)
+    zip_path = rb.create_backup(
+        plan, root, tmp_path / "out", include_vectors=True, timestamp="20260613-120000"
+    )
+    assert zip_path.exists()
+
+    manifest = rb.read_manifest(zip_path)
+    assert manifest["include_vectors"] is True
+    arcs = {f["arc"] for f in manifest["files"]}
+    assert "db/sqlite/chat_history.db" in arcs
+    assert "db/chroma/chroma.sqlite3" in arcs
+    assert ".env" in arcs and "ws.code-workspace" in arcs
+    assert not any("auth.db" in a for a in arcs)  # 不存在的库不进 manifest
+    assert not any("bm25" in a for a in arcs)
+
+    dest = tmp_path / "restored"
+    dest.mkdir()
+    n = rb.restore_backup(zip_path, dest, manifest)
+    assert n == len(manifest["files"])
+    assert (dest / ".env").read_text(encoding="utf-8") == "OPENAI_API_KEY=secret\n"
+    assert (dest / "tools" / "agent_eval" / "reports" / "r1.md").read_text(encoding="utf-8") == "report"
+
+    conn = sqlite3.connect(dest / "db" / "sqlite" / "chat_history.db")
+    rows = conn.execute("SELECT txt FROM msg").fetchall()
+    conn.close()
+    assert rows == [("hello",)]
+
+
+def test_list_snapshots_summary(tmp_path):
+    root = tmp_path / "proj"
+    root.mkdir()
+    _make_fake_root(root)
+    cfg = _fake_config(root)
+    out = tmp_path / "out"
+    plan = rb.build_plan(root, cfg, skip_vectors=True)
+    rb.create_backup(plan, root, out, include_vectors=False, timestamp="20260613-130000")
+
+    snaps = rb.list_snapshots(out)
+    assert len(snaps) == 1
+    assert snaps[0]["timestamp"] == "20260613-130000"
+    assert snaps[0]["include_vectors"] is False
+    assert snaps[0]["file_count"] > 0
+    assert snaps[0]["name"].startswith("agenta-backup-")
+
+
+def test_list_empty_dir(tmp_path):
+    assert rb.list_snapshots(tmp_path / "nope") == []
+
+
+def test_validate_restore_targets_ok(tmp_path):
+    root = tmp_path / "proj"
+    manifest = {"files": [{"arc": ".env", "restore": ".env", "external": False}]}
+    assert rb.validate_restore_targets(manifest, root) == []
+
+
+def test_validate_restore_targets_rejects_traversal(tmp_path):
+    root = tmp_path / "proj"
+    root.mkdir()
+    manifest = {
+        "files": [
+            {"arc": "ok", "restore": "db/x.db", "external": False},
+            {"arc": "bad-up", "restore": "../evil.txt", "external": False},
+            {"arc": "bad-ext", "restore": "C:/Windows/x", "external": True},
+        ]
+    }
+    bad = rb.validate_restore_targets(manifest, root)
+    assert "bad-up" in bad
+    assert "bad-ext" in bad
+    assert "ok" not in bad
+
+
+def test_cli_help_exits_zero():
     r = subprocess.run(
         [sys.executable, str(ROOT / "tools" / "backup.py"), "-h"],
         cwd=str(ROOT),
@@ -72,71 +148,3 @@ def test_help_exits_zero():
     assert r.returncode == 0
     for kw in ("backup", "restore", "list"):
         assert kw in r.stdout
-
-
-def test_skip_vectors_drops_c(backup, tmp_path):
-    root = tmp_path / "proj"
-    root.mkdir()
-    _make_fake_root(root)
-    cfg = _fake_config(root)
-    with_c = [c for c, _, _ in backup.build_plan(root, cfg, skip_vectors=False)]
-    without_c = [c for c, _, _ in backup.build_plan(root, cfg, skip_vectors=True)]
-    assert "C" in with_c
-    assert "C" not in without_c
-
-
-def test_roundtrip_restores_all(backup, tmp_path):
-    root = tmp_path / "proj"
-    root.mkdir()
-    _make_fake_root(root)
-    cfg = _fake_config(root)
-
-    plan = backup.build_plan(root, cfg, skip_vectors=False)
-    zip_path = backup.create_backup(
-        plan, root, tmp_path / "out", include_vectors=True, timestamp="20260613-120000"
-    )
-    assert zip_path.exists()
-
-    manifest = backup.read_manifest(zip_path)
-    assert manifest["include_vectors"] is True
-    # 不存在的 auth.db / bm25 不应进 manifest
-    arcs = {f["arc"] for f in manifest["files"]}
-    assert "db/sqlite/chat_history.db" in arcs
-    assert "db/chroma/chroma.sqlite3" in arcs
-    assert ".env" in arcs and "ws.code-workspace" in arcs
-    assert not any("auth.db" in a for a in arcs)
-    assert not any("bm25" in a for a in arcs)
-
-    # 还原到全新空目录，逐一比对内容
-    dest = tmp_path / "restored"
-    dest.mkdir()
-    n = backup.restore_backup(zip_path, dest, manifest)
-    assert n == len(manifest["files"])
-    assert (dest / ".env").read_text(encoding="utf-8") == "OPENAI_API_KEY=secret\n"
-    assert (dest / "tools" / "agent_eval" / "reports" / "r1.md").read_text(encoding="utf-8") == "report"
-
-    # SQLite 在线备份还原后可正常读取
-    conn = sqlite3.connect(dest / "db" / "sqlite" / "chat_history.db")
-    rows = conn.execute("SELECT txt FROM msg").fetchall()
-    conn.close()
-    assert rows == [("hello",)]
-
-
-def test_list_snapshots_summary(backup, tmp_path):
-    root = tmp_path / "proj"
-    root.mkdir()
-    _make_fake_root(root)
-    cfg = _fake_config(root)
-    out = tmp_path / "out"
-    plan = backup.build_plan(root, cfg, skip_vectors=True)
-    backup.create_backup(plan, root, out, include_vectors=False, timestamp="20260613-130000")
-
-    snaps = backup.list_snapshots(out)
-    assert len(snaps) == 1
-    assert snaps[0]["timestamp"] == "20260613-130000"
-    assert snaps[0]["include_vectors"] is False
-    assert snaps[0]["file_count"] > 0
-
-
-def test_list_empty_dir(backup, tmp_path):
-    assert backup.list_snapshots(tmp_path / "nope") == []

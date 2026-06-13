@@ -30,6 +30,9 @@ tools/rag_eval/golden.json
 # 对话历史目录
 history/
 
+# 运行时数据备份（含明文密钥的 zip，绝不进 git）
+backups/
+
 # 日志文件目录
 logs/
 

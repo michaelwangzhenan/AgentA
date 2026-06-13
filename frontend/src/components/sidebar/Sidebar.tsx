@@ -7,6 +7,7 @@ import {
   ChevronDown,
   GaugeCircle,
   GraduationCap,
+  HardDriveDownload,
   HelpCircle,
   LogOut,
   MessageSquare,
@@ -63,6 +64,7 @@ export type ViewKind =
   | 'mastery'
   | 'usage'
   | 'quality'
+  | 'backup'
   | 'settings'
 
 export type SidebarProps = {
@@ -222,6 +224,14 @@ export function Sidebar(props: SidebarProps) {
           active={activeView === 'quality'}
           onClick={() => onSwitchView('quality')}
         />
+        {isAdmin && (
+          <ViewNavButton
+            icon={<HardDriveDownload className="h-4 w-4" />}
+            label="备份与恢复"
+            active={activeView === 'backup'}
+            onClick={() => onSwitchView('backup')}
+          />
+        )}
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col">
