@@ -46,6 +46,7 @@ from src.api.routes import (  # noqa: E402
     backup as backup_route,
     chat,
     config as config_route,
+    db_admin,
     eval as eval_route,
     health,
     kb,
@@ -139,4 +140,5 @@ app.include_router(srs.router, prefix="/api", tags=["srs"])
 app.include_router(usage.router, prefix="/api", tags=["usage"])
 app.include_router(routing.router, prefix="/api", tags=["routing"])
 app.include_router(eval_route.router, prefix="/api", tags=["eval"])
+app.include_router(db_admin.router, prefix="/api", tags=["db-admin"])
 app.include_router(backup_route.router, prefix="/api", tags=["backup"])

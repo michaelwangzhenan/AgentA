@@ -74,6 +74,16 @@ import type {
 } from '@/types/usage'
 import type { RoutingPoolResponse } from '@/types/routing'
 import type {
+  Bm25DocDetail,
+  Bm25DocsPage,
+  Bm25Indexes,
+  ChromaCollections,
+  ChromaItemDetail,
+  ChromaItemsPage,
+  SqliteDatabases,
+  SqliteTableRows,
+} from '@/types/dbAdmin'
+import type {
   GoldenCreateInput,
   GoldenItem,
   GoldenList,
@@ -1050,6 +1060,85 @@ export async function getSecurityRuntimeSummary(
   const res = await apiFetch(`/api/eval/security/runtime/summary?range=${range}&limit=${limit}`)
   await _ensureOk(res)
   return (await res.json()) as SecurityRuntimeSummary
+}
+
+// ─── DB 秀（/admin/db/*，仅 admin，只读）────────────────────────────────
+
+export async function getChromaCollections(): Promise<ChromaCollections> {
+  const res = await apiFetch('/api/admin/db/chroma/collections')
+  await _ensureOk(res)
+  return (await res.json()) as ChromaCollections
+}
+
+export async function getChromaItems(
+  name: string,
+  opts: { limit?: number; offset?: number } = {},
+): Promise<ChromaItemsPage> {
+  const { limit = 50, offset = 0 } = opts
+  const res = await apiFetch(
+    `/api/admin/db/chroma/${encodeURIComponent(name)}/items?limit=${limit}&offset=${offset}`,
+  )
+  await _ensureOk(res)
+  return (await res.json()) as ChromaItemsPage
+}
+
+export async function getChromaItem(
+  name: string,
+  itemId: string,
+): Promise<ChromaItemDetail> {
+  const res = await apiFetch(
+    `/api/admin/db/chroma/${encodeURIComponent(name)}/items/${encodeURIComponent(itemId)}`,
+  )
+  await _ensureOk(res)
+  return (await res.json()) as ChromaItemDetail
+}
+
+export async function getBm25Indexes(): Promise<Bm25Indexes> {
+  const res = await apiFetch('/api/admin/db/bm25/indexes')
+  await _ensureOk(res)
+  return (await res.json()) as Bm25Indexes
+}
+
+export async function getBm25Docs(
+  collection: string,
+  opts: { limit?: number; offset?: number } = {},
+): Promise<Bm25DocsPage> {
+  const { limit = 50, offset = 0 } = opts
+  const res = await apiFetch(
+    `/api/admin/db/bm25/${encodeURIComponent(collection)}/docs?limit=${limit}&offset=${offset}`,
+  )
+  await _ensureOk(res)
+  return (await res.json()) as Bm25DocsPage
+}
+
+export async function getBm25Doc(
+  collection: string,
+  docId: string,
+): Promise<Bm25DocDetail> {
+  const res = await apiFetch(
+    `/api/admin/db/bm25/${encodeURIComponent(collection)}/docs/${encodeURIComponent(docId)}`,
+  )
+  await _ensureOk(res)
+  return (await res.json()) as Bm25DocDetail
+}
+
+export async function getSqliteDatabases(): Promise<SqliteDatabases> {
+  const res = await apiFetch('/api/admin/db/sqlite/databases')
+  await _ensureOk(res)
+  return (await res.json()) as SqliteDatabases
+}
+
+export async function getSqliteTableRows(
+  dbKey: string,
+  table: string,
+  opts: { limit?: number; offset?: number } = {},
+): Promise<SqliteTableRows> {
+  const { limit = 50, offset = 0 } = opts
+  const res = await apiFetch(
+    `/api/admin/db/sqlite/${encodeURIComponent(dbKey)}/${encodeURIComponent(table)}?limit=${limit}&offset=${offset}`,
+  )
+  await _ensureOk(res)
+  return (await res.json()) as SqliteTableRows
 }
 
 // ─── 运行时数据备份（/admin/backup/*，仅 admin）────────────────────────

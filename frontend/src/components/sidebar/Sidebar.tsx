@@ -5,6 +5,7 @@ import {
   BookOpen,
   Brain,
   ChevronDown,
+  Database,
   GaugeCircle,
   GraduationCap,
   HardDriveDownload,
@@ -64,6 +65,7 @@ export type ViewKind =
   | 'mastery'
   | 'usage'
   | 'quality'
+  | 'dbshow'
   | 'backup'
   | 'settings'
 
@@ -224,6 +226,14 @@ export function Sidebar(props: SidebarProps) {
           active={activeView === 'quality'}
           onClick={() => onSwitchView('quality')}
         />
+        {isAdmin && (
+          <ViewNavButton
+            icon={<Database className="h-4 w-4" />}
+            label="DB 秀"
+            active={activeView === 'dbshow'}
+            onClick={() => onSwitchView('dbshow')}
+          />
+        )}
         {isAdmin && (
           <ViewNavButton
             icon={<HardDriveDownload className="h-4 w-4" />}
