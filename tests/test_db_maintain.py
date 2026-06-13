@@ -96,19 +96,36 @@ def chat_db(tmp_path, monkeypatch):
     return db
 
 
-def test_purge_user_preview(chat_db):
+def test_purge_user_preview_lists_rows(chat_db):
     out = maintain.purge_user_preview(1)
-    by = {(i["table"]): i["count"] for i in out["items"]}
-    assert by["messages"] == 2  # s1 的两条
-    assert by["sessions"] == 1
-    assert out["executed"] is False
+    sess = next(t for t in out["tables"] if t["table"] == "sessions")
+    assert sess["total"] == 1
+    assert sess["child"] == "messages"  # 子表跟随级联，仅标注
+    assert "rowid" in sess["columns"]
+    assert len(sess["rows"]) == 1
+    # messages 子表不单列
+    assert all(t["table"] != "messages" for t in out["tables"])
 
 
-def test_purge_user_executes_cascade(chat_db):
-    maintain.purge_user(1)
+def test_purge_user_all_cascade(chat_db):
+    maintain.purge_user(1, [{"db": "chat_history", "table": "sessions", "all": True, "rowids": []}])
     conn = sqlite3.connect(chat_db)
     assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1  # s2 留存
     assert conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 1  # s2 的消息留存
+    conn.close()
+
+
+def test_purge_user_selected_rowids_cascade(chat_db):
+    # 只删 s1 这一行（按 rowid），其 messages 级联删；s2 不动
+    pre = maintain.purge_user_preview(1)
+    sess = next(t for t in pre["tables"] if t["table"] == "sessions")
+    rid = sess["rows"][0]["rowid"]
+    out = maintain.purge_user(1, [{"db": "chat_history", "table": "sessions", "all": False, "rowids": [rid]}])
+    by = {i["table"]: i["deleted"] for i in out["items"]}
+    assert by["sessions"] == 1
+    assert by["messages"] == 2
+    conn = sqlite3.connect(chat_db)
+    assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1
     conn.close()
 
 

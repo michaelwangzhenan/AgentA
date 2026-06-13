@@ -39,7 +39,8 @@ import type {
   ChromaItemsPage,
   Metadata,
   PruneResult,
-  PurgeResult,
+  PurgePreview,
+  PurgeSelection,
   SqliteDatabases,
   SqliteTableRows,
   VacuumResult,
@@ -1554,7 +1555,11 @@ function PrunePanel() {
 
 function PurgeUserPanel() {
   const [uid, setUid] = useState('')
-  const [preview, setPreview] = useState<PurgeResult | null>(null)
+  const [preview, setPreview] = useState<PurgePreview | null>(null)
+  // sessions 表逐行勾选：被取消勾选的 rowid 集合（空集 = 全选）
+  const [excluded, setExcluded] = useState<Record<string, Set<number>>>({})
+  // 其它表只整表勾选：被关掉的表 key 集合
+  const [disabledTables, setDisabledTables] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
   const [confirm, setConfirm] = useState(false)
 
@@ -1562,18 +1567,58 @@ function PurgeUserPanel() {
     setBusy(true)
     try {
       setPreview(await getPurgeUserPreview(Number(uid)))
+      setExcluded({})
+      setDisabledTables(new Set())
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '预览失败')
     } finally {
       setBusy(false)
     }
   }
+
+  const buildSelections = (): PurgeSelection[] => {
+    if (!preview) return []
+    const out: PurgeSelection[] = []
+    for (const t of preview.tables) {
+      const key = `${t.db}.${t.table}`
+      if (t.table === 'sessions') {
+        const ex = excluded[key]
+        if (!ex || ex.size === 0) {
+          out.push({ db: t.db, table: t.table, all: true, rowids: [] })
+        } else {
+          const ids = t.rows.map((r) => Number(r.rowid)).filter((id) => !ex.has(id))
+          if (ids.length) out.push({ db: t.db, table: t.table, all: false, rowids: ids })
+        }
+      } else if (!disabledTables.has(key)) {
+        out.push({ db: t.db, table: t.table, all: true, rowids: [] })
+      }
+    }
+    return out
+  }
+
+  const selectedCount = (): number => {
+    if (!preview) return 0
+    let n = 0
+    for (const t of preview.tables) {
+      const key = `${t.db}.${t.table}`
+      if (t.table === 'sessions') {
+        const ex = excluded[key]
+        n += !ex || ex.size === 0 ? t.total : t.rows.length - ex.size
+      } else if (!disabledTables.has(key)) {
+        n += t.total
+      }
+    }
+    return n
+  }
+
   const doRun = async () => {
     setBusy(true)
     try {
-      const r = await runPurgeUser(Number(uid))
-      toast.success(`已清理 user_id=${uid} 的 ${r.total} 行`)
+      const r = await runPurgeUser(Number(uid), buildSelections())
+      toast.success(`已清理 user_id=${uid} 的 ${r.total} 行（含级联）`)
       setPreview(null)
+      setExcluded({})
+      setDisabledTables(new Set())
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '清理失败')
     } finally {
@@ -1582,10 +1627,32 @@ function PurgeUserPanel() {
     }
   }
 
+  const toggleRow = (key: string, rowid: number) => {
+    setExcluded((prev) => {
+      const next = new Set(prev[key] ?? [])
+      if (next.has(rowid)) next.delete(rowid)
+      else next.add(rowid)
+      return { ...prev, [key]: next }
+    })
+  }
+  const toggleAll = (key: string, rowids: number[], allChecked: boolean) => {
+    setExcluded((prev) => ({ ...prev, [key]: allChecked ? new Set(rowids) : new Set() }))
+  }
+  const toggleTable = (key: string) => {
+    setDisabledTables((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  const total = selectedCount()
+
   return (
     <Card
       title="按 user_id 清理数据"
-      desc="删除该用户在各表的数据（会话/消息、用量、记忆、计划、测验、SRS、设置等，含子表级联）。不删 users 账号行本身。"
+      desc="预览各表将删的行，勾选要清理的行（默认全选）；子表（messages 等）跟随父行级联删除，不单列。不删 users 账号行本身。"
     >
       <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
         <label className="flex items-center gap-1 text-muted-foreground">
@@ -1603,18 +1670,87 @@ function PurgeUserPanel() {
         <button
           type="button"
           onClick={() => setConfirm(true)}
-          disabled={busy || !preview || preview.total === 0}
+          disabled={busy || !preview || total === 0}
           className={dangerBtnCls}
         >
-          执行清理
+          清理选中（{total} 行）
         </button>
       </div>
-      {preview && <MaintCountsTable items={preview.items} total={preview.total} />}
+
+      {preview && preview.tables.length === 0 && (
+        <p className="text-sm text-muted-foreground">该 user_id 没有可清理的数据。</p>
+      )}
+
+      <div className="space-y-3">
+        {preview?.tables.map((t) => {
+          const key = `${t.db}.${t.table}`
+          const isSessions = t.table === 'sessions'
+          const ex = excluded[key] ?? new Set<number>()
+          const rowids = t.rows.map((r) => Number(r.rowid))
+          // sessions：逐行勾选，首列显示首问内容；其它表：整表勾选、不列明细
+          const tableChecked = isSessions ? ex.size === 0 : !disabledTables.has(key)
+          const dispCols = isSessions
+            ? ['first_user_msg', 'created_at'].filter((c) => t.columns.includes(c))
+            : []
+          return (
+            <div key={key} className="rounded-md border border-border">
+              <div className="flex flex-wrap items-center gap-2 px-3 py-1.5 text-sm">
+                <label className="flex items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    checked={tableChecked}
+                    onChange={() =>
+                      isSessions ? toggleAll(key, rowids, tableChecked) : toggleTable(key)
+                    }
+                  />
+                  <span className="font-medium">{t.table}</span>
+                  <span className="text-xs text-muted-foreground">（{t.db}）</span>
+                </label>
+                <span className="text-xs text-muted-foreground">
+                  共 {t.total} 行{isSessions && t.truncated ? `，仅显示前 ${preview.cap}` : ''}
+                  {t.child ? ` · 级联删 ${t.child}` : ''}
+                </span>
+              </div>
+              {isSessions && (
+                <div className="max-h-64 overflow-auto border-t border-border">
+                  <table className="w-full text-left text-sm">
+                    <tbody>
+                      {t.rows.map((r) => {
+                        const rid = Number(r.rowid)
+                        return (
+                          <tr key={rid} className="border-t border-border first:border-t-0">
+                            <td className="w-8 px-2 py-1">
+                              <input
+                                type="checkbox"
+                                checked={!ex.has(rid)}
+                                onChange={() => toggleRow(key, rid)}
+                              />
+                            </td>
+                            {dispCols.map((c) => {
+                              const text = fmtSqliteCell(c, r[c])
+                              return (
+                                <td key={c} className="max-w-md truncate px-2 py-1" title={text}>
+                                  {text || (c === 'first_user_msg' ? '（无首问）' : '')}
+                                </td>
+                              )
+                            })}
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}
         title="确认清理？"
-        desc={`将删除 user_id=${uid} 的约 ${preview?.total ?? 0} 行数据，不可恢复。`}
+        desc={`将删除 user_id=${uid} 选中的约 ${total} 行（含子表级联），不可恢复。`}
         onConfirm={doRun}
       />
     </Card>

@@ -118,9 +118,27 @@ export type PruneResult = {
   error?: string
 }
 
+export type PurgePreviewTable = {
+  db: string
+  table: string
+  total: number
+  truncated: boolean
+  columns: string[]
+  rows: Record<string, unknown>[]
+  child: string | null
+}
+
+export type PurgePreview = {
+  user_id: number
+  cap: number
+  tables: PurgePreviewTable[]
+}
+
+export type PurgeSelection = { db: string; table: string; all: boolean; rowids: number[] }
+
 export type PurgeResult = {
   user_id?: number
-  items: MaintCount[]
+  items: { db: string; table: string; deleted: number }[]
   total: number
   executed?: boolean
 }

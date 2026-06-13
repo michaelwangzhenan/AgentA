@@ -15,36 +15,27 @@ import src.db_inspect as inspect
 _EVENT_TABLES = ("usage_events", "agent_traces", "cache_lookups", "saving_events", "security_events")
 
 # 按 user_id 清数据的级联计划：子表在前，父表在后；每条 (table, where)。
-# where 里每个 ? 都绑定 user_id。users 账号行本身不删（走用户管理入口）。
-_PURGE_PLAN: list[tuple[str, list[tuple[str, str]]]] = [
-    ("chat_history", [
-        ("messages", "session_id IN (SELECT session_id FROM sessions WHERE user_id=?)"),
-        ("sessions", "user_id=?"),
-    ]),
-    ("usage", [
-        ("trace_spans", "trace_id IN (SELECT trace_id FROM agent_traces WHERE user_id=?)"),
-        ("usage_events", "user_id=?"),
-        ("agent_traces", "user_id=?"),
-        ("cache_lookups", "user_id=?"),
-        ("saving_events", "user_id=?"),
-        ("security_events", "user_id=?"),
-    ]),
-    ("learning", [
-        ("learning_tasks", "plan_id IN (SELECT id FROM learning_plans WHERE user_id=?)"),
-        ("learning_plans", "user_id=?"),
-    ]),
-    ("quiz", [
-        ("quiz_questions", "quiz_set_id IN (SELECT id FROM quiz_sets WHERE user_id=?)"),
-        ("quiz_sets", "user_id=?"),
-    ]),
-    ("user_memory", [("user_memories", "user_id=?")]),
-    ("srs", [("srs_cards", "user_id=?")]),
-    ("auth", [
-        ("auth_sessions", "user_id=?"),
-        ("user_settings", "user_id=?"),
-        ("user_rules", "user_id=?"),
-    ]),
+# 按 user_id 清理的主要表（直接含 user_id 列，可逐行勾选）。
+# child=(子表, 子表外键, 父表关联键)：选中的父行删除前先级联删其子行；None 表示无子表。
+# users 账号行本身不在内（删账号走用户管理入口）。
+_PURGE_TABLES: list[tuple[str, str, tuple[str, str, str] | None]] = [
+    ("chat_history", "sessions", ("messages", "session_id", "session_id")),
+    ("usage", "usage_events", None),
+    ("usage", "agent_traces", ("trace_spans", "trace_id", "trace_id")),
+    ("usage", "cache_lookups", None),
+    ("usage", "saving_events", None),
+    ("usage", "security_events", None),
+    ("learning", "learning_plans", ("learning_tasks", "plan_id", "id")),
+    ("quiz", "quiz_sets", ("quiz_questions", "quiz_set_id", "id")),
+    ("user_memory", "user_memories", None),
+    ("srs", "srs_cards", None),
+    ("auth", "auth_sessions", None),
+    ("auth", "user_settings", None),
+    ("auth", "user_rules", None),
 ]
+
+# 预览每表最多列出的行数（超出时 truncated=True，但「全选」仍可全删）
+PURGE_PREVIEW_CAP = 500
 
 
 def _db_path(db_key: str) -> Path | None:
@@ -127,38 +118,101 @@ def prune(days: int) -> dict:
 
 # ── 按 user_id 清数据 ─────────────────────────────────────────────────────────
 
-def _purge_user(user_id: int, *, execute: bool) -> dict:
+def purge_user_preview(user_id: int) -> dict:
+    """列出该 user_id 在各主要表里将删的行（带 rowid + 各列，敏感列脱敏），每表上限 cap。
+
+    子表（messages 等）不单列——它们会跟随被选中的父行级联删除，仅在表头标注。
+    """
+    tables: list[dict] = []
+    conns: dict[str, sqlite3.Connection] = {}
+    try:
+        for db_key, table, child in _PURGE_TABLES:
+            path = _db_path(db_key)
+            if path is None or not path.exists():
+                continue
+            conn = conns.get(db_key)
+            if conn is None:
+                conn = conns[db_key] = inspect._ro_connect(path)  # noqa: SLF001
+            if table not in _tables(conn):
+                continue
+            total = _count(conn, table, "user_id=?", [user_id])
+            if total == 0:
+                continue
+            cur = conn.execute(
+                f'SELECT rowid, * FROM "{table}" WHERE user_id=? LIMIT ?', [user_id, PURGE_PREVIEW_CAP]
+            )
+            cols = [c[0] for c in cur.description]
+            sensitive = {c for c in cols if inspect.is_sensitive_column(c)}
+            rows = []
+            for raw in cur.fetchall():
+                rows.append({n: ("***" if n in sensitive else v) for n, v in zip(cols, raw)})
+            tables.append({
+                "db": db_key, "table": table, "total": total,
+                "truncated": total > PURGE_PREVIEW_CAP, "columns": cols, "rows": rows,
+                "child": child[0] if child else None,
+            })
+    finally:
+        for c in conns.values():
+            c.close()
+    return {"user_id": user_id, "cap": PURGE_PREVIEW_CAP, "tables": tables}
+
+
+def purge_user(user_id: int, selections: list[dict]) -> dict:
+    """按选择删除：每项 {db, table, all, rowids}。all=True 删该表该用户全部行；
+    否则只删选中 rowid。父表删除前先级联删其子表行（按全量或选中 rowid 推导）。
+    """
+    whitelist = {(db, table): child for db, table, child in _PURGE_TABLES}
     items: list[dict] = []
     total = 0
-    for db_key, steps in _PURGE_PLAN:
-        path = _db_path(db_key)
-        if path is None or not path.exists():
-            continue
-        conn = _rw_conn(path)
-        try:
+    conns: dict[str, sqlite3.Connection] = {}
+    try:
+        for sel in selections:
+            db_key = sel.get("db")
+            table = sel.get("table")
+            child = whitelist.get((db_key, table))
+            if (db_key, table) not in whitelist:
+                continue
+            path = _db_path(db_key)
+            if path is None or not path.exists():
+                continue
+            conn = conns.get(db_key)
+            if conn is None:
+                conn = conns[db_key] = _rw_conn(path)
             present = _tables(conn)
-            for table, where in steps:
-                if table not in present:
-                    continue
-                params = [user_id] * where.count("?")
-                n = _count(conn, table, where, params)
-                if execute and n:
-                    conn.execute(f'DELETE FROM "{table}" WHERE {where}', params)
-                items.append({"db": db_key, "table": table, "count": n})
-                total += n
-            if execute:
-                conn.commit()
-        finally:
-            conn.close()
-    return {"user_id": user_id, "items": items, "total": total, "executed": execute}
+            if table not in present:
+                continue
+            take_all = bool(sel.get("all"))
+            rowids = [int(x) for x in (sel.get("rowids") or [])]
+            if not take_all and not rowids:
+                continue
 
+            if child is not None:
+                child_table, child_fk, parent_key = child
+                if child_table in present:
+                    if take_all:
+                        sub = f'SELECT "{parent_key}" FROM "{table}" WHERE user_id=?'
+                        cur = conn.execute(f'DELETE FROM "{child_table}" WHERE "{child_fk}" IN ({sub})', [user_id])
+                    else:
+                        ph = ",".join("?" * len(rowids))
+                        sub = f'SELECT "{parent_key}" FROM "{table}" WHERE rowid IN ({ph})'
+                        cur = conn.execute(f'DELETE FROM "{child_table}" WHERE "{child_fk}" IN ({sub})', rowids)
+                    if cur.rowcount:
+                        items.append({"db": db_key, "table": child_table, "deleted": cur.rowcount})
+                        total += cur.rowcount
 
-def purge_user_preview(user_id: int) -> dict:
-    return _purge_user(user_id, execute=False)
-
-
-def purge_user(user_id: int) -> dict:
-    return _purge_user(user_id, execute=True)
+            if take_all:
+                cur = conn.execute(f'DELETE FROM "{table}" WHERE user_id=?', [user_id])
+            else:
+                ph = ",".join("?" * len(rowids))
+                cur = conn.execute(f'DELETE FROM "{table}" WHERE rowid IN ({ph})', rowids)
+            items.append({"db": db_key, "table": table, "deleted": cur.rowcount})
+            total += cur.rowcount
+        for c in conns.values():
+            c.commit()
+    finally:
+        for c in conns.values():
+            c.close()
+    return {"user_id": user_id, "items": items, "total": total, "executed": True}
 
 
 # ── VACUUM ────────────────────────────────────────────────────────────────────

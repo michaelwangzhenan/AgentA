@@ -82,7 +82,9 @@ import type {
   ChromaItemsPage,
   ItemsQuery,
   PruneResult,
+  PurgePreview,
   PurgeResult,
+  PurgeSelection,
   SqliteDatabases,
   SqliteTableRows,
   VacuumResult,
@@ -1175,17 +1177,20 @@ export async function runPrune(days: number): Promise<PruneResult> {
   return (await res.json()) as PruneResult
 }
 
-export async function getPurgeUserPreview(userId: number): Promise<PurgeResult> {
+export async function getPurgeUserPreview(userId: number): Promise<PurgePreview> {
   const res = await apiFetch(`/api/admin/db/maintenance/purge-user/preview?user_id=${userId}`)
   await _ensureOk(res)
-  return (await res.json()) as PurgeResult
+  return (await res.json()) as PurgePreview
 }
 
-export async function runPurgeUser(userId: number): Promise<PurgeResult> {
+export async function runPurgeUser(
+  userId: number,
+  selections: PurgeSelection[],
+): Promise<PurgeResult> {
   const res = await apiFetch('/api/admin/db/maintenance/purge-user', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user_id: userId }),
+    body: JSON.stringify({ user_id: userId, selections }),
   })
   await _ensureOk(res)
   return (await res.json()) as PurgeResult

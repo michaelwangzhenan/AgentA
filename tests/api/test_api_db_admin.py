@@ -157,10 +157,19 @@ def test_maintenance_prune_execute(client, monkeypatch):
 
 def test_maintenance_purge_user_execute(client, monkeypatch):
     captured = {}
-    monkeypatch.setattr(maintain, "purge_user", lambda uid: captured.update(uid=uid) or {"total": 3})
-    r = client.post("/api/admin/db/maintenance/purge-user", json={"user_id": 1})
+
+    def _purge(uid, selections):
+        captured.update(uid=uid, selections=selections)
+        return {"total": 3}
+
+    monkeypatch.setattr(maintain, "purge_user", _purge)
+    r = client.post(
+        "/api/admin/db/maintenance/purge-user",
+        json={"user_id": 1, "selections": [{"db": "chat_history", "table": "sessions", "all": True, "rowids": []}]},
+    )
     assert r.status_code == 200
     assert captured["uid"] == 1
+    assert captured["selections"][0]["table"] == "sessions"
 
 
 def test_maintenance_vacuum(client, monkeypatch):

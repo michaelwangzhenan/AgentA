@@ -136,8 +136,16 @@ class PruneRequest(BaseModel):
     days: int = Field(ge=1)
 
 
+class PurgeSelection(BaseModel):
+    db: str
+    table: str
+    all: bool = False
+    rowids: list[int] = Field(default_factory=list)
+
+
 class PurgeUserRequest(BaseModel):
     user_id: int
+    selections: list[PurgeSelection] = Field(default_factory=list)
 
 
 class VacuumRequest(BaseModel):
@@ -161,7 +169,7 @@ def purge_user_preview(user_id: int = Query(...)) -> dict:
 
 @router.post("/maintenance/purge-user")
 def purge_user(req: PurgeUserRequest) -> dict:
-    return maintain.purge_user(req.user_id)
+    return maintain.purge_user(req.user_id, [s.model_dump() for s in req.selections])
 
 
 @router.post("/maintenance/vacuum")
