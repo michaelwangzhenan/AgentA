@@ -167,3 +167,41 @@ stateDiagram-v2
 | 6 | 任一列表翻页 | 上一页/下一页与 `from–to / total` 正确 |
 | 7 | 面包屑点中间层 | 正确回退到上一层 |
 | 8 | `pytest tests/tools/test_db_show.py tests/test_db_inspect.py tests/api/test_api_db_admin.py -q` | 21 项全过 |
+
+# 4. UI 工具升级（入库时间 / 过滤 / 排序）
+
+在 DB 秀（§3）的 L2 列表上做增量，**只针对 Chroma 与 BM25**（两者结构一致、共享 metadata）；SQLite 不在本期。**维持只读**——不加删除。
+
+## 4.1. 范围决策
+
+| 维度 | 结论 |
+|------|------|
+| 入库时间 | L2 行加「入库时间」徽章，取 `ingested_at`；**无则显示 `-`**（不回落 `mtime`）。旧数据（早期入库的 `kb_en`/`kb_zh`）无该字段，会显示 `-` |
+| 过滤 | 文件名模糊 + 正文模糊 + 入库时间段（三者可组合） |
+| 排序 | 文件名 / 入库时间，升降序 |
+| 删除 | **不做**，保持只读；删除走现有领域功能（知识库文档删除 / 会话 / 记忆 等已有入口） |
+
+## 4.2. 实现方式与性能护栏
+
+- **BM25**：索引本就整份载入内存，过滤 / 排序全在内存做（纯函数 `filter_sort_rows`）。
+- **Chroma**：正文模糊走服务端 `where_document $contains`、入库时间段走服务端 `where ingested_at` 范围（数值范围用 `$and` 拆两个单操作符子句）；服务端预过滤后取回 **≤ `CHROMA_SCAN_CAP`（20000）** 候选，再在内存做文件名模糊 + 排序 + 分页。候选触顶返回 `truncated=true`，UI 提示「结果基于前 N 条」。
+- 排序 / 文件名过滤的内存逻辑两库共用 `filter_sort_rows`。
+
+接口改动（均新增 query 参数，仍 `require_admin` + 只读）：
+
+| 端点 | 新增参数 |
+|------|----------|
+| `GET /admin/db/chroma/{name}/items` | `filename_q` / `body_q` / `ts_from` / `ts_to` / `sort_by`(`filename`\|`ingested_at`) / `desc` |
+| `GET /admin/db/bm25/{collection}/docs` | 同上 |
+
+## 4.3. UI（用户视角）
+
+- L2 列表上方过滤条：`文件名 [包含…]　正文 [包含…]　入库 [日期]–[日期]　[查询][清除]`，下一行 `排序 [字段▾] [↑/↓]`。
+- 每行右侧徽章含「入库 2026-06-13 21:02」（无则「入库 -」）。
+- 切换过滤 / 排序回到第 1 页；过滤后 `total` 为过滤后条数。
+
+## 4.4. 约束
+
+- 全程只读 + `require_admin`。
+- Chroma 时间段过滤靠 `ingested_at`，无该字段的旧数据会被排除（已确认可接受）。
+- 坏向量段（历史 `kb_m3`）不取 embeddings，过滤 / 列表读不到就跳过、不报错。

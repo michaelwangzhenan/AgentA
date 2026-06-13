@@ -44,14 +44,35 @@ def test_chroma_item_missing_404(client, monkeypatch):
 def test_chroma_items_pagination_params(client, monkeypatch):
     captured = {}
 
-    def _items(name, limit, offset):
+    def _items(name, limit, offset, **kwargs):
         captured["args"] = (name, limit, offset)
-        return {"name": name, "total": 0, "items": []}
+        return {"name": name, "total": 0, "items": [], "truncated": False}
 
     monkeypatch.setattr(db_admin.inspect, "chroma_items", _items)
     r = client.get("/api/admin/db/chroma/kb_zh/items?limit=10&offset=20")
     assert r.status_code == 200
     assert captured["args"] == ("kb_zh", 10, 20)
+
+
+def test_chroma_items_filter_sort_params_passthrough(client, monkeypatch):
+    captured = {}
+
+    def _items(name, limit, offset, **kwargs):
+        captured.update(kwargs)
+        return {"name": name, "total": 0, "items": [], "truncated": False}
+
+    monkeypatch.setattr(db_admin.inspect, "chroma_items", _items)
+    r = client.get(
+        "/api/admin/db/chroma/kb_zh/items"
+        "?filename_q=alpha&body_q=hello&ts_from=100&ts_to=200&sort_by=ingested_at&desc=true"
+    )
+    assert r.status_code == 200
+    assert captured["filename_q"] == "alpha"
+    assert captured["body_q"] == "hello"
+    assert captured["ts_from"] == 100
+    assert captured["ts_to"] == 200
+    assert captured["sort_by"] == "ingested_at"
+    assert captured["desc"] is True
 
 
 def test_chroma_items_limit_out_of_range_422(client):
@@ -64,6 +85,27 @@ def test_bm25_docs_missing_index_404(client, monkeypatch):
     monkeypatch.setattr(db_admin.inspect, "bm25_docs", lambda *a, **k: None)
     r = client.get("/api/admin/db/bm25/nope/docs")
     assert r.status_code == 404
+
+
+def test_bm25_docs_filter_sort_params_passthrough(client, monkeypatch):
+    captured = {}
+
+    def _docs(collection, limit, offset, **kwargs):
+        captured.update(kwargs)
+        return {"collection": collection, "total": 0, "items": []}
+
+    monkeypatch.setattr(db_admin.inspect, "bm25_docs", _docs)
+    r = client.get(
+        "/api/admin/db/bm25/kb_zh/docs"
+        "?filename_q=alpha&body_q=hello&ts_from=100&ts_to=200&sort_by=filename&desc=true"
+    )
+    assert r.status_code == 200
+    assert captured["filename_q"] == "alpha"
+    assert captured["body_q"] == "hello"
+    assert captured["ts_from"] == 100
+    assert captured["ts_to"] == 200
+    assert captured["sort_by"] == "filename"
+    assert captured["desc"] is True
 
 
 def test_sqlite_databases_ok(client, monkeypatch):

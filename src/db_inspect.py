@@ -125,28 +125,141 @@ def chroma_collections() -> dict:
     return {"root": str(chroma_root()), "collections": items}
 
 
-def chroma_items(name: str, limit: int = 50, offset: int = 0) -> dict:
-    """L2：某 collection 条目分页（id + 正文摘要 + metadata）。不取 embeddings。"""
-    client = _chroma_client()
-    col = client.get_collection(name)  # 不存在会抛，由路由转 404
-    total = col.count()
-    try:
-        got = col.get(limit=limit, offset=offset, include=["documents", "metadatas"])
-    except Exception as e:
-        return {"name": name, "total": total, "items": [], "error": f"{type(e).__name__}: {e}"}
+# 过滤/排序时一次性拉取的硬上限：避免超大 collection 把整库正文拉进内存卡死。
+# 正文/时间段过滤已在 Chroma 服务端 where 完成，这里只对预过滤后的候选集再做
+# 文件名模糊 + 排序；候选超过 cap 则截断并在响应里标 truncated。
+CHROMA_SCAN_CAP = 20000
+
+
+def _rows_from_get(got: dict) -> list[dict]:
     ids = got.get("ids") or []
     docs = got.get("documents") or []
     metas = got.get("metadatas") or []
-    items = []
+    rows = []
     for i, _id in enumerate(ids):
-        doc = (docs[i] if i < len(docs) else "") or ""
-        items.append({
+        rows.append({
             "id": _id,
-            "preview": truncate(doc),
-            "doc_len": len(doc),
+            "document": (docs[i] if i < len(docs) else "") or "",
             "metadata": metas[i] if i < len(metas) else None,
         })
-    return {"name": name, "total": total, "items": items}
+    return rows
+
+
+def _chroma_item_view(r: dict) -> dict:
+    doc = r["document"] or ""
+    return {"id": r["id"], "preview": truncate(doc), "doc_len": len(doc), "metadata": r["metadata"]}
+
+
+def filter_sort_rows(
+    rows: list[dict],
+    *,
+    filename_q: str | None = None,
+    body_q: str | None = None,
+    ts_from: int | None = None,
+    ts_to: int | None = None,
+    sort_by: str | None = None,
+    desc: bool = False,
+) -> list[dict]:
+    """纯函数：对候选行（含 id/document/metadata）做过滤 + 排序，便于 UT。
+
+    BM25 全量在内存，全部条件走这里；Chroma 的正文/时间段已在服务端 where 处理，
+    只把 filename + sort 传进来即可（body_q/ts_* 留空）。
+    """
+    out = rows
+    if filename_q:
+        q = filename_q.lower()
+        out = [r for r in out if q in str((r["metadata"] or {}).get("filename") or "").lower()]
+    if body_q:
+        q = body_q.lower()
+        out = [r for r in out if q in (r.get("document") or "").lower()]
+    if ts_from is not None or ts_to is not None:
+        def _in_range(r: dict) -> bool:
+            v = (r["metadata"] or {}).get("ingested_at")
+            if v is None:
+                return False
+            v = float(v)
+            if ts_from is not None and v < ts_from:
+                return False
+            if ts_to is not None and v > ts_to:
+                return False
+            return True
+        out = [r for r in out if _in_range(r)]
+    if sort_by in ("filename", "ingested_at"):
+        def _key(r: dict):
+            m = r["metadata"] or {}
+            if sort_by == "filename":
+                return (str(m.get("filename") or ""),)
+            v = m.get("ingested_at")
+            return (float(v) if v is not None else float("-inf"),)
+        out = sorted(out, key=_key, reverse=desc)
+    return out
+
+
+def chroma_items(
+    name: str,
+    limit: int = 50,
+    offset: int = 0,
+    *,
+    filename_q: str | None = None,
+    body_q: str | None = None,
+    ts_from: int | None = None,
+    ts_to: int | None = None,
+    sort_by: str | None = None,
+    desc: bool = False,
+) -> dict:
+    """L2：某 collection 条目分页（id + 正文摘要 + metadata）。不取 embeddings。
+
+    无过滤/排序时走 Chroma 原生分页（轻量）；有过滤/排序时：正文模糊走 where_document
+    `$contains`、入库时间段走 where 数值范围（均服务端），取回 ≤ CHROMA_SCAN_CAP 条候选后，
+    在内存做文件名模糊 + 排序 + 分页；候选触顶则 truncated=True。
+    """
+    client = _chroma_client()
+    col = client.get_collection(name)  # 不存在会抛，由路由转 404
+
+    has_server_filter = bool(body_q) or ts_from is not None or ts_to is not None
+    needs_scan = bool(filename_q) or sort_by in ("filename", "ingested_at")
+
+    # 无过滤无排序：原生分页，total 直接用 count（最省）
+    if not has_server_filter and not needs_scan:
+        total = col.count()
+        try:
+            got = col.get(limit=limit, offset=offset, include=["documents", "metadatas"])
+        except Exception as e:
+            return {"name": name, "total": total, "items": [], "truncated": False, "error": f"{type(e).__name__}: {e}"}
+        items = [_chroma_item_view(r) for r in _rows_from_get(got)]
+        return {"name": name, "total": total, "items": items, "truncated": False}
+
+    # 有过滤/排序：服务端预过滤（正文/时间段）取回 ≤ cap 候选，内存做文件名+排序+分页
+    # Chroma 每个 where 表达式只允许一个操作符，范围要用 $and 拆成两个单操作符子句
+    where: dict | None = None
+    clauses: list[dict] = []
+    if ts_from is not None:
+        clauses.append({"ingested_at": {"$gte": ts_from}})
+    if ts_to is not None:
+        clauses.append({"ingested_at": {"$lte": ts_to}})
+    if len(clauses) == 1:
+        where = clauses[0]
+    elif len(clauses) >= 2:
+        where = {"$and": clauses}
+    where_document = {"$contains": body_q} if body_q else None
+
+    get_kwargs: dict = {"include": ["documents", "metadatas"], "limit": CHROMA_SCAN_CAP}
+    if where is not None:
+        get_kwargs["where"] = where
+    if where_document is not None:
+        get_kwargs["where_document"] = where_document
+    try:
+        got = col.get(**get_kwargs)
+    except Exception as e:
+        return {"name": name, "total": 0, "items": [], "truncated": False, "error": f"{type(e).__name__}: {e}"}
+
+    rows = _rows_from_get(got)
+    truncated = len(rows) >= CHROMA_SCAN_CAP
+    rows = filter_sort_rows(rows, filename_q=filename_q, sort_by=sort_by, desc=desc)
+    total = len(rows)
+    page = rows[offset: offset + limit]
+    items = [_chroma_item_view(r) for r in page]
+    return {"name": name, "total": total, "items": items, "truncated": truncated}
 
 
 def chroma_item(name: str, item_id: str) -> dict | None:
@@ -212,23 +325,40 @@ def _load_bm25(collection: str):
     return BM25Index.load_or_new(collection, path)
 
 
-def bm25_docs(collection: str, limit: int = 50, offset: int = 0) -> dict | None:
-    """L2：某索引的文档块分页（id + 正文摘要）。索引不存在返回 None。"""
+def bm25_docs(
+    collection: str,
+    limit: int = 50,
+    offset: int = 0,
+    *,
+    filename_q: str | None = None,
+    body_q: str | None = None,
+    ts_from: int | None = None,
+    ts_to: int | None = None,
+    sort_by: str | None = None,
+    desc: bool = False,
+) -> dict | None:
+    """L2：某索引的文档块分页（id + 正文摘要）。索引不存在返回 None。
+
+    索引已全量载入内存，过滤（文件名/正文/入库时间段）+ 排序（文件名/入库时间）全在内存做。
+    """
     idx = _load_bm25(collection)
     if idx is None:
         return None
-    ids = sorted(idx.docs.keys())
-    total = len(ids)
-    page = ids[offset: offset + limit]
-    items = []
-    for _id in page:
-        d = idx.docs[_id]
-        items.append({
-            "id": _id,
-            "preview": truncate(d.document or ""),
-            "tokens": len(d.tokens or []),
-            "metadata": dict(d.metadata or {}),
-        })
+    # 默认按 id 稳定排序，保证未排序时翻页顺序确定
+    rows = [
+        {"id": cid, "document": d.document or "", "metadata": dict(d.metadata or {}), "tokens": len(d.tokens or [])}
+        for cid, d in sorted(idx.docs.items())
+    ]
+    rows = filter_sort_rows(
+        rows, filename_q=filename_q, body_q=body_q,
+        ts_from=ts_from, ts_to=ts_to, sort_by=sort_by, desc=desc,
+    )
+    total = len(rows)
+    page = rows[offset: offset + limit]
+    items = [
+        {"id": r["id"], "preview": truncate(r["document"]), "tokens": r["tokens"], "metadata": r["metadata"]}
+        for r in page
+    ]
     return {"collection": collection, "total": total, "items": items}
 
 

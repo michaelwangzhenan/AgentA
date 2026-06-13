@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Check, ChevronRight, Copy, Loader2 } from 'lucide-react'
-import { toast } from 'sonner'
+import { ChevronRight, Loader2 } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import { ResourcePage } from '@/components/resources/ResourcePage'
@@ -31,6 +30,8 @@ type Tab = 'chroma' | 'bm25' | 'sqlite'
 // 后端 limit 上限 200，候选项不超过它
 const PAGE_SIZE_OPTIONS = [20, 50, 100, 200] as const
 const DEFAULT_PAGE_SIZE = 50
+// 与后端 db_inspect.CHROMA_SCAN_CAP 对齐，仅用于 truncated 提示文案
+const CHROMA_SCAN_CAP_HINT = 20000
 
 export function DBShowView() {
   const [tab, setTab] = useState<Tab>('chroma')
@@ -243,53 +244,35 @@ function normalizePreview(s: string): string {
   return (s || '').replace(/\s+/g, ' ').trim()
 }
 
-function shortId(id: string): string {
-  return id.length > 12 ? `${id.slice(0, 8)}…` : id
-}
-
 function metaStr(m: Metadata, key: string): string | undefined {
   if (!m) return undefined
   const v = (m as Record<string, unknown>)[key]
   return v === undefined || v === null ? undefined : String(v)
 }
 
-function CopyId({ id }: { id: string }) {
-  const [done, setDone] = useState(false)
-  return (
-    <button
-      type="button"
-      title={`复制完整 id：${id}`}
-      onClick={(e) => {
-        e.stopPropagation()
-        navigator.clipboard
-          ?.writeText(id)
-          .then(() => {
-            setDone(true)
-            toast.success('已复制 id')
-            setTimeout(() => setDone(false), 1200)
-          })
-          .catch(() => toast.error('复制失败'))
-      }}
-      className="flex items-center gap-1 rounded px-1 font-mono text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
-    >
-      {shortId(id)}
-      {done ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-    </button>
-  )
+// epoch 秒 → 可读时间；缺失/非法显示 '-'
+function fmtTime(epoch?: number | string): string {
+  if (epoch == null || epoch === '') return '-'
+  const n = typeof epoch === 'string' ? Number(epoch) : epoch
+  if (!Number.isFinite(n) || n <= 0) return '-'
+  const d = new Date(n * 1000)
+  if (Number.isNaN(d.getTime())) return '-'
+  const p = (x: number) => String(x).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
 // Chroma / BM25 第二层共用：结构信息（来源/块/语言/行/章节）当主角，正文摘要当配角。
 function ChunkRow({
-  id,
   preview,
   metadata,
   extra,
+  showTime,
   onClick,
 }: {
-  id: string
   preview: string
   metadata: Metadata
   extra?: React.ReactNode
+  showTime?: boolean
   onClick: () => void
 }) {
   const title =
@@ -326,10 +309,10 @@ function ChunkRow({
         </span>
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           {extra}
+          {showTime && <Pill>入库 {fmtTime(metaStr(metadata, 'ingested_at'))}</Pill>}
           {chunk && <Pill>{chunk}</Pill>}
           {lang && <Pill>{lang}</Pill>}
           {lines && <Pill>{lines}</Pill>}
-          <CopyId id={id} />
           <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
         </span>
       </div>
@@ -368,12 +351,26 @@ function useAsync<T>(fn: () => Promise<T>, depKey: string) {
 
 // ── Chroma 面板 ────────────────────────────────────────────────────────────
 
+type ChromaFilters = { filenameQ: string; bodyQ: string; tsFrom?: number; tsTo?: number }
+type ChromaSort = { by?: 'filename' | 'ingested_at'; desc: boolean }
+const EMPTY_FILTERS: ChromaFilters = { filenameQ: '', bodyQ: '' }
+
 function ChromaPanel() {
   const [sel, setSel] = useState<{ name: string; itemId?: string } | null>(null)
   const [offset, setOffset] = useState(0)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
+  const [filters, setFilters] = useState<ChromaFilters>(EMPTY_FILTERS)
+  const [sort, setSort] = useState<ChromaSort>({ desc: true })
   const changePageSize = (n: number) => {
     setPageSize(n)
+    setOffset(0)
+  }
+  const changeFilters = (f: ChromaFilters) => {
+    setFilters(f)
+    setOffset(0)
+  }
+  const changeSort = (s: ChromaSort) => {
+    setSort(s)
     setOffset(0)
   }
 
@@ -395,6 +392,10 @@ function ChromaPanel() {
         setOffset={setOffset}
         pageSize={pageSize}
         onPageSize={changePageSize}
+        filters={filters}
+        onFilters={changeFilters}
+        sort={sort}
+        onSort={changeSort}
         onOpen={(id) => setSel({ name: sel.name, itemId: id })}
         onRoot={() => {
           setSel(null)
@@ -408,8 +409,125 @@ function ChromaPanel() {
       onOpen={(name) => {
         setSel({ name })
         setOffset(0)
+        setFilters(EMPTY_FILTERS)
+        setSort({ desc: true })
       }}
     />
+  )
+}
+
+// 'YYYY-MM-DD' → epoch 秒（本地时区）；空串返回 undefined
+function dateToEpoch(s: string, endOfDay: boolean): number | undefined {
+  if (!s) return undefined
+  const d = new Date(`${s}T${endOfDay ? '23:59:59' : '00:00:00'}`)
+  return Number.isNaN(d.getTime()) ? undefined : Math.floor(d.getTime() / 1000)
+}
+
+function ChromaFilterBar({
+  filters,
+  sort,
+  onFilters,
+  onSort,
+}: {
+  filters: ChromaFilters
+  sort: ChromaSort
+  onFilters: (f: ChromaFilters) => void
+  onSort: (s: ChromaSort) => void
+}) {
+  const [filename, setFilename] = useState(filters.filenameQ)
+  const [body, setBody] = useState(filters.bodyQ)
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+
+  const apply = () => {
+    onFilters({
+      filenameQ: filename.trim(),
+      bodyQ: body.trim(),
+      tsFrom: dateToEpoch(from, false),
+      tsTo: dateToEpoch(to, true),
+    })
+  }
+  const clear = () => {
+    setFilename('')
+    setBody('')
+    setFrom('')
+    setTo('')
+    onFilters({ ...EMPTY_FILTERS })
+  }
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') apply()
+  }
+  const inputCls =
+    'rounded-md border border-border bg-background px-2 py-1 text-foreground'
+
+  return (
+    <div className="mb-3 flex flex-col gap-2 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+      <label className="flex items-center gap-1 text-muted-foreground">
+        文件名
+        <input
+          value={filename}
+          onChange={(e) => setFilename(e.target.value)}
+          onKeyDown={onKey}
+          placeholder="包含…"
+          className={cn(inputCls, 'w-36')}
+        />
+      </label>
+      <label className="flex items-center gap-1 text-muted-foreground">
+        正文
+        <input
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          onKeyDown={onKey}
+          placeholder="包含…"
+          className={cn(inputCls, 'w-40')}
+        />
+      </label>
+      <label className="flex items-center gap-1 text-muted-foreground">
+        入库
+        <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={inputCls} />
+        –
+        <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={inputCls} />
+      </label>
+      <button
+        type="button"
+        onClick={apply}
+        className="rounded-md border border-border px-2 py-1 hover:bg-muted/50"
+      >
+        查询
+      </button>
+      <button
+        type="button"
+        onClick={clear}
+        className="rounded-md border border-border px-2 py-1 text-muted-foreground hover:bg-muted/50"
+      >
+        清除
+      </button>
+      </div>
+      <label className="flex items-center gap-1 text-muted-foreground">
+        排序
+        <select
+          value={sort.by ?? ''}
+          onChange={(e) =>
+            onSort({ ...sort, by: (e.target.value || undefined) as ChromaSort['by'] })
+          }
+          className={inputCls}
+        >
+          <option value="">默认</option>
+          <option value="ingested_at">入库时间</option>
+          <option value="filename">文件名</option>
+        </select>
+        <button
+          type="button"
+          onClick={() => onSort({ ...sort, desc: !sort.desc })}
+          disabled={!sort.by}
+          className="rounded-md border border-border px-2 py-1 hover:bg-muted/50 disabled:opacity-40"
+          title={sort.desc ? '降序' : '升序'}
+        >
+          {sort.desc ? '↓' : '↑'}
+        </button>
+      </label>
+    </div>
   )
 }
 
@@ -452,6 +570,10 @@ function ChromaItems({
   setOffset,
   pageSize,
   onPageSize,
+  filters,
+  onFilters,
+  sort,
+  onSort,
   onOpen,
   onRoot,
 }: {
@@ -460,19 +582,40 @@ function ChromaItems({
   setOffset: (n: number) => void
   pageSize: number
   onPageSize: (n: number) => void
+  filters: ChromaFilters
+  onFilters: (f: ChromaFilters) => void
+  sort: ChromaSort
+  onSort: (s: ChromaSort) => void
   onOpen: (id: string) => void
   onRoot: () => void
 }) {
+  const fKey = `${filters.filenameQ}|${filters.bodyQ}|${filters.tsFrom ?? ''}|${filters.tsTo ?? ''}`
   const { data, loading, error } = useAsync<ChromaItemsPage>(
-    () => getChromaItems(name, { limit: pageSize, offset }),
-    `${name}:${pageSize}:${offset}`,
+    () =>
+      getChromaItems(name, {
+        limit: pageSize,
+        offset,
+        filenameQ: filters.filenameQ || undefined,
+        bodyQ: filters.bodyQ || undefined,
+        tsFrom: filters.tsFrom,
+        tsTo: filters.tsTo,
+        sortBy: sort.by,
+        desc: sort.desc,
+      }),
+    `${name}:${pageSize}:${offset}:${fKey}:${sort.by ?? ''}:${sort.desc}`,
   )
   return (
     <div>
       <Breadcrumb parts={[{ label: 'Chroma', onClick: onRoot }, { label: name }]} />
+      <ChromaFilterBar filters={filters} sort={sort} onFilters={onFilters} onSort={onSort} />
       {loading && <Spinner />}
       {error && <ErrorNote msg={error} />}
       {data?.error && <ErrorNote msg={data.error} />}
+      {data?.truncated && (
+        <p className="mb-2 text-xs text-amber-600 dark:text-amber-500">
+          数据量大，过滤 / 排序仅基于前 {CHROMA_SCAN_CAP_HINT} 条结果，可能不完整。
+        </p>
+      )}
       {data && !loading && (
         <>
           <Pager
@@ -487,9 +630,9 @@ function ChromaItems({
             {data.items.map((it) => (
               <li key={it.id}>
                 <ChunkRow
-                  id={it.id}
                   preview={it.preview}
                   metadata={it.metadata}
+                  showTime
                   onClick={() => onOpen(it.id)}
                 />
               </li>
@@ -559,8 +702,18 @@ function Bm25Panel() {
   const [sel, setSel] = useState<{ coll: string; docId?: string } | null>(null)
   const [offset, setOffset] = useState(0)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
+  const [filters, setFilters] = useState<ChromaFilters>(EMPTY_FILTERS)
+  const [sort, setSort] = useState<ChromaSort>({ desc: true })
   const changePageSize = (n: number) => {
     setPageSize(n)
+    setOffset(0)
+  }
+  const changeFilters = (f: ChromaFilters) => {
+    setFilters(f)
+    setOffset(0)
+  }
+  const changeSort = (s: ChromaSort) => {
+    setSort(s)
     setOffset(0)
   }
 
@@ -582,6 +735,10 @@ function Bm25Panel() {
         setOffset={setOffset}
         pageSize={pageSize}
         onPageSize={changePageSize}
+        filters={filters}
+        onFilters={changeFilters}
+        sort={sort}
+        onSort={changeSort}
         onOpen={(id) => setSel({ coll: sel.coll, docId: id })}
         onRoot={() => {
           setSel(null)
@@ -594,6 +751,8 @@ function Bm25Panel() {
     <Bm25List
       onOpen={(coll) => {
         setSel({ coll })
+        setFilters(EMPTY_FILTERS)
+        setSort({ desc: true })
         setOffset(0)
       }}
     />
@@ -645,6 +804,10 @@ function Bm25Docs({
   setOffset,
   pageSize,
   onPageSize,
+  filters,
+  onFilters,
+  sort,
+  onSort,
   onOpen,
   onRoot,
 }: {
@@ -653,16 +816,32 @@ function Bm25Docs({
   setOffset: (n: number) => void
   pageSize: number
   onPageSize: (n: number) => void
+  filters: ChromaFilters
+  onFilters: (f: ChromaFilters) => void
+  sort: ChromaSort
+  onSort: (s: ChromaSort) => void
   onOpen: (id: string) => void
   onRoot: () => void
 }) {
+  const fKey = `${filters.filenameQ}|${filters.bodyQ}|${filters.tsFrom ?? ''}|${filters.tsTo ?? ''}`
   const { data, loading, error } = useAsync<Bm25DocsPage>(
-    () => getBm25Docs(coll, { limit: pageSize, offset }),
-    `${coll}:${pageSize}:${offset}`,
+    () =>
+      getBm25Docs(coll, {
+        limit: pageSize,
+        offset,
+        filenameQ: filters.filenameQ || undefined,
+        bodyQ: filters.bodyQ || undefined,
+        tsFrom: filters.tsFrom,
+        tsTo: filters.tsTo,
+        sortBy: sort.by,
+        desc: sort.desc,
+      }),
+    `${coll}:${pageSize}:${offset}:${fKey}:${sort.by ?? ''}:${sort.desc}`,
   )
   return (
     <div>
       <Breadcrumb parts={[{ label: 'BM25', onClick: onRoot }, { label: coll }]} />
+      <ChromaFilterBar filters={filters} sort={sort} onFilters={onFilters} onSort={onSort} />
       {loading && <Spinner />}
       {error && <ErrorNote msg={error} />}
       {data && !loading && (
@@ -679,10 +858,10 @@ function Bm25Docs({
             {data.items.map((it) => (
               <li key={it.id}>
                 <ChunkRow
-                  id={it.id}
                   preview={it.preview}
                   metadata={it.metadata}
-                  extra={<Pill>{it.tokens} tok</Pill>}
+                  extra={<Pill>{it.tokens} tokens</Pill>}
+                  showTime
                   onClick={() => onOpen(it.id)}
                 />
               </li>

@@ -80,6 +80,7 @@ import type {
   ChromaCollections,
   ChromaItemDetail,
   ChromaItemsPage,
+  ItemsQuery,
   SqliteDatabases,
   SqliteTableRows,
 } from '@/types/dbAdmin'
@@ -1072,11 +1073,18 @@ export async function getChromaCollections(): Promise<ChromaCollections> {
 
 export async function getChromaItems(
   name: string,
-  opts: { limit?: number; offset?: number } = {},
+  opts: ItemsQuery = {},
 ): Promise<ChromaItemsPage> {
-  const { limit = 50, offset = 0 } = opts
+  const { limit = 50, offset = 0, filenameQ, bodyQ, tsFrom, tsTo, sortBy, desc } = opts
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  if (filenameQ) params.set('filename_q', filenameQ)
+  if (bodyQ) params.set('body_q', bodyQ)
+  if (tsFrom != null) params.set('ts_from', String(tsFrom))
+  if (tsTo != null) params.set('ts_to', String(tsTo))
+  if (sortBy) params.set('sort_by', sortBy)
+  if (desc) params.set('desc', 'true')
   const res = await apiFetch(
-    `/api/admin/db/chroma/${encodeURIComponent(name)}/items?limit=${limit}&offset=${offset}`,
+    `/api/admin/db/chroma/${encodeURIComponent(name)}/items?${params.toString()}`,
   )
   await _ensureOk(res)
   return (await res.json()) as ChromaItemsPage
@@ -1101,11 +1109,18 @@ export async function getBm25Indexes(): Promise<Bm25Indexes> {
 
 export async function getBm25Docs(
   collection: string,
-  opts: { limit?: number; offset?: number } = {},
+  opts: ItemsQuery = {},
 ): Promise<Bm25DocsPage> {
-  const { limit = 50, offset = 0 } = opts
+  const { limit = 50, offset = 0, filenameQ, bodyQ, tsFrom, tsTo, sortBy, desc } = opts
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  if (filenameQ) params.set('filename_q', filenameQ)
+  if (bodyQ) params.set('body_q', bodyQ)
+  if (tsFrom != null) params.set('ts_from', String(tsFrom))
+  if (tsTo != null) params.set('ts_to', String(tsTo))
+  if (sortBy) params.set('sort_by', sortBy)
+  if (desc) params.set('desc', 'true')
   const res = await apiFetch(
-    `/api/admin/db/bm25/${encodeURIComponent(collection)}/docs?limit=${limit}&offset=${offset}`,
+    `/api/admin/db/bm25/${encodeURIComponent(collection)}/docs?${params.toString()}`,
   )
   await _ensureOk(res)
   return (await res.json()) as Bm25DocsPage

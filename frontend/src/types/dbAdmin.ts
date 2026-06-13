@@ -28,7 +28,20 @@ export type ChromaItemsPage = {
   name: string
   total: number
   items: ChromaItem[]
+  truncated?: boolean
   error?: string
+}
+
+// Chroma 条目 / BM25 文档块 通用的过滤排序查询参数
+export type ItemsQuery = {
+  limit?: number
+  offset?: number
+  filenameQ?: string
+  bodyQ?: string
+  tsFrom?: number
+  tsTo?: number
+  sortBy?: 'filename' | 'ingested_at'
+  desc?: boolean
 }
 
 export type ChromaItemDetail = {

@@ -72,6 +72,46 @@ def test_sqlite_table_rows_unknown_db(tmp_path, monkeypatch):
     assert inspect.sqlite_table_rows("ghost", "t", limit=10, offset=0) is None
 
 
+def _rows():
+    return [
+        {"id": "a", "document": "hello world", "metadata": {"filename": "alpha.md", "ingested_at": 100}},
+        {"id": "b", "document": "foo bar", "metadata": {"filename": "Beta.txt", "ingested_at": 300}},
+        {"id": "c", "document": "baz", "metadata": {"filename": "gamma.md"}},  # 无 ingested_at
+    ]
+
+
+def test_filter_sort_filename_substring_ci():
+    out = inspect.filter_sort_rows(_rows(), filename_q="beta")
+    assert [r["id"] for r in out] == ["b"]  # 大小写不敏感
+
+
+def test_filter_sort_body_substring_ci():
+    out = inspect.filter_sort_rows(_rows(), body_q="WORLD")
+    assert [r["id"] for r in out] == ["a"]
+
+
+def test_filter_sort_ts_range_excludes_missing():
+    # [200, 400] 命中 b(300)，a(100) 超下界、c 无 ingested_at 一律排除
+    out = inspect.filter_sort_rows(_rows(), ts_from=200, ts_to=400)
+    assert [r["id"] for r in out] == ["b"]
+
+
+def test_filter_sort_sort_ingested_desc():
+    out = inspect.filter_sort_rows(_rows(), sort_by="ingested_at", desc=True)
+    # 有时间的按降序在前，缺失的（-inf）落最后
+    assert [r["id"] for r in out] == ["b", "a", "c"]
+
+
+def test_filter_sort_sort_filename_asc():
+    out = inspect.filter_sort_rows(_rows(), sort_by="filename", desc=False)
+    assert [r["id"] for r in out] == ["b", "a", "c"]  # Beta.txt < alpha.md < gamma.md（按原串）
+
+
+def test_filter_sort_noop_keeps_order():
+    out = inspect.filter_sort_rows(_rows())
+    assert [r["id"] for r in out] == ["a", "b", "c"]
+
+
 def test_sqlite_databases_shape(tmp_path, monkeypatch):
     db = tmp_path / "auth.db"
     _make_db(db)

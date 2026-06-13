@@ -31,9 +31,19 @@ def chroma_items(
     name: str,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    filename_q: str | None = Query(default=None),
+    body_q: str | None = Query(default=None),
+    ts_from: int | None = Query(default=None),
+    ts_to: int | None = Query(default=None),
+    sort_by: str | None = Query(default=None),
+    desc: bool = Query(default=False),
 ) -> dict:
     try:
-        return inspect.chroma_items(name, limit=limit, offset=offset)
+        return inspect.chroma_items(
+            name, limit=limit, offset=offset,
+            filename_q=filename_q, body_q=body_q,
+            ts_from=ts_from, ts_to=ts_to, sort_by=sort_by, desc=desc,
+        )
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"collection 不存在或不可读: {name}") from e
 
@@ -61,8 +71,18 @@ def bm25_docs(
     collection: str,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    filename_q: str | None = Query(default=None),
+    body_q: str | None = Query(default=None),
+    ts_from: int | None = Query(default=None),
+    ts_to: int | None = Query(default=None),
+    sort_by: str | None = Query(default=None),
+    desc: bool = Query(default=False),
 ) -> dict:
-    data = inspect.bm25_docs(collection, limit=limit, offset=offset)
+    data = inspect.bm25_docs(
+        collection, limit=limit, offset=offset,
+        filename_q=filename_q, body_q=body_q,
+        ts_from=ts_from, ts_to=ts_to, sort_by=sort_by, desc=desc,
+    )
     if data is None:
         raise HTTPException(status_code=404, detail=f"BM25 索引不存在: {collection}")
     return data
