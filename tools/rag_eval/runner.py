@@ -884,6 +884,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-rerank", action="store_true", help="禁用 reranker（基线对比）")
     ap.add_argument("-o", dest="output", default="",
                     help="把详细报告写到该 Markdown 文件（同时把 INFO trace 落到同名 .log）")
+    ap.add_argument("--judge-model", dest="judge_model", type=str, default="",
+                    help="答案质量评委模型 id（覆盖 EVAL_JUDGE_MODEL）；空=用配置默认")
     ap.add_argument("--llm", type=int, default=None, metavar="N",
                     help="额外跑答案质量评估（faithfulness / 相关度）：N=最多评的 golden 条数，"
                          "N<=0 表示全部。会调 LLM 生成答案 + LLM 评委打分，耗 token，不进 CI")
@@ -952,6 +954,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # --llm：在检索评估之后再跑答案质量链路（生成 + 评委，耗 token）
     if args.llm is not None:
+        # UI 选了评委模型 → 覆盖 config（evaluate_answer_quality 在调用时读 config.EVAL_JUDGE_MODEL）
+        if args.judge_model:
+            config.EVAL_JUDGE_MODEL = args.judge_model
         aq_answer = config.current_active_model()
         aq_judge = (config.EVAL_JUDGE_MODEL or "").strip() or aq_answer
         aq_n = len(items) if args.llm <= 0 else min(args.llm, len(items))
@@ -969,10 +974,46 @@ def main(argv: list[str] | None = None) -> int:
         report_path = Path(args.output)
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(_render_markdown(rep), encoding="utf-8")
+        # 配对 summary JSON（供「质量看板 → 离线评估」卡片读）：同名换 .json 后缀
+        report_path.with_suffix(".json").write_text(
+            json.dumps(_build_summary(rep), ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
     _print_report(rep, report_path=report_path)
 
     return 0
+
+
+def _build_summary(rep: EvalReport) -> dict[str, Any]:
+    """把 EvalReport 摘成卡片用的结构化 summary（与 .md 报告配对落 .json）。"""
+    env = (rep.metadata or {}).get("env", {})
+    g = env.get("git", {})
+    git = f"{g.get('commit', '?')}{'*' if g.get('dirty') else ''}"
+    aq = rep.answer_quality
+    return {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "git": git,
+        "items": rep.items,
+        "k": rep.k,
+        "hit_either_at_1": rep.hit_either_at_1,
+        "hit_either_at_3": rep.hit_either_at_3,
+        "hit_either_at_k": rep.hit_either_at_k,
+        "hit_source_at_k": rep.hit_source_at_k,
+        "mrr": rep.mrr,
+        "use_rewriter": rep.use_rewriter,
+        "use_rerank": rep.use_rerank,
+        "answer_quality": (
+            {
+                "scored": aq.scored,
+                "avg_faithfulness": aq.avg_faithfulness,
+                "avg_relevance": aq.avg_relevance,
+                "answer_model": aq.answer_model,
+                "judge_model": aq.judge_model,
+            }
+            if aq
+            else None
+        ),
+    }
 
 
 if __name__ == "__main__":

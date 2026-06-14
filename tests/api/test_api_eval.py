@@ -183,7 +183,10 @@ def test_eval_run_security_builds_args(
     monkeypatch.setattr("src.eval_runner.start", fake_start)
     r = client.post(
         "/api/eval/run",
-        json={"task": "security", "no_llm": True, "kind": "direct", "model": "kimi-k2.5"},
+        json={
+            "task": "security", "no_llm": True,
+            "options": {"kind": "direct"}, "model": "kimi-k2.5",
+        },
     )
     assert r.status_code == 200
     assert seen["args"] == ["--no-llm", "--kind", "direct"]
@@ -191,8 +194,79 @@ def test_eval_run_security_builds_args(
 
 
 def test_eval_run_rejects_bad_kind_400(client: TestClient) -> None:
-    r = client.post("/api/eval/run", json={"task": "security", "kind": "evil"})
+    r = client.post("/api/eval/run", json={"task": "security", "options": {"kind": "evil"}})
     assert r.status_code == 400
+
+
+def test_eval_run_rag_retrieval_only(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RAG + None（no_llm）：含消融开关、不带 --llm、自动补 -o。"""
+    seen: dict = {}
+
+    def fake_start(task, args, model=None):
+        seen["args"] = args
+        return {"state": "running", "task": task, "model": model, "args": args,
+                "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}
+
+    monkeypatch.setattr("src.eval_runner.start", fake_start)
+    # 复选框正向：rewriter/rerank=False → 关闭 → 传 --no-*
+    r = client.post(
+        "/api/eval/run",
+        json={"task": "rag", "no_llm": True, "options": {"rewriter": False, "rerank": False}},
+    )
+    assert r.status_code == 200
+    assert "--no-rewriter" in seen["args"]
+    assert "--no-rerank" in seen["args"]
+    assert "--llm" not in seen["args"]
+    assert "-o" in seen["args"]
+    out = seen["args"][seen["args"].index("-o") + 1]
+    assert out.startswith("tools/reports/rag/")
+
+
+def test_eval_run_rag_rewriter_on_no_flag(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """rewriter/rerank=True（默认开）→ 不传 --no-*。"""
+    seen: dict = {}
+    monkeypatch.setattr(
+        "src.eval_runner.start",
+        lambda task, args, model=None: (seen.update(args=args) or {
+            "state": "running", "task": task, "model": model, "args": args,
+            "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
+    )
+    r = client.post(
+        "/api/eval/run",
+        json={"task": "rag", "no_llm": True, "options": {"rewriter": True, "rerank": True}},
+    )
+    assert r.status_code == 200
+    assert "--no-rewriter" not in seen["args"]
+    assert "--no-rerank" not in seen["args"]
+
+
+def test_eval_run_rag_with_model_adds_llm(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict = {}
+
+    def fake_start(task, args, model=None):
+        seen["args"] = args
+        return {"state": "running", "task": task, "model": model, "args": args,
+                "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}
+
+    monkeypatch.setattr("src.eval_runner.start", fake_start)
+    r = client.post(
+        "/api/eval/run",
+        json={
+            "task": "rag", "model": "kimi-k2.5",
+            "options": {"llm_count": 5, "judge_model": "kimi-k2.5"},
+        },
+    )
+    assert r.status_code == 200
+    assert "--llm" in seen["args"]
+    assert "5" in seen["args"]
+    assert "--judge-model" in seen["args"]
+    assert "kimi-k2.5" in seen["args"]
 
 
 def test_eval_run_thresholds_to_args(

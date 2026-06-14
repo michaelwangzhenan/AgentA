@@ -404,22 +404,47 @@ def _threshold(req: EvalRunRequest, key: str) -> float | None:
     return float(v)
 
 
+import time as _time
+from pathlib import Path as _Path
+
+
 def _build_eval_args(req: EvalRunRequest) -> list[str]:
     """按任务把请求里的 UI 选项拼成命令行参数（白名单，杜绝注入）。"""
     args: list[str] = []
+    opts = req.options or {}
     if req.task == "security":
         if req.no_llm:
             args.append("--no-llm")
-        if req.kind:
-            if req.kind not in _SECURITY_KINDS:
-                raise HTTPException(status_code=400, detail=f"非法 kind：{req.kind}")
-            args += ["--kind", req.kind]
+        kind = opts.get("kind")
+        if kind:
+            if kind not in _SECURITY_KINDS:
+                raise HTTPException(status_code=400, detail=f"非法 kind：{kind}")
+            args += ["--kind", str(kind)]
         recall = _threshold(req, "recall")
         if recall is not None:
             args += ["--recall-threshold", str(recall)]
         fpr = _threshold(req, "fpr")
         if fpr is not None:
             args += ["--fpr-threshold", str(fpr)]
+    elif req.task == "rag":
+        # 复选框正向语义：勾选=开（默认开）；取消勾选才传 --no-*
+        if opts.get("rewriter", True) is False:
+            args.append("--no-rewriter")
+        if opts.get("rerank", True) is False:
+            args.append("--no-rerank")
+        # 选了模型（no_llm=False）才额外评答案质量；条数来自 llm_count
+        if not req.no_llm:
+            n = opts.get("llm_count", 10)
+            if not isinstance(n, (int, float)) or int(n) < 0:
+                raise HTTPException(status_code=400, detail="评测样本数需为非负整数")
+            args += ["--llm", str(int(n))]
+            judge = opts.get("judge_model")
+            if judge and isinstance(judge, str):
+                args += ["--judge-model", judge]
+        # runner 不自带默认目录：由后端指定 -o 到 tools/reports/rag/
+        ts = _time.strftime("%Y%m%d-%H%M%S")
+        out = _Path("tools") / "reports" / "rag" / f"rag-{ts}.md"
+        args += ["-o", out.as_posix()]
     return args
 
 
@@ -510,8 +535,62 @@ def _security_summary(report: str | None = None) -> EvalSummary:
     return EvalSummary(available=False, task="security")
 
 
+def _rag_summary_from_data(data: dict) -> EvalSummary:
+    """RAG sidecar dict → 通用卡片（纯展示数字，无 pass/fail）。"""
+
+    def _pct_opt(v: object) -> str:
+        return _pct(v) if isinstance(v, (int, float)) else "—"
+
+    metrics = [
+        EvalMetric(label="命中率@1", value=_pct_opt(data.get("hit_either_at_1")), ok=None),
+        EvalMetric(label="命中率@3", value=_pct_opt(data.get("hit_either_at_3")), ok=None),
+        EvalMetric(label="命中率@k", value=_pct_opt(data.get("hit_either_at_k")), ok=None),
+        EvalMetric(label="MRR", value=f"{data.get('mrr', 0.0):.4f}", ok=None),
+    ]
+    aq = data.get("answer_quality")
+    if isinstance(aq, dict):
+        af, ar = aq.get("avg_faithfulness"), aq.get("avg_relevance")
+        metrics.append(EvalMetric(
+            label="faithfulness",
+            value=f"{af:.2f}" if isinstance(af, (int, float)) else "—",
+            ok=None,
+        ))
+        metrics.append(EvalMetric(
+            label="相关度",
+            value=f"{ar:.2f}" if isinstance(ar, (int, float)) else "—",
+            ok=None,
+        ))
+    return EvalSummary(
+        available=True,
+        task="rag",
+        timestamp=data.get("timestamp", ""),
+        git=data.get("git", ""),
+        passed=None,  # RAG 检索指标无统一硬阈，纯展示
+        partial=False,
+        metrics=metrics,
+    )
+
+
+def _rag_summary(report: str | None = None) -> EvalSummary:
+    """RAG 卡片：给 report 读其配对 sidecar；否则取 tools/reports/rag 下最新一份。"""
+    if report:
+        data = _sidecar_for_report(report)
+        return _rag_summary_from_data(data) if data else EvalSummary(available=False, task="rag")
+    root = _reports_root() / "rag"
+    if root.is_dir():
+        jsons = sorted(
+            (fp for fp in root.glob("*.json") if fp.is_file()),
+            key=lambda p: p.stat().st_mtime,
+        )
+        for fp in reversed(jsons):
+            data = _load_sidecar(fp)
+            if data is not None:
+                return _rag_summary_from_data(data)
+    return EvalSummary(available=False, task="rag")
+
+
 # task -> 摘要构造器（接收可选 report 名）；后续 eval 逐个补
-_SUMMARY_BUILDERS = {"security": _security_summary}
+_SUMMARY_BUILDERS = {"security": _security_summary, "rag": _rag_summary}
 
 
 @router.get("/summary", response_model=EvalSummary)

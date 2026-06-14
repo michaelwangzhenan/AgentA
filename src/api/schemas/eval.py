@@ -196,8 +196,11 @@ class SecurityRuntimeSummary(BaseModel):
 class EvalRunRequest(BaseModel):
     task: str = Field(..., description="评估任务 key，如 security")
     model: str | None = Field(None, description="测试模型 id（注入子进程 ACTIVE_MODEL）；空=用默认")
-    no_llm: bool = Field(False, description="仅跑不耗 LLM 的确定性子集")
-    kind: str | None = Field(None, description="按类别过滤（如安全的 direct / indirect_rag…）")
+    no_llm: bool = Field(False, description="不调用 LLM（仅确定性子集 / 仅检索）")
+    options: dict[str, object] = Field(
+        default_factory=dict,
+        description="各 eval 自有选项（如安全 kind、RAG no_rewriter/no_rerank/llm_count）；后端按 task 白名单取",
+    )
     thresholds: dict[str, float] | None = Field(
         None, description="判定阈值覆盖（不持久化），如 {recall:0.9, fpr:0.1}"
     )

@@ -23,6 +23,7 @@ _IS_WIN = os.name == "nt"
 # task_key -> 模块路径。后续 eval 逐个加。
 EVAL_MODULES: dict[str, str] = {
     "security": "tools.agent_eval.security.adversarial",
+    "rag": "tools.rag_eval.runner",
 }
 
 _lock = threading.Lock()

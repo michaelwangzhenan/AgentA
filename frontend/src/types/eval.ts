@@ -189,7 +189,7 @@ export type EvalRunRequest = {
   task: string
   model?: string | null
   no_llm?: boolean
-  kind?: string | null
+  options?: Record<string, string | boolean | number>
   thresholds?: Record<string, number>
 }
 

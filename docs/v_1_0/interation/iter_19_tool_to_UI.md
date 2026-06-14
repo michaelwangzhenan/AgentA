@@ -147,7 +147,7 @@ agent_eval/run_all.py
 - **说明卡片**（顶部可折叠）：**卡片头即 eval 名**（不再另起标题，标题与说明合并），点头展开 / 收起；默认**首次展开、之后按 eval key 记住折叠状态**（localStorage）。节序：目的 / 如何评估（**每步一行**）/ 参数说明（LLM 以外的选项，如类别 / target / ci）/ 工作原理（数据集、调不调 LLM、判定方式）/ 指标解读（**每指标一行**，指标 + 阈值 + 判定含义）/ 耗时·成本 / 如何看结果（卡片=结论、报告=诊断详情，**通用话术**）/ 数据来源（dataset · golden 路径与规模）。各 eval 在前端 `EvalTaskConfig.intro` 写静态文案，字段支持 `string` 或 `string[]`（数组逐行展示）。
 - **摘要卡片**（通用组件）：最近一次结果（核心指标 + 阈值 + PASS/FAIL + 时间 / git）。安全那份逐类作详情扩展。
 - **测试模型下拉**（统一标准，仅涉及 LLM 的 eval）：候选来自 `GET /routing/pool` 的可用模型（已配 api_key）；**默认选中系统当前 `ACTIVE_MODEL`**（`GET /config/models` 的 `active`，列表里标「（当前）」）。支持无 LLM 模式的 eval 在下拉里加 **「None（不调用 LLM）」** 选项 = 只跑不调用 LLM 的 case（取代单独的 `--no-llm` 复选框）。
-- **选项 UI 化**：各 eval 的命令行选项都做成可操作控件（`--ci` 等开关用复选框，`--target` / `--kind` 等用下拉框；`--no-llm` 归入上面的模型下拉「None」），不让用户手敲参数；点「开始评估」即按所选控件拼出命令。
+- **选项 UI 化**：各 eval 的命令行选项都做成可操作控件（开关用复选框、枚举用下拉、计数用 number 输入；`--no-llm` 归入模型下拉「None」）。复选框用**正向语义**（勾选=开，可设 `default`），避免"关 xx"这种反逻辑；选项值统一进请求 `options` 字典，后端按 task 白名单拼参。需要副模型（如 RAG 评委模型）时可加第二个模型下拉。
 - **阈值 UI 可调**：有判定阈值的 eval（如拦截率 / 误拦率 / 通过率 / 结构分）把阈值做成 UI 输入控件，默认填脚本现有默认值；跑评估时作为参数传入（不持久化，遵循上面"不改系统配置"）。卡片与 markdown 报告都**记录本次所用阈值**，便于复盘"是按什么线判的"。各 eval 具体可调哪些阈值，实现该 eval 时按其脚本定。
 - **历史报告 / 详情**：该 eval 的历史报告列表，**从新到旧排列**。**点某行 = 摘要卡片切到那次快照**（高亮「当前卡片」跟随；卡片经 `/eval/summary?report=<name>` 读该报告配对的 sidecar JSON，缺失则显示"无结构化摘要"）；每行有**「查看源文档」按钮**点开 markdown 正文。进页 / 跑完默认选中最新一份。卡片管"是否过线"，markdown 管"挂在哪 / 怎么改"。不再单列顶级「综合评估报告」tab。
 - **运行控制区布局**：所有控件（测试模型 / 选项 / 阈值）一组自动换行；**「开始评估」/「取消」单独成一行、右对齐**（不与控件挤同一行）。运行中在控制区下方显示 spinner + 日志末尾。
@@ -214,6 +214,15 @@ agent_eval/run_all.py
 
 ### 3.2.4. RAG 检索
 
+按统一标准接入（task=`rag`，模块 `tools.rag_eval.runner`）。
+
+- **测试模型下拉**：默认 **None（只评检索，不耗 token）**；选具体模型 = 额外评答案质量（`--llm`，回答用所选模型）。
+- **评委模型下拉**（仅选了测试模型时显示）：给答案质量打分的模型，「（系统默认）」= 用 `EVAL_JUDGE_MODEL`，否则传 `--judge-model`。注：`.env` 定义了 `EVAL_JUDGE_MODEL`，env 注入会被 `load_dotenv(override)` 覆盖，故评委模型走 **CLI 参数** 而非 env 注入。
+- **选项**：`query 改写` / `精排` 两个**正向**复选框（默认勾选=开，取消勾选才传 `--no-rewriter`/`--no-rerank`）+ `评委评测样本数`（number，默认 10、0=全部，仅选模型时生效）。
+- **卡片**：纯展示数字、无 pass/fail——命中率@1/@3/@k、MRR（选模型时加 faithfulness / 相关度）。
+- **报告**：runner 不自带目录，后端给 `-o tools/reports/rag/rag-<ts>.md`；新增**配对 summary JSON**（runner 落 `<out>.json`），卡片读它。
+- **前置**：需先入库知识库 + `rag_golden.db` 有 approved golden。
+- 产出：`runner._build_summary` + JSON 落盘；后端 `_rag_summary` / `EVAL_MODULES['rag']` / `_build_eval_args` rag 分支；通用请求改为 `options` 字典（各 eval 自有选项）+ 选项加 `number` 类型 + `defaultModelNone`。
 
 ### 3.2.5. 记忆召回
 

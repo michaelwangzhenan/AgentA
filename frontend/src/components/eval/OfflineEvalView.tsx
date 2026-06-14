@@ -3,8 +3,51 @@ import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { EvalRunner, type EvalTaskConfig } from './EvalRunner'
 
-// 离线评估各子页配置。后续 eval 逐个往这里加（框架期先接安全红队）。
+// 离线评估各子页配置。后续 eval 逐个往这里加。
 const EVAL_TASKS: EvalTaskConfig[] = [
+  {
+    key: 'rag',
+    label: 'RAG 检索',
+    usesLlm: true,
+    noneOption: true,
+    defaultModelNone: true, // 默认只评检索（不耗 token）；选模型才额外评答案质量
+    judgeModel: true, // 选了测试模型时可配评委模型
+    reportMatch: 'rag/',
+    options: [
+      { kind: 'checkbox', key: 'rewriter', label: 'query 改写', default: true },
+      { kind: 'checkbox', key: 'rerank', label: '精排', default: true },
+      { kind: 'number', key: 'llm_count', label: '评委评测样本数（0=全部）', default: 10, min: 0, step: 1 },
+    ],
+    intro: {
+      purpose: '评估 RAG 检索质量：给定 golden 问题，看检索能否命中应中的来源 / 关键词，命中得早不早。',
+      how: [
+        '① 选「测试模型」：默认 None = 只评检索（不耗 token）；选具体模型 = 额外评"答案质量"（faithfulness / 相关度，耗 token），此时回答用所选模型。',
+        '② 选了测试模型后，可设「评委模型」（默认跟随系统配置）与「评委评测样本数」（0=全部）。',
+        '③ 可勾「query 改写」「精排」做消融对比（默认都开，取消勾选即关闭）。',
+        '④ 点「开始评估」，跑完看卡片与历史报告。',
+      ],
+      params: [
+        'query 改写 / 精排：检索的两个增强环节，默认开启；取消勾选即关闭，用于对比它们对指标的贡献。',
+        '评委模型：评答案质量时给 faithfulness / 相关度打分的模型，默认跟随系统 EVAL_JUDGE_MODEL。',
+        '评委评测样本数：选了模型时，评测前 N 条 golden 的答案质量（0=全部）。',
+      ],
+      principle: [
+        '对每条 golden 问题跑真实检索（向量 + BM25 融合），看返回的 top-K 里有没有命中预期来源 / 关键词。',
+        '选了模型时再额外生成答案并由评委模型打 faithfulness（忠实度）/ 相关度。',
+      ],
+      metrics: [
+        '命中率@1/@3/@k：top-1/3/K 内命中预期的比例，越高越好。',
+        'MRR：第一次命中位置的倒数平均，越接近 1 越好（命中越靠前）。',
+        '答案质量（选模型时）：faithfulness / 相关度平均分（0~1 或 0~5，看评委）。',
+      ],
+      cost: [
+        '默认 None：只检索，不耗 token，秒级~分钟级（看 golden 规模）。',
+        '选模型：额外按"答案质量条数"逐条生成 + 评委打分，耗 token、更慢。',
+      ],
+      dataset:
+        'golden 来自 rag_golden.db（质量看板 → Golden 管理维护）。前置：需先在「知识库」入库文档、且有 approved golden，否则无样本可评。',
+    },
+  },
   {
     key: 'security',
     label: '安全红队',

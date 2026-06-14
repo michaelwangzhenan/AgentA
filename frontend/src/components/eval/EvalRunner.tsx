@@ -28,8 +28,9 @@ import { toast } from '@/lib/toast'
 
 // 一个 eval 子页的 UI 配置（选项 / 是否用 LLM / 报告前缀）
 export type EvalOption =
-  | { kind: 'checkbox'; key: 'no_llm'; label: string }
-  | { kind: 'select'; key: 'kind'; label: string; choices: { value: string; label: string }[] }
+  | { kind: 'checkbox'; key: string; label: string; default?: boolean }
+  | { kind: 'select'; key: string; label: string; choices: { value: string; label: string }[] }
+  | { kind: 'number'; key: string; label: string; default: number; min?: number; step?: number }
 
 // 说明正文：单段（string）或多行（string[]，逐行展示，便于步骤 / 指标分行）
 export type IntroBody = string | string[]
@@ -61,6 +62,8 @@ export type EvalTaskConfig = {
   label: string
   usesLlm: boolean // 显示测试模型下拉
   noneOption?: boolean // 模型下拉是否含「None（不调用 LLM）」= 只跑不用 LLM 的 case
+  defaultModelNone?: boolean // 默认选中 None 而非 ACTIVE_MODEL（如 RAG：默认只评检索）
+  judgeModel?: boolean // 是否显示「评委模型」下拉（如 RAG 答案质量；选模型时才用）
   reportMatch: string // 历史报告按文件名包含此串过滤
   options: EvalOption[]
   thresholds?: EvalThreshold[]
@@ -79,6 +82,13 @@ function fmtTime(epoch: number): string {
   return new Date(epoch * 1000).toLocaleString()
 }
 
+// 把 sidecar 的 ISO 时间串按本地格式显示，跟历史报告列表一致；不可解析则原样返回
+function fmtTimeStr(s: string): string {
+  if (!s) return '—'
+  const d = new Date(s)
+  return Number.isNaN(d.getTime()) ? s : d.toLocaleString()
+}
+
 export function EvalRunner({ task }: { task: EvalTaskConfig }) {
   const [status, setStatus] = useState<EvalRunStatus | null>(null)
   const [summary, setSummary] = useState<EvalSummary | null>(null)
@@ -86,8 +96,9 @@ export function EvalRunner({ task }: { task: EvalTaskConfig }) {
   const [selectedReport, setSelectedReport] = useState<string | null>(null)
   const [models, setModels] = useState<RoutingModel[]>([])
   const [model, setModel] = useState('')
+  const [judgeModel, setJudgeModel] = useState('') // '' = 系统默认
   const [activeModel, setActiveModel] = useState('')
-  const [opts, setOpts] = useState<Record<string, string | boolean>>({})
+  const [opts, setOpts] = useState<Record<string, string | boolean | number>>({})
   const [thresholds, setThresholds] = useState<Record<string, number>>({})
   const [viewing, setViewing] = useState<{ name: string; content: string } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -121,7 +132,14 @@ export function EvalRunner({ task }: { task: EvalTaskConfig }) {
 
   // 切换 eval：重置选项 / 选中、拉报告 /（可用）模型（摘要由上面 effect 跟随 selectedReport）
   useEffect(() => {
-    setOpts({})
+    // 用各选项默认值初始化（number 的 default、checkbox 的 default；select 缺省即未选）
+    const initOpts: Record<string, string | boolean | number> = {}
+    for (const o of task.options) {
+      if (o.kind === 'number') initOpts[o.key] = o.default
+      else if (o.kind === 'checkbox' && o.default !== undefined) initOpts[o.key] = o.default
+    }
+    setOpts(initOpts)
+    setJudgeModel('')
     setThresholds(
       Object.fromEntries((task.thresholds ?? []).map((t) => [t.key, t.default])),
     )
@@ -137,7 +155,13 @@ export function EvalRunner({ task }: { task: EvalTaskConfig }) {
           setActiveModel(m.active)
           const hasActive = avail.some((x) => x.model_id === m.active)
           setModel(
-            hasActive ? m.active : task.noneOption ? NONE_MODEL : avail[0]?.model_id ?? '',
+            task.defaultModelNone && task.noneOption
+              ? NONE_MODEL
+              : hasActive
+                ? m.active
+                : task.noneOption
+                  ? NONE_MODEL
+                  : avail[0]?.model_id ?? '',
           )
         })
         .catch(() => {
@@ -145,7 +169,7 @@ export function EvalRunner({ task }: { task: EvalTaskConfig }) {
           setModel(task.noneOption ? NONE_MODEL : '')
         })
     }
-  }, [task.key, task.usesLlm, task.noneOption, task.thresholds, refreshReports])
+  }, [task.key, task.usesLlm, task.noneOption, task.defaultModelNone, task.thresholds, task.options, refreshReports])
 
   // 轮询全局任务状态（单任务锁）；跑完刷新摘要 / 报告
   useEffect(() => {
@@ -175,11 +199,14 @@ export function EvalRunner({ task }: { task: EvalTaskConfig }) {
     setBusy(true)
     try {
       const isNone = task.usesLlm && model === NONE_MODEL
+      // 选了评委模型（且非 None 测试模型）才带 judge_model
+      const sendOpts: Record<string, string | boolean | number> = { ...opts }
+      if (task.judgeModel && !isNone && judgeModel) sendOpts.judge_model = judgeModel
       const st = await runEval({
         task: task.key,
         model: isNone ? undefined : task.usesLlm ? model || undefined : undefined,
-        no_llm: isNone || opts.no_llm === true,
-        kind: typeof opts.kind === 'string' && opts.kind ? opts.kind : undefined,
+        no_llm: isNone,
+        options: sendOpts,
         thresholds: task.thresholds && task.thresholds.length > 0 ? thresholds : undefined,
       })
       setStatus(st)
@@ -261,6 +288,25 @@ export function EvalRunner({ task }: { task: EvalTaskConfig }) {
             </label>
           )}
 
+          {task.judgeModel && !(task.noneOption && model === NONE_MODEL) && (
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              评委模型
+              <select
+                value={judgeModel}
+                onChange={(e) => setJudgeModel(e.target.value)}
+                disabled={runningThis}
+                className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
+              >
+                <option value="">（系统默认）</option>
+                {models.map((m) => (
+                  <option key={m.model_id} value={m.model_id}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
           {task.options.map((opt) =>
             opt.kind === 'checkbox' ? (
               <label key={opt.key} className="flex items-center gap-1.5 text-sm">
@@ -272,6 +318,19 @@ export function EvalRunner({ task }: { task: EvalTaskConfig }) {
                   className="h-4 w-4 accent-primary"
                 />
                 {opt.label}
+              </label>
+            ) : opt.kind === 'number' ? (
+              <label key={opt.key} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                {opt.label}
+                <input
+                  type="number"
+                  value={Number(opts[opt.key] ?? opt.default)}
+                  min={opt.min ?? 0}
+                  step={opt.step ?? 1}
+                  disabled={runningThis}
+                  onChange={(e) => setOpts((p) => ({ ...p, [opt.key]: Number(e.target.value) }))}
+                  className="w-20 rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
+                />
               </label>
             ) : (
               <label key={opt.key} className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -510,7 +569,7 @@ function SummaryCard({
     <div className="space-y-3 rounded-lg border border-border p-4">
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
         <span>
-          最近评估：{summary.timestamp || '—'}
+          最近评估：{fmtTimeStr(summary.timestamp)}
           {summary.git ? ` · ${summary.git}` : ''}
           {summary.partial && (
             <span className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-600 dark:text-amber-500">
