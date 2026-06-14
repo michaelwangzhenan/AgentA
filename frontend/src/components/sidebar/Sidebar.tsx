@@ -216,7 +216,7 @@ export function Sidebar(props: SidebarProps) {
         />
         <ViewNavButton
           icon={<BarChart3 className="h-4 w-4" />}
-          label="用量"
+          label="用量看板"
           active={activeView === 'usage'}
           onClick={() => onSwitchView('usage')}
         />

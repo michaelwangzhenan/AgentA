@@ -110,16 +110,10 @@ function L1View({ onOpen }: { onOpen: (alias: string) => void }) {
 
   return (
     <div className="space-y-6">
-      <IngestPanel
-        collections={ordered}
-        defaultAlias={defaultAlias}
-        onIngested={() => load(true)}
-      />
-
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <p className="text-xs text-muted-foreground">
-            共 {ordered.length} 个库，点击进入查看 / 管理文档
+            共 {ordered.length} 个知识库，点击任意一个可查看并管理其中的文档
           </p>
           <Button
             variant="ghost"
@@ -182,6 +176,12 @@ function L1View({ onOpen }: { onOpen: (alias: string) => void }) {
         ))}
         </ul>
       </div>
+
+      <IngestPanel
+        collections={ordered}
+        defaultAlias={defaultAlias}
+        onIngested={() => load(true)}
+      />
     </div>
   )
 }
