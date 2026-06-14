@@ -3,7 +3,7 @@ import { Loader2, Upload } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 // 跟后端 SUPPORTED_EXTENSIONS 对齐（src/rag/parser.py）
-const ACCEPT_EXTENSIONS = [
+export const ACCEPT_EXTENSIONS = [
   '.md',
   '.txt',
   '.html',

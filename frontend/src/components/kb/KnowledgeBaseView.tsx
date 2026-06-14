@@ -1,15 +1,25 @@
+import type { ReactNode } from 'react'
 import { useCallback, useEffect, useState } from 'react'
-import { Trash2 } from 'lucide-react'
+import {
+  ChevronLeft,
+  ChevronRight,
+  Database,
+  FileText,
+  Layers,
+  Loader2,
+  RefreshCw,
+  Trash2,
+} from 'lucide-react'
 
 import {
   clearAllKBDocuments,
   deleteKBDocument,
+  getKBCollections,
   listKBDocuments,
-  uploadKBFile,
 } from '@/api/client'
-import type { KBDocument } from '@/types/kb'
-import { DropZone } from '@/components/kb/DropZone'
+import type { KBCollection, KBDocument } from '@/types/kb'
 import { DocumentList } from '@/components/kb/DocumentList'
+import { IngestPanel } from '@/components/kb/IngestPanel'
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
@@ -21,82 +31,209 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
 
 export function KnowledgeBaseView() {
+  // null = 第一层（库列表 L1）；否则进第二层（该库的文档列表 L2）
+  const [alias, setAlias] = useState<string | null>(null)
+
+  return (
+    <div className="flex h-full flex-1 flex-col overflow-hidden">
+      <header className="border-b border-border px-6 py-3">
+        <h1 className="text-base font-semibold tracking-tight">知识库</h1>
+        <p className="text-xs text-muted-foreground">
+          选择一个库查看 / 管理其文档；Agent 通过 search_knowledge 工具自动检索
+        </p>
+      </header>
+
+      <div className="flex-1 overflow-y-auto p-6">
+        <div className="mx-auto max-w-4xl space-y-6">
+          {alias === null ? (
+            <L1View onOpen={setAlias} />
+          ) : (
+            <LibraryView alias={alias} onBack={() => setAlias(null)} />
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── L1：库列表 ───────────────────────────────────────────────────────────────
+
+// 模块级缓存：在 KB 页反复进出时立即回显上次结果，后台再静默校验，避免每次都干等。
+let _cachedCollections: KBCollection[] | null = null
+
+function L1View({ onOpen }: { onOpen: (alias: string) => void }) {
+  const [collections, setCollections] = useState<KBCollection[]>(
+    () => _cachedCollections ?? [],
+  )
+  // 有缓存就先不转圈，直接显示旧数据；无缓存才显示首屏 loading
+  const [loading, setLoading] = useState(_cachedCollections === null)
+  const [refreshing, setRefreshing] = useState(false)
+
+  // force=true 走后端 refresh（跳过进程内缓存，重新扫库统计）
+  const load = useCallback(async (force = false) => {
+    if (force) setRefreshing(true)
+    try {
+      const data = await getKBCollections(force)
+      _cachedCollections = data
+      setCollections(data)
+    } catch (e) {
+      toast.error(`拉取库列表失败：${(e as Error).message}`)
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }, [])
+
+  // 进页：有缓存则后台静默校验，无缓存则首屏拉取
+  useEffect(() => {
+    void load(false)
+  }, [load])
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> 加载中…
+      </div>
+    )
+  }
+
+  // 默认入库库排第一，其余保持后端顺序
+  const ordered = [...collections].sort(
+    (a, b) => Number(b.is_default) - Number(a.is_default),
+  )
+  const defaultAlias =
+    collections.find((c) => c.is_default)?.alias ?? collections[0]?.alias ?? ''
+
+  return (
+    <div className="space-y-6">
+      <IngestPanel
+        collections={ordered}
+        defaultAlias={defaultAlias}
+        onIngested={() => load(true)}
+      />
+
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-muted-foreground">
+            共 {ordered.length} 个库，点击进入查看 / 管理文档
+          </p>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1 text-xs text-muted-foreground"
+            onClick={() => load(true)}
+            disabled={refreshing}
+          >
+            <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
+            刷新
+          </Button>
+        </div>
+        <ul className="space-y-2.5">
+        {ordered.map((c) => (
+          <li key={c.alias}>
+            <button
+              type="button"
+              onClick={() => onOpen(c.alias)}
+              className={cn(
+                'group flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition-colors',
+                c.is_default
+                  ? 'border-primary/50 bg-primary/5 hover:bg-primary/10'
+                  : 'border-border hover:border-foreground/20 hover:bg-muted/40',
+              )}
+            >
+              <span
+                className={cn(
+                  'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg',
+                  c.is_default
+                    ? 'bg-primary/15 text-primary'
+                    : 'bg-muted text-muted-foreground',
+                )}
+              >
+                <Database className="h-5 w-5" />
+              </span>
+
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="flex items-center gap-2">
+                  <span className="text-sm font-semibold">{c.alias}</span>
+                  {c.is_default && (
+                    <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-medium text-primary">
+                      默认入库
+                    </span>
+                  )}
+                </span>
+                <span className="truncate text-xs text-muted-foreground">
+                  {c.model}
+                  <span className="mx-1.5 text-border">·</span>
+                  {c.collection}
+                </span>
+              </span>
+
+              <span className="ml-auto flex shrink-0 items-center gap-2">
+                <Stat icon={<FileText className="h-3.5 w-3.5" />} label="文档" value={c.doc_count} />
+                <Stat icon={<Layers className="h-3.5 w-3.5" />} label="chunks" value={c.chunk_count} />
+                <ChevronRight className="h-4 w-4 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-muted-foreground" />
+              </span>
+            </button>
+          </li>
+        ))}
+        </ul>
+      </div>
+    </div>
+  )
+}
+
+function Stat({
+  icon,
+  label,
+  value,
+}: {
+  icon: ReactNode
+  label: string
+  value: number
+}) {
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-md bg-background/70 px-2 py-1 text-xs text-muted-foreground"
+      title={label}
+    >
+      {icon}
+      <span className="font-medium text-foreground">{value.toLocaleString()}</span>
+    </span>
+  )
+}
+
+// ── L2：单个库的文档管理 ─────────────────────────────────────────────────────
+
+function LibraryView({ alias, onBack }: { alias: string; onBack: () => void }) {
   const [documents, setDocuments] = useState<KBDocument[]>([])
   const [loading, setLoading] = useState(true)
-  const [uploading, setUploading] = useState(false)
-  const [uploadStatus, setUploadStatus] = useState<string>('')
-  const [elapsedSec, setElapsedSec] = useState(0)
   const [clearDialogOpen, setClearDialogOpen] = useState(false)
   const [clearing, setClearing] = useState(false)
-
-  // 上传期间每秒刷新耗时，给用户"系统活着"的反馈（后端单文件 sync POST，无内部进度回传）
-  useEffect(() => {
-    if (!uploading) {
-      setElapsedSec(0)
-      return
-    }
-    const startedAt = Date.now()
-    const id = window.setInterval(() => {
-      setElapsedSec(Math.floor((Date.now() - startedAt) / 1000))
-    }, 1000)
-    return () => window.clearInterval(id)
-  }, [uploading])
 
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const docs = await listKBDocuments()
-      setDocuments(docs)
+      setDocuments(await listKBDocuments(alias))
     } catch (e) {
       console.error('[KB] 拉列表失败', e)
       toast.error(`拉取列表失败: ${(e as Error).message}`)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [alias])
 
   useEffect(() => {
     refresh()
   }, [refresh])
 
-  const handleFiles = useCallback(
-    async (files: File[]) => {
-      if (files.length === 0) return
-      setUploading(true)
-      let okCount = 0
-      let failCount = 0
-      try {
-        for (const file of files) {
-          setUploadStatus(`处理中：${file.name} (${okCount + failCount + 1}/${files.length})`)
-          try {
-            const resp = await uploadKBFile(file)
-            okCount++
-            if (resp.chunks > 0) {
-              toast.success(`已入库 ${file.name}：${resp.chunks} chunks`)
-            } else {
-              toast.info(`${file.name}：${resp.message || '已跳过'}`)
-            }
-          } catch (e) {
-            failCount++
-            toast.error(`${file.name}：${(e as Error).message}`)
-          }
-        }
-      } finally {
-        setUploading(false)
-        setUploadStatus('')
-        await refresh()
-      }
-    },
-    [refresh],
-  )
-
   const handleDelete = useCallback(
     async (docId: string) => {
       try {
-        const resp = await deleteKBDocument(docId)
+        const resp = await deleteKBDocument(docId, alias)
         if (resp.deleted) {
           toast.success(`已删除，移除 ${resp.chunks_removed} chunks`)
         } else {
@@ -107,13 +244,36 @@ export function KnowledgeBaseView() {
         toast.error(`删除失败：${(e as Error).message}`)
       }
     },
-    [refresh],
+    [alias, refresh],
+  )
+
+  const handleDeleteMany = useCallback(
+    async (docIds: string[]) => {
+      let removed = 0
+      let chunks = 0
+      let failed = 0
+      for (const id of docIds) {
+        try {
+          const resp = await deleteKBDocument(id, alias)
+          if (resp.deleted) {
+            removed++
+            chunks += resp.chunks_removed
+          }
+        } catch {
+          failed++
+        }
+      }
+      if (failed > 0) toast.error(`批量删除：成功 ${removed} · 失败 ${failed}`)
+      else toast.success(`已删除 ${removed} 个文档（移除 ${chunks} chunks）`)
+      await refresh()
+    },
+    [alias, refresh],
   )
 
   const handleClearAll = useCallback(async () => {
     setClearing(true)
     try {
-      const resp = await clearAllKBDocuments()
+      const resp = await clearAllKBDocuments(alias)
       toast.success(
         `已清空：${resp.docs_removed} 个文档 / ${resp.chunks_removed} chunks / ${resp.files_removed} 个物理文件`,
       )
@@ -124,55 +284,45 @@ export function KnowledgeBaseView() {
     } finally {
       setClearing(false)
     }
-  }, [refresh])
+  }, [alias, refresh])
 
   const totalChunks = documents.reduce((sum, d) => sum + d.chunks, 0)
 
   return (
-    <div className="flex h-full flex-1 flex-col overflow-hidden">
-      <header className="border-b border-border px-6 py-3">
-        <h1 className="text-base font-semibold tracking-tight">知识库</h1>
-        <p className="text-xs text-muted-foreground">
-          拖拽文件入库；Agent 通过 search_knowledge 工具自动检索
-        </p>
-      </header>
+    <div className="space-y-6">
+      <div className="flex items-center gap-2 text-sm">
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex items-center gap-1 rounded px-1 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+        >
+          <ChevronLeft className="h-3.5 w-3.5" />
+          库列表
+        </button>
+        <span className="text-muted-foreground">/</span>
+        <span className="font-medium text-foreground">{alias}</span>
+      </div>
 
-      <div className="flex-1 overflow-y-auto p-6">
-        <div className="mx-auto max-w-4xl space-y-6">
-          <DropZone onFiles={handleFiles} disabled={uploading} />
-
-          {uploading && uploadStatus && (
-            <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
-              {uploadStatus}
-              {elapsedSec > 0 && (
-                <span className="ml-2 text-xs">· 已耗时 {elapsedSec}s</span>
-              )}
-            </div>
-          )}
-
-          <div className="rounded-lg border border-border bg-card">
-            <div className="flex items-center justify-between border-b border-border px-3 py-2">
-              <span className="text-sm font-medium">
-                已入库文档 ({documents.length})
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 gap-1 text-xs text-muted-foreground hover:text-destructive"
-                disabled={documents.length === 0 || uploading || clearing}
-                onClick={() => setClearDialogOpen(true)}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                一键清空
-              </Button>
-            </div>
-            <DocumentList
-              documents={documents}
-              loading={loading}
-              onDelete={handleDelete}
-            />
-          </div>
+      <div className="rounded-lg border border-border bg-card">
+        <div className="flex items-center justify-between border-b border-border px-3 py-2">
+          <span className="text-sm font-medium">已入库文档 ({documents.length})</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1 text-xs text-muted-foreground hover:text-destructive"
+            disabled={documents.length === 0 || clearing}
+            onClick={() => setClearDialogOpen(true)}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            一键清空
+          </Button>
         </div>
+        <DocumentList
+          documents={documents}
+          loading={loading}
+          onDelete={handleDelete}
+          onDeleteMany={handleDeleteMany}
+        />
       </div>
 
       <AlertDialog
@@ -194,10 +344,10 @@ export function KnowledgeBaseView() {
           }}
         >
           <AlertDialogHeader>
-            <AlertDialogTitle>清空整个知识库？</AlertDialogTitle>
+            <AlertDialogTitle>清空库 {alias}？</AlertDialogTitle>
             <AlertDialogDescription>
-              将删除 <b>{documents.length}</b> 个文档（共 <b>{totalChunks}</b>{' '}
-              chunks），同时清空 <code>web_uploads/</code>{' '}
+              将删除 <b>{alias}</b> 库的 <b>{documents.length}</b> 个文档（共{' '}
+              <b>{totalChunks}</b> chunks），同时清空 <code>web_uploads/</code>{' '}
               下对应的物理文件。该操作不可恢复。
             </AlertDialogDescription>
           </AlertDialogHeader>

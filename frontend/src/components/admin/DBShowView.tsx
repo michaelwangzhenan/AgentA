@@ -15,12 +15,14 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import {
+  cleanupOrphanSegments,
   getBm25Doc,
   getBm25Docs,
   getBm25Indexes,
   getChromaCollections,
   getChromaItem,
   getChromaItems,
+  getOrphanSegmentsPreview,
   getPrunePreview,
   getPurgeUserPreview,
   getSqliteDatabases,
@@ -38,6 +40,7 @@ import type {
   ChromaItemDetail,
   ChromaItemsPage,
   Metadata,
+  OrphanSegmentsPreview,
   PruneResult,
   PurgePreview,
   PurgeSelection,
@@ -51,7 +54,7 @@ type Tab = 'chroma' | 'bm25' | 'sqlite' | 'maintenance'
 
 // 后端 limit 上限 200，候选项不超过它
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 200] as const
-const DEFAULT_PAGE_SIZE = 50
+const DEFAULT_PAGE_SIZE = 10
 // 与后端 db_inspect.CHROMA_SCAN_CAP 对齐，仅用于 truncated 提示文案
 const CHROMA_SCAN_CAP_HINT = 20000
 
@@ -259,6 +262,15 @@ function Pill({ children }: { children: React.ReactNode }) {
   return (
     <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
       {children}
+    </span>
+  )
+}
+
+// .env 配置的默认入库库标记，样式对齐知识库 L1
+function DefaultBadge() {
+  return (
+    <span className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-medium text-primary">
+      默认入库
     </span>
   )
 }
@@ -566,23 +578,33 @@ function ChromaList({ onOpen }: { onOpen: (name: string) => void }) {
       <p className="mb-2 text-xs text-muted-foreground">数据库目录：{data.root}</p>
       {data.error && <ErrorNote msg={data.error} />}
       <ul className="space-y-1">
-        {data.collections.map((c) => (
-          <li key={c.name}>
-            <button
-              type="button"
-              onClick={() => onOpen(c.name)}
-              className="flex w-full items-center justify-between rounded-md border border-border px-3 py-2 text-left text-sm hover:bg-muted/50"
-            >
-              <span className="font-medium">{c.name}</span>
-              <span className="flex items-center gap-1.5">
-                <StatCard label="条数" value={c.count ?? '—'} />
-                <StatCard label="维度" value={c.dim ?? '—'} />
-                {c.space && <StatCard label="空间" value={c.space} />}
-                {c.error && <span className="text-xs text-destructive">异常</span>}
-              </span>
-            </button>
-          </li>
-        ))}
+        {[...data.collections]
+          .sort((a, b) => Number(b.is_default) - Number(a.is_default))
+          .map((c) => (
+            <li key={c.name}>
+              <button
+                type="button"
+                onClick={() => onOpen(c.name)}
+                className={cn(
+                  'flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition-colors',
+                  c.is_default
+                    ? 'border-primary/50 bg-primary/5 hover:bg-primary/10'
+                    : 'border-border hover:bg-muted/50',
+                )}
+              >
+                <span className="flex items-center gap-2">
+                  <span className="font-medium">{c.name}</span>
+                  {c.is_default && <DefaultBadge />}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <StatCard label="条数" value={c.count ?? '—'} />
+                  <StatCard label="维度" value={c.dim ?? '—'} />
+                  {c.space && <StatCard label="空间" value={c.space} />}
+                  {c.error && <span className="text-xs text-destructive">异常</span>}
+                </span>
+              </button>
+            </li>
+          ))}
       </ul>
     </div>
   )
@@ -793,15 +815,25 @@ function Bm25List({ onOpen }: { onOpen: (coll: string) => void }) {
       <Breadcrumb parts={[{ label: 'BM25' }]} />
       <p className="mb-2 text-xs text-muted-foreground">索引目录：{data.dir}</p>
       <ul className="space-y-1">
-        {data.indexes.map((ix) => (
+        {[...data.indexes]
+          .sort((a, b) => Number(b.is_default) - Number(a.is_default))
+          .map((ix) => (
           <li key={ix.file}>
             <button
               type="button"
               onClick={() => !ix.error && onOpen(ix.collection)}
               disabled={!!ix.error}
-              className="flex w-full items-center justify-between rounded-md border border-border px-3 py-2 text-left text-sm hover:bg-muted/50 disabled:opacity-60"
+              className={cn(
+                'flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition-colors disabled:opacity-60',
+                ix.is_default
+                  ? 'border-primary/50 bg-primary/5 hover:bg-primary/10'
+                  : 'border-border hover:bg-muted/50',
+              )}
             >
-              <span className="font-medium">{ix.file}</span>
+              <span className="flex items-center gap-2">
+                <span className="font-medium">{ix.file}</span>
+                {ix.is_default && <DefaultBadge />}
+              </span>
               <span className="flex items-center gap-1.5">
                 {ix.error ? (
                   <span className="text-xs text-destructive">加载失败</span>
@@ -1841,8 +1873,111 @@ function MaintenancePanel() {
     <div className="space-y-4">
       <PrunePanel />
       <PurgeUserPanel />
+      <OrphanSegmentsPanel />
       <VacuumPanel />
     </div>
+  )
+}
+
+// 字节 → 人类可读
+function fmtBytes(n: number): string {
+  if (n >= 1024 * 1024 * 1024) return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`
+  if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${n} B`
+}
+
+function OrphanSegmentsPanel() {
+  const [preview, setPreview] = useState<OrphanSegmentsPreview | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [confirm, setConfirm] = useState(false)
+
+  const doPreview = async () => {
+    setBusy(true)
+    try {
+      setPreview(await getOrphanSegmentsPreview())
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '预览失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+  const doRun = async () => {
+    setBusy(true)
+    try {
+      const r = await cleanupOrphanSegments()
+      toast.success(`已清理 ${r.removed.length} 个孤儿段，回收 ${fmtBytes(r.freed_bytes)}`)
+      if (r.failed.length > 0) {
+        toast.error(`${r.failed.length} 个删除失败（可能被占用）`)
+      }
+      setPreview(null)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '清理失败')
+    } finally {
+      setBusy(false)
+      setConfirm(false)
+    }
+  }
+
+  return (
+    <Card
+      title="孤儿段清理"
+      desc="清空 / 删除知识库后，Chroma 在磁盘上残留不再被任何库引用的 <uuid>/ 向量段目录（只占空间，不影响检索）。这里把它们物理删除。"
+    >
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+        <button type="button" onClick={doPreview} disabled={busy} className={btnCls}>
+          扫描
+        </button>
+        <button
+          type="button"
+          onClick={() => setConfirm(true)}
+          disabled={busy || !preview || !preview.available || preview.count === 0}
+          className={dangerBtnCls}
+        >
+          清理孤儿段
+        </button>
+      </div>
+
+      {preview && !preview.available && (
+        <p className="text-sm text-muted-foreground">
+          无法读取 chroma.sqlite3，已跳过（不会误删）。
+        </p>
+      )}
+      {preview && preview.available && preview.count === 0 && (
+        <p className="text-sm text-muted-foreground">没有孤儿段，磁盘已干净。</p>
+      )}
+      {preview && preview.available && preview.count > 0 && (
+        <div className="rounded-md border border-border">
+          <div className="flex items-center justify-between border-b border-border bg-muted/30 px-3 py-1.5 text-xs text-muted-foreground">
+            <span>共 {preview.count} 个孤儿段</span>
+            <span>合计 {fmtBytes(preview.total_bytes)}</span>
+          </div>
+          <ul className="max-h-64 overflow-auto">
+            {preview.items.map((it) => (
+              <li
+                key={it.uuid}
+                className="flex items-center justify-between border-t border-border/50 px-3 py-1 text-sm first:border-t-0"
+              >
+                <span className="truncate font-mono text-xs" title={it.uuid}>
+                  {it.uuid}
+                </span>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {fmtBytes(it.bytes)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={confirm}
+        onOpenChange={setConfirm}
+        title="确认清理孤儿段？"
+        desc={`将物理删除 ${preview?.count ?? 0} 个孤儿段目录（约 ${fmtBytes(preview?.total_bytes ?? 0)}），不可恢复。`}
+        onConfirm={doRun}
+      />
+    </Card>
   )
 }
 

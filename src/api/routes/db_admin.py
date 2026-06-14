@@ -175,3 +175,13 @@ def purge_user(req: PurgeUserRequest) -> dict:
 @router.post("/maintenance/vacuum")
 def vacuum(req: VacuumRequest) -> dict:
     return maintain.vacuum(req.db_key)
+
+
+@router.get("/maintenance/orphan-segments/preview")
+def orphan_segments_preview() -> dict:
+    return maintain.orphan_segments_preview()
+
+
+@router.post("/maintenance/orphan-segments")
+def cleanup_orphan_segments() -> dict:
+    return maintain.cleanup_orphan_segments()

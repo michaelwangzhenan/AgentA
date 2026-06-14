@@ -5,11 +5,19 @@
 """
 from __future__ import annotations
 
+import re
+import shutil
 import sqlite3
 import time
 from pathlib import Path
 
+import src.config as config
 import src.db_inspect as inspect
+
+# Chroma 持久化根下 segment 目录名是 UUID；用它识别段目录，避开 bm25_*.pkl / chroma.sqlite3 等
+_CHROMA_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
 
 # 事件/日志类表：按 created_at（epoch）删 N 天前的行。均在 usage.db。
 _EVENT_TABLES = ("usage_events", "agent_traces", "cache_lookups", "saving_events", "security_events")
@@ -216,6 +224,92 @@ def purge_user(user_id: int, selections: list[dict]) -> dict:
 
 
 # ── VACUUM ────────────────────────────────────────────────────────────────────
+
+# ── Chroma 孤儿 segment 清理 ──────────────────────────────────────────────────
+# delete_collection() 只删 chroma.sqlite3 catalog，不 unlink 磁盘上的 <uuid>/ 段目录。
+# 删库 / 清空后这些不再被任何活跃 collection 引用的目录就成了孤儿，纯占磁盘。
+
+def _chroma_root() -> Path:
+    return Path(config.CHROMA_DB_PATH).resolve()
+
+
+def _dir_size(p: Path) -> int:
+    total = 0
+    for f in p.rglob("*"):
+        try:
+            if f.is_file():
+                total += f.stat().st_size
+        except OSError:
+            pass
+    return total
+
+
+def _live_vector_segment_ids(root: Path) -> set[str] | None:
+    """从 chroma.sqlite3 反查活跃 VECTOR 段 UUID。
+
+    安全策略：sqlite 不存在或读失败返回 None，调用方据此放弃清理，绝不"读不到 → 全删"。
+    """
+    sqlite_path = root / "chroma.sqlite3"
+    if not sqlite_path.exists():
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{sqlite_path}?mode=ro", uri=True)
+        try:
+            return {r[0] for r in conn.execute("SELECT id FROM segments WHERE scope = 'VECTOR'")}
+        finally:
+            conn.close()
+    except Exception:
+        return None
+
+
+def _orphan_dirs(root: Path) -> list[Path] | None:
+    """列出磁盘上不再被任何活跃 VECTOR 段引用的 UUID 目录；读不到 sqlite 返回 None。"""
+    if not root.is_dir():
+        return []
+    live = _live_vector_segment_ids(root)
+    if live is None:
+        return None
+    return [
+        p for p in root.iterdir()
+        if p.is_dir() and _CHROMA_UUID_RE.match(p.name) and p.name not in live
+    ]
+
+
+def orphan_segments_preview() -> dict:
+    """预览将清理的孤儿 segment 目录（UUID + 占用字节）。available=False 表示无法安全判定。"""
+    root = _chroma_root()
+    dirs = _orphan_dirs(root)
+    if dirs is None:
+        return {"available": False, "root": str(root), "count": 0, "total_bytes": 0, "items": []}
+    items = [{"uuid": d.name, "bytes": _dir_size(d)} for d in dirs]
+    return {
+        "available": True,
+        "root": str(root),
+        "count": len(items),
+        "total_bytes": sum(i["bytes"] for i in items),
+        "items": items,
+    }
+
+
+def cleanup_orphan_segments() -> dict:
+    """物理删除孤儿 segment 目录；返回已删 UUID / 回收字节 / 失败项（被占用等）。"""
+    root = _chroma_root()
+    dirs = _orphan_dirs(root)
+    if dirs is None:
+        return {"available": False, "removed": [], "freed_bytes": 0, "failed": []}
+    removed: list[str] = []
+    failed: list[dict] = []
+    freed = 0
+    for d in dirs:
+        size = _dir_size(d)
+        try:
+            shutil.rmtree(d)
+            removed.append(d.name)
+            freed += size
+        except OSError as e:
+            failed.append({"uuid": d.name, "error": f"{type(e).__name__}: {e}"})
+    return {"available": True, "removed": removed, "freed_bytes": freed, "failed": failed}
+
 
 def vacuum(db_key: str | None = None) -> dict:
     """对指定库或全部库执行 VACUUM 回收空间；返回每库结果。"""

@@ -30,8 +30,19 @@ for _key in ("HF_ENDPOINT", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE"):
 
 import hashlib
 import logging
+import shutil
 import time
+from collections.abc import Callable
 from pathlib import Path
+
+# 分批 upsert 的批大小：把整文件的 N 块分批写入，便于在批与批之间上报"第 M/N 块"进度。
+# 越小进度越细、嵌入调用次数越多；16 在体验与开销间折中。
+_EMBED_BATCH_SIZE = 16
+
+# 入库进度回调签名：cb(phase, done, total)
+#   phase: "parse" 解析中 / "split" 切分完成 / "embed" 嵌入中
+#   done/total: embed 阶段为已写入 / 总块数；parse 阶段为 0/0
+ProgressCb = Callable[[str, int, int], None]
 
 import chromadb
 
@@ -130,6 +141,7 @@ def _ingest_one_file(
     docs_path: Path,
     collection,
     collection_name: str,
+    progress_cb: ProgressCb | None = None,
 ) -> dict:
     """处理单个文件入库；返回 {doc_id, chunks, status}。
 
@@ -137,6 +149,8 @@ def _ingest_one_file(
       - 'ingested'          : 解析 + 分块 + upsert 成功
       - 'skipped_unchanged' : content_sha1 未变，跳过 parse 后续阶段
       - 'empty'             : 解析或分块结果为空
+
+    progress_cb 可选：按 parse / split / embed 阶段回调上报进度（Web SSE 用）。
 
     被 `ingest_all`（批量）和 `ingest_one`（单文件公开入口）共用。
     """
@@ -147,6 +161,8 @@ def _ingest_one_file(
     doc_id = _doc_id_from_relpath(rel_path)
 
     logger.info("Parse 解析: %s", rel_path)
+    if progress_cb:
+        progress_cb("parse", 0, 0)
     text = parse_file(file_path)
 
     if not text.strip():
@@ -210,11 +226,21 @@ def _ingest_one_file(
             md["page_no"] = int(c.page_no)
         metadatas.append(md)
 
-    collection.upsert(
-        ids=ids,
-        documents=documents,
-        metadatas=metadatas,  # type: ignore[arg-type]
-    )
+    total_chunks = len(structured)
+    if progress_cb:
+        progress_cb("split", 0, total_chunks)
+
+    # 分批 upsert：每批 embedding 后回调一次进度，让前端能显示"第 M/N 块"。
+    # 结果与一次性 upsert 等价（同一批 ids，幂等）。
+    for start in range(0, total_chunks, _EMBED_BATCH_SIZE):
+        end = min(start + _EMBED_BATCH_SIZE, total_chunks)
+        collection.upsert(
+            ids=ids[start:end],
+            documents=documents[start:end],
+            metadatas=metadatas[start:end],  # type: ignore[arg-type]
+        )
+        if progress_cb:
+            progress_cb("embed", end, total_chunks)
 
     # 同步写入 BM25 倒排索引（如启用）；与 Chroma 共享 ids 保证融合时可对齐
     if config.BM25_ENABLED:
@@ -253,6 +279,7 @@ def ingest_one(
     file_path: str | Path,
     docs_root: str | Path | None = None,
     model: str = config.DEFAULT_EMBEDDING_ALIAS,
+    progress_cb: ProgressCb | None = None,
 ) -> dict:
     """单文件入库入口（Web 拖拽上传专用，不扫整个目录）。
 
@@ -263,6 +290,7 @@ def ingest_one(
         file_path: 待入库文件绝对/相对路径。
         docs_root: 用于计算 rel_path（doc_id 派生自 rel_path）。None 则用文件所在目录。
         model: embedding 别名（en / zh / m3）。
+        progress_cb: 可选进度回调（parse / split / embed 阶段），Web SSE 用。
 
     Returns:
         dict: {doc_id, chunks, status}，status ∈ ingested / skipped_unchanged / empty
@@ -281,10 +309,11 @@ def ingest_one(
 
     client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
     collection = _open_collection(client, model_name, collection_name)
-    result = _ingest_one_file(fp, docs_path, collection, collection_name)
+    result = _ingest_one_file(fp, docs_path, collection, collection_name, progress_cb)
     # KB 内容变了，语义缓存里依赖旧 KB 的答案可能过期 → 全量作废（软失败旁路）
     if result.get("status") == "ingested":
         _invalidate_semantic_cache()
+        _invalidate_kb_stats(collection_name)
     return result
 
 
@@ -409,6 +438,47 @@ def list_kb_documents(model: str = config.DEFAULT_EMBEDDING_ALIAS) -> list[dict]
     return sorted(grouped.values(), key=lambda x: x["ingested_at"], reverse=True)
 
 
+# count_kb_documents 的进程内缓存：collection_name -> (doc_count, chunk_count)。
+# L1 库列表频繁进出，每次重扫全部 metadatas 去重 doc_id 很慢；写操作（入库 / 删除 /
+# 清空）会按库失效对应条目。CLI 在另一进程入库不会触发失效，前端可用 refresh 强制重算。
+_KB_STATS_CACHE: dict[str, tuple[int, int]] = {}
+
+
+def _invalidate_kb_stats(collection_name: str) -> None:
+    """让某个 collection 的统计缓存失效（下次重算）。"""
+    _KB_STATS_CACHE.pop(collection_name, None)
+
+
+def count_kb_documents(
+    model: str = config.DEFAULT_EMBEDDING_ALIAS, *, use_cache: bool = True
+) -> tuple[int, int]:
+    """轻量统计指定 collection 的 (文档数, chunk 数)，只读 metadatas 不读正文。
+
+    给库列表（L1）用：chunk 数取 collection.count()，文档数按 doc_id 去重。
+    命中进程内缓存直接返回；collection 不存在返回 (0, 0)。
+    """
+    _, collection_name = config.resolve_embedding(model)
+    if use_cache and collection_name in _KB_STATS_CACHE:
+        return _KB_STATS_CACHE[collection_name]
+
+    client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
+    try:
+        collection = client.get_collection(name=collection_name)
+    except Exception:
+        return 0, 0
+
+    chunk_count = collection.count()
+    data = collection.get(include=["metadatas"])
+    doc_ids = {
+        md.get("doc_id")
+        for md in (data.get("metadatas") or [])
+        if md and md.get("doc_id")
+    }
+    stats = (len(doc_ids), chunk_count)
+    _KB_STATS_CACHE[collection_name] = stats
+    return stats
+
+
 def delete_kb_document(
     doc_id: str,
     model: str = config.DEFAULT_EMBEDDING_ALIAS,
@@ -471,6 +541,7 @@ def delete_kb_document(
         logger.warning("KB 删除物理文件失败 doc_id=%s: %s", doc_id, e)
 
     _invalidate_semantic_cache()
+    _invalidate_kb_stats(collection_name)
     return True, chunks_removed
 
 
@@ -529,22 +600,22 @@ def delete_all_kb_documents(
         except Exception as e:
             logger.warning("KB 清空 BM25 索引失败: %s", e)
 
-    # 3. 清 web_uploads 目录内所有支持格式的文件（保留目录本身和子目录）
+    # 3. 清该库 upload 目录（per-alias 子目录，递归）：整目录删掉，避免误伤其它库的文件
     try:
         web_root = Path(web_upload_dir).resolve()
         if web_root.is_dir():
-            for fp in web_root.iterdir():
-                if fp.is_file() and fp.suffix.lower() in SUPPORTED_EXTENSIONS:
-                    try:
-                        fp.unlink()
-                        files_removed += 1
-                    except Exception as e:
-                        logger.warning("KB 清空物理文件失败 %s: %s", fp, e)
-            logger.info("KB 清空物理文件: %d 个", files_removed)
+            files_removed = sum(
+                1
+                for fp in web_root.rglob("*")
+                if fp.is_file() and fp.suffix.lower() in SUPPORTED_EXTENSIONS
+            )
+            shutil.rmtree(web_root, ignore_errors=True)
+            logger.info("KB 清空物理文件: %d 个（%s）", files_removed, web_root)
     except Exception as e:
         logger.warning("KB 清空 web_uploads 目录失败: %s", e)
 
     _invalidate_semantic_cache()
+    _invalidate_kb_stats(collection_name)
     return {
         "docs_removed": docs_removed,
         "chunks_removed": chunks_removed,

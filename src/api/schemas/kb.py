@@ -21,14 +21,19 @@ class KBDocumentListResponse(BaseModel):
     documents: list[KBDocument]
 
 
-class KBUploadResponse(BaseModel):
-    """POST /api/kb/upload 同步返回（不分阶段；ingest 完成才返回）"""
+class KBCollection(BaseModel):
+    """库列表（L1）单项：一个 embedding 别名对应一个 collection。"""
 
-    doc_id: str = Field(..., description="入库后的 doc_id")
-    filename: str = Field(..., description="保存的文件名")
-    chunks: int = Field(..., description="入库 chunk 数（0 = 内容未变化跳过 或 解析失败）")
-    skipped_unchanged: bool = Field(False, description="是否因 content_sha1 一致而跳过 re-embed")
-    message: str = Field("", description="给用户看的人类友好消息")
+    alias: str = Field(..., description="embedding 别名（en / zh / m3）")
+    model: str = Field(..., description="模型名称，如 BAAI/bge-m3")
+    collection: str = Field(..., description="对应的 Chroma collection 名，如 kb_m3")
+    doc_count: int = Field(0, description="该库内文档数（按 doc_id 去重）")
+    chunk_count: int = Field(0, description="该库内 chunk 总数")
+    is_default: bool = Field(False, description="是否为 .env 配置的默认入库库")
+
+
+class KBCollectionListResponse(BaseModel):
+    collections: list[KBCollection]
 
 
 class KBDeleteResponse(BaseModel):

@@ -11,11 +11,14 @@ import type {
   SessionMessagesResponse,
 } from '@/types/session'
 import type {
+  IngestProgress,
+  IngestResult,
   KBClearAllResponse,
+  KBCollection,
+  KBCollectionListResponse,
   KBDeleteResponse,
   KBDocument,
   KBDocumentListResponse,
-  KBUploadResponse,
 } from '@/types/kb'
 import type {
   MCPReloadResponse,
@@ -81,6 +84,8 @@ import type {
   ChromaItemDetail,
   ChromaItemsPage,
   ItemsQuery,
+  OrphanCleanupResult,
+  OrphanSegmentsPreview,
   PruneResult,
   PurgePreview,
   PurgeResult,
@@ -303,33 +308,87 @@ export async function truncateSession(
 
 // ─── Step 4：Knowledge Base ────────────────────────────────────────────
 
-export async function listKBDocuments(): Promise<KBDocument[]> {
-  const res = await apiFetch('/api/kb/documents')
+export async function getKBCollections(refresh = false): Promise<KBCollection[]> {
+  const res = await apiFetch(`/api/kb/collections${refresh ? '?refresh=true' : ''}`)
+  await _ensureOk(res)
+  return ((await res.json()) as KBCollectionListResponse).collections
+}
+
+export async function listKBDocuments(model: string): Promise<KBDocument[]> {
+  const res = await apiFetch(`/api/kb/documents?model=${encodeURIComponent(model)}`)
   await _ensureOk(res)
   return ((await res.json()) as KBDocumentListResponse).documents
 }
 
-export async function uploadKBFile(file: File): Promise<KBUploadResponse> {
+// 上传 + 入库：SSE 流式，progress 事件回调 onProgress，最终返回 done 结果。
+// 校验失败（400/415/413/422）按普通 HTTP 错误抛出；流中 error 事件转为异常抛出。
+export async function ingestKBFileStream(
+  file: File,
+  model: string,
+  relpath: string,
+  onProgress?: (p: IngestProgress) => void,
+  signal?: AbortSignal,
+): Promise<IngestResult> {
   const form = new FormData()
   form.append('file', file)
-  const res = await apiFetch('/api/kb/upload', {
-    method: 'POST',
-    body: form,
-  })
-  await _ensureOk(res)
-  return (await res.json()) as KBUploadResponse
+  form.append('model', model)
+  form.append('relpath', relpath)
+  const res = await apiFetch('/api/kb/upload', { method: 'POST', body: form, signal })
+  if (!res.ok) {
+    await _ensureOk(res) // 抛出带 detail 的错误
+  }
+  const reader = res.body?.getReader()
+  if (!reader) throw new Error('无法读取上传响应流')
+
+  const decoder = new TextDecoder()
+  let buf = ''
+  let result: IngestResult | null = null
+  let errMsg: string | null = null
+
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    let idx: number
+    while ((idx = buf.indexOf('\n\n')) >= 0) {
+      const block = buf.slice(0, idx)
+      buf = buf.slice(idx + 2)
+      for (const line of block.split('\n')) {
+        if (!line.startsWith('data:')) continue
+        const ev = JSON.parse(line.slice(5).trim())
+        if (ev.type === 'progress') {
+          onProgress?.({ phase: ev.phase, done: ev.done, total: ev.total })
+        } else if (ev.type === 'done') {
+          result = ev as IngestResult
+        } else if (ev.type === 'error') {
+          errMsg = ev.message
+        }
+      }
+    }
+  }
+
+  if (errMsg) throw new Error(errMsg)
+  if (!result) throw new Error('上传未返回结果')
+  return result
 }
 
-export async function deleteKBDocument(docId: string): Promise<KBDeleteResponse> {
-  const res = await apiFetch(`/api/kb/documents/${encodeURIComponent(docId)}`, {
-    method: 'DELETE',
-  })
+export async function deleteKBDocument(
+  docId: string,
+  model: string,
+): Promise<KBDeleteResponse> {
+  const res = await apiFetch(
+    `/api/kb/documents/${encodeURIComponent(docId)}?model=${encodeURIComponent(model)}`,
+    { method: 'DELETE' },
+  )
   await _ensureOk(res)
   return (await res.json()) as KBDeleteResponse
 }
 
-export async function clearAllKBDocuments(): Promise<KBClearAllResponse> {
-  const res = await apiFetch('/api/kb/documents', { method: 'DELETE' })
+export async function clearAllKBDocuments(model: string): Promise<KBClearAllResponse> {
+  const res = await apiFetch(
+    `/api/kb/documents?model=${encodeURIComponent(model)}`,
+    { method: 'DELETE' },
+  )
   await _ensureOk(res)
   return (await res.json()) as KBClearAllResponse
 }
@@ -1204,6 +1263,20 @@ export async function runVacuum(dbKey?: string): Promise<VacuumResult> {
   })
   await _ensureOk(res)
   return (await res.json()) as VacuumResult
+}
+
+export async function getOrphanSegmentsPreview(): Promise<OrphanSegmentsPreview> {
+  const res = await apiFetch('/api/admin/db/maintenance/orphan-segments/preview')
+  await _ensureOk(res)
+  return (await res.json()) as OrphanSegmentsPreview
+}
+
+export async function cleanupOrphanSegments(): Promise<OrphanCleanupResult> {
+  const res = await apiFetch('/api/admin/db/maintenance/orphan-segments', {
+    method: 'POST',
+  })
+  await _ensureOk(res)
+  return (await res.json()) as OrphanCleanupResult
 }
 
 export async function getSqliteTableRows(

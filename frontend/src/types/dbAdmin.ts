@@ -8,6 +8,7 @@ export type ChromaCollection = {
   space?: string | null
   count?: number | null
   dim?: number | null
+  is_default?: boolean
   error?: string
 }
 
@@ -58,6 +59,7 @@ export type Bm25Index = {
   docs?: number
   k1?: number
   b?: number
+  is_default?: boolean
   error?: string
 }
 
@@ -145,6 +147,21 @@ export type PurgeResult = {
 
 export type VacuumResult = {
   results: { db: string; ok: boolean; freed_bytes?: number; size?: number; error?: string }[]
+}
+
+export type OrphanSegmentsPreview = {
+  available: boolean // false = 读不到 chroma.sqlite3，无法安全判定（不清理）
+  root: string
+  count: number
+  total_bytes: number
+  items: { uuid: string; bytes: number }[]
+}
+
+export type OrphanCleanupResult = {
+  available: boolean
+  removed: string[]
+  freed_bytes: number
+  failed: { uuid: string; error: string }[]
 }
 
 export type SqliteTableRows = {

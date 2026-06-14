@@ -1,5 +1,15 @@
-import { useMemo, useState } from 'react'
-import { ChevronDown, ChevronUp, FileText, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { ChevronDown, ChevronUp, FileText, Trash2, X } from 'lucide-react'
+
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const
+const DEFAULT_PAGE_SIZE = 10
+
+// 'YYYY-MM-DD' → epoch 秒（本地时区）；空串返回 undefined
+function dateToEpoch(s: string, endOfDay: boolean): number | undefined {
+  if (!s) return undefined
+  const d = new Date(`${s}T${endOfDay ? '23:59:59' : '00:00:00'}`)
+  return Number.isNaN(d.getTime()) ? undefined : Math.floor(d.getTime() / 1000)
+}
 
 import { Button } from '@/components/ui/button'
 import {
@@ -19,6 +29,7 @@ export type DocumentListProps = {
   documents: KBDocument[]
   loading: boolean
   onDelete: (docId: string) => Promise<void> | void
+  onDeleteMany?: (docIds: string[]) => Promise<void> | void
 }
 
 type SortKey =
@@ -95,25 +106,123 @@ function formatChars(n: number): string {
   return String(n)
 }
 
-export function DocumentList({ documents, loading, onDelete }: DocumentListProps) {
+export function DocumentList({
+  documents,
+  loading,
+  onDelete,
+  onDeleteMany,
+}: DocumentListProps) {
   const [deleteTarget, setDeleteTarget] = useState<KBDocument | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [batchOpen, setBatchOpen] = useState(false)
   // 默认按"入库时间"倒序，跟后端 list_kb_documents 默认排序一致
   const [sortKey, setSortKey] = useState<SortKey>('ingested_at')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
 
-  const sortedDocs = useMemo(
-    // Array.prototype.sort 是稳定排序 (ES2019+)，同键值时保持原顺序
-    () => [...documents].sort((a, b) => compareDocs(a, b, sortKey, sortDir)),
-    [documents, sortKey, sortDir],
+  const [offset, setOffset] = useState(0)
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE)
+
+  // 过滤条件：文件名关键词 / 语言 / 扩展名 / 入库时间范围
+  const [nameQ, setNameQ] = useState('')
+  const [lang, setLang] = useState('')
+  const [ext, setExt] = useState('')
+  const [tsFrom, setTsFrom] = useState('')
+  const [tsTo, setTsTo] = useState('')
+
+  // 下拉选项从当前文档实际出现的值动态生成
+  const langOptions = useMemo(
+    () => Array.from(new Set(documents.map((d) => d.lang).filter(Boolean))).sort(),
+    [documents],
+  )
+  const extOptions = useMemo(
+    () => Array.from(new Set(documents.map((d) => d.ext).filter(Boolean))).sort(),
+    [documents],
   )
 
+  const filteredDocs = useMemo(() => {
+    const q = nameQ.trim().toLowerCase()
+    const from = dateToEpoch(tsFrom, false)
+    const to = dateToEpoch(tsTo, true)
+    return documents.filter((d) => {
+      if (
+        q &&
+        !(d.filename || '').toLowerCase().includes(q) &&
+        !(d.source || '').toLowerCase().includes(q)
+      )
+        return false
+      if (lang && (d.lang || '') !== lang) return false
+      if (ext && (d.ext || '') !== ext) return false
+      if (from !== undefined && d.ingested_at < from) return false
+      if (to !== undefined && d.ingested_at > to) return false
+      return true
+    })
+  }, [documents, nameQ, lang, ext, tsFrom, tsTo])
+
+  // 过滤条件变化时回到第 1 页 + 清空选择（避免选中项已被过滤掉）
+  useEffect(() => {
+    setOffset(0)
+    setSelected(new Set())
+  }, [nameQ, lang, ext, tsFrom, tsTo])
+
+  // 文档列表刷新（删除/入库后）时清空选择，避免残留已不存在的 doc_id
+  useEffect(() => {
+    setSelected(new Set())
+  }, [documents])
+
+  // 选择作用于"过滤后"的全部文档（跨分页），便于"过滤→全选→批量删"
+  const filteredIds = filteredDocs.map((d) => d.doc_id)
+  const allSelected = filteredIds.length > 0 && filteredIds.every((id) => selected.has(id))
+  const toggleAll = () => {
+    setSelected(allSelected ? new Set() : new Set(filteredIds))
+  }
+  const toggleOne = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  const confirmBatchDelete = async () => {
+    await onDeleteMany?.([...selected])
+    setSelected(new Set())
+    setBatchOpen(false)
+  }
+
+  const hasFilter = Boolean(nameQ || lang || ext || tsFrom || tsTo)
+  const clearFilters = () => {
+    setNameQ('')
+    setLang('')
+    setExt('')
+    setTsFrom('')
+    setTsTo('')
+  }
+
+  const sortedDocs = useMemo(
+    // Array.prototype.sort 是稳定排序 (ES2019+)，同键值时保持原顺序
+    () => [...filteredDocs].sort((a, b) => compareDocs(a, b, sortKey, sortDir)),
+    [filteredDocs, sortKey, sortDir],
+  )
+
+  // 列表可能因删除 / 刷新变短：用 clamp 后的 offset 取当前页，避免停在空页
+  const total = sortedDocs.length
+  const maxOffset = Math.max(0, Math.floor((total - 1) / pageSize) * pageSize)
+  const safeOffset = Math.min(offset, maxOffset)
+  const pagedDocs = sortedDocs.slice(safeOffset, safeOffset + pageSize)
+
   const handleSort = (col: SortColumn) => {
+    setOffset(0)
     if (col.key === sortKey) {
       setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
     } else {
       setSortKey(col.key)
       setSortDir(col.defaultDir)
     }
+  }
+
+  const changePageSize = (n: number) => {
+    setPageSize(n)
+    setOffset(0)
   }
 
   const confirmDelete = async () => {
@@ -138,11 +247,118 @@ export function DocumentList({ documents, loading, onDelete }: DocumentListProps
     )
   }
 
+  const inputCls =
+    'rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground'
+
   return (
     <>
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
+        <input
+          value={nameQ}
+          onChange={(e) => setNameQ(e.target.value)}
+          placeholder="文件名关键词"
+          className={cn(inputCls, 'w-44')}
+        />
+        <select
+          value={lang}
+          onChange={(e) => setLang(e.target.value)}
+          className={inputCls}
+          aria-label="按语言过滤"
+        >
+          <option value="">全部语言</option>
+          {langOptions.map((v) => (
+            <option key={v} value={v}>
+              {v}
+            </option>
+          ))}
+        </select>
+        <select
+          value={ext}
+          onChange={(e) => setExt(e.target.value)}
+          className={inputCls}
+          aria-label="按扩展名过滤"
+        >
+          <option value="">全部类型</option>
+          {extOptions.map((v) => (
+            <option key={v} value={v}>
+              {v}
+            </option>
+          ))}
+        </select>
+        <label className="flex items-center gap-1 text-xs text-muted-foreground">
+          入库
+          <input
+            type="date"
+            value={tsFrom}
+            onChange={(e) => setTsFrom(e.target.value)}
+            className={inputCls}
+            aria-label="入库时间起"
+          />
+          –
+          <input
+            type="date"
+            value={tsTo}
+            onChange={(e) => setTsTo(e.target.value)}
+            className={inputCls}
+            aria-label="入库时间止"
+          />
+        </label>
+        {hasFilter && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1 text-xs text-muted-foreground"
+            onClick={clearFilters}
+          >
+            <X className="h-3.5 w-3.5" />
+            清除
+          </Button>
+        )}
+      </div>
+
+      {selected.size > 0 && (
+        <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/40 px-3 py-2">
+          <span className="text-sm">已选 {selected.size} 项</span>
+          <div className="flex items-center gap-1.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs text-muted-foreground"
+              onClick={() => setSelected(new Set())}
+            >
+              取消选择
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1 text-xs text-destructive hover:text-destructive"
+              onClick={() => setBatchOpen(true)}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              批量删除
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {sortedDocs.length === 0 ? (
+        <div className="p-8 text-center text-sm text-muted-foreground">
+          无匹配文档
+        </div>
+      ) : (
+        <>
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border text-left text-xs text-muted-foreground">
+            <th className="w-8 px-3 py-2">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={toggleAll}
+                aria-label="全选（过滤后全部）"
+                className="h-4 w-4 cursor-pointer accent-primary align-middle"
+              />
+            </th>
             {SORT_COLUMNS.map((col) => {
               const active = sortKey === col.key
               const Icon = sortDir === 'asc' ? ChevronUp : ChevronDown
@@ -186,11 +402,23 @@ export function DocumentList({ documents, loading, onDelete }: DocumentListProps
           </tr>
         </thead>
         <tbody>
-          {sortedDocs.map((d) => (
+          {pagedDocs.map((d) => (
             <tr
               key={d.doc_id}
-              className="border-b border-border/50 hover:bg-muted/30"
+              className={cn(
+                'border-b border-border/50 hover:bg-muted/30',
+                selected.has(d.doc_id) && 'bg-muted/40',
+              )}
             >
+              <td className="px-3 py-2">
+                <input
+                  type="checkbox"
+                  checked={selected.has(d.doc_id)}
+                  onChange={() => toggleOne(d.doc_id)}
+                  aria-label={`选择 ${d.filename || d.source}`}
+                  className="h-4 w-4 cursor-pointer accent-primary align-middle"
+                />
+              </td>
               <td className="px-3 py-2">
                 <div className="flex items-center gap-2">
                   <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -226,11 +454,34 @@ export function DocumentList({ documents, loading, onDelete }: DocumentListProps
         </tbody>
       </table>
 
+      <Pager
+        total={total}
+        offset={safeOffset}
+        pageSize={pageSize}
+        onOffset={setOffset}
+        onPageSize={changePageSize}
+      />
+        </>
+      )}
+
       <AlertDialog
         open={deleteTarget !== null}
         onOpenChange={(o: boolean) => !o && setDeleteTarget(null)}
       >
-        <AlertDialogContent>
+        <AlertDialogContent
+          onKeyDown={(e) => {
+            if (
+              e.key === 'Enter' &&
+              !e.shiftKey &&
+              !e.ctrlKey &&
+              !e.metaKey &&
+              !e.altKey
+            ) {
+              e.preventDefault()
+              confirmDelete()
+            }
+          }}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle>删除文档？</AlertDialogTitle>
             <AlertDialogDescription>
@@ -242,6 +493,41 @@ export function DocumentList({ documents, loading, onDelete }: DocumentListProps
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={confirmDelete}
+              autoFocus
+            >
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={batchOpen} onOpenChange={(o: boolean) => !o && setBatchOpen(false)}>
+        <AlertDialogContent
+          onKeyDown={(e) => {
+            if (
+              e.key === 'Enter' &&
+              !e.shiftKey &&
+              !e.ctrlKey &&
+              !e.metaKey &&
+              !e.altKey
+            ) {
+              e.preventDefault()
+              confirmBatchDelete()
+            }
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>批量删除 {selected.size} 个文档？</AlertDialogTitle>
+            <AlertDialogDescription>
+              即将删除选中的 <b>{selected.size}</b> 个文档及其所有 chunks（不可恢复）。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={confirmBatchDelete}
+              autoFocus
             >
               删除
             </AlertDialogAction>
@@ -249,5 +535,97 @@ export function DocumentList({ documents, loading, onDelete }: DocumentListProps
         </AlertDialogContent>
       </AlertDialog>
     </>
+  )
+}
+
+// 分页导航栏：上一页 / 范围 / 下一页 / 页码 / 跳至 / 每页（样式对齐「数据库」L2）
+function Pager({
+  total,
+  offset,
+  pageSize,
+  onOffset,
+  onPageSize,
+}: {
+  total: number
+  offset: number
+  pageSize: number
+  onOffset: (offset: number) => void
+  onPageSize: (n: number) => void
+}) {
+  const [jump, setJump] = useState('')
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const page = Math.floor(offset / pageSize) + 1
+  const from = total === 0 ? 0 : offset + 1
+  const to = Math.min(offset + pageSize, total)
+
+  const go = () => {
+    const n = parseInt(jump, 10)
+    if (!Number.isNaN(n)) {
+      const clamped = Math.min(Math.max(1, n), totalPages)
+      onOffset((clamped - 1) * pageSize)
+    }
+    setJump('')
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 border-t border-border px-3 py-2 text-sm text-muted-foreground">
+      <button
+        type="button"
+        onClick={() => onOffset(Math.max(0, offset - pageSize))}
+        disabled={offset <= 0}
+        className="rounded-md border border-border px-2 py-1 hover:bg-muted/50 disabled:opacity-40"
+      >
+        上一页
+      </button>
+      <span>
+        {from}–{to} / {total}
+      </span>
+      <button
+        type="button"
+        onClick={() => onOffset(offset + pageSize)}
+        disabled={to >= total}
+        className="rounded-md border border-border px-2 py-1 hover:bg-muted/50 disabled:opacity-40"
+      >
+        下一页
+      </button>
+      <span>
+        第 {page}/{totalPages} 页
+      </span>
+      <span className="flex items-center gap-1">
+        跳至
+        <input
+          value={jump}
+          inputMode="numeric"
+          onChange={(e) => setJump(e.target.value.replace(/[^0-9]/g, ''))}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') go()
+          }}
+          placeholder={String(page)}
+          className="w-14 rounded-md border border-border bg-background px-1.5 py-1 text-center text-foreground"
+        />
+        <button
+          type="button"
+          onClick={go}
+          className="rounded-md border border-border px-2 py-1 hover:bg-muted/50"
+        >
+          跳转
+        </button>
+      </span>
+      <label className="ml-auto flex items-center gap-1.5">
+        每页
+        <select
+          value={pageSize}
+          onChange={(e) => onPageSize(Number(e.target.value))}
+          className="rounded-md border border-border bg-background px-1.5 py-1 text-foreground"
+        >
+          {PAGE_SIZE_OPTIONS.map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+        条
+      </label>
+    </div>
   )
 }
