@@ -49,6 +49,33 @@ const EVAL_TASKS: EvalTaskConfig[] = [
     },
   },
   {
+    key: 'memory',
+    label: '记忆召回',
+    usesLlm: true, // 始终调 LLM（无 None）
+    reportMatch: 'memory/',
+    options: [],
+    thresholds: [{ key: 'pass', label: '通过率阈值(≥)', default: 0.8 }],
+    intro: {
+      purpose:
+        '检验写入的"记忆 / 项目 rules / RAG 引用"能否被正确注入 system prompt，并被 LLM 的回答真正遵循。',
+      how: [
+        '① 选「测试模型」（默认系统当前模型）；记忆召回必须调 LLM。',
+        '② 可调「通过率阈值」（默认 0.8）。',
+        '③ 点「开始评估」，跑完看卡片与历史报告。',
+      ],
+      params: ['无额外开关；判定阈值见下方「通过率阈值」。'],
+      principle: [
+        '每条 case 把若干"已有记忆 + 一个新问题"灌进 UserMemoryStore，用 build_system_prompt 拼出含 <user_context> 的真实 system prompt。',
+        '调真实 LLM 拿答案，用 must_contain_any（OR）+ must_not_contain（NOT）关键词判断是否遵循了记忆里的偏好 / 指令。',
+      ],
+      metrics: [
+        '通过率：遵循记忆的 case 占比，越高越好；达「通过率阈值」判「通过」。',
+      ],
+      cost: '每条 case 一次真实 LLM 调用，耗所选模型 token，按 case 数分钟级。',
+      dataset: 'golden 来自 tools/agent_eval/memory/dataset.json。',
+    },
+  },
+  {
     key: 'security',
     label: '安全红队',
     usesLlm: true,

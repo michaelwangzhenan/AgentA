@@ -445,6 +445,10 @@ def _build_eval_args(req: EvalRunRequest) -> list[str]:
         ts = _time.strftime("%Y%m%d-%H%M%S")
         out = _Path("tools") / "reports" / "rag" / f"rag-{ts}.md"
         args += ["-o", out.as_posix()]
+    elif req.task == "memory":
+        pt = _threshold(req, "pass")
+        if pt is not None:
+            args += ["--pass-threshold", str(pt)]
     return args
 
 
@@ -589,8 +593,57 @@ def _rag_summary(report: str | None = None) -> EvalSummary:
     return EvalSummary(available=False, task="rag")
 
 
+def _passrate_summary(task: str, subdir: str, label: str):
+    """通用"通过率"型 eval 的卡片构造器工厂（如记忆 / skill / srs 等）。
+
+    sidecar 需含 rate / pass_threshold（可选 ok）；卡片就一条"通过率"指标 + 阈值判定。
+    """
+
+    def _from_data(data: dict) -> EvalSummary:
+        rate = data.get("rate", 0.0)
+        th = data.get("pass_threshold", 0.0)
+        return EvalSummary(
+            available=True,
+            task=task,
+            timestamp=data.get("timestamp", ""),
+            git=data.get("git", ""),
+            passed=bool(data.get("ok", rate >= th)),
+            partial=False,
+            metrics=[
+                EvalMetric(
+                    label=label,
+                    value=f"{_pct(rate)} ({data.get('passed', 0)}/{data.get('total', 0)})",
+                    threshold=f"≥ {_pct(th)}",
+                    ok=rate >= th,
+                ),
+            ],
+        )
+
+    def _builder(report: str | None = None) -> EvalSummary:
+        if report:
+            data = _sidecar_for_report(report)
+            return _from_data(data) if data else EvalSummary(available=False, task=task)
+        root = _reports_root() / subdir
+        if root.is_dir():
+            jsons = sorted(
+                (fp for fp in root.glob("*.json") if fp.is_file()),
+                key=lambda p: p.stat().st_mtime,
+            )
+            for fp in reversed(jsons):
+                data = _load_sidecar(fp)
+                if data is not None:
+                    return _from_data(data)
+        return EvalSummary(available=False, task=task)
+
+    return _builder
+
+
 # task -> 摘要构造器（接收可选 report 名）；后续 eval 逐个补
-_SUMMARY_BUILDERS = {"security": _security_summary, "rag": _rag_summary}
+_SUMMARY_BUILDERS = {
+    "security": _security_summary,
+    "rag": _rag_summary,
+    "memory": _passrate_summary("memory", "memory", "通过率"),
+}
 
 
 @router.get("/summary", response_model=EvalSummary)

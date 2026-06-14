@@ -24,6 +24,7 @@ _IS_WIN = os.name == "nt"
 EVAL_MODULES: dict[str, str] = {
     "security": "tools.agent_eval.security.adversarial",
     "rag": "tools.rag_eval.runner",
+    "memory": "tools.agent_eval.memory.recall_golden",
 }
 
 _lock = threading.Lock()

@@ -226,6 +226,13 @@ agent_eval/run_all.py
 
 ### 3.2.5. 记忆召回
 
+按统一标准接入（task=`memory`，模块 `tools.agent_eval.memory.recall_golden`）。
+
+- **始终调 LLM**：模型下拉无 None、默认 ACTIVE_MODEL（记忆遵循需真实 LLM 回答）。
+- **阈值**：`通过率阈值(≥)`（默认 0.8），脚本加 `--pass-threshold`，记入报告 + sidecar，卡片据此判 pass/fail。
+- **卡片**：一条「通过率」指标（passed/total + 阈值 + 判定）。
+- 产出：脚本加 `--pass-threshold` + 配对 summary JSON；后端新增**通用"通过率"型卡片工厂** `_passrate_summary`（记忆 / 后续 skill / srs 等复用）+ `EVAL_MODULES['memory']` + memory 阈值分支。
+
 ### 3.2.6. Skills
 ### 3.2.7. MCP
 

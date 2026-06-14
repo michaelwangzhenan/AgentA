@@ -271,6 +271,7 @@ def _render_markdown(
     total: int,
     dataset_path: Path,
     env: dict[str, str],
+    pass_threshold: float = 0.80,
 ) -> str:
     """渲染：标题 + 元信息 + 核心指标 + 全 case 总览 + Fail 详情。
 
@@ -278,7 +279,7 @@ def _render_markdown(
     question / system_prompt / answer 截断 + 触发的 reasons，便于事后回归定位。
     """
     rate = passed / total if total else 0.0
-    verdict = "✅ 合格 (≥ 80%)" if rate >= 0.80 else "⚠️ 未达 80% 判据"
+    verdict = f"✅ 合格 (≥ {pass_threshold:.0%})" if rate >= pass_threshold else f"⚠️ 未达 {pass_threshold:.0%} 判据"
 
     lines: list[str] = []
     lines.append("# Memory Recall Golden 评估报告")
@@ -288,6 +289,7 @@ def _render_markdown(
     lines.append(f"- **Python**: {env['python']}")
     lines.append(f"- **Provider**: {env['provider']}")
     lines.append(f"- **Dataset**: `{dataset_path}`")
+    lines.append(f"- **阈值**: 通过率 ≥ {pass_threshold:.0%}")
     lines.append("")
 
     lines.append("## 核心指标")
@@ -297,7 +299,7 @@ def _render_markdown(
     lines.append(f"| 样本数 | {total} |")
     lines.append(f"| 通过数 | {passed} |")
     lines.append(f"| 通过率 | {rate:.1%} |")
-    lines.append(f"| 判据 (≥ 80%) | {verdict} |")
+    lines.append(f"| 判据 (≥ {pass_threshold:.0%}) | {verdict} |")
     lines.append("")
 
     lines.append("## 全 case 总览")
@@ -350,20 +352,43 @@ def _render_markdown(
     return "\n".join(lines)
 
 
+def _build_summary(
+    passed: int, total: int, env: dict[str, str], pass_threshold: float
+) -> dict[str, Any]:
+    """卡片用结构化 summary（与 .md 配对落 .json）。"""
+    rate = passed / total if total else 0.0
+    return {
+        "timestamp": env.get("timestamp", ""),
+        "git": env.get("git", ""),
+        "total": total,
+        "passed": passed,
+        "rate": rate,
+        "pass_threshold": pass_threshold,
+        "ok": rate >= pass_threshold,
+    }
+
+
 def _dump_report(
     results: list[dict[str, Any]],
     passed: int,
     total: int,
     dataset_path: Path,
     env: dict[str, str],
+    pass_threshold: float = 0.80,
 ) -> Path:
-    """落盘 recall-<ts>.md，返回路径。"""
+    """落盘 recall-<ts>.md + 配对 .json，返回 md 路径。"""
+    import json
+
     from tools.eval_common.report_paths import reports_dir as eval_reports_dir
     reports_dir = eval_reports_dir("memory")
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     out = reports_dir / f"recall-{ts}.md"
     out.write_text(
-        _render_markdown(results, passed, total, dataset_path, env),
+        _render_markdown(results, passed, total, dataset_path, env, pass_threshold),
+        encoding="utf-8",
+    )
+    out.with_suffix(".json").write_text(
+        json.dumps(_build_summary(passed, total, env, pass_threshold), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     return out
@@ -390,6 +415,10 @@ def main() -> None:
     parser.add_argument(
         "--no-report", action="store_true", help="只在屏幕打印，不落盘 Markdown 报告",
     )
+    parser.add_argument(
+        "--pass-threshold", dest="pass_threshold", type=float, default=0.80,
+        help="通过率达标阈值（≥），默认 0.80",
+    )
     args = parser.parse_args()
 
     dataset = _load_dataset(args.dataset)
@@ -413,17 +442,18 @@ def main() -> None:
     passed = sum(1 for r in results if r["pass"])
     total = len(results)
     rate = passed / total if total else 0.0
+    pt = args.pass_threshold
     print(
         f"\n📊 通过 {passed}/{total} ({rate:.0%})  "
-        f"{'✅ 合格 (≥80%)' if rate >= 0.80 else '⚠️  未达 80% 判据'}\n"
+        f"{f'✅ 合格 (≥{pt:.0%})' if rate >= pt else f'⚠️  未达 {pt:.0%} 判据'}\n"
     )
 
     if not args.no_report:
         env = _collect_env()
-        report = _dump_report(results, passed, total, args.dataset, env)
+        report = _dump_report(results, passed, total, args.dataset, env, pt)
         print(f"📁 报告已落盘：{report}\n")
 
-    sys.exit(0 if rate >= 0.80 else 1)
+    sys.exit(0 if rate >= pt else 1)
 
 
 if __name__ == "__main__":
