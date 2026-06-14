@@ -45,9 +45,9 @@ Phase 1 性能基准（session + memory 合二为一）
     - upsert/update < 10ms         —— 单行写
     - render-list < 100ms          —— 分组 + 多行输出
 
-报告会同时落盘到 `tools/reports/perf/perf-<target>-<timestamp>.md`，
-含元信息（时间 / git / python / provider）+ 测量表 + 判据自动评估（PASS/FAIL），
-便于人工浏览和阶段间对比。
+报告落盘到 `tools/reports/perf/perf-<timestamp>.md`（本次跑过的 target 合并为一份），
+含元信息（时间 / git / python / provider）+ 各 target 测量表 + 判据自动评估（PASS/FAIL），
+并附配对 `perf-<timestamp>.json`（供 UI 卡片读）。
 """
 
 from __future__ import annotations
@@ -111,21 +111,43 @@ def _collect_env() -> dict[str, str]:
     }
 
 
-def _render_session_md(rows: list[dict], env: dict[str, str]) -> str:
-    """session target 的 Markdown 报告：表 + 判据自动评估。"""
-    lines: list[str] = []
-    lines.append("# Perf 评估报告 — session")
-    lines.append("")
-    lines.append(f"- **时间**: {env['timestamp']}")
-    lines.append(f"- **Git**: {env['git']}")
-    lines.append(f"- **Python**: {env['python']}")
-    lines.append(f"- **Provider**: {env['provider']}")
-    lines.append("")
+# target 的中文名（报告 / 卡片用）
+_TARGET_ZH = {"session": "会话", "memory": "记忆"}
 
-    lines.append("## /sessions 性能基准")
-    lines.append("")
-    lines.append("每个数字 = 5 次中位数（单位 ms）。")
-    lines.append("")
+
+def _session_checks(last: dict) -> list[dict]:
+    """session 判据：以最大 size 行对照（名称内已含阈值，note 给实测）。"""
+    queries = [
+        last["query_none_ms"], last["query_id_prefix_ms"],
+        last["query_keyword_ms"], last["query_with_limit_ms"],
+    ]
+    renders = [last["render_full_ms"], last["render_filtered_ms"]]
+    ratio = (last["query_keyword_ms"] / last["query_none_ms"]) if last["query_none_ms"] else 0.0
+    raw = [
+        ("查询类 4 列 < 50 ms",      max(queries) < 50,   f"实测最大 {max(queries):.2f} ms"),
+        ("渲染类 2 列 < 200 ms",     max(renders) < 200,  f"实测最大 {max(renders):.2f} ms"),
+        ("keyword / no-filter < 2x", ratio < 2.0,         f"实测 {ratio:.2f}x"),
+    ]
+    return [{"name": n, "ok": ok, "note": note} for n, ok, note in raw]
+
+
+def _memory_checks(last: dict) -> list[dict]:
+    """memory 判据：以最大 size 行对照。"""
+    raw = [
+        ("load_all < 20 ms",     last["load_all_ms"] < 20,     f"实测 {last['load_all_ms']:.2f} ms"),
+        ("load_ctx < 30 ms",     last["load_ctx_ms"] < 30,     f"实测 {last['load_ctx_ms']:.2f} ms"),
+        ("add < 10 ms",          last["add_ms"] < 10,          f"实测 {last['add_ms']:.2f} ms"),
+        ("update_text < 10 ms",  last["update_text_ms"] < 10,  f"实测 {last['update_text_ms']:.2f} ms"),
+        ("render-list < 100 ms", last["render_list_ms"] < 100, f"实测 {last['render_list_ms']:.2f} ms"),
+    ]
+    return [{"name": n, "ok": ok, "note": note} for n, ok, note in raw]
+
+
+_CHECKS_FN = {"session": _session_checks, "memory": _memory_checks}
+
+
+def _session_section(rows: list[dict]) -> list[str]:
+    lines = ["## /sessions 性能基准", "", "每个数字 = 5 次中位数（单位 ms）。", ""]
     lines.append("| size | no-filter | id-prefix | keyword | limit=20 | render-full | render-filt |")
     lines.append("|---:|---:|---:|---:|---:|---:|---:|")
     for r in rows:
@@ -135,49 +157,11 @@ def _render_session_md(rows: list[dict], env: dict[str, str]) -> str:
             f"{r['render_full_ms']:.2f} | {r['render_filtered_ms']:.2f} |"
         )
     lines.append("")
-
-    lines.append("## 判据评估")
-    lines.append("")
-    if not rows:
-        lines.append("_无数据。_")
-        return "\n".join(lines)
-    last = rows[-1]
-    queries = [
-        last["query_none_ms"], last["query_id_prefix_ms"],
-        last["query_keyword_ms"], last["query_with_limit_ms"],
-    ]
-    renders = [last["render_full_ms"], last["render_filtered_ms"]]
-    ratio = (last["query_keyword_ms"] / last["query_none_ms"]) if last["query_none_ms"] else 0.0
-    checks = [
-        ("查询类 4 列 < 50 ms",     max(queries) < 50,   f"实测最大 {max(queries):.2f} ms"),
-        ("渲染类 2 列 < 200 ms",    max(renders) < 200,  f"实测最大 {max(renders):.2f} ms"),
-        ("keyword / no-filter < 2x", ratio < 2.0,        f"实测 {ratio:.2f}x"),
-    ]
-    lines.append(f"以最大 size={last['size']} 行对照（不达标考虑加索引 / FTS5）：")
-    lines.append("")
-    lines.append("| 判据 | 结果 | 说明 |")
-    lines.append("|---|:-:|---|")
-    for name, ok, note in checks:
-        lines.append(f"| {name} | {'PASS' if ok else 'FAIL'} | {note} |")
-    lines.append("")
-    return "\n".join(lines)
+    return lines
 
 
-def _render_memory_md(rows: list[dict], env: dict[str, str]) -> str:
-    """memory target 的 Markdown 报告：表 + 判据自动评估。"""
-    lines: list[str] = []
-    lines.append("# Perf 评估报告 — memory")
-    lines.append("")
-    lines.append(f"- **时间**: {env['timestamp']}")
-    lines.append(f"- **Git**: {env['git']}")
-    lines.append(f"- **Python**: {env['python']}")
-    lines.append(f"- **Provider**: {env['provider']}")
-    lines.append("")
-
-    lines.append("## /memory 性能基准")
-    lines.append("")
-    lines.append("每个数字 = 5 次中位数（单位 ms）。")
-    lines.append("")
+def _memory_section(rows: list[dict]) -> list[str]:
+    lines = ["## /memory 性能基准", "", "每个数字 = 5 次中位数（单位 ms）。", ""]
     lines.append("| size | load_all | load_ctx | add | update_text | render-list |")
     lines.append("|---:|---:|---:|---:|---:|---:|")
     for r in rows:
@@ -186,36 +170,79 @@ def _render_memory_md(rows: list[dict], env: dict[str, str]) -> str:
             f"{r['add_ms']:.2f} | {r['update_text_ms']:.2f} | {r['render_list_ms']:.2f} |"
         )
     lines.append("")
+    return lines
 
-    lines.append("## 判据评估")
+
+_SECTION_FN = {"session": _session_section, "memory": _memory_section}
+_HINT = {
+    "session": "不达标考虑加索引 / FTS5",
+    "memory": "实际单用户场景 ≤ 100 条，留余量",
+}
+
+
+def _render_report(results: dict[str, list[dict]], env: dict[str, str]) -> str:
+    """合并报告：一份覆盖本次跑过的全部 target（各一节 + 各自判据表）。"""
+    lines = ["# Perf 评估报告", ""]
+    lines.append(f"- **时间**: {env['timestamp']}")
+    lines.append(f"- **Git**: {env['git']}")
+    lines.append(f"- **Python**: {env['python']}")
+    lines.append(f"- **Provider**: {env['provider']}")
     lines.append("")
-    if not rows:
-        lines.append("_无数据。_")
-        return "\n".join(lines)
-    last = rows[-1]
-    checks = [
-        ("load_all < 20 ms",        last["load_all_ms"] < 20,     f"实测 {last['load_all_ms']:.2f} ms"),
-        ("load_ctx < 30 ms",        last["load_ctx_ms"] < 30,     f"实测 {last['load_ctx_ms']:.2f} ms"),
-        ("add < 10 ms",             last["add_ms"] < 10,          f"实测 {last['add_ms']:.2f} ms"),
-        ("update_text < 10 ms",     last["update_text_ms"] < 10,  f"实测 {last['update_text_ms']:.2f} ms"),
-        ("render-list < 100 ms",    last["render_list_ms"] < 100, f"实测 {last['render_list_ms']:.2f} ms"),
-    ]
-    lines.append(f"以最大 size={last['size']} 行对照（实际单用户场景 ≤ 100 条，留余量）：")
-    lines.append("")
-    lines.append("| 判据 | 结果 | 说明 |")
-    lines.append("|---|:-:|---|")
-    for name, ok, note in checks:
-        lines.append(f"| {name} | {'PASS' if ok else 'FAIL'} | {note} |")
-    lines.append("")
+    for t, rows in results.items():
+        lines.append(f"# {_TARGET_ZH.get(t, t)}")
+        lines.append("")
+        lines += _SECTION_FN[t](rows)
+        lines.append("## 判据评估")
+        lines.append("")
+        if not rows:
+            lines.append("_无数据。_")
+            lines.append("")
+            continue
+        last = rows[-1]
+        lines.append(f"以最大 size={last['size']} 行对照（{_HINT[t]}）：")
+        lines.append("")
+        lines.append("| 判据 | 结果 | 说明 |")
+        lines.append("|---|:-:|---|")
+        for c in _CHECKS_FN[t](last):
+            lines.append(f"| {c['name']} | {'PASS' if c['ok'] else 'FAIL'} | {c['note']} |")
+        lines.append("")
     return "\n".join(lines)
 
 
-def _dump_report(target: str, rows: list[dict], env: dict[str, str]) -> Path:
-    """落盘 perf-<target>-<ts>.md，返回路径。"""
+def _build_summary(results: dict[str, list[dict]], env: dict[str, str]) -> dict:
+    """配对 summary JSON：每 target 的判据 + 整体是否全过（供 UI 卡片读）。"""
+    targets: dict[str, dict] = {}
+    all_ok = True
+    for t, rows in results.items():
+        if not rows:
+            targets[t] = {"size": 0, "checks": [], "ok": False}
+            all_ok = False
+            continue
+        last = rows[-1]
+        checks = _CHECKS_FN[t](last)
+        t_ok = all(c["ok"] for c in checks)
+        all_ok = all_ok and t_ok
+        targets[t] = {"size": last["size"], "checks": checks, "ok": t_ok}
+    return {
+        "timestamp": env["timestamp"],
+        "git": env["git"],
+        "python": env["python"],
+        "provider": env["provider"],
+        "targets": targets,
+        "passed": all_ok,
+    }
+
+
+def _dump_report(results: dict[str, list[dict]], env: dict[str, str]) -> Path:
+    """落盘单份合并 perf-<ts>.md + 配对 perf-<ts>.json，返回 md 路径。"""
+    import json
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    out = _reports_dir() / f"perf-{target}-{ts}.md"
-    md = _render_session_md(rows, env) if target == "session" else _render_memory_md(rows, env)
-    out.write_text(md, encoding="utf-8")
+    out = _reports_dir() / f"perf-{ts}.md"
+    out.write_text(_render_report(results, env), encoding="utf-8")
+    out.with_suffix(".json").write_text(
+        json.dumps(_build_summary(results, env), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     return out
 
 
@@ -398,6 +425,7 @@ def main() -> None:
 
     env = _collect_env()
     targets = ["session", "memory"] if args.target == "all" else [args.target]
+    results: dict[str, list[dict]] = {}
     for t in targets:
         sizes = _parse_sizes(default_sizes[t])
         rows: list[dict] = []
@@ -409,9 +437,11 @@ def main() -> None:
             for n in sizes:
                 rows.append(_bench_memory_size(n))
             _print_memory_table(rows)
-        if not args.no_report:
-            path = _dump_report(t, rows, env)
-            print(f"报告已保存：{path}")
+        results[t] = rows
+    # 一份合并报告覆盖本次跑过的全部 target（UI 默认 all → session + memory 同一份）
+    if not args.no_report:
+        path = _dump_report(results, env)
+        print(f"报告已保存：{path}")
 
 
 if __name__ == "__main__":

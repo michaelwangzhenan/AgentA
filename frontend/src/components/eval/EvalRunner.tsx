@@ -31,6 +31,7 @@ export type EvalOption =
   | { kind: 'checkbox'; key: string; label: string; default?: boolean }
   | { kind: 'select'; key: string; label: string; choices: { value: string; label: string }[] }
   | { kind: 'number'; key: string; label: string; default: number; min?: number; step?: number }
+  | { kind: 'text'; key: string; label: string; placeholder?: string; default?: string }
 
 // 说明正文：单段（string）或多行（string[]，逐行展示，便于步骤 / 指标分行）
 export type IntroBody = string | string[]
@@ -137,6 +138,7 @@ export function EvalRunner({ task }: { task: EvalTaskConfig }) {
     for (const o of task.options) {
       if (o.kind === 'number') initOpts[o.key] = o.default
       else if (o.kind === 'checkbox' && o.default !== undefined) initOpts[o.key] = o.default
+      else if (o.kind === 'text') initOpts[o.key] = o.default ?? ''
     }
     setOpts(initOpts)
     setJudgeModel('')
@@ -173,7 +175,6 @@ export function EvalRunner({ task }: { task: EvalTaskConfig }) {
 
   // 轮询全局任务状态（单任务锁）；跑完刷新摘要 / 报告
   useEffect(() => {
-    let timer: number | undefined
     const tick = async () => {
       try {
         const st = await getEvalRunStatus()
@@ -188,7 +189,7 @@ export function EvalRunner({ task }: { task: EvalTaskConfig }) {
       }
     }
     void tick()
-    timer = window.setInterval(tick, 1500)
+    const timer = window.setInterval(tick, 1500)
     return () => window.clearInterval(timer)
   }, [refreshReports])
 
@@ -330,6 +331,18 @@ export function EvalRunner({ task }: { task: EvalTaskConfig }) {
                   disabled={runningThis}
                   onChange={(e) => setOpts((p) => ({ ...p, [opt.key]: Number(e.target.value) }))}
                   className="w-20 rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
+                />
+              </label>
+            ) : opt.kind === 'text' ? (
+              <label key={opt.key} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                {opt.label}
+                <input
+                  type="text"
+                  value={String(opts[opt.key] ?? '')}
+                  placeholder={opt.placeholder}
+                  disabled={runningThis}
+                  onChange={(e) => setOpts((p) => ({ ...p, [opt.key]: e.target.value }))}
+                  className="w-40 rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
                 />
               </label>
             ) : (

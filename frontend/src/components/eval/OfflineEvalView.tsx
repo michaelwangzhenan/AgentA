@@ -134,6 +134,37 @@ const EVAL_TASKS: EvalTaskConfig[] = [
     },
   },
   {
+    key: 'perf',
+    label: '性能基准',
+    usesLlm: false, // 纯 SQLite 计时，不调 LLM、无模型下拉
+    reportMatch: 'perf/',
+    options: [
+      { kind: 'text', key: 'sizes', label: '数据档位', placeholder: '默认 10,100,1000', default: '' },
+    ],
+    intro: {
+      purpose:
+        '基准测试本地 SQLite 在数据量增长时的查询 / 渲染耗时：会话（/sessions 列出·搜索）与记忆（/memory 读取·写入·渲染）会不会随量级变卡。',
+      how: [
+        '① 默认 session + memory 一起跑（不调 LLM、不耗 token）。',
+        '② 可在「数据档位」填逗号分隔的正整数（如 100,1000,5000）控制每档数据量；留空 = 默认 10,100,1000。',
+        '③ 点「开始评估」，跑完看卡片（判据 PASS/FAIL）与合并报告。',
+      ],
+      params: [
+        '数据档位：每个档位灌入对应条数的数据各测一轮；判据以最大档位那行对照。留空走默认 10,100,1000。',
+      ],
+      principle: [
+        '每档在临时库里灌入 N 条数据，对各操作跑 5 次取中位数（屏蔽冷启动抖动）。',
+        '以最大档位那行对照各项阈值，逐条判 PASS/FAIL；全部 PASS 才判「通过」。',
+      ],
+      metrics: [
+        '会话：查询类 4 列 < 50ms、渲染类 2 列 < 200ms、keyword/no-filter < 2x。',
+        '记忆：load_all < 20ms、load_ctx < 30ms、add/update < 10ms、render-list < 100ms。',
+      ],
+      cost: '纯本地 SQLite 计时，不耗 token；耗时随档位增大，默认档位约秒级~分钟级。',
+      dataset: '临时库内现造数据（不动真实库）；不依赖外部数据集。',
+    },
+  },
+  {
     key: 'security',
     label: '安全红队',
     usesLlm: true,

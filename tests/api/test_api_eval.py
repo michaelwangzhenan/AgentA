@@ -369,6 +369,66 @@ def test_eval_run_mcp_with_model_full(
     assert seen["model"] == "kimi-k2.5"
 
 
+def test_eval_run_perf_target_all(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict = {}
+    monkeypatch.setattr(
+        "src.eval_runner.start",
+        lambda task, args, model=None: (seen.update(args=args, model=model) or {
+            "state": "running", "task": task, "model": model, "args": args,
+            "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
+    )
+    r = client.post("/api/eval/run", json={"task": "perf", "options": {"sizes": " 100, 1000 "}})
+    assert r.status_code == 200
+    assert seen["args"][:2] == ["--target", "all"]
+    assert "--sizes" in seen["args"]
+    assert "100,1000" in seen["args"]
+    assert seen["model"] is None
+
+
+def test_eval_run_perf_rejects_bad_sizes_400(client: TestClient) -> None:
+    r = client.post("/api/eval/run", json={"task": "perf", "options": {"sizes": "abc"}})
+    assert r.status_code == 400
+
+
+def test_eval_summary_perf_by_report(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """性能 sidecar：各 target 判据展开为 metrics，全过判 passed。"""
+    import json
+
+    import src.api.routes.eval as evalmod
+
+    root = tmp_path / "reports"
+    (root / "perf").mkdir(parents=True)
+    sidecar = {
+        "timestamp": "2026-06-14 10:00:00", "git": "abc",
+        "passed": False,
+        "targets": {
+            "session": {"size": 1000, "ok": True, "checks": [
+                {"name": "查询类 4 列 < 50 ms", "ok": True, "note": "实测最大 3.2 ms"},
+            ]},
+            "memory": {"size": 1000, "ok": False, "checks": [
+                {"name": "load_all < 20 ms", "ok": False, "note": "实测 33.0 ms"},
+            ]},
+        },
+    }
+    name = "perf/perf-20260614-100000"
+    (root / f"{name}.json").write_text(json.dumps(sidecar), encoding="utf-8")
+    (root / f"{name}.md").write_text("# r", encoding="utf-8")
+    monkeypatch.setattr(evalmod, "_reports_root", lambda: root)
+
+    r = client.get(f"/api/eval/summary?task=perf&report={name}.md")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["available"] is True
+    assert body["passed"] is False
+    assert body["partial"] is True
+    assert len(body["metrics"]) == 2
+    assert body["metrics"][0]["label"].startswith("会话·")
+
+
 def test_eval_run_status_ok(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "src.eval_runner.status",

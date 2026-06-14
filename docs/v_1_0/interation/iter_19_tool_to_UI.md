@@ -249,6 +249,14 @@ agent_eval/run_all.py
 - 产出：脚本写报告时配对输出 summary JSON（含 total/passed/skipped/failed/ok）；后端新增 `_mcp_summary`（"全过"型，部分通过标 partial）+ `EVAL_MODULES['mcp']` + mcp 分支（None→`--no-llm`）。
 
 ### 3.2.8. 性能
+
+接入（task=`perf`，模块 `tools.agent_eval.perf_eval`），判定型（判据 PASS/FAIL）：
+
+- **不调 LLM**：`usesLlm:false`，无模型下拉。后端固定传 `--target all`——**session + memory 一起跑、合并一份报告**（不再分别选 target）。
+- **新增 `text` 选项类型**：UI 暴露「数据档位」文本框（逗号分隔正整数，留空=默认 10,100,1000）；后端白名单校验（仅数字+逗号）后传 `--sizes`。
+- **合并报告 + 配对 JSON**：脚本改为把跑过的 target 合并成单份 `perf-<ts>.md` + `perf-<ts>.json`（含各 target 的判据 + 整体 `passed`）。
+- **卡片**：判定型——各 target 判据逐条展开为 metric（如「会话·查询类<50ms」+ 实测值 + ok），全部 PASS 才判「通过」，部分通过标 partial。后端新增 `_perf_summary`。
+
 ### 3.2.9. 安全红队（框架任务已含，本节留细化 / 复核）
 
 ### 3.2.10. Plan

@@ -453,6 +453,16 @@ def _build_eval_args(req: EvalRunRequest) -> list[str]:
         # 选 None（no_llm）= 只跑 structural，不烧 LLM；否则含 llm-e2e。无阈值（验收"全过"判定）
         if req.no_llm:
             args.append("--no-llm")
+    elif req.task == "perf":
+        # 不调 LLM；UI 默认 session + memory 一起跑、合并一份报告
+        args += ["--target", "all"]
+        sizes = opts.get("sizes", "")
+        if isinstance(sizes, str) and sizes.strip():
+            # 白名单：只允许数字 + 逗号（杜绝注入），转成规范串再传
+            parts = [p.strip() for p in sizes.split(",") if p.strip()]
+            if not all(p.isdigit() and int(p) > 0 for p in parts):
+                raise HTTPException(status_code=400, detail="数据档位需为正整数，逗号分隔")
+            args += ["--sizes", ",".join(parts)]
     return args
 
 
@@ -638,6 +648,52 @@ def _mcp_summary(report: str | None = None) -> EvalSummary:
     return EvalSummary(available=False, task="mcp")
 
 
+_PERF_TARGET_ZH = {"session": "会话", "memory": "记忆"}
+
+
+def _perf_summary_from_data(data: dict) -> EvalSummary:
+    """性能 sidecar dict → 判定型卡片：各 target 的判据逐条 + 整体全过判 pass。"""
+    metrics: list[EvalMetric] = []
+    targets = data.get("targets", {})
+    for t, info in targets.items():
+        zh = _PERF_TARGET_ZH.get(t, t)
+        for c in info.get("checks", []):
+            metrics.append(EvalMetric(
+                label=f"{zh}·{c.get('name', '')}",
+                value=str(c.get("note", "")),
+                ok=bool(c.get("ok", False)),
+            ))
+    passed = bool(data.get("passed", False))
+    oks = [bool(m.ok) for m in metrics]
+    return EvalSummary(
+        available=True,
+        task="perf",
+        timestamp=data.get("timestamp", ""),
+        git=data.get("git", ""),
+        passed=passed,
+        partial=(not passed) and any(oks),
+        metrics=metrics,
+    )
+
+
+def _perf_summary(report: str | None = None) -> EvalSummary:
+    """性能卡片：给 report 读其配对 sidecar；否则取 tools/reports/perf 下最新一份。"""
+    if report:
+        data = _sidecar_for_report(report)
+        return _perf_summary_from_data(data) if data else EvalSummary(available=False, task="perf")
+    root = _reports_root() / "perf"
+    if root.is_dir():
+        jsons = sorted(
+            (fp for fp in root.glob("*.json") if fp.is_file()),
+            key=lambda p: p.stat().st_mtime,
+        )
+        for fp in reversed(jsons):
+            data = _load_sidecar(fp)
+            if data is not None:
+                return _perf_summary_from_data(data)
+    return EvalSummary(available=False, task="perf")
+
+
 def _passrate_summary(task: str, subdir: str, label: str):
     """通用"通过率"型 eval 的卡片构造器工厂（如记忆 / skill / srs 等）。
 
@@ -690,6 +746,7 @@ _SUMMARY_BUILDERS = {
     "memory": _passrate_summary("memory", "memory", "通过率"),
     "skills": _passrate_summary("skills", "skills", "识别通过率"),
     "mcp": _mcp_summary,
+    "perf": _perf_summary,
 }
 
 
