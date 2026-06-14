@@ -114,7 +114,11 @@ def chroma_collections() -> dict:
         return {"root": str(chroma_root()), "collections": [], "error": f"{type(e).__name__}: {e}"}
     items: list[dict] = []
     for meta in sorted(client.list_collections(), key=lambda c: c.name):
-        row: dict = {"name": meta.name, "space": (meta.metadata or {}).get("hnsw:space")}
+        row: dict = {
+            "name": meta.name,
+            "space": (meta.metadata or {}).get("hnsw:space"),
+            "is_default": meta.name == config.DEFAULT_COLLECTION,
+        }
         try:
             col = client.get_collection(meta.name)
             row["count"] = col.count()
@@ -303,6 +307,7 @@ def bm25_indexes() -> dict:
         coll = _coll_of(path)
         row: dict = {
             "file": path.name, "collection": coll, "bytes": path.stat().st_size,
+            "is_default": coll == config.DEFAULT_COLLECTION,
         }
         try:
             with open(path, "rb") as f:
