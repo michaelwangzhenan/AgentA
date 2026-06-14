@@ -234,6 +234,12 @@ agent_eval/run_all.py
 - 产出：脚本加 `--pass-threshold` + 配对 summary JSON；后端新增**通用"通过率"型卡片工厂** `_passrate_summary`（记忆 / 后续 skill / srs 等复用）+ `EVAL_MODULES['memory']` + memory 阈值分支。
 
 ### 3.2.6. Skills
+
+按统一标准接入（task=`skills`，模块 `tools.agent_eval.skills.recall_skill`），与记忆同为"通过率"型：
+
+- 始终调 LLM（无 None、默认 ACTIVE_MODEL）；`通过率阈值(≥)` 默认 0.8（`--pass-threshold` + 配对 summary JSON）。
+- 卡片复用 `_passrate_summary("skills", …, "识别通过率")`；后端 memory/skills 共用 `--pass-threshold` 分支。
+
 ### 3.2.7. MCP
 
 ### 3.2.8. 性能

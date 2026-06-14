@@ -445,7 +445,7 @@ def _build_eval_args(req: EvalRunRequest) -> list[str]:
         ts = _time.strftime("%Y%m%d-%H%M%S")
         out = _Path("tools") / "reports" / "rag" / f"rag-{ts}.md"
         args += ["-o", out.as_posix()]
-    elif req.task == "memory":
+    elif req.task in ("memory", "skills"):
         pt = _threshold(req, "pass")
         if pt is not None:
             args += ["--pass-threshold", str(pt)]
@@ -643,6 +643,7 @@ _SUMMARY_BUILDERS = {
     "security": _security_summary,
     "rag": _rag_summary,
     "memory": _passrate_summary("memory", "memory", "通过率"),
+    "skills": _passrate_summary("skills", "skills", "识别通过率"),
 }
 
 

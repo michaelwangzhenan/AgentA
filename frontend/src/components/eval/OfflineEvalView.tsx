@@ -76,6 +76,31 @@ const EVAL_TASKS: EvalTaskConfig[] = [
     },
   },
   {
+    key: 'skills',
+    label: 'Skill 路由',
+    usesLlm: true,
+    reportMatch: 'skills/',
+    options: [],
+    thresholds: [{ key: 'pass', label: '通过率阈值(≥)', default: 0.8 }],
+    intro: {
+      purpose:
+        '检验 LLM 能否从 skill catalog 的描述里主动认出该用哪个 skill——该调时调对、不该调时不乱调。',
+      how: [
+        '① 选「测试模型」（默认系统当前模型）；需真实 LLM 做 function-calling 决策。',
+        '② 可调「通过率阈值」（默认 0.8）。',
+        '③ 点「开始评估」，跑完看卡片与历史报告。',
+      ],
+      params: ['无额外开关；判定阈值见下方「通过率阈值」。'],
+      principle: [
+        '真实扫 .agenta/skills/，把各 skill 的 frontmatter 经 catalog 注入 system prompt。',
+        '对每条 case 调真实 LLM 并带 get_tools，看它是否 load_skill：positive 应调对预期 skill、negative 应不调任何 load_skill。',
+      ],
+      metrics: ['识别通过率：positive 调对 + negative 不乱调的占比，达阈值判「通过」。'],
+      cost: '每条 case 一次真实 LLM 调用，耗所选模型 token。',
+      dataset: 'golden 来自 tools/agent_eval/skills/dataset.json；skill 来自 .agenta/skills/。',
+    },
+  },
+  {
     key: 'security',
     label: '安全红队',
     usesLlm: true,

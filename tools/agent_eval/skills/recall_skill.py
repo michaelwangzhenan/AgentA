@@ -209,9 +209,10 @@ def _render_markdown(
     dataset_path: Path,
     env: dict[str, str],
     skills_loaded: list[str],
+    pass_threshold: float = 0.80,
 ) -> str:
     rate = passed / total if total else 0.0
-    verdict = "✅ 合格 (≥ 80%)" if rate >= 0.80 else "⚠️ 未达 80% 判据"
+    verdict = f"✅ 合格 (≥ {pass_threshold:.0%})" if rate >= pass_threshold else f"⚠️ 未达 {pass_threshold:.0%} 判据"
 
     lines: list[str] = []
     lines.append("# Skill Recall Golden 评估报告")
@@ -222,6 +223,7 @@ def _render_markdown(
     lines.append(f"- **Provider**: {env['provider']}")
     lines.append(f"- **Dataset**: `{dataset_path}`")
     lines.append(f"- **Loaded Skills**: {', '.join(skills_loaded) or '（无）'}")
+    lines.append(f"- **阈值**: 通过率 ≥ {pass_threshold:.0%}")
     lines.append("")
 
     lines.append("## 核心指标")
@@ -231,7 +233,7 @@ def _render_markdown(
     lines.append(f"| 样本数 | {total} |")
     lines.append(f"| 通过数 | {passed} |")
     lines.append(f"| 通过率 | {rate:.1%} |")
-    lines.append(f"| 判据 (≥ 80%) | {verdict} |")
+    lines.append(f"| 判据 (≥ {pass_threshold:.0%}) | {verdict} |")
     lines.append("")
 
     # category breakdown — 让人一眼看出 positive vs negative 的偏倚
@@ -299,13 +301,25 @@ def _dump_report(
     dataset_path: Path,
     env: dict[str, str],
     skills_loaded: list[str],
+    pass_threshold: float = 0.80,
 ) -> Path:
+    import json
+
     from tools.eval_common.report_paths import reports_dir as eval_reports_dir
     reports_dir = eval_reports_dir("skills")
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     out = reports_dir / f"skill-recall-{ts}.md"
     out.write_text(
-        _render_markdown(results, passed, total, dataset_path, env, skills_loaded),
+        _render_markdown(results, passed, total, dataset_path, env, skills_loaded, pass_threshold),
+        encoding="utf-8",
+    )
+    rate = passed / total if total else 0.0
+    out.with_suffix(".json").write_text(
+        json.dumps({
+            "timestamp": env.get("timestamp", ""), "git": env.get("git", ""),
+            "total": total, "passed": passed, "rate": rate,
+            "pass_threshold": pass_threshold, "ok": rate >= pass_threshold,
+        }, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     return out
@@ -328,6 +342,10 @@ def main() -> None:
     )
     parser.add_argument("--case", type=str, default="", help="只跑指定 id（精确匹配）")
     parser.add_argument("--no-report", action="store_true", help="不落盘 Markdown 报告")
+    parser.add_argument(
+        "--pass-threshold", dest="pass_threshold", type=float, default=0.80,
+        help="通过率达标阈值（≥），默认 0.80",
+    )
     args = parser.parse_args()
 
     dataset = _load_dataset(args.dataset)
@@ -367,17 +385,18 @@ def main() -> None:
     passed = sum(1 for r in results if r["pass"])
     total = len(results)
     rate = passed / total if total else 0.0
+    pt = args.pass_threshold
     print(
         f"\n📊 通过 {passed}/{total} ({rate:.0%})  "
-        f"{'✅ 合格 (≥80%)' if rate >= 0.80 else '⚠️  未达 80% 判据'}\n"
+        f"{f'✅ 合格 (≥{pt:.0%})' if rate >= pt else f'⚠️  未达 {pt:.0%} 判据'}\n"
     )
 
     if not args.no_report:
         env = _collect_env()
-        report = _dump_report(results, passed, total, args.dataset, env, skills_loaded)
+        report = _dump_report(results, passed, total, args.dataset, env, skills_loaded, pt)
         print(f"📁 报告已存储：{report}\n")
 
-    sys.exit(0 if rate >= 0.80 else 1)
+    sys.exit(0 if rate >= pt else 1)
 
 
 if __name__ == "__main__":
