@@ -250,7 +250,7 @@ agent_eval/run_all.py
 
 - **模型下拉带 None、默认 None**：None = 只跑 structural（真启 MCP server 子进程、不调 LLM、不耗 token）；选模型 = 额外跑 llm-e2e（`--no-llm` 仅在 None 时传）。无额外 options、无阈值。
 - **判定**：验收①-⑦无 failed 即"通过"；`--no-llm` 模式下被跳过的 llm-e2e case 不算失败。卡片一条「通过」指标（passed/total（+跳过 N）、阈值"全过"）。
-- 产出：脚本写报告时配对输出 summary JSON（含 total/passed/skipped/failed/ok）；后端新增 `_mcp_summary`（"全过"型，部分通过标 partial）+ `EVAL_MODULES['mcp']` + mcp 分支（None→`--no-llm`）。
+- 产出：脚本写报告时配对输出 summary JSON（含 total/passed/skipped/failed/ok）；后端新增 `_mcp_summary`（"全过"型，`partial` 按 `skipped>0` 即选 None 跳过 llm-e2e 才算"部分跑"）+ `EVAL_MODULES['mcp']` + mcp 分支（None→`--no-llm`）。报告补 Git/Provider（Provider 选 None 时显示 `—（--no-llm）`）。
 
 ### 3.2.8. 性能
 
@@ -259,19 +259,30 @@ agent_eval/run_all.py
 - **不调 LLM**：`usesLlm:false`，无模型下拉。后端固定传 `--target all`——**session + memory 一起跑、合并一份报告**（不再分别选 target）。
 - **新增 `text` 选项类型**：UI 暴露「数据档位」文本框（逗号分隔正整数，留空=默认 10,100,1000）；后端白名单校验（仅数字+逗号）后传 `--sizes`。
 - **合并报告 + 配对 JSON**：脚本改为把跑过的 target 合并成单份 `perf-<ts>.md` + `perf-<ts>.json`（含各 target 的判据 + 整体 `passed`）。
-- **卡片**：判定型——各 target 判据逐条展开为 metric（如「会话·查询类<50ms」+ 实测值 + ok），全部 PASS 才判「通过」，部分通过标 partial。后端新增 `_perf_summary`。
+- **卡片**：判定型——各 target 判据逐条展开为 metric（如「会话·查询类<50ms」+ 实测值 + ok），全部 PASS 才判「通过」（始终跑全量，`partial` 恒 False，不写 Provider）。后端新增 `_perf_summary`。
 
-### 3.2.9. 安全红队（框架任务已含，本节留细化 / 复核）
+### 3.2.9. 安全红队（复核）
+
+安全红队（task=`security`，模块 `tools.agent_eval.security.adversarial`）是框架首个接入、也是各统一标准的母本，复核确认**全符合、无需代码改动**：
+·
+- **脚本**：env 含 timestamp/git/python/provider；报告头有 时间/Git/Python/Provider/Dataset；sidecar 含 `partial`（`no_llm` 或 kind 子集=部分跑，语义正确）+ `kinds_run` + 全量指标（recall/fpr + 阈值 + passed + by_kind）。
+- **前端**：模型下拉默认 ACTIVE_MODEL + None；`类别` 选项；`拦截率(≥0.9)`/`误拦率(≤0.1)` 阈值 UI 可调并记入报告；说明卡片 8 节齐全。
+- 模型注入修复（§3.2.2 易错点）后，选模型对含 LLM 的类别已真实生效。
 
 ### 3.2.10. Plan
+
+接入（task=`plan`，模块 `tools.agent_eval.plan.eval_plan`），双阈值判定型：
+
+- **始终调 LLM**（识别层，无 None、默认 ACTIVE_MODEL）。选项 `评 plan 结构`（复选框，默认开；取消勾选传 `--no-judge`，只评识别、省一轮 judge token）。
+- **两阈值 UI 可调**：`识别通过率(≥0.8)` + `plan 结构得分(≥3.5/5)`（脚本加 `--recall-threshold`/`--struct-threshold`；后端 `_threshold` 加可选上限参数支持 0-5）。
+- **卡片**：判定型——`识别通过率` + `plan 结构均分` 两条指标（关 judge 时只有识别一条），两项达标才判「通过」；`--no-judge` 时 `partial=True`（只跑识别层）。
+- 产出：脚本新增配对 summary JSON（含 recall/struct_score + 两阈值 + passed + partial）；后端新增 `_plan_summary` + `EVAL_MODULES['plan']` + plan 分支。
+
 ### 3.2.11. Harness
 
 ### 3.2.12. 学习计划
 ### 3.2.13. Quiz
 ### 3.2.14. SRS
-### 3.2.15. 清理旧页面
-### 3.2.16. 提交代码
-按公约提交代码
 
 
 

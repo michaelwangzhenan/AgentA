@@ -393,14 +393,14 @@ def security_runtime_summary(
 _SECURITY_KINDS = {"direct", "indirect_rag", "indirect_web", "tool_blocklist"}
 
 
-def _threshold(req: EvalRunRequest, key: str) -> float | None:
-    """取并校验一个阈值（0~1）；缺省返回 None。"""
+def _threshold(req: EvalRunRequest, key: str, hi: float = 1.0) -> float | None:
+    """取并校验一个阈值（0~hi，默认 0~1）；缺省返回 None。"""
     th = req.thresholds or {}
     if key not in th:
         return None
     v = th[key]
-    if not isinstance(v, (int, float)) or not (0.0 <= v <= 1.0):
-        raise HTTPException(status_code=400, detail=f"阈值 {key} 需在 0~1 之间")
+    if not isinstance(v, (int, float)) or not (0.0 <= v <= hi):
+        raise HTTPException(status_code=400, detail=f"阈值 {key} 需在 0~{hi:g} 之间")
     return float(v)
 
 
@@ -463,6 +463,16 @@ def _build_eval_args(req: EvalRunRequest) -> list[str]:
             if not all(p.isdigit() and int(p) > 0 for p in parts):
                 raise HTTPException(status_code=400, detail="数据档位需为正整数，逗号分隔")
             args += ["--sizes", ",".join(parts)]
+    elif req.task == "plan":
+        # 始终调 LLM 评识别；取消勾选「评 plan 结构」才关 LLM-judge 结构评分
+        if opts.get("judge", True) is False:
+            args.append("--no-judge")
+        recall = _threshold(req, "recall")
+        if recall is not None:
+            args += ["--recall-threshold", str(recall)]
+        struct = _threshold(req, "struct", hi=5.0)
+        if struct is not None:
+            args += ["--struct-threshold", str(struct)]
     return args
 
 
@@ -694,6 +704,56 @@ def _perf_summary(report: str | None = None) -> EvalSummary:
     return EvalSummary(available=False, task="perf")
 
 
+def _plan_summary_from_data(data: dict) -> EvalSummary:
+    """Plan sidecar dict → 判定型卡片：识别通过率 + plan 结构均分（关 judge 时只有前者）。"""
+    rate = data.get("recall", 0.0)
+    rt = data.get("recall_threshold", 0.0)
+    metrics = [
+        EvalMetric(
+            label="识别通过率",
+            value=f"{_pct(rate)} ({data.get('recall_passed', 0)}/{data.get('total', 0)})",
+            threshold=f"≥ {_pct(rt)}",
+            ok=rate >= rt,
+        ),
+    ]
+    score = data.get("struct_score")
+    st = data.get("struct_threshold", 0.0)
+    if isinstance(score, (int, float)):
+        metrics.append(EvalMetric(
+            label="plan 结构均分",
+            value=f"{score:.2f}/5",
+            threshold=f"≥ {st}",
+            ok=score >= st,
+        ))
+    return EvalSummary(
+        available=True,
+        task="plan",
+        timestamp=data.get("timestamp", ""),
+        git=data.get("git", ""),
+        passed=bool(data.get("passed", False)),
+        partial=bool(data.get("partial", False)),  # --no-judge = 只跑识别层
+        metrics=metrics,
+    )
+
+
+def _plan_summary(report: str | None = None) -> EvalSummary:
+    """Plan 卡片：给 report 读其配对 sidecar；否则取 tools/reports/plan 下最新一份。"""
+    if report:
+        data = _sidecar_for_report(report)
+        return _plan_summary_from_data(data) if data else EvalSummary(available=False, task="plan")
+    root = _reports_root() / "plan"
+    if root.is_dir():
+        jsons = sorted(
+            (fp for fp in root.glob("*.json") if fp.is_file()),
+            key=lambda p: p.stat().st_mtime,
+        )
+        for fp in reversed(jsons):
+            data = _load_sidecar(fp)
+            if data is not None:
+                return _plan_summary_from_data(data)
+    return EvalSummary(available=False, task="plan")
+
+
 def _passrate_summary(task: str, subdir: str, label: str):
     """通用"通过率"型 eval 的卡片构造器工厂（如记忆 / skill / srs 等）。
 
@@ -747,6 +807,7 @@ _SUMMARY_BUILDERS = {
     "skills": _passrate_summary("skills", "skills", "识别通过率"),
     "mcp": _mcp_summary,
     "perf": _perf_summary,
+    "plan": _plan_summary,
 }
 
 

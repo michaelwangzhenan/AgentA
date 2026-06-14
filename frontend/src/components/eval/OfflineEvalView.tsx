@@ -218,6 +218,49 @@ const EVAL_TASKS: EvalTaskConfig[] = [
       dataset: '红队样本来自 tools/agent_eval/security/dataset.json。',
     },
   },
+  {
+    key: 'plan',
+    label: 'Plan 规划',
+    usesLlm: true, // 识别层必须调 LLM（无 None）
+    reportMatch: 'plan/',
+    options: [
+      { kind: 'checkbox', key: 'judge', label: '评 plan 结构（LLM-judge）', default: true },
+    ],
+    thresholds: [
+      { key: 'recall', label: '识别通过率阈值(≥)', default: 0.8 },
+      { key: 'struct', label: 'plan 结构得分阈值(≥)', default: 3.5, min: 0, max: 5, step: 0.1 },
+    ],
+    intro: {
+      purpose:
+        '检验 Agent 的任务规划能力：面对复杂任务能否主动调 make_plan 拆解、面对简单任务不强行规划；并由 LLM-judge 评所生成 plan 的结构质量。',
+      how: [
+        '① 选「测试模型」（默认系统当前模型）；识别层必须调 LLM。',
+        '② 默认开「评 plan 结构」（LLM-judge 给 0-5 分）；取消勾选则只看识别、不评结构（省一轮 judge token）。',
+        '③ 可调「识别通过率阈值」（默认 0.8）与「plan 结构得分阈值」（默认 3.5/5）。',
+        '④ 点「开始评估」，跑完看卡片与历史报告。',
+      ],
+      params: [
+        '评 plan 结构：开=positive 通过的 case 再由 LLM-judge 评结构分（耗额外 token）；关=只评识别（传 --no-judge）。',
+        '识别通过率阈值：复杂任务调对 + 简单任务不乱调的占比下限。',
+        'plan 结构得分阈值：positive 通过 case 的平均结构分（0-5）下限。',
+      ],
+      principle: [
+        '对每条 case 单步 chat() + 解析 make_plan 的 tool_call：positive 应调 make_plan、negative 应不调。',
+        '开 judge 时，对 positive 通过 case 的 plan steps 由 LLM-judge 按粒度 / 顺序 / 覆盖度 / 业务对齐打 0-5 分。',
+        '不跑完整 plan 循环（噪音 / 耗时 / 成本高），单步足够覆盖识别 + 结构验收。',
+      ],
+      metrics: [
+        '识别通过率：positive 调对 + negative 不乱调的占比，达阈值判通过。',
+        'plan 结构均分：positive 通过 case 的平均结构分（0-5），达阈值判通过。',
+        '两项都达标才判「通过」（关 judge 时只看识别）。',
+      ],
+      cost: [
+        '每条 case 一次真实 LLM 调用（识别）。',
+        '开「评 plan 结构」时，positive 通过 case 再各一次 judge 调用，耗额外 token。',
+      ],
+      dataset: 'golden 来自 tools/agent_eval/plan/dataset.json（positive / negative 两类）。',
+    },
+  },
 ]
 
 export function OfflineEvalView() {

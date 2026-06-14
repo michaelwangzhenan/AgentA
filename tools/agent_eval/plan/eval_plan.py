@@ -295,11 +295,13 @@ def _render_markdown(
     dataset_path: Path,
     env: dict[str, str],
     judge_enabled: bool,
+    recall_th: float = _RECALL_PASS_RATE,
+    struct_th: float = _PLAN_STRUCTURE_PASS_SCORE,
 ) -> str:
     rate = passed / total if total else 0.0
     recall_verdict = (
-        f"✅ 合格 (≥ {_RECALL_PASS_RATE:.0%})" if rate >= _RECALL_PASS_RATE
-        else f"⚠️ 未达 {_RECALL_PASS_RATE:.0%} 判据"
+        f"✅ 合格 (≥ {recall_th:.0%})" if rate >= recall_th
+        else f"⚠️ 未达 {recall_th:.0%} 判据"
     )
 
     lines: list[str] = []
@@ -320,15 +322,15 @@ def _render_markdown(
     lines.append(f"| 样本数 | {total} |")
     lines.append(f"| 识别通过数 | {passed} |")
     lines.append(f"| 识别通过率 | {rate:.1%} |")
-    lines.append(f"| 识别判据 (≥ {_RECALL_PASS_RATE:.0%}) | {recall_verdict} |")
+    lines.append(f"| 识别判据 (≥ {recall_th:.0%}) | {recall_verdict} |")
     if avg_judge is not None:
         struct_verdict = (
-            f"✅ 合格 (≥ {_PLAN_STRUCTURE_PASS_SCORE})"
-            if avg_judge >= _PLAN_STRUCTURE_PASS_SCORE
-            else f"⚠️ 未达 {_PLAN_STRUCTURE_PASS_SCORE} 判据"
+            f"✅ 合格 (≥ {struct_th})"
+            if avg_judge >= struct_th
+            else f"⚠️ 未达 {struct_th} 判据"
         )
         lines.append(f"| plan 结构均分 (positive 通过) | {avg_judge:.2f}/5 |")
-        lines.append(f"| 结构判据 (≥ {_PLAN_STRUCTURE_PASS_SCORE}) | {struct_verdict} |")
+        lines.append(f"| 结构判据 (≥ {struct_th}) | {struct_verdict} |")
     lines.append("")
 
     pos = [r for r in results if r.get("category") == "positive"]
@@ -416,14 +418,39 @@ def _dump_report(
     dataset_path: Path,
     env: dict[str, str],
     judge_enabled: bool,
+    recall_th: float = _RECALL_PASS_RATE,
+    struct_th: float = _PLAN_STRUCTURE_PASS_SCORE,
 ) -> Path:
     from tools.eval_common.report_paths import reports_dir as eval_reports_dir
     reports_dir = eval_reports_dir("plan")
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     out = reports_dir / f"plan-eval-{ts}.md"
     out.write_text(
-        _render_markdown(results, passed, total, avg_judge, dataset_path, env, judge_enabled),
+        _render_markdown(
+            results, passed, total, avg_judge, dataset_path, env,
+            judge_enabled, recall_th, struct_th,
+        ),
         encoding="utf-8",
+    )
+    # 配对 summary JSON（供「质量看板 → 离线评估」卡片读）
+    rate = passed / total if total else 0.0
+    ok_recall = rate >= recall_th
+    ok_struct = (avg_judge is None) or (avg_judge >= struct_th)
+    summary = {
+        **env,
+        "judge_enabled": judge_enabled,
+        # partial = 关了结构评测（--no-judge）= 只跑了识别这一层
+        "partial": not judge_enabled,
+        "recall": rate,
+        "recall_passed": passed,
+        "total": total,
+        "recall_threshold": recall_th,
+        "struct_score": avg_judge,
+        "struct_threshold": struct_th,
+        "passed": ok_recall and ok_struct,
+    }
+    out.with_suffix(".json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     return out
 
@@ -450,6 +477,14 @@ def main() -> None:
     parser.add_argument("--case", type=str, default="", help="只跑指定 id（精确匹配）")
     parser.add_argument("--no-report", action="store_true", help="不落盘 Markdown 报告")
     parser.add_argument("--no-judge", action="store_true", help="不调 LLM-judge 评 plan 结构分")
+    parser.add_argument(
+        "--recall-threshold", type=float, default=_RECALL_PASS_RATE,
+        help=f"识别通过率判据（默认 {_RECALL_PASS_RATE}）",
+    )
+    parser.add_argument(
+        "--struct-threshold", type=float, default=_PLAN_STRUCTURE_PASS_SCORE,
+        help=f"plan 结构均分判据 0-5（默认 {_PLAN_STRUCTURE_PASS_SCORE}）",
+    )
     args = parser.parse_args()
 
     dataset = _load_dataset(args.dataset)
@@ -488,12 +523,15 @@ def main() -> None:
         sum(judged_scores) / len(judged_scores) if judged_scores else None
     )
 
+    recall_th = args.recall_threshold
+    struct_th = args.struct_threshold
+
     print(
         f"\n📊 识别通过 {passed}/{total} ({rate:.0%})  "
-        f"{'✅ 合格' if rate >= _RECALL_PASS_RATE else '⚠️  未达判据'}"
+        f"{'✅ 合格' if rate >= recall_th else '⚠️  未达判据'}"
     )
     if avg_judge is not None:
-        struct_ok = avg_judge >= _PLAN_STRUCTURE_PASS_SCORE
+        struct_ok = avg_judge >= struct_th
         print(
             f"📐 plan 结构均分 {avg_judge:.2f}/5  "
             f"{'✅ 合格' if struct_ok else '⚠️  未达判据'}"
@@ -502,12 +540,15 @@ def main() -> None:
 
     if not args.no_report:
         env = _collect_env()
-        report = _dump_report(results, passed, total, avg_judge, args.dataset, env, judge_enabled)
+        report = _dump_report(
+            results, passed, total, avg_judge, args.dataset, env,
+            judge_enabled, recall_th, struct_th,
+        )
         print(f"📁 报告已存储：{report}\n")
 
     # 退出码：识别通过率 + 结构均分都达标才 0
-    ok_recall = rate >= _RECALL_PASS_RATE
-    ok_struct = (avg_judge is None) or (avg_judge >= _PLAN_STRUCTURE_PASS_SCORE)
+    ok_recall = rate >= recall_th
+    ok_struct = (avg_judge is None) or (avg_judge >= struct_th)
     sys.exit(0 if (ok_recall and ok_struct) else 1)
 
 
