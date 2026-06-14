@@ -149,3 +149,124 @@ def test_report_content_rejects_bad_name(client: TestClient) -> None:
     for bad in ["../secret.md", "agent_eval/../../x.md", "unknown/foo.md", "agent_eval/sub/dir.md"]:
         r = client.get(f"/api/eval/reports/content?name={bad}")
         assert r.status_code in (400, 404), f"{bad} -> {r.status_code}"
+
+
+# ── 离线评估：触发 / 状态 / 取消 / 摘要 ───────────────────────────────────────
+
+
+def test_eval_run_unknown_task_400(client: TestClient) -> None:
+    r = client.post("/api/eval/run", json={"task": "nope"})
+    assert r.status_code == 400
+
+
+def test_eval_run_busy_409(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(task, args, model=None):
+        raise RuntimeError("已有评估在运行")
+
+    monkeypatch.setattr("src.eval_runner.start", boom)
+    r = client.post("/api/eval/run", json={"task": "security"})
+    assert r.status_code == 409
+
+
+def test_eval_run_security_builds_args(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict = {}
+
+    def fake_start(task, args, model=None):
+        seen["task"] = task
+        seen["args"] = args
+        seen["model"] = model
+        return {"state": "running", "task": task, "model": model, "args": args,
+                "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}
+
+    monkeypatch.setattr("src.eval_runner.start", fake_start)
+    r = client.post(
+        "/api/eval/run",
+        json={"task": "security", "no_llm": True, "kind": "direct", "model": "kimi-k2.5"},
+    )
+    assert r.status_code == 200
+    assert seen["args"] == ["--no-llm", "--kind", "direct"]
+    assert seen["model"] == "kimi-k2.5"
+
+
+def test_eval_run_rejects_bad_kind_400(client: TestClient) -> None:
+    r = client.post("/api/eval/run", json={"task": "security", "kind": "evil"})
+    assert r.status_code == 400
+
+
+def test_eval_run_thresholds_to_args(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict = {}
+
+    def fake_start(task, args, model=None):
+        seen["args"] = args
+        return {"state": "running", "task": task, "model": model, "args": args,
+                "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}
+
+    monkeypatch.setattr("src.eval_runner.start", fake_start)
+    r = client.post(
+        "/api/eval/run",
+        json={"task": "security", "thresholds": {"recall": 0.8, "fpr": 0.2}},
+    )
+    assert r.status_code == 200
+    assert "--recall-threshold" in seen["args"]
+    assert "0.8" in seen["args"]
+    assert "--fpr-threshold" in seen["args"]
+    assert "0.2" in seen["args"]
+
+
+def test_eval_run_rejects_bad_threshold_400(client: TestClient) -> None:
+    r = client.post(
+        "/api/eval/run",
+        json={"task": "security", "thresholds": {"recall": 1.5}},
+    )
+    assert r.status_code == 400
+
+
+def test_eval_run_status_ok(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "src.eval_runner.status",
+        lambda: {"state": "idle", "args": [], "tail": ""},
+    )
+    r = client.get("/api/eval/run/status")
+    assert r.status_code == 200
+    assert r.json()["state"] == "idle"
+
+
+def test_eval_summary_unknown_task(client: TestClient) -> None:
+    r = client.get("/api/eval/summary?task=nope")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["available"] is False
+    assert body["task"] == "nope"
+
+
+def test_eval_summary_by_report(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """带 report 名 → 读该报告配对的 .json sidecar 映射成卡片。"""
+    import json
+
+    import src.api.routes.eval as evalmod
+
+    root = tmp_path / "reports"
+    (root / "security").mkdir(parents=True)
+    sidecar = {
+        "timestamp": "2026-06-14T10:00:00", "git": "abc",
+        "passed": True, "partial": False,
+        "recall": 0.95, "fpr": 0.05, "recall_threshold": 0.9, "fpr_threshold": 0.1,
+        "attack_blocked": 19, "attacks": 20, "benign_blocked": 1, "benigns": 20,
+    }
+    name = "security/security-adversarial-20260614-100000"
+    (root / f"{name}.json").write_text(json.dumps(sidecar), encoding="utf-8")
+    (root / f"{name}.md").write_text("# r", encoding="utf-8")
+    monkeypatch.setattr(evalmod, "_reports_root", lambda: root)
+
+    r = client.get(f"/api/eval/summary?task=security&report={name}.md")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["available"] is True
+    assert body["passed"] is True
+    assert len(body["metrics"]) == 2

@@ -45,7 +45,7 @@ Phase 1 性能基准（session + memory 合二为一）
     - upsert/update < 10ms         —— 单行写
     - render-list < 100ms          —— 分组 + 多行输出
 
-报告会同时落盘到 `tools/agent_eval/reports/perf-<target>-<timestamp>.md`，
+报告会同时落盘到 `tools/reports/perf/perf-<target>-<timestamp>.md`，
 含元信息（时间 / git / python / provider）+ 测量表 + 判据自动评估（PASS/FAIL），
 便于人工浏览和阶段间对比。
 """
@@ -82,10 +82,9 @@ def _time_ms(callable_, n_runs: int = 5) -> float:
 
 
 def _reports_dir() -> Path:
-    """tools/agent_eval/reports/，不存在则创建。"""
-    p = Path(__file__).parent / "reports"
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+    """tools/reports/perf/，不存在则创建。"""
+    from tools.eval_common.report_paths import reports_dir
+    return reports_dir("perf")
 
 
 def _collect_env() -> dict[str, str]:

@@ -11,7 +11,7 @@ RAG 检索评估脚本（Iter-5）。
     python -m tools.rag_eval.runner                                  # 跑 db 里的 golden，仅终端汇总
     python -m tools.rag_eval.runner --no-rewriter                    # 关闭 query 改写（基线对比）
     python -m tools.rag_eval.runner --no-rerank                      # 关闭 reranker（真关，透传给 retriever）
-    python -m tools.rag_eval.runner -o tools/rag_eval/reports/m3.md  # 同时落盘 Markdown + .log trace
+    python -m tools.rag_eval.runner -o tools/reports/rag/m3.md  # 同时落盘 Markdown + .log trace
     python -m tools.rag_eval.runner --llm 10                         # 额外评前 10 条答案质量（耗 token）
     python -m tools.rag_eval.runner -v                               # 终端打印 [search] 阶段化日志
 

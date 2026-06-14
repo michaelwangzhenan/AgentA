@@ -135,12 +135,107 @@ CLI tool: tools/rag_cli.py
 - 问题：Chroma 删库只删 `chroma.sqlite3` catalog，不删磁盘 `<uuid>/` 向量段目录，残留的、不再被任何活跃 collection 引用的段目录。浪费磁盘。
 - 维护页新增「孤儿段清理」面板：扫描（列 UUID+占用）→ 确认 → 清理。
 
-### 3.1.9. 提交代码
-按公约提交代码
 
 ## 3.2. 离线评估
 agent_eval/run_all.py
-agent_eval x 8 + rag_eval -> 和 综合评估报告 整合
+
+### 3.2.1. 总体设计
+
+把质量看板的「离线安全评估」+「综合评估报告」合并成一个 **「离线评估」**；会话监控 / 实时安全监控 / Golden 管理保持不动。
+
+**信息架构**：「离线评估」内左侧竖向导航列出各 eval，点一个进它的子页。子页结构：
+- **说明卡片**（顶部可折叠）：**卡片头即 eval 名**（不再另起标题，标题与说明合并），点头展开 / 收起；默认**首次展开、之后按 eval key 记住折叠状态**（localStorage）。节序：目的 / 如何评估（**每步一行**）/ 参数说明（LLM 以外的选项，如类别 / target / ci）/ 工作原理（数据集、调不调 LLM、判定方式）/ 指标解读（**每指标一行**，指标 + 阈值 + 判定含义）/ 耗时·成本 / 如何看结果（卡片=结论、报告=诊断详情，**通用话术**）/ 数据来源（dataset · golden 路径与规模）。各 eval 在前端 `EvalTaskConfig.intro` 写静态文案，字段支持 `string` 或 `string[]`（数组逐行展示）。
+- **摘要卡片**（通用组件）：最近一次结果（核心指标 + 阈值 + PASS/FAIL + 时间 / git）。安全那份逐类作详情扩展。
+- **测试模型下拉**（统一标准，仅涉及 LLM 的 eval）：候选来自 `GET /routing/pool` 的可用模型（已配 api_key）；**默认选中系统当前 `ACTIVE_MODEL`**（`GET /config/models` 的 `active`，列表里标「（当前）」）。支持无 LLM 模式的 eval 在下拉里加 **「None（不调用 LLM）」** 选项 = 只跑不调用 LLM 的 case（取代单独的 `--no-llm` 复选框）。
+- **选项 UI 化**：各 eval 的命令行选项都做成可操作控件（`--ci` 等开关用复选框，`--target` / `--kind` 等用下拉框；`--no-llm` 归入上面的模型下拉「None」），不让用户手敲参数；点「开始评估」即按所选控件拼出命令。
+- **阈值 UI 可调**：有判定阈值的 eval（如拦截率 / 误拦率 / 通过率 / 结构分）把阈值做成 UI 输入控件，默认填脚本现有默认值；跑评估时作为参数传入（不持久化，遵循上面"不改系统配置"）。卡片与 markdown 报告都**记录本次所用阈值**，便于复盘"是按什么线判的"。各 eval 具体可调哪些阈值，实现该 eval 时按其脚本定。
+- **历史报告 / 详情**：该 eval 的历史报告列表，**从新到旧排列**。**点某行 = 摘要卡片切到那次快照**（高亮「当前卡片」跟随；卡片经 `/eval/summary?report=<name>` 读该报告配对的 sidecar JSON，缺失则显示"无结构化摘要"）；每行有**「查看源文档」按钮**点开 markdown 正文。进页 / 跑完默认选中最新一份。卡片管"是否过线"，markdown 管"挂在哪 / 怎么改"。不再单列顶级「综合评估报告」tab。
+- **运行控制区布局**：所有控件（测试模型 / 选项 / 阈值）一组自动换行；**「开始评估」/「取消」单独成一行、右对齐**（不与控件挤同一行）。运行中在控制区下方显示 spinner + 日志末尾。
+- 趋势图可选（安全已有，后补到通用）。
+
+**触发机制**：单任务全局锁（同时只跑一个）+ 后台子进程跑 `python -m tools.<eval> [opts]`（输出落 `logs/eval_runs/`）+ **轮询 status**（运行中 / 末尾日志 / 退出码），可 cancel。取轮询而非 SSE：长任务跨页面存活、重连即恢复（详见 §3.2.2）。
+
+**不改动系统现有配置**：选中的测试模型仅注入**子进程**的 `ACTIVE_MODEL` env，**不写 `.env` / 不改运行时 `config_overrides` / 不动模型路由池 / 不改父进程配置**。子进程退出即失效——天然"还原"，无需显式恢复。其它 UI 选项（`--no-llm` 等）同理只作为该次命令行参数，不落任何持久配置。
+
+**卡片数据**：现仅安全有结构化 JSON sidecar。每个 eval 需补一份**标准化 summary JSON**（统一 schema：`name / timestamp / git / metrics:[{label,value,threshold,ok}] / passed / partial`），UI 用一个通用卡片组件渲染。
+
+**eval 清单（怎么测 / 卡片指标 / 判定）**：
+
+| eval | 命令 | 耗 token | 卡片指标 | 判定 |
+|---|---|---|---|---|
+| RAG 检索 | `rag_eval.runner` | 默认否 | recall@k / MRR | 阈值 |
+| 安全红队 | `security.adversarial [--no-llm]` | 可选 | 拦截率 / 误拦率 + 逐类 | recall≥阈 且 fpr≤阈 |
+| 性能 | `perf_eval --target …` | 否 | 各操作中位耗时(ms) | 无硬阈（基准 / 趋势） |
+| 记忆召回 | `memory.recall_golden` | 是 | 通过率 | 阈值 |
+| Skill 路由 | `skills.recall_skill` | 是 | 识别通过率(pos/neg) | 阈值 |
+| Plan | `plan.eval_plan` | 是 | 识别率 + 结构分 | ≥80% 且 ≥3.5 |
+| 学习计划 | `plan_business.eval_learning_plan` | 是 | 触发识别 + 质量分 | 阈值 |
+| Quiz | `quiz.eval_quiz` | 是 | 触发识别 + 质量分 | 阈值 |
+| SRS | `srs.eval_srs` | 是 | 触发识别率 | 阈值 |
+| Harness | `harness.eval_harness` | 是 | critic 判准率 | 阈值 |
+| MCP | `mcp.eval_mcp [--no-llm]` | 可选 | 验收 ①-⑦ 通过 | 全过 |
+
+特殊：性能无 pass/fail（卡片为数字 + 趋势）。
+
+**不做综合页**：`run_all` 不进 UI（每页参数各异，一页塞不下）；需要一键全量按预设跑时走 CLI `python -m tools.agent_eval.run_all`。
+
+**实现顺序（按功能纵切，每步含 触发 + 报告 + 卡片）**：
+第 1 步单列**框架**任务（共享基建），用**安全红队**做端到端验证（已有 summary JSON、可 `--no-llm` 快跑、并入现有"离线安全评估"卡片）。
+之后各 eval 薄切：RAG → 记忆 → Skills → MCP → 性能 →（安全红队框架已含）→ Plan → Harness → 学习计划 → Quiz → SRS。
+
+### 3.2.2. 框架（含安全红队验证）
+搭「离线评估」共享基建，安全红队作活体验证。
+- 信息架构：合并「离线安全评估」+「综合评估报告」为「离线评估」，左导航各 eval 子页。
+- 后端：job runner（单任务全局锁，后台子进程，输出落 `logs/eval_runs/`）+ **轮询 status**（运行中 / 末尾日志 / 退出码）+ cancel。模型经子进程 `ACTIVE_MODEL` env 注入（`.env` 未定义该项，`load_dotenv(override)` 不会覆盖）。
+  - 取轮询而非 SSE：eval 是分钟级长任务，后台 job + 轮询能跨页面存活、重连即恢复，比"SSE 绑请求（断连即杀）"稳健、比"SSE attach 后台 job"简单。
+- 前端：通用卡片组件 + 通用子页骨架（选项复选 / 下拉、阈值输入、历史报告列表复用 `ReportsViewer`）+ 模型下拉（`/routing/pool`）。
+- 约定：统一 summary JSON schema（`name / timestamp / git / metrics[] / passed / partial`）。
+- 验证：接入安全红队，触发 → 轮询 → 报告 → 卡片全链路跑通。
+
+产出：后端 `src/eval_runner.py`（单任务 runner）+ `/eval/run`、`/eval/run/status`、`/eval/run/cancel`、`/eval/summary`（通用摘要，映射安全 sidecar）；前端 `eval/OfflineEvalView`（左导航）+ `eval/EvalRunner`（模型下拉 + 选项 + 阈值 + 运行/取消/轮询 + 通用卡片 + 按 eval 过滤的历史报告/查看 + 可折叠说明卡片）；质量看板 tab 合并为「离线评估」（旧「离线安全评估」「综合评估报告」下沉，`SecurityPanel.OfflineEval` / `ReportsViewer` 暂留待清）。
+
+**接入一个新 eval 的步骤（后续各 eval 照此模板）**：
+1. 脚本：报告改用 `reports_dir("<eval>")` 落到 `tools/reports/<eval>/`；若有判定阈值，加对应 CLI 参数（如 `--xxx-threshold`），并把阈值记进 markdown + summary JSON。
+2. 脚本：每次跑产出**与 .md 同名配对的 summary JSON**（统一 schema，供"点报告回看卡片"），后端 `_SUMMARY_BUILDERS` 加该 eval 的 sidecar→卡片映射（支持按 report 名读配对 JSON）。
+3. 后端：`eval_runner.EVAL_MODULES` 注册 `<eval> → 模块路径`；`_build_eval_args` 加该 eval 的选项 / 阈值 → 命令行参数（白名单）。
+4. 前端：`OfflineEvalView` 的 `EVAL_TASKS` 加一项 `EvalTaskConfig`——`key/label/usesLlm/noneOption?/reportMatch/options/thresholds?/intro`（intro 8 节文案）。
+5. UT：路由层"选项 / 阈值 → 参数""非法值拒绝"；脚本核心逻辑按需补。
+
+### 3.2.3. reports 目录调整（已确认）
+
+把 `tools/agent_eval/reports` 和 `tools/rag_eval/reports` 合并到 **`tools/reports/<eval>/`**，按 eval 建子目录。**单独一步统一做**（避免新旧双布局过渡）。
+
+- **新布局**：`tools/reports/{rag,security,perf,memory,skills,plan,learning_plan,quiz,srs,harness,mcp,run_all}/`。
+- **共享 helper**：`tools/eval_common/report_paths.py` 的 `reports_dir(name)` → `tools/reports/<name>`（自动建目录），各脚本统一调用。
+- **代码只扫新目录**：后端报告接口改成单根 `tools/reports/` 递归扫，report `name` = 相对路径（如 `security/security-adversarial-…md`）；安全 sidecar 读 `tools/reports/security/`。
+- **旧报告整理不删**：把旧 `agent_eval/reports`、`rag_eval/reports` 里的文件按文件名前缀移到对应子目录（security/recall→memory/perf-→perf/… ），不删除内容。
+- 前端无需改：`reportMatch` 文件名子串仍命中（`name` 含文件名）。
+
+
+### 3.2.4. RAG 检索
+
+
+### 3.2.5. 记忆召回
+
+### 3.2.6. Skills
+### 3.2.7. MCP
+
+### 3.2.8. 性能
+### 3.2.9. 安全红队（框架任务已含，本节留细化 / 复核）
+
+### 3.2.10. Plan
+### 3.2.11. Harness
+
+### 3.2.12. 学习计划
+### 3.2.13. Quiz
+### 3.2.14. SRS
+### 3.2.15. 清理旧页面
+### 3.2.16. 提交代码
+按公约提交代码
+
+
+
 
 ## 3.3. Golden
-“质量看板->Golden管理” 与 "数据库 -> SQLite -> rag_golden.db" 合并
+“质量看板->Golden管理” 与 
+"数据库 -> SQLite -> rag_golden.db" or "知识库 -> 入库" 整合

@@ -189,3 +189,43 @@ class SecurityRuntimeSummary(BaseModel):
     total: int
     by_type: dict[str, int]               # {scrub, tool, ssrf} → 计数
     recent: list[SecurityEventRow]        # 最近若干条（时间倒序）
+
+
+# ── 离线评估：触发 / 状态 / 通用摘要卡片 ─────────────────────────────────────
+
+class EvalRunRequest(BaseModel):
+    task: str = Field(..., description="评估任务 key，如 security")
+    model: str | None = Field(None, description="测试模型 id（注入子进程 ACTIVE_MODEL）；空=用默认")
+    no_llm: bool = Field(False, description="仅跑不耗 LLM 的确定性子集")
+    kind: str | None = Field(None, description="按类别过滤（如安全的 direct / indirect_rag…）")
+    thresholds: dict[str, float] | None = Field(
+        None, description="判定阈值覆盖（不持久化），如 {recall:0.9, fpr:0.1}"
+    )
+
+
+class EvalRunStatus(BaseModel):
+    state: str = Field(..., description="idle | running | done")
+    task: str | None = None
+    model: str | None = None
+    args: list[str] = Field(default_factory=list)
+    started_at: float | None = None
+    finished_at: float | None = None
+    returncode: int | None = None
+    tail: str = ""                        # 日志末尾若干行
+
+
+class EvalMetric(BaseModel):
+    label: str
+    value: str
+    threshold: str = ""
+    ok: bool | None = None                # None = 无判定（如性能基准）
+
+
+class EvalSummary(BaseModel):
+    available: bool
+    task: str
+    timestamp: str = ""
+    git: str = ""
+    passed: bool | None = None            # None = 无 pass/fail（如性能）
+    partial: bool = False
+    metrics: list[EvalMetric] = Field(default_factory=list)

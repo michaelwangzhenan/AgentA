@@ -182,3 +182,43 @@ export type SecurityRuntimeSummary = {
   by_type: Record<string, number>
   recent: SecurityEventRow[]
 }
+
+// 离线评估：触发 / 状态 / 通用摘要卡片（对齐 src/api/schemas/eval.py）
+
+export type EvalRunRequest = {
+  task: string
+  model?: string | null
+  no_llm?: boolean
+  kind?: string | null
+  thresholds?: Record<string, number>
+}
+
+export type EvalRunState = 'idle' | 'running' | 'done'
+
+export type EvalRunStatus = {
+  state: EvalRunState
+  task?: string | null
+  model?: string | null
+  args: string[]
+  started_at?: number | null
+  finished_at?: number | null
+  returncode?: number | null
+  tail: string
+}
+
+export type EvalMetric = {
+  label: string
+  value: string
+  threshold: string
+  ok: boolean | null // null = 无判定（如性能）
+}
+
+export type EvalSummary = {
+  available: boolean
+  task: string
+  timestamp: string
+  git: string
+  passed: boolean | null // null = 无 pass/fail
+  partial: boolean
+  metrics: EvalMetric[]
+}

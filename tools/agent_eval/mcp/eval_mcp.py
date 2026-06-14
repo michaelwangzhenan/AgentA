@@ -17,7 +17,7 @@ case 分类：
     python -m tools.agent_eval.mcp.eval_mcp --no-llm     # 仅跑 structural（不烧 LLM 配额）
     python -m tools.agent_eval.mcp.eval_mcp --case C6-ssrf-defense-blocks-internal
 
-报告落 `tools/agent_eval/reports/mcp-<YYYYMMDD-HHMMSS>.md`。
+报告落 `tools/reports/mcp/mcp-<YYYYMMDD-HHMMSS>.md`。
 """
 from __future__ import annotations
 
@@ -53,7 +53,8 @@ from src.cli.handlers import handle_mcp  # noqa: E402
 
 
 _DEFAULT_DATASET = Path(__file__).parent / "dataset.json"
-_REPORTS_DIR = Path(__file__).parent.parent / "reports"
+from tools.eval_common.report_paths import reports_dir as _eval_reports_dir  # noqa: E402
+_REPORTS_DIR = _eval_reports_dir("mcp")
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 

@@ -2,7 +2,7 @@
 
 各 feature 的评估脚本仍可单独跑（见各自模块）；本聚合器把它们逐个拉起（子进程，
 彼此环境隔离、各自 load_dotenv），按**退出码**判 PASS / FAIL，最后落一份
-``tools/agent_eval/reports/run-all-<ts>.md`` 总报告，并在有任一 FAIL 时整体非零退出
+``tools/reports/run_all/run-all-<ts>.md`` 总报告，并在有任一 FAIL 时整体非零退出
 （CI 直接用退出码做门禁，无需 grep）。
 
 用法：
@@ -111,9 +111,8 @@ def _collect_env() -> dict[str, str]:
 
 
 def _reports_dir() -> Path:
-    p = Path(__file__).parent / "reports"
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+    from tools.eval_common.report_paths import reports_dir
+    return reports_dir("run_all")
 
 
 def _render_md(results: list[TaskResult], env: dict[str, str], ci: bool) -> str:

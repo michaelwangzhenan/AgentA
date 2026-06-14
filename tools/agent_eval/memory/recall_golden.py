@@ -28,7 +28,7 @@ Phase 1.4 扩展：case 可加 `mock_hits: [...]` 字段模拟 `search_knowledge
     python -m tools.agent_eval.memory.recall_golden --case M01-lang-zh           # 只跑指定 id
     python -m tools.agent_eval.memory.recall_golden --dataset other.json         # 自定义 golden
 
-报告落盘到 `tools/agent_eval/reports/recall-<timestamp>.md`，含元信息（时间 /
+报告落盘到 `tools/reports/memory/recall-<timestamp>.md`，含元信息（时间 /
 git / python / provider）+ 核心指标 + 全 case 总览 + Fail 用例详情
 （question / system_prompt / answer 截断 + 触发的 must/not 规则），便于事后诊断。
 
@@ -358,8 +358,8 @@ def _dump_report(
     env: dict[str, str],
 ) -> Path:
     """落盘 recall-<ts>.md，返回路径。"""
-    reports_dir = Path(__file__).parent.parent / "reports"
-    reports_dir.mkdir(parents=True, exist_ok=True)
+    from tools.eval_common.report_paths import reports_dir as eval_reports_dir
+    reports_dir = eval_reports_dir("memory")
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     out = reports_dir / f"recall-{ts}.md"
     out.write_text(

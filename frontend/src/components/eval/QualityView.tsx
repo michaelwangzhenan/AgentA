@@ -5,10 +5,10 @@ import { useAuth } from '@/lib/auth'
 import { ResourcePage } from '@/components/resources/ResourcePage'
 import { TraceDashboard } from './TraceDashboard'
 import { GoldenManager } from './GoldenManager'
-import { ReportsViewer } from './ReportsViewer'
-import { OfflineEval, RuntimeMonitor } from './SecurityPanel'
+import { OfflineEvalView } from './OfflineEvalView'
+import { RuntimeMonitor } from './SecurityPanel'
 
-type Tab = 'trace' | 'security_runtime' | 'security_offline' | 'golden' | 'reports'
+type Tab = 'trace' | 'security_runtime' | 'offline' | 'golden'
 
 export function QualityView() {
   const { isAdmin } = useAuth()
@@ -19,9 +19,8 @@ export function QualityView() {
     ...(isAdmin
       ? ([
           { value: 'security_runtime', label: '实时安全监控' },
-          { value: 'security_offline', label: '离线安全评估' },
+          { value: 'offline', label: '离线评估' },
           { value: 'golden', label: 'Golden 管理' },
-          { value: 'reports', label: '综合评估报告' },
         ] as { value: Tab; label: string }[])
       : []),
   ]
@@ -31,9 +30,9 @@ export function QualityView() {
   return (
     <ResourcePage
       title="质量看板"
-      subtitle="在线 trace 可观测 + RAG golden 管理 + 离线评估报告"
-      // 评估报告正文较长，单独放宽到 max-w-6xl；其余标签保持默认
-      maxWidthClassName={active === 'reports' ? 'max-w-6xl' : 'max-w-4xl'}
+      subtitle="在线 trace 可观测 + RAG golden 管理 + 离线评估"
+      // 离线评估含报告正文 / 卡片，放宽到 max-w-6xl；其余标签保持默认
+      maxWidthClassName={active === 'offline' ? 'max-w-6xl' : 'max-w-4xl'}
     >
       <div className="flex min-h-0 flex-1 gap-4">
         {/* 左侧竖向导航（同设置页样式） */}
@@ -62,9 +61,8 @@ export function QualityView() {
         <div className="min-w-0 flex-1">
           {active === 'trace' && <TraceDashboard />}
           {active === 'security_runtime' && isAdmin && <RuntimeMonitor />}
-          {active === 'security_offline' && isAdmin && <OfflineEval />}
+          {active === 'offline' && isAdmin && <OfflineEvalView />}
           {active === 'golden' && isAdmin && <GoldenManager />}
-          {active === 'reports' && isAdmin && <ReportsViewer />}
         </div>
       </div>
     </ResourcePage>

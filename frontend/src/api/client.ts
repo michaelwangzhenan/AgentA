@@ -95,6 +95,9 @@ import type {
   VacuumResult,
 } from '@/types/dbAdmin'
 import type {
+  EvalRunRequest,
+  EvalRunStatus,
+  EvalSummary,
   GoldenCreateInput,
   GoldenItem,
   GoldenList,
@@ -1125,6 +1128,38 @@ export async function getSecurityRuntimeSummary(
   const res = await apiFetch(`/api/eval/security/runtime/summary?range=${range}&limit=${limit}`)
   await _ensureOk(res)
   return (await res.json()) as SecurityRuntimeSummary
+}
+
+// ─── 离线评估：触发 / 状态 / 取消 / 通用摘要 ──────────────────────────────
+
+export async function runEval(req: EvalRunRequest): Promise<EvalRunStatus> {
+  const res = await apiFetch('/api/eval/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as EvalRunStatus
+}
+
+export async function getEvalRunStatus(): Promise<EvalRunStatus> {
+  const res = await apiFetch('/api/eval/run/status')
+  await _ensureOk(res)
+  return (await res.json()) as EvalRunStatus
+}
+
+export async function cancelEval(): Promise<EvalRunStatus> {
+  const res = await apiFetch('/api/eval/run/cancel', { method: 'POST' })
+  await _ensureOk(res)
+  return (await res.json()) as EvalRunStatus
+}
+
+export async function getEvalSummary(task: string, report?: string): Promise<EvalSummary> {
+  const q = new URLSearchParams({ task })
+  if (report) q.set('report', report)
+  const res = await apiFetch(`/api/eval/summary?${q.toString()}`)
+  await _ensureOk(res)
+  return (await res.json()) as EvalSummary
 }
 
 // ─── 数据库（/admin/db/*，仅 admin，只读）────────────────────────────────

@@ -24,6 +24,10 @@ from src.api.deps import (
     require_admin,
 )
 from src.api.schemas.eval import (
+    EvalMetric,
+    EvalRunRequest,
+    EvalRunStatus,
+    EvalSummary,
     GoldenCreateRequest,
     GoldenItem,
     GoldenList,
@@ -45,6 +49,7 @@ from src.api.schemas.eval import (
     TraceSeriesRow,
     TraceSpan,
 )
+import src.eval_runner as eval_runner
 from src.memory.golden_store import GoldenStore
 from src.memory.security_event_store import SecurityEventStore
 from src.memory.trace_store import TraceStore
@@ -247,31 +252,26 @@ def trace_detail(
     return TraceDetail(spans=spans, **fields)
 
 
-# ── 评估报告浏览（admin，只读 reports 目录） ──────────────────────────────────
+# ── 评估报告浏览（admin，只读 tools/reports/<eval>/ 单根） ────────────────────
 
-def _report_roots() -> dict[str, Path]:
-    """报告目录：标识前缀 → 绝对路径。"""
-    repo = Path(__file__).resolve().parents[3]
-    return {
-        "agent_eval": repo / "tools" / "agent_eval" / "reports",
-        "rag_eval": repo / "tools" / "rag_eval" / "reports",
-    }
+def _reports_root() -> Path:
+    """报告统一根目录：tools/reports/（下按 eval 建子目录）。"""
+    return Path(__file__).resolve().parents[3] / "tools" / "reports"
 
 
 @router.get("/reports", response_model=ReportList)
 def list_reports(_: dict = Depends(require_admin)) -> ReportList:
-    """列出全部评估 Markdown 报告（按修改时间倒序）。"""
+    """递归列出 tools/reports/ 下全部 Markdown 报告（按修改时间倒序）。name = 相对路径。"""
+    root = _reports_root()
     items: list[ReportItem] = []
-    for prefix, root in _report_roots().items():
-        if not root.is_dir():
-            continue
-        for fp in root.glob("*.md"):
+    if root.is_dir():
+        for fp in root.rglob("*.md"):
             try:
                 st = fp.stat()
             except OSError:
                 continue
             items.append(ReportItem(
-                name=f"{prefix}/{fp.name}",
+                name=fp.relative_to(root).as_posix(),
                 size=st.st_size,
                 modified_at=int(st.st_mtime),
             ))
@@ -281,18 +281,16 @@ def list_reports(_: dict = Depends(require_admin)) -> ReportList:
 
 @router.get("/reports/content", response_model=ReportContent)
 def report_content(
-    name: str = Query(..., description="形如 agent_eval/perf-xxx.md"),
+    name: str = Query(..., description="相对 tools/reports 的路径，如 security/xxx.md"),
     _: dict = Depends(require_admin),
 ) -> ReportContent:
-    """读取单份报告内容（路径受限于 reports 目录，防目录穿越）。"""
-    roots = _report_roots()
-    prefix, _, fname = name.partition("/")
-    root = roots.get(prefix)
-    if root is None or not fname or "/" in fname or "\\" in fname or ".." in fname:
+    """读取单份报告内容（路径受限于 tools/reports 目录，防目录穿越）。"""
+    if not name or ".." in name or name.startswith(("/", "\\")) or "\\" in name:
         raise HTTPException(status_code=400, detail="非法报告名")
-    fp = (root / fname).resolve()
-    # 二次确认解析后的路径仍落在 root 内（纵深防御）
-    if root.resolve() not in fp.parents or fp.suffix != ".md" or not fp.is_file():
+    root = _reports_root().resolve()
+    fp = (root / name).resolve()
+    # 纵深防御：解析后的路径必须仍落在 root 内，且是 .md 文件
+    if root not in fp.parents or fp.suffix != ".md" or not fp.is_file():
         raise HTTPException(status_code=404, detail="报告不存在")
     return ReportContent(name=name, content=fp.read_text(encoding="utf-8"))
 
@@ -300,8 +298,8 @@ def report_content(
 # ── 安全红队看板（admin，读 security-adversarial-*.json sidecar） ─────────────
 
 def _security_sidecars() -> list[Path]:
-    """按修改时间升序列出全部安全评估 sidecar JSON。"""
-    root = _report_roots()["agent_eval"]
+    """按修改时间升序列出全部安全评估 sidecar JSON（tools/reports/security/）。"""
+    root = _reports_root() / "security"
     if not root.is_dir():
         return []
     files = [fp for fp in root.glob("security-adversarial-*.json") if fp.is_file()]
@@ -388,3 +386,142 @@ def security_runtime_summary(
         by_type=s["by_type"],
         recent=[SecurityEventRow(**r) for r in recent],
     )
+
+
+# ── 离线评估：触发 / 状态 / 取消（admin，单任务全局锁） ───────────────────────
+
+_SECURITY_KINDS = {"direct", "indirect_rag", "indirect_web", "tool_blocklist"}
+
+
+def _threshold(req: EvalRunRequest, key: str) -> float | None:
+    """取并校验一个阈值（0~1）；缺省返回 None。"""
+    th = req.thresholds or {}
+    if key not in th:
+        return None
+    v = th[key]
+    if not isinstance(v, (int, float)) or not (0.0 <= v <= 1.0):
+        raise HTTPException(status_code=400, detail=f"阈值 {key} 需在 0~1 之间")
+    return float(v)
+
+
+def _build_eval_args(req: EvalRunRequest) -> list[str]:
+    """按任务把请求里的 UI 选项拼成命令行参数（白名单，杜绝注入）。"""
+    args: list[str] = []
+    if req.task == "security":
+        if req.no_llm:
+            args.append("--no-llm")
+        if req.kind:
+            if req.kind not in _SECURITY_KINDS:
+                raise HTTPException(status_code=400, detail=f"非法 kind：{req.kind}")
+            args += ["--kind", req.kind]
+        recall = _threshold(req, "recall")
+        if recall is not None:
+            args += ["--recall-threshold", str(recall)]
+        fpr = _threshold(req, "fpr")
+        if fpr is not None:
+            args += ["--fpr-threshold", str(fpr)]
+    return args
+
+
+@router.post("/run", response_model=EvalRunStatus)
+def run_eval(req: EvalRunRequest, _: dict = Depends(require_admin)) -> EvalRunStatus:
+    """触发一个离线评估子进程；已有任务在跑返回 409。"""
+    args = _build_eval_args(req)
+    try:
+        st = eval_runner.start(req.task, args, model=req.model)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    return EvalRunStatus(**st)
+
+
+@router.get("/run/status", response_model=EvalRunStatus)
+def run_status(_: dict = Depends(require_admin)) -> EvalRunStatus:
+    """当前评估任务状态 + 日志末尾（前端轮询用）。"""
+    return EvalRunStatus(**eval_runner.status())
+
+
+@router.post("/run/cancel", response_model=EvalRunStatus)
+def run_cancel(_: dict = Depends(require_admin)) -> EvalRunStatus:
+    """取消当前评估任务（杀进程树）。"""
+    return EvalRunStatus(**eval_runner.cancel())
+
+
+# ── 离线评估：通用摘要卡片（按 task 读最近一次结构化结果） ────────────────────
+
+def _pct(v: float) -> str:
+    return f"{v * 100:.1f}%"
+
+
+def _sidecar_for_report(report: str) -> dict | None:
+    """给一个 .md 报告名，读它配对的 .json sidecar（同名换后缀）；非法 / 缺失返回 None。"""
+    if not report or ".." in report or report.startswith(("/", "\\")) or "\\" in report:
+        return None
+    root = _reports_root().resolve()
+    fp = (root / report).resolve()
+    if root not in fp.parents:
+        return None
+    jp = fp.with_suffix(".json")
+    if not jp.is_file():
+        return None
+    return _load_sidecar(jp)
+
+
+def _sec_summary_from_data(data: dict) -> EvalSummary:
+    """安全红队 sidecar dict → 通用卡片 schema。"""
+    recall = data.get("recall", 0.0)
+    fpr = data.get("fpr", 0.0)
+    rt = data.get("recall_threshold", 0.0)
+    ft = data.get("fpr_threshold", 0.0)
+    return EvalSummary(
+        available=True,
+        task="security",
+        timestamp=data.get("timestamp", ""),
+        git=data.get("git", ""),
+        passed=bool(data.get("passed", False)),
+        partial=bool(data.get("partial", False)),
+        metrics=[
+            EvalMetric(
+                label="拦截率",
+                value=f"{_pct(recall)} ({data.get('attack_blocked', 0)}/{data.get('attacks', 0)})",
+                threshold=f"≥ {_pct(rt)}",
+                ok=recall >= rt,
+            ),
+            EvalMetric(
+                label="误拦率",
+                value=f"{_pct(fpr)} ({data.get('benign_blocked', 0)}/{data.get('benigns', 0)})",
+                threshold=f"≤ {_pct(ft)}",
+                ok=fpr <= ft,
+            ),
+        ],
+    )
+
+
+def _security_summary(report: str | None = None) -> EvalSummary:
+    """安全红队卡片：给 report 则读该报告配对 sidecar，否则取最新一次。"""
+    if report:
+        data = _sidecar_for_report(report)
+        return _sec_summary_from_data(data) if data else EvalSummary(available=False, task="security")
+    for fp in reversed(_security_sidecars()):
+        data = _load_sidecar(fp)
+        if data is not None:
+            return _sec_summary_from_data(data)
+    return EvalSummary(available=False, task="security")
+
+
+# task -> 摘要构造器（接收可选 report 名）；后续 eval 逐个补
+_SUMMARY_BUILDERS = {"security": _security_summary}
+
+
+@router.get("/summary", response_model=EvalSummary)
+def eval_summary(
+    task: str = Query(...),
+    report: str | None = Query(None, description="指定历史报告的 .md 名；空=最新一次"),
+    _: dict = Depends(require_admin),
+) -> EvalSummary:
+    """某 eval 的通用摘要卡片：给 report 则读该报告快照，否则最新。未登记 / 无结果 → available=False。"""
+    builder = _SUMMARY_BUILDERS.get(task)
+    if builder is None:
+        return EvalSummary(available=False, task=task)
+    return builder(report)

@@ -382,8 +382,8 @@ def _dump_report(
     env: dict[str, str],
     judge_enabled: bool,
 ) -> Path:
-    reports_dir = Path(__file__).parent.parent / "reports"
-    reports_dir.mkdir(parents=True, exist_ok=True)
+    from tools.eval_common.report_paths import reports_dir as eval_reports_dir
+    reports_dir = eval_reports_dir("learning_plan")
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     out = reports_dir / f"learning-plan-eval-{ts}.md"
     out.write_text(
