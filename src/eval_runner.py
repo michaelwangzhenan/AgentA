@@ -4,8 +4,8 @@
 - **单任务全局锁**：同时只允许一个 eval 在跑（多数耗 CPU / token，重）。
 - **后台子进程**：`python -m tools.<module> <args>`，stdout/stderr 落 `logs/eval_runs/`；
   与请求解耦——前端轮询 status 看进度，跨页面存活、重连即恢复。
-- **模型注入**：选中的测试模型经子进程 `ACTIVE_MODEL` env 传入（`.env` 未定义该项，
-  各 eval 的 `load_dotenv(override=True)` 不会覆盖它）。不写任何持久配置。
+- **模型注入**：选中的测试模型经子进程 `AGENTA_EVAL_ACTIVE_MODEL` env 传入（该键不在 `.env`，
+  扛得住各 eval 入口的 `load_dotenv(override=True)`；`config.ACTIVE_MODEL` 会优先读它）。不写任何持久配置。
 """
 from __future__ import annotations
 
@@ -86,7 +86,10 @@ def start(task: str, args: list[str], model: str | None = None) -> dict:
 
         env = os.environ.copy()
         if model:
-            env["ACTIVE_MODEL"] = model
+            # 用 AGENTA_EVAL_ACTIVE_MODEL（不在 .env 里）而非直接设 ACTIVE_MODEL：各 eval 入口
+            # 的 load_dotenv(override=True) 会用 .env 的 ACTIVE_MODEL 覆盖普通注入，唯独这个
+            # 专用键不会被覆盖；config.ACTIVE_MODEL 会优先读它。
+            env["AGENTA_EVAL_ACTIVE_MODEL"] = model
 
         cmd = [sys.executable, "-u", "-m", module, *args]
         logf = open(log_path, "w", encoding="utf-8")  # noqa: SIM115 — 进程存活期间持有，结束时关

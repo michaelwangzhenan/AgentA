@@ -78,3 +78,20 @@ def test_cancel_kills(sleeper: str):
 def test_status_idle_initially():
     eval_runner._job = None  # noqa: SLF001
     assert eval_runner.status()["state"] == "idle"
+
+
+def test_model_injected_as_eval_var(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """选中模型经 AGENTA_EVAL_ACTIVE_MODEL 注入（非 ACTIVE_MODEL，否则被 .env override 冲掉）。"""
+    out = tmp_path / "seen_env.txt"
+    mod = tmp_path / "agenta_eval_envdump.py"
+    mod.write_text(
+        "import os, pathlib\n"
+        f"pathlib.Path(r'{out}').write_text(os.environ.get('AGENTA_EVAL_ACTIVE_MODEL', ''), encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path) + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    monkeypatch.setitem(eval_runner.EVAL_MODULES, "envdump", "agenta_eval_envdump")
+
+    eval_runner.start("envdump", [], model="kimi-k2.5")
+    _wait(lambda s: s["state"] == "done")
+    assert out.read_text(encoding="utf-8") == "kimi-k2.5"

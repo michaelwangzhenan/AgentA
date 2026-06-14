@@ -623,7 +623,8 @@ def _mcp_summary_from_data(data: dict) -> EvalSummary:
         timestamp=data.get("timestamp", ""),
         git=data.get("git", ""),
         passed=ok,
-        partial=(not ok) and passed > 0,
+        # partial = 只跑了部分 case（--no-llm 跳过 llm-e2e）；选了模型跑全量时 skipped=0 → 不 partial
+        partial=skipped > 0,
         metrics=[
             EvalMetric(label="通过", value=val, threshold="全过（0 失败）", ok=ok),
         ],
@@ -664,14 +665,13 @@ def _perf_summary_from_data(data: dict) -> EvalSummary:
                 ok=bool(c.get("ok", False)),
             ))
     passed = bool(data.get("passed", False))
-    oks = [bool(m.ok) for m in metrics]
     return EvalSummary(
         available=True,
         task="perf",
         timestamp=data.get("timestamp", ""),
         git=data.get("git", ""),
         passed=passed,
-        partial=(not passed) and any(oks),
+        partial=False,  # 性能始终跑全量（session + memory），无"部分跑"
         metrics=metrics,
     )
 

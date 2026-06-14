@@ -46,7 +46,7 @@ Phase 1 性能基准（session + memory 合二为一）
     - render-list < 100ms          —— 分组 + 多行输出
 
 报告落盘到 `tools/reports/perf/perf-<timestamp>.md`（本次跑过的 target 合并为一份），
-含元信息（时间 / git / python / provider）+ 各 target 测量表 + 判据自动评估（PASS/FAIL），
+含元信息（时间 / git / python）+ 各 target 测量表 + 判据自动评估（PASS/FAIL），
 并附配对 `perf-<timestamp>.json`（供 UI 卡片读）。
 """
 
@@ -66,7 +66,6 @@ from pathlib import Path
 from dotenv import load_dotenv  # noqa: E402
 load_dotenv(override=True)
 
-import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
 from src.cli import handlers  # noqa: E402
 from src.memory.chat_history import ChatHistoryStore  # noqa: E402
 from src.memory.user_memory import UserMemoryStore  # noqa: E402
@@ -88,7 +87,10 @@ def _reports_dir() -> Path:
 
 
 def _collect_env() -> dict[str, str]:
-    """收集报告头部元信息：时间 / git short sha (+ dirty mark) / python / provider。"""
+    """收集报告头部元信息：时间 / git short sha (+ dirty mark) / python。
+
+    性能基准纯 SQLite 计时、不调 LLM，故不记 provider（写了反而误导）。
+    """
     git_part = "?"
     try:
         sha = subprocess.run(
@@ -107,7 +109,6 @@ def _collect_env() -> dict[str, str]:
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "git": git_part,
         "python": platform.python_version(),
-        "provider": getattr(config, "ACTIVE_MODEL", "?"),
     }
 
 
@@ -186,7 +187,6 @@ def _render_report(results: dict[str, list[dict]], env: dict[str, str]) -> str:
     lines.append(f"- **时间**: {env['timestamp']}")
     lines.append(f"- **Git**: {env['git']}")
     lines.append(f"- **Python**: {env['python']}")
-    lines.append(f"- **Provider**: {env['provider']}")
     lines.append("")
     for t, rows in results.items():
         lines.append(f"# {_TARGET_ZH.get(t, t)}")
@@ -227,7 +227,6 @@ def _build_summary(results: dict[str, list[dict]], env: dict[str, str]) -> dict:
         "timestamp": env["timestamp"],
         "git": env["git"],
         "python": env["python"],
-        "provider": env["provider"],
         "targets": targets,
         "passed": all_ok,
     }

@@ -424,7 +424,7 @@ def test_eval_summary_perf_by_report(
     body = r.json()
     assert body["available"] is True
     assert body["passed"] is False
-    assert body["partial"] is True
+    assert body["partial"] is False  # 性能始终跑全量
     assert len(body["metrics"]) == 2
     assert body["metrics"][0]["label"].startswith("会话·")
 

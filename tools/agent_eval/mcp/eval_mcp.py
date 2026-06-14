@@ -58,6 +58,23 @@ _REPORTS_DIR = _eval_reports_dir("mcp")
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
+def _git_rev() -> str:
+    """short sha（+ dirty 标记 *）；git 不在 / 超时不阻塞评估。"""
+    import subprocess
+    try:
+        sha = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, check=False, timeout=2,
+        ).stdout.strip()
+        dirty = "*" if subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True, text=True, check=False, timeout=2,
+        ).stdout.strip() else ""
+        return f"{sha}{dirty}" if sha else "?"
+    except Exception:  # noqa: BLE001
+        return "?"
+
+
 def _load_dataset(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         sys.exit(f"❌ 找不到 dataset：{path}")
@@ -271,9 +288,11 @@ def _format_md_report(
 ) -> None:
     """按 §4.10 评估报告格式落 Markdown。"""
     lines: list[str] = []
-    lines.append(f"# MCP 接入评估报告（Phase 3.3）\n")
+    lines.append(f"# MCP 接入评估报告\n")
     lines.append(f"- **生成时间**：{summary['timestamp']}")
+    lines.append(f"- **Git**：{summary.get('git', '?')}")
     lines.append(f"- **平台**：{summary['platform']}")
+    lines.append(f"- **Provider**：{summary.get('provider', '?')}")
     lines.append(f"- **dataset**：{summary['dataset_path']}")
     lines.append(f"- **模式**：{summary['mode']}")
     lines.append("")
@@ -320,7 +339,7 @@ def _verify_label(vid: int) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="MCP 接入评估器（Phase 3.3）")
+    parser = argparse.ArgumentParser(description="MCP 接入评估器")
     parser.add_argument("--dataset", type=Path, default=_DEFAULT_DATASET)
     parser.add_argument("--case", type=str, default=None, help="只跑指定 case id")
     parser.add_argument("--no-llm", action="store_true", help="跳过 llm-e2e 类 case，不烧 LLM 配额")
@@ -403,7 +422,9 @@ def main() -> None:
     failed_n = len(results) - passed_n - skipped
     summary = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "git": _git_rev(),
         "platform": f"{platform.system()} {platform.release()} / Python {platform.python_version()}",
+        "provider": "—（--no-llm）" if args.no_llm else getattr(_cfg, "ACTIVE_MODEL", "?"),
         "dataset_path": str(args.dataset.relative_to(_PROJECT_ROOT)),
         "mode": "--no-llm" if args.no_llm else "default (含 LLM e2e)",
         "total": len(results),
@@ -418,7 +439,6 @@ def main() -> None:
     report_path = _REPORTS_DIR / f"mcp-{ts}.md"
     _format_md_report(results, summary, report_path)
     # 配对 summary JSON（供「质量看板 → 离线评估」卡片读）
-    import json
     report_path.with_suffix(".json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
     )

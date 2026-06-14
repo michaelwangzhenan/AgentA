@@ -201,6 +201,10 @@ agent_eval/run_all.py
 4. 前端：`OfflineEvalView` 的 `EVAL_TASKS` 加一项 `EvalTaskConfig`——`key/label/usesLlm/noneOption?/reportMatch/options/thresholds?/intro`（intro 8 节文案）。
 5. UT：路由层"选项 / 阈值 → 参数""非法值拒绝"；脚本核心逻辑按需补。
 
+**两条易错点（已踩过坑，新 eval 务必照做）**：
+- **取生成模型一律走 `config.ACTIVE_MODEL`，不要 `os.getenv("ACTIVE_MODEL")`**。UI 选的测试模型由 `eval_runner` 经 **`AGENTA_EVAL_ACTIVE_MODEL`** 注入（该键不在 `.env`，扛得住各 eval 入口的 `load_dotenv(override=True)`；`config.ACTIVE_MODEL` 会优先读它）。直接读 env 会被 `.env` 的 `ACTIVE_MODEL` 覆盖回去，UI 选的模型失效。同理：任何要从 UI 传给子进程、又恰好在 `.env` 里有同名项的值（如评委模型），用 **CLI 参数**或专用注入键，别用同名 env。
+- **`partial`（卡片"部分跑"）语义 = 只跑了部分 case**（如 `--no-llm` / 按 kind 过滤的子集），**不是"部分通过"**。始终跑全量的 eval（memory/skills/perf 等）一律 `partial=False`；只有真能跑子集的（security 的 `no_llm`/kind、mcp 的 `skipped>0`）才按"是否跑了子集"判 `partial`。
+
 ### 3.2.3. reports 目录调整（已确认）
 
 把 `tools/agent_eval/reports` 和 `tools/rag_eval/reports` 合并到 **`tools/reports/<eval>/`**，按 eval 建子目录。**单独一步统一做**（避免新旧双布局过渡）。

@@ -359,7 +359,9 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
 
 # 全局默认 LLM 模型（model id，厂商从 MODEL_CONFIGS 反推）。CLI 直接用它；Web 端每用户在
 # 聊天页自选、未选时回落到此；评估脚本生成答案也用它。可选值见 MODEL_CONFIGS 的 key
-ACTIVE_MODEL: str = os.getenv("ACTIVE_MODEL", "kimi-k2.5")
+# AGENTA_EVAL_ACTIVE_MODEL 优先：离线评估子进程注入它临时指定测试模型——该变量不在 .env 里，
+# 故能扛住各 eval 入口的 load_dotenv(override=True)（否则会被 .env 的 ACTIVE_MODEL 覆盖回去）。
+ACTIVE_MODEL: str = os.getenv("AGENTA_EVAL_ACTIVE_MODEL") or os.getenv("ACTIVE_MODEL", "kimi-k2.5")
 
 # ChromaDB 存储路径（仅向量库元数据 + 段目录；BM25 默认另见 BM25_INDEX_DIR）
 CHROMA_DB_PATH: str = os.getenv("CHROMA_DB_PATH", "./db/chroma")
