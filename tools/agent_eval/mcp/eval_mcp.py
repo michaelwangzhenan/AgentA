@@ -68,10 +68,10 @@ def _load_dataset(path: Path) -> list[dict[str, Any]]:
 
 
 def _run_c1(case: dict[str, Any]) -> tuple[bool, str]:
-    """验收 ① 配置驱动接入：解析 .example 模板。"""
+    """验收 ① 配置驱动接入：解析 .agenta/mcp/config.json。"""
     specs = load_mcp_config(
         root=_PROJECT_ROOT,
-        file=".agenta/mcp/config.json.example",
+        file=".agenta/mcp/config.json",
     )
     if specs is None:
         return False, "load_mcp_config 返回 None（应解析出 2 个 server）"
@@ -339,10 +339,10 @@ def main() -> None:
         reset_shared_manager_for_tests()
         specs = load_mcp_config(
             root=_PROJECT_ROOT,
-            file=".agenta/mcp/config.json.example",
+            file=".agenta/mcp/config.json",
         )
         if not specs:
-            sys.exit("❌ 解析 .agenta/mcp/config.json.example 失败")
+            sys.exit("❌ 解析 .agenta/mcp/config.json 失败")
 
         # 评估器宽松环境调整：
         # - command "python" 替换为当前解释器（避免找不到 venv 装的 mcp_server_fetch）
@@ -400,6 +400,7 @@ def main() -> None:
             reset_shared_manager_for_tests()
 
     passed_n = sum(1 for r in results if r["status"] == "passed")
+    failed_n = len(results) - passed_n - skipped
     summary = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "platform": f"{platform.system()} {platform.release()} / Python {platform.python_version()}",
@@ -408,12 +409,19 @@ def main() -> None:
         "total": len(results),
         "passed": passed_n,
         "skipped": skipped,
+        "failed": failed_n,
+        "ok": failed_n == 0,  # 验收"全过"= 无 failed（skipped 不算失败）
     }
 
     _REPORTS_DIR.mkdir(exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     report_path = _REPORTS_DIR / f"mcp-{ts}.md"
     _format_md_report(results, summary, report_path)
+    # 配对 summary JSON（供「质量看板 → 离线评估」卡片读）
+    import json
+    report_path.with_suffix(".json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     print()
     print(f"=== 总结：{passed_n}/{len(results)} passed (skipped {skipped}) ===")

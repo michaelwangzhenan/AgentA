@@ -101,6 +101,39 @@ const EVAL_TASKS: EvalTaskConfig[] = [
     },
   },
   {
+    key: 'mcp',
+    label: 'MCP 接入',
+    usesLlm: true,
+    noneOption: true,
+    defaultModelNone: true, // 默认 None = 只跑 structural（真启 server、不烧 token）
+    reportMatch: 'mcp/',
+    options: [],
+    intro: {
+      purpose:
+        '检验 MCP（Model Context Protocol，模型上下文协议）工具接入是否可用且安全：能真启外部 MCP server、能被 LLM 正确选用、并守住 SSRF（服务端请求伪造）等防线。',
+      how: [
+        '① 选「测试模型」：默认 None = 只跑 structural（真启 npx / mcp_server_fetch 子进程，不调 LLM、不耗 token）；选具体模型 = 额外跑 llm-e2e（真发 LLM 选 tool）。',
+        '② 点「开始评估」，看运行日志。',
+        '③ 跑完看上方摘要卡片，下方历史报告按验收编号①-⑦看明细。',
+      ],
+      params: ['无额外开关；是否含 llm-e2e 由「测试模型」是否选 None 决定。'],
+      principle: [
+        'structural：真启 MCP server 子进程，走完整 tool 调用栈，验证连通 / 参数 / SSRF 防御等，不调 LLM。',
+        'llm-e2e：真发 LLM + 真 MCP server，验证「用户 query → LLM 选 tool → 返回正解」整条链路。',
+        '每条 case 显式声明对应的验收标准编号（验收①-⑦），报告按编号分组。',
+      ],
+      metrics: [
+        '通过：通过的 case 数 / 总数；无失败（0 failed）才判「通过」，跳过的 case（None 模式下的 llm-e2e）不算失败。',
+      ],
+      cost: [
+        '默认 None：只跑 structural，不耗 token，但会真启子进程，约分钟级。',
+        '选模型：额外跑 llm-e2e，耗所选模型 token、更慢。',
+      ],
+      dataset:
+        'case 来自 tools/agent_eval/mcp/ 的 dataset；MCP server 配置取自 .agenta/mcp/config.json。',
+    },
+  },
+  {
     key: 'security',
     label: '安全红队',
     usesLlm: true,

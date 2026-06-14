@@ -242,6 +242,12 @@ agent_eval/run_all.py
 
 ### 3.2.7. MCP
 
+按统一标准接入（task=`mcp`，模块 `tools.agent_eval.mcp.eval_mcp`），属"全过"判定型（非阈值型）：
+
+- **模型下拉带 None、默认 None**：None = 只跑 structural（真启 MCP server 子进程、不调 LLM、不耗 token）；选模型 = 额外跑 llm-e2e（`--no-llm` 仅在 None 时传）。无额外 options、无阈值。
+- **判定**：验收①-⑦无 failed 即"通过"；`--no-llm` 模式下被跳过的 llm-e2e case 不算失败。卡片一条「通过」指标（passed/total（+跳过 N）、阈值"全过"）。
+- 产出：脚本写报告时配对输出 summary JSON（含 total/passed/skipped/failed/ok）；后端新增 `_mcp_summary`（"全过"型，部分通过标 partial）+ `EVAL_MODULES['mcp']` + mcp 分支（None→`--no-llm`）。
+
 ### 3.2.8. 性能
 ### 3.2.9. 安全红队（框架任务已含，本节留细化 / 复核）
 

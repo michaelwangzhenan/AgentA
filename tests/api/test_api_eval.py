@@ -337,6 +337,38 @@ def test_eval_run_skills_pass_threshold(
     assert "0.75" in seen["args"]
 
 
+def test_eval_run_mcp_no_model_skips_llm(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict = {}
+    monkeypatch.setattr(
+        "src.eval_runner.start",
+        lambda task, args, model=None: (seen.update(args=args, model=model) or {
+            "state": "running", "task": task, "model": model, "args": args,
+            "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
+    )
+    # 不选模型（None）→ 只跑 structural
+    r = client.post("/api/eval/run", json={"task": "mcp", "no_llm": True})
+    assert r.status_code == 200
+    assert "--no-llm" in seen["args"]
+
+
+def test_eval_run_mcp_with_model_full(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict = {}
+    monkeypatch.setattr(
+        "src.eval_runner.start",
+        lambda task, args, model=None: (seen.update(args=args, model=model) or {
+            "state": "running", "task": task, "model": model, "args": args,
+            "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
+    )
+    r = client.post("/api/eval/run", json={"task": "mcp", "model": "kimi-k2.5"})
+    assert r.status_code == 200
+    assert "--no-llm" not in seen["args"]
+    assert seen["model"] == "kimi-k2.5"
+
+
 def test_eval_run_status_ok(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "src.eval_runner.status",
@@ -382,3 +414,32 @@ def test_eval_summary_by_report(
     assert body["available"] is True
     assert body["passed"] is True
     assert len(body["metrics"]) == 2
+
+
+def test_eval_summary_mcp_by_report(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """MCP sidecar：有失败即不通过；skipped 不算失败。"""
+    import json
+
+    import src.api.routes.eval as evalmod
+
+    root = tmp_path / "reports"
+    (root / "mcp").mkdir(parents=True)
+    sidecar = {
+        "timestamp": "2026-06-14 10:00:00",
+        "total": 10, "passed": 7, "skipped": 2, "failed": 1, "ok": False,
+    }
+    name = "mcp/mcp-20260614-100000"
+    (root / f"{name}.json").write_text(json.dumps(sidecar), encoding="utf-8")
+    (root / f"{name}.md").write_text("# r", encoding="utf-8")
+    monkeypatch.setattr(evalmod, "_reports_root", lambda: root)
+
+    r = client.get(f"/api/eval/summary?task=mcp&report={name}.md")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["available"] is True
+    assert body["passed"] is False
+    assert body["partial"] is True
+    assert len(body["metrics"]) == 1
+    assert "跳过 2" in body["metrics"][0]["value"]

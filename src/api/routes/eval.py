@@ -449,6 +449,10 @@ def _build_eval_args(req: EvalRunRequest) -> list[str]:
         pt = _threshold(req, "pass")
         if pt is not None:
             args += ["--pass-threshold", str(pt)]
+    elif req.task == "mcp":
+        # 选 None（no_llm）= 只跑 structural，不烧 LLM；否则含 llm-e2e。无阈值（验收"全过"判定）
+        if req.no_llm:
+            args.append("--no-llm")
     return args
 
 
@@ -593,6 +597,47 @@ def _rag_summary(report: str | None = None) -> EvalSummary:
     return EvalSummary(available=False, task="rag")
 
 
+def _mcp_summary_from_data(data: dict) -> EvalSummary:
+    """MCP sidecar dict → 通用卡片：验收"全过"判定（无失败即过，skipped 不算失败）。"""
+    total = data.get("total", 0)
+    passed = data.get("passed", 0)
+    skipped = data.get("skipped", 0)
+    failed = data.get("failed", total - passed - skipped)
+    ok = bool(data.get("ok", failed == 0))
+    val = f"{passed}/{total}"
+    if skipped:
+        val += f"（跳过 {skipped}）"
+    return EvalSummary(
+        available=True,
+        task="mcp",
+        timestamp=data.get("timestamp", ""),
+        git=data.get("git", ""),
+        passed=ok,
+        partial=(not ok) and passed > 0,
+        metrics=[
+            EvalMetric(label="通过", value=val, threshold="全过（0 失败）", ok=ok),
+        ],
+    )
+
+
+def _mcp_summary(report: str | None = None) -> EvalSummary:
+    """MCP 卡片：给 report 读其配对 sidecar；否则取 tools/reports/mcp 下最新一份。"""
+    if report:
+        data = _sidecar_for_report(report)
+        return _mcp_summary_from_data(data) if data else EvalSummary(available=False, task="mcp")
+    root = _reports_root() / "mcp"
+    if root.is_dir():
+        jsons = sorted(
+            (fp for fp in root.glob("*.json") if fp.is_file()),
+            key=lambda p: p.stat().st_mtime,
+        )
+        for fp in reversed(jsons):
+            data = _load_sidecar(fp)
+            if data is not None:
+                return _mcp_summary_from_data(data)
+    return EvalSummary(available=False, task="mcp")
+
+
 def _passrate_summary(task: str, subdir: str, label: str):
     """通用"通过率"型 eval 的卡片构造器工厂（如记忆 / skill / srs 等）。
 
@@ -644,6 +689,7 @@ _SUMMARY_BUILDERS = {
     "rag": _rag_summary,
     "memory": _passrate_summary("memory", "memory", "通过率"),
     "skills": _passrate_summary("skills", "skills", "识别通过率"),
+    "mcp": _mcp_summary,
 }
 
 

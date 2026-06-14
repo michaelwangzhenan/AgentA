@@ -3,7 +3,7 @@
     "id": "C1-config-driven-load",
     "verify": 1,
     "category": "structural",
-    "description": "按 .agenta/mcp/config.json.example 模板能解析出 filesystem + fetch 两个 ServerSpec（验收 ① 配置驱动接入）",
+    "description": "按 .agenta/mcp/config.json 能解析出 filesystem + fetch 两个 ServerSpec（验收 ① 配置驱动接入）",
     "expect": {
       "server_count": 2,
       "server_names_subset": ["filesystem", "fetch"]

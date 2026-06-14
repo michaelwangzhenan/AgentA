@@ -26,6 +26,7 @@ EVAL_MODULES: dict[str, str] = {
     "rag": "tools.rag_eval.runner",
     "memory": "tools.agent_eval.memory.recall_golden",
     "skills": "tools.agent_eval.skills.recall_skill",
+    "mcp": "tools.agent_eval.mcp.eval_mcp",
 }
 
 _lock = threading.Lock()
