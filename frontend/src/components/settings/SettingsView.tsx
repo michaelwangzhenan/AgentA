@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Search } from 'lucide-react'
 
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
   AlertDialog,
@@ -16,7 +15,7 @@ import {
 import { ResourcePage } from '@/components/resources/ResourcePage'
 import { ConfigField } from '@/components/settings/ConfigField'
 import { RoutingPoolConfig } from '@/components/settings/RoutingPoolConfig'
-import { getConfig, patchConfig, reloadConfig, resetConfig } from '@/api/client'
+import { getConfig, patchConfig, resetConfig } from '@/api/client'
 import type { ConfigGroupView, ConfigItemView } from '@/types/config'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
@@ -65,27 +64,6 @@ export function SettingsView({
       setActiveGroup((prev) => prev ?? res.groups[0]?.name ?? null)
     } catch (e) {
       setLoadError((e as Error).message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  const handleReload = useCallback(async () => {
-    setLoading(true)
-    setLoadError(null)
-    try {
-      const res = await reloadConfig()
-      setGroups(res.config.groups)
-      setActiveGroup((prev) => prev ?? res.config.groups[0]?.name ?? null)
-      const n = res.changed_keys.length
-      if (n === 0) {
-        toast.success('overrides 文件已是最新，无变化')
-      } else {
-        toast.success(`已从文件同步 ${n} 项配置：${res.changed_keys.join(', ')}`)
-      }
-    } catch (e) {
-      setLoadError((e as Error).message)
-      toast.error((e as Error).message)
     } finally {
       setLoading(false)
     }
@@ -286,25 +264,9 @@ export function SettingsView({
     return counts
   }, [edits, groups])
 
-  const toolbar = (
-    <>
-      {inflightCount > 0 && (
-        <span className="text-xs text-muted-foreground">{inflightCount} 项保存中…</span>
-      )}
-      <Button
-        onClick={handleReload}
-        size="sm"
-        variant="outline"
-        disabled={loading}
-        title="重新读取 .agenta/config_overrides.json 并同步到内存；手动改过该文件后用。"
-      >
-        从文件重载
-      </Button>
-      <Button onClick={refresh} size="sm" variant="outline" disabled={loading}>
-        刷新
-      </Button>
-    </>
-  )
+  const toolbar = inflightCount > 0 ? (
+    <span className="text-xs text-muted-foreground">{inflightCount} 项保存中…</span>
+  ) : null
 
   const content = (
     <>
@@ -501,7 +463,7 @@ export function SettingsView({
             {title && <h2 className="text-sm font-semibold tracking-tight">{title}</h2>}
             {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
           </div>
-          <div className="flex shrink-0 items-center gap-2">{toolbar}</div>
+          {toolbar && <div className="flex shrink-0 items-center gap-2">{toolbar}</div>}
         </div>
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
           {content}
