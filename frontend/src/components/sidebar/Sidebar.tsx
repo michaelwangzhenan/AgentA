@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react'
-import { useState } from 'react'
+import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   BarChart3,
   BookOpen,
@@ -54,6 +54,10 @@ import { cn } from '@/lib/utils'
 import type { Session } from '@/types/session'
 
 const RECENTS_COLLAPSED_KEY = 'agenta:sidebar:recentsCollapsed'
+const SIDEBAR_WIDTH_KEY = 'agenta:sidebar:width'
+const SIDEBAR_MIN_WIDTH = 150
+const SIDEBAR_MAX_WIDTH = 480
+const SIDEBAR_DEFAULT_WIDTH = 256
 
 export type ViewKind =
   | 'chat'
@@ -111,6 +115,74 @@ export function Sidebar(props: SidebarProps) {
     }
   })
 
+  // 侧边栏宽度可拖拽调整，记到 localStorage；启动时夹到 [MIN, MAX]
+  const [width, setWidth] = useState<number>(() => {
+    try {
+      const n = parseInt(localStorage.getItem(SIDEBAR_WIDTH_KEY) ?? '', 10)
+      if (!Number.isNaN(n)) {
+        return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, n))
+      }
+    } catch {
+      // localStorage 不可用时退回默认宽度
+    }
+    return SIDEBAR_DEFAULT_WIDTH
+  })
+  const [resizing, setResizing] = useState(false)
+  const widthRef = useRef(width)
+  widthRef.current = width
+
+  const startResize = (e: ReactPointerEvent) => {
+    e.preventDefault()
+    setResizing(true)
+    const startX = e.clientX
+    const startW = widthRef.current
+    // 拖动期间禁用选中 / 统一光标，避免选到文本或光标闪烁
+    const prevUserSelect = document.body.style.userSelect
+    const prevCursor = document.body.style.cursor
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'col-resize'
+
+    const onMove = (ev: PointerEvent) => {
+      const next = Math.min(
+        SIDEBAR_MAX_WIDTH,
+        Math.max(SIDEBAR_MIN_WIDTH, startW + (ev.clientX - startX)),
+      )
+      setWidth(next)
+    }
+    const onUp = () => {
+      setResizing(false)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      document.body.style.userSelect = prevUserSelect
+      document.body.style.cursor = prevCursor
+      try {
+        localStorage.setItem(SIDEBAR_WIDTH_KEY, String(widthRef.current))
+      } catch {
+        // 隐私模式下忽略
+      }
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
+  // 双击分隔条重置为默认宽度
+  const resetWidth = () => {
+    setWidth(SIDEBAR_DEFAULT_WIDTH)
+    try {
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(SIDEBAR_DEFAULT_WIDTH))
+    } catch {
+      // 隐私模式下忽略
+    }
+  }
+
+  // 组件卸载时兜底恢复 body 样式（拖动中卸载的极端情况）
+  useEffect(() => {
+    return () => {
+      document.body.style.userSelect = ''
+      document.body.style.cursor = ''
+    }
+  }, [])
+
   const toggleRecents = () => {
     setRecentsCollapsed((prev) => {
       const next = !prev
@@ -154,7 +226,10 @@ export function Sidebar(props: SidebarProps) {
   }
 
   return (
-    <aside className="flex h-full w-64 flex-col border-r border-border bg-muted/30">
+    <aside
+      className="relative flex h-full shrink-0 flex-col border-r border-border bg-muted/30"
+      style={{ width }}
+    >
       <div className="border-b border-border p-3">
         <Button
           variant="outline"
@@ -457,6 +532,20 @@ export function Sidebar(props: SidebarProps) {
           <p className="text-sm text-muted-foreground">帮助文档即将上线，敬请期待。</p>
         </DialogContent>
       </Dialog>
+
+      {/* 右缘拖拽条：拖动调宽度，双击重置默认 */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="拖动调整侧边栏宽度"
+        onPointerDown={startResize}
+        onDoubleClick={resetWidth}
+        className={cn(
+          'absolute -right-0.5 top-0 z-20 h-full w-1.5 cursor-col-resize transition-colors',
+          'hover:bg-primary/40',
+          resizing && 'bg-primary/60',
+        )}
+      />
     </aside>
   )
 }

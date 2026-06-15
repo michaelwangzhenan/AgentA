@@ -104,7 +104,14 @@ export function PricingConfig() {
           <div className="border-b border-border bg-muted/50 px-3 py-1.5 text-xs font-medium text-muted-foreground">
             {g.label}
           </div>
-          <table className="w-full text-sm">
+          <table className="w-full table-fixed text-sm">
+            <colgroup>
+              {/* 模型列吃剩余宽度，其余列固定 —— 保证各 provider 表第 2/3/4 列横向对齐 */}
+              <col />
+              <col className="w-36" />
+              <col className="w-36" />
+              <col className="w-28" />
+            </colgroup>
             <thead>
               <tr className="border-b border-border text-left text-xs text-muted-foreground">
                 <th className="px-3 py-2 font-medium">模型</th>

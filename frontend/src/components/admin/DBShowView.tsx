@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { ChevronRight, Loader2 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
+import { Boxes, ChevronRight, Database, Loader2, Search, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { cn } from '@/lib/utils'
@@ -60,11 +61,11 @@ const CHROMA_SCAN_CAP_HINT = 20000
 
 export function DBShowView() {
   const [tab, setTab] = useState<Tab>('chroma')
-  const tabs: { value: Tab; label: string }[] = [
-    { value: 'chroma', label: 'Chroma' },
-    { value: 'bm25', label: 'BM25' },
-    { value: 'sqlite', label: 'SQLite' },
-    { value: 'maintenance', label: '维护' },
+  const tabs: { value: Tab; label: string; icon: LucideIcon }[] = [
+    { value: 'chroma', label: 'Chroma', icon: Boxes },
+    { value: 'bm25', label: 'BM25', icon: Search },
+    { value: 'sqlite', label: 'SQLite', icon: Database },
+    { value: 'maintenance', label: '维护', icon: Wrench },
   ]
 
   return (
@@ -81,12 +82,13 @@ export function DBShowView() {
                   type="button"
                   onClick={() => setTab(t.value)}
                   className={cn(
-                    'w-full rounded-md px-2.5 py-1.5 text-left text-sm transition-colors',
+                    'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors',
                     tab === t.value
                       ? 'bg-muted font-medium text-foreground'
                       : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
                   )}
                 >
+                  <t.icon className="h-4 w-4 shrink-0" />
                   {t.label}
                 </button>
               </li>

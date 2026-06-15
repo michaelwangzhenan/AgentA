@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import type { LucideIcon } from 'lucide-react'
+import { Activity, ClipboardCheck, ShieldAlert, Star } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/auth'
@@ -34,14 +36,15 @@ export function QualityView({
     if (goldenTabSignal) setTab('golden')
   }, [goldenTabSignal])
 
-  const tabs: { value: Tab; label: string }[] = [
-    { value: 'trace', label: '会话监控' },
+  type TabDef = { value: Tab; label: string; icon: LucideIcon }
+  const tabs: TabDef[] = [
+    { value: 'trace', label: '会话监控', icon: Activity },
     ...(isAdmin
       ? ([
-          { value: 'security_runtime', label: '实时安全监控' },
-          { value: 'offline', label: '离线评估' },
-          { value: 'golden', label: 'Golden 管理' },
-        ] as { value: Tab; label: string }[])
+          { value: 'security_runtime', label: '实时安全监控', icon: ShieldAlert },
+          { value: 'offline', label: '离线评估', icon: ClipboardCheck },
+          { value: 'golden', label: 'Golden 管理', icon: Star },
+        ] as TabDef[])
       : []),
   ]
 
@@ -62,12 +65,13 @@ export function QualityView({
                   type="button"
                   onClick={() => setTab(t.value)}
                   className={cn(
-                    'w-full rounded-md px-2.5 py-1.5 text-left text-sm transition-colors',
+                    'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors',
                     active === t.value
                       ? 'bg-muted font-medium text-foreground'
                       : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
                   )}
                 >
+                  <t.icon className="h-4 w-4 shrink-0" />
                   {t.label}
                 </button>
               </li>

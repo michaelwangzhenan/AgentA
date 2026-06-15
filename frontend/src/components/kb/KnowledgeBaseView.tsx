@@ -67,7 +67,7 @@ export function KnowledgeBaseView({
       </header>
 
       <div className="flex-1 overflow-y-auto p-6">
-        <div className="mx-auto max-w-4xl space-y-6">
+        <div className="max-w-6xl space-y-6">
           {alias === null ? (
             <L1View onOpen={setAlias} onGotoGolden={onGotoGolden} />
           ) : (
