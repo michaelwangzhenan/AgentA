@@ -30,7 +30,9 @@ export function ResourcePage({
         {toolbar && <div className="flex items-center gap-2">{toolbar}</div>}
       </header>
       <div className="flex-1 overflow-y-auto p-6">
-        <div className={cn('mx-auto flex h-full flex-col space-y-4', maxWidthClassName)}>
+        {/* 左对齐（不 mx-auto 居中）：内容只向右扩展、左缘恒定，切到更宽的页
+            （如离线评估 max-w-6xl）不会推动页内左侧导航 */}
+        <div className={cn('flex h-full flex-col space-y-4', maxWidthClassName)}>
           {children}
         </div>
       </div>
