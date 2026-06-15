@@ -510,6 +510,84 @@ def test_eval_run_plan_no_judge_skips_judge_model(
     assert "--judge-model" not in seen["args"]
 
 
+def test_eval_run_learning_plan_args(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict = {}
+    monkeypatch.setattr(
+        "src.eval_runner.start",
+        lambda task, args, model=None: (seen.update(args=args) or {
+            "state": "running", "task": task, "model": model, "args": args,
+            "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
+    )
+    r = client.post(
+        "/api/eval/run",
+        json={"task": "learning_plan", "model": "kimi-k2.5",
+              "options": {"judge": True, "judge_model": "deepseek-v4-pro"},
+              "thresholds": {"recall": 0.75, "quality": 4.2}},
+    )
+    assert r.status_code == 200
+    assert "--recall-threshold" in seen["args"]
+    assert "0.75" in seen["args"]
+    assert "--quality-threshold" in seen["args"]
+    assert "4.2" in seen["args"]
+    assert "--judge-model" in seen["args"]
+    assert "deepseek-v4-pro" in seen["args"]
+
+
+def test_eval_summary_learning_plan_by_report(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import json
+
+    import src.api.routes.eval as evalmod
+
+    root = tmp_path / "reports"
+    (root / "learning_plan").mkdir(parents=True)
+    sidecar = {
+        "timestamp": "2026-06-15 10:00:00", "git": "abc",
+        "judge_enabled": True, "partial": False,
+        "recall": 0.9, "recall_passed": 9, "total": 10, "recall_threshold": 0.8,
+        "struct_score": 4.3, "struct_threshold": 4.0,
+        "passed": True,
+    }
+    name = "learning_plan/learning-plan-eval-20260615-100000"
+    (root / f"{name}.json").write_text(json.dumps(sidecar), encoding="utf-8")
+    (root / f"{name}.md").write_text("# r", encoding="utf-8")
+    monkeypatch.setattr(evalmod, "_reports_root", lambda: root)
+
+    r = client.get(f"/api/eval/summary?task=learning_plan&report={name}.md")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["available"] is True
+    assert body["passed"] is True
+    assert len(body["metrics"]) == 2
+    assert body["metrics"][1]["label"] == "plan 质量均分"
+
+
+def test_eval_run_quiz_args(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict = {}
+    monkeypatch.setattr(
+        "src.eval_runner.start",
+        lambda task, args, model=None: (seen.update(args=args) or {
+            "state": "running", "task": task, "model": model, "args": args,
+            "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
+    )
+    r = client.post(
+        "/api/eval/run",
+        json={"task": "quiz", "model": "kimi-k2.5",
+              "options": {"judge": True, "judge_model": "deepseek-v4-pro"},
+              "thresholds": {"recall": 0.8, "quality": 4.0}},
+    )
+    assert r.status_code == 200
+    assert "--recall-threshold" in seen["args"]
+    assert "--quality-threshold" in seen["args"]
+    assert "--judge-model" in seen["args"]
+    assert "deepseek-v4-pro" in seen["args"]
+
+
 def test_eval_run_perf_target_all(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

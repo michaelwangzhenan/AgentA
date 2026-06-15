@@ -479,6 +479,21 @@ def _build_eval_args(req: EvalRunRequest) -> list[str]:
             judge = opts.get("judge_model")
             if judge and isinstance(judge, str):
                 args += ["--judge-model", judge]
+    elif req.task in ("learning_plan", "quiz"):
+        # 同 plan：识别 + 质量 judge 两层；阈值 recall + quality（质量 0-5），可关 judge、可配评委模型
+        judge_on = opts.get("judge", True) is not False
+        if not judge_on:
+            args.append("--no-judge")
+        recall = _threshold(req, "recall")
+        if recall is not None:
+            args += ["--recall-threshold", str(recall)]
+        quality = _threshold(req, "quality", hi=5.0)
+        if quality is not None:
+            args += ["--quality-threshold", str(quality)]
+        if judge_on:
+            judge = opts.get("judge_model")
+            if judge and isinstance(judge, str):
+                args += ["--judge-model", judge]
     return args
 
 
@@ -710,54 +725,63 @@ def _perf_summary(report: str | None = None) -> EvalSummary:
     return EvalSummary(available=False, task="perf")
 
 
-def _plan_summary_from_data(data: dict) -> EvalSummary:
-    """Plan sidecar dict → 判定型卡片：识别通过率 + plan 结构均分（关 judge 时只有前者）。"""
-    rate = data.get("recall", 0.0)
-    rt = data.get("recall_threshold", 0.0)
-    metrics = [
-        EvalMetric(
-            label="识别通过率",
-            value=f"{_pct(rate)} ({data.get('recall_passed', 0)}/{data.get('total', 0)})",
-            threshold=f"≥ {_pct(rt)}",
-            ok=rate >= rt,
-        ),
-    ]
-    score = data.get("struct_score")
-    st = data.get("struct_threshold", 0.0)
-    if isinstance(score, (int, float)):
-        metrics.append(EvalMetric(
-            label="plan 结构均分",
-            value=f"{score:.2f}/5",
-            threshold=f"≥ {st}",
-            ok=score >= st,
-        ))
-    return EvalSummary(
-        available=True,
-        task="plan",
-        timestamp=data.get("timestamp", ""),
-        git=data.get("git", ""),
-        passed=bool(data.get("passed", False)),
-        partial=bool(data.get("partial", False)),  # --no-judge = 只跑识别层
-        metrics=metrics,
-    )
+def _recall_quality_summary(task: str, subdir: str, score_label: str):
+    """识别通过率 + LLM-judge 质量分"双指标判定型 eval 的卡片工厂（plan / learning_plan）。
 
+    sidecar 需含 recall / recall_threshold / recall_passed / total + struct_score / struct_threshold
+    （struct_score=None 表示关了 judge，只显示识别一条）+ passed / partial。
+    """
 
-def _plan_summary(report: str | None = None) -> EvalSummary:
-    """Plan 卡片：给 report 读其配对 sidecar；否则取 tools/reports/plan 下最新一份。"""
-    if report:
-        data = _sidecar_for_report(report)
-        return _plan_summary_from_data(data) if data else EvalSummary(available=False, task="plan")
-    root = _reports_root() / "plan"
-    if root.is_dir():
-        jsons = sorted(
-            (fp for fp in root.glob("*.json") if fp.is_file()),
-            key=lambda p: p.stat().st_mtime,
+    def _from_data(data: dict) -> EvalSummary:
+        rate = data.get("recall", 0.0)
+        rt = data.get("recall_threshold", 0.0)
+        metrics = [
+            EvalMetric(
+                label="识别通过率",
+                value=f"{_pct(rate)} ({data.get('recall_passed', 0)}/{data.get('total', 0)})",
+                threshold=f"≥ {_pct(rt)}",
+                ok=rate >= rt,
+            ),
+        ]
+        score = data.get("struct_score")
+        st = data.get("struct_threshold", 0.0)
+        if isinstance(score, (int, float)):
+            metrics.append(EvalMetric(
+                label=score_label,
+                value=f"{score:.2f}/5",
+                threshold=f"≥ {st}",
+                ok=score >= st,
+            ))
+        return EvalSummary(
+            available=True,
+            task=task,
+            timestamp=data.get("timestamp", ""),
+            git=data.get("git", ""),
+            passed=bool(data.get("passed", False)),
+            partial=bool(data.get("partial", False)),  # --no-judge = 只跑识别层
+            metrics=metrics,
         )
-        for fp in reversed(jsons):
-            data = _load_sidecar(fp)
-            if data is not None:
-                return _plan_summary_from_data(data)
-    return EvalSummary(available=False, task="plan")
+
+    def _builder(report: str | None = None) -> EvalSummary:
+        if report:
+            data = _sidecar_for_report(report)
+            return _from_data(data) if data else EvalSummary(available=False, task=task)
+        root = _reports_root() / subdir
+        if root.is_dir():
+            jsons = sorted(
+                (fp for fp in root.glob("*.json") if fp.is_file()),
+                key=lambda p: p.stat().st_mtime,
+            )
+            for fp in reversed(jsons):
+                data = _load_sidecar(fp)
+                if data is not None:
+                    return _from_data(data)
+        return EvalSummary(available=False, task=task)
+
+    return _builder
+
+
+_plan_summary = _recall_quality_summary("plan", "plan", "plan 结构均分")
 
 
 def _passrate_summary(task: str, subdir: str, label: str):
@@ -815,6 +839,8 @@ _SUMMARY_BUILDERS = {
     "perf": _perf_summary,
     "plan": _plan_summary,
     "harness": _passrate_summary("harness", "harness", "通过率"),
+    "learning_plan": _recall_quality_summary("learning_plan", "learning_plan", "plan 质量均分"),
+    "quiz": _recall_quality_summary("quiz", "quiz", "plan 质量均分"),
 }
 
 

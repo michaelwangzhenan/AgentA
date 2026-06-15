@@ -65,5 +65,6 @@ export type ProviderModels = {
 
 export type ModelsResponse = {
   active: string
+  eval_judge?: string // 评委默认模型（EVAL_JUDGE_MODEL；空=回落被测模型）
   providers: ProviderModels[]
 }

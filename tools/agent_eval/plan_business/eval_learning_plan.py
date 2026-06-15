@@ -30,6 +30,7 @@ import json
 import platform
 import subprocess
 import sys
+from contextlib import nullcontext
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -158,23 +159,31 @@ def _judge_recall(
 
 
 def _judge_plan_quality(
-    question: str, steps: list[str],
+    question: str, steps: list[str], judge_model: str = "",
 ) -> tuple[float | None, str]:
-    """对 make_plan 嵌套出的 steps 评学习计划质量分（0-5）。"""
+    """对 make_plan 嵌套出的 steps 评学习计划质量分（0-5）。
+
+    judge_model 非空时用 use_llm_prefs 把评委切到该模型（关 thinking、温度 0），
+    与 RAG / plan 评委一致；为空则用当前被测模型（自评）。
+    """
     plan_block = "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(steps))
-    res = judge_with_llm(
-        role_intro="你是一个学习计划质量评委",
-        prompt=question,
-        output=plan_block,
-        criteria=_PLAN_QUALITY_CRITERIA,
-    )
+    ctx = config.use_llm_prefs(judge_model, False, 0) if judge_model else nullcontext()
+    with ctx:
+        res = judge_with_llm(
+            role_intro="你是一个学习计划质量评委",
+            prompt=question,
+            output=plan_block,
+            criteria=_PLAN_QUALITY_CRITERIA,
+        )
     return res.score, res.reason
 
 
 # ── 单 case 跑 ──────────────────────────────────────────────────────────────
 
 
-def _run_case(case: dict[str, Any], judge_enabled: bool) -> dict[str, Any]:
+def _run_case(
+    case: dict[str, Any], judge_enabled: bool, judge_model: str = "",
+) -> dict[str, Any]:
     """跑单个 case：single-step chat → 解析 tool_call → recall + 可选 quality judge。"""
     # 模拟激活 study-planner skill：传一个最小 skill_bodies 让 get_tools 加上 load_skill enum
     # （本评估不真调 load_skill，但 skill_bodies 是 get_tools() 拿到完整 9 tool 列表的入口）
@@ -210,7 +219,7 @@ def _run_case(case: dict[str, Any], judge_enabled: bool) -> dict[str, Any]:
             and first_name == "make_plan" and judge_enabled):
         steps_raw = first_args.get("steps")
         if isinstance(steps_raw, list) and steps_raw:
-            judge_score, judge_reason = _judge_plan_quality(case["question"], steps_raw)
+            judge_score, judge_reason = _judge_plan_quality(case["question"], steps_raw, judge_model)
             if judge_score is not None:
                 reasons.append(f"plan-quality: {judge_score:.1f}/5 — {judge_reason}")
             else:
@@ -256,7 +265,7 @@ def _collect_env() -> dict[str, str]:
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "git": git_part,
         "python": platform.python_version(),
-        "provider": getattr(config, "ACTIVE_MODEL", "?"),
+        # answer_model / judge_model 由 main 解析后注入（被测模型 + 评委模型）
     }
 
 
@@ -273,19 +282,23 @@ def _render_markdown(
     dataset_path: Path,
     env: dict[str, str],
     judge_enabled: bool,
+    recall_th: float = _RECALL_PASS_RATE,
+    quality_th: float = _PLAN_QUALITY_PASS_SCORE,
 ) -> str:
     rate = passed / total if total else 0.0
     recall_verdict = (
-        f"✅ 合格 (≥ {_RECALL_PASS_RATE:.0%})" if rate >= _RECALL_PASS_RATE
-        else f"⚠️ 未达 {_RECALL_PASS_RATE:.0%} 判据"
+        f"✅ 合格 (≥ {recall_th:.0%})" if rate >= recall_th
+        else f"⚠️ 未达 {recall_th:.0%} 判据"
     )
+    judge_line = env.get('judge_model', '?') if judge_enabled else "—（未评质量）"
     lines: list[str] = [
         "# 学习计划业务 触发识别 + 质量评估报告",
         "",
         f"- **时间**: {env['timestamp']}",
         f"- **Git**: {env['git']}",
         f"- **Python**: {env['python']}",
-        f"- **Provider**: {env['provider']}",
+        f"- **被测模型**: {env.get('answer_model', '?')}",
+        f"- **评委模型**: {judge_line}",
         f"- **Dataset**: `{dataset_path}`",
         f"- **LLM-judge**: {'开启' if judge_enabled else '关闭'}",
         "",
@@ -296,16 +309,16 @@ def _render_markdown(
         f"| 样本数 | {total} |",
         f"| 识别通过数 | {passed} |",
         f"| 识别通过率 | {rate:.1%} |",
-        f"| 识别判据 (≥ {_RECALL_PASS_RATE:.0%}) | {recall_verdict} |",
+        f"| 识别判据 (≥ {recall_th:.0%}) | {recall_verdict} |",
     ]
     if avg_quality is not None:
         verdict = (
-            f"✅ 合格 (≥ {_PLAN_QUALITY_PASS_SCORE})"
-            if avg_quality >= _PLAN_QUALITY_PASS_SCORE
-            else f"⚠️ 未达 {_PLAN_QUALITY_PASS_SCORE} 判据"
+            f"✅ 合格 (≥ {quality_th})"
+            if avg_quality >= quality_th
+            else f"⚠️ 未达 {quality_th} 判据"
         )
         lines.append(f"| plan 质量均分 (create 通过) | {avg_quality:.2f}/5 |")
-        lines.append(f"| 质量判据 (≥ {_PLAN_QUALITY_PASS_SCORE}) | {verdict} |")
+        lines.append(f"| 质量判据 (≥ {quality_th}) | {verdict} |")
     lines.append("")
 
     creates = [r for r in results if r.get("category") == "create"]
@@ -381,14 +394,38 @@ def _dump_report(
     dataset_path: Path,
     env: dict[str, str],
     judge_enabled: bool,
+    recall_th: float = _RECALL_PASS_RATE,
+    quality_th: float = _PLAN_QUALITY_PASS_SCORE,
 ) -> Path:
     from tools.eval_common.report_paths import reports_dir as eval_reports_dir
     reports_dir = eval_reports_dir("learning_plan")
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     out = reports_dir / f"learning-plan-eval-{ts}.md"
     out.write_text(
-        _render_markdown(results, passed, total, avg_quality, dataset_path, env, judge_enabled),
+        _render_markdown(
+            results, passed, total, avg_quality, dataset_path, env,
+            judge_enabled, recall_th, quality_th,
+        ),
         encoding="utf-8",
+    )
+    # 配对 summary JSON（供「质量看板 → 离线评估」卡片读）
+    rate = passed / total if total else 0.0
+    ok_recall = rate >= recall_th
+    ok_quality = (avg_quality is None) or (avg_quality >= quality_th)
+    summary = {
+        **env,
+        "judge_enabled": judge_enabled,
+        "partial": not judge_enabled,  # 关质量评测 = 只跑识别这一层
+        "recall": rate,
+        "recall_passed": passed,
+        "total": total,
+        "recall_threshold": recall_th,
+        "struct_score": avg_quality,  # 复用 plan 卡片 schema（struct_score=质量均分）
+        "struct_threshold": quality_th,
+        "passed": ok_recall and ok_quality,
+    }
+    out.with_suffix(".json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     return out
 
@@ -414,6 +451,18 @@ def main() -> None:
     parser.add_argument("--case", type=str, default="", help="只跑指定 id（精确匹配）")
     parser.add_argument("--no-report", action="store_true", help="不落盘 Markdown 报告")
     parser.add_argument("--no-judge", action="store_true", help="不调 LLM-judge")
+    parser.add_argument(
+        "--recall-threshold", type=float, default=_RECALL_PASS_RATE,
+        help=f"识别通过率判据（默认 {_RECALL_PASS_RATE}）",
+    )
+    parser.add_argument(
+        "--quality-threshold", type=float, default=_PLAN_QUALITY_PASS_SCORE,
+        help=f"plan 质量均分判据 0-5（默认 {_PLAN_QUALITY_PASS_SCORE}）",
+    )
+    parser.add_argument(
+        "--judge-model", dest="judge_model", type=str, default="",
+        help="plan 质量评委模型 id（覆盖 EVAL_JUDGE_MODEL）；空=用配置默认（回落被测模型）",
+    )
     args = parser.parse_args()
 
     dataset = _load_dataset(args.dataset)
@@ -423,15 +472,28 @@ def main() -> None:
             sys.exit(f"❌ 没有 id={args.case} 的 case")
 
     judge_enabled = not args.no_judge
+
+    # 被测模型（生成计划）= 当前 ACTIVE_MODEL；评委模型 = EVAL_JUDGE_MODEL（UI 可覆盖，回落被测）
+    answer_model = config.current_active_model()
+    if args.judge_model:
+        config.EVAL_JUDGE_MODEL = args.judge_model
+    judge_model = (config.EVAL_JUDGE_MODEL or "").strip()
+    if judge_model and judge_model not in config.MODEL_CONFIGS:
+        print(f"⚠️  EVAL_JUDGE_MODEL={judge_model!r} 不在 MODEL_CONFIGS，回落被测模型 {answer_model}")
+        judge_model = ""
+    judge_label = judge_model or answer_model
+
     print(
         f"\n🧪 学习计划业务评估（{len(dataset)} case，"
         f"LLM-judge {'开' if judge_enabled else '关'}）\n"
+        f"   被测模型={answer_model}"
+        + (f"，评委模型={judge_label}\n" if judge_enabled else "\n")
     )
 
     results: list[dict[str, Any]] = []
     for i, case in enumerate(dataset, 1):
         print(f"  [{i:>2}/{len(dataset)}] {case['id']} ... ", end="", flush=True)
-        r = _run_case(case, judge_enabled)
+        r = _run_case(case, judge_enabled, judge_model)
         results.append(r)
         flag = "✅" if r["pass"] else "❌"
         print(flag)
@@ -449,12 +511,15 @@ def main() -> None:
         sum(judged_scores) / len(judged_scores) if judged_scores else None
     )
 
+    recall_th = args.recall_threshold
+    quality_th = args.quality_threshold
+
     print(
         f"\n📊 识别通过 {passed}/{total} ({rate:.0%})  "
-        f"{'✅ 合格' if rate >= _RECALL_PASS_RATE else '⚠️  未达判据'}"
+        f"{'✅ 合格' if rate >= recall_th else '⚠️  未达判据'}"
     )
     if avg_quality is not None:
-        q_ok = avg_quality >= _PLAN_QUALITY_PASS_SCORE
+        q_ok = avg_quality >= quality_th
         print(
             f"📐 plan 质量均分 {avg_quality:.2f}/5  "
             f"{'✅ 合格' if q_ok else '⚠️  未达判据'}"
@@ -463,11 +528,16 @@ def main() -> None:
 
     if not args.no_report:
         env = _collect_env()
-        report = _dump_report(results, passed, total, avg_quality, args.dataset, env, judge_enabled)
+        env["answer_model"] = answer_model
+        env["judge_model"] = judge_label if judge_enabled else "—（未评质量）"
+        report = _dump_report(
+            results, passed, total, avg_quality, args.dataset, env,
+            judge_enabled, recall_th, quality_th,
+        )
         print(f"📁 报告已存储：{report}\n")
 
-    ok_recall = rate >= _RECALL_PASS_RATE
-    ok_quality = (avg_quality is None) or (avg_quality >= _PLAN_QUALITY_PASS_SCORE)
+    ok_recall = rate >= recall_th
+    ok_quality = (avg_quality is None) or (avg_quality >= quality_th)
     sys.exit(0 if (ok_recall and ok_quality) else 1)
 
 

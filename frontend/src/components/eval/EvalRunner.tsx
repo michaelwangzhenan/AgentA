@@ -165,13 +165,18 @@ export function EvalRunner({ task }: { task: EvalTaskConfig }) {
                   ? NONE_MODEL
                   : avail[0]?.model_id ?? '',
           )
+          // 评委默认直接选中真实模型：EVAL_JUDGE_MODEL 有则用它，否则回落被测模型（active）
+          if (task.judgeModel) {
+            const judgeDefault = m.eval_judge || m.active
+            setJudgeModel(avail.some((x) => x.model_id === judgeDefault) ? judgeDefault : avail[0]?.model_id ?? '')
+          }
         })
         .catch(() => {
           setModels([])
           setModel(task.noneOption ? NONE_MODEL : '')
         })
     }
-  }, [task.key, task.usesLlm, task.noneOption, task.defaultModelNone, task.thresholds, task.options, refreshReports])
+  }, [task.key, task.usesLlm, task.noneOption, task.defaultModelNone, task.judgeModel, task.thresholds, task.options, refreshReports])
 
   // 轮询全局任务状态（单任务锁）；跑完刷新摘要 / 报告
   useEffect(() => {
@@ -298,7 +303,6 @@ export function EvalRunner({ task }: { task: EvalTaskConfig }) {
                 disabled={runningThis}
                 className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
               >
-                <option value="">（系统默认）</option>
                 {models.map((m) => (
                   <option key={m.model_id} value={m.model_id}>
                     {m.label}

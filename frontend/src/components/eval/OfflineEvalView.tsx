@@ -27,6 +27,7 @@ const EVAL_TASKS: EvalTaskConfig[] = [
         '④ 点「开始评估」，跑完看卡片与历史报告。',
       ],
       params: [
+        '测试模型：默认 None＝只评检索（不耗 token）；选具体模型＝额外评答案质量、回答用该模型。',
         'query 改写 / 精排：检索的两个增强环节，默认开启；取消勾选即关闭，用于对比它们对指标的贡献。',
         '评委模型：评答案质量时给 faithfulness / 相关度打分的模型，默认跟随系统 EVAL_JUDGE_MODEL。',
         '评委评测样本数：选了模型时，评测前 N 条 golden 的答案质量（0=全部）。',
@@ -63,7 +64,10 @@ const EVAL_TASKS: EvalTaskConfig[] = [
         '② 可调「通过率阈值」（默认 0.8）。',
         '③ 点「开始评估」，跑完看卡片与历史报告。',
       ],
-      params: ['无额外开关；判定阈值见下方「通过率阈值」。'],
+      params: [
+        '测试模型：默认系统当前模型（ACTIVE_MODEL）；记忆召回必须调 LLM，无 None。',
+        '无额外开关；判定阈值见下方「通过率阈值」。',
+      ],
       principle: [
         '每条 case 把若干"已有记忆 + 一个新问题"灌进 UserMemoryStore，用 build_system_prompt 拼出含 <user_context> 的真实 system prompt。',
         '调真实 LLM 拿答案，用 must_contain_any（OR）+ must_not_contain（NOT）关键词判断是否遵循了记忆里的偏好 / 指令。',
@@ -90,7 +94,10 @@ const EVAL_TASKS: EvalTaskConfig[] = [
         '② 可调「通过率阈值」（默认 0.8）。',
         '③ 点「开始评估」，跑完看卡片与历史报告。',
       ],
-      params: ['无额外开关；判定阈值见下方「通过率阈值」。'],
+      params: [
+        '测试模型：默认系统当前模型（ACTIVE_MODEL）；需真实 LLM 做 function-calling 决策，无 None。',
+        '无额外开关；判定阈值见下方「通过率阈值」。',
+      ],
       principle: [
         '真实扫 .agenta/skills/，把各 skill 的 frontmatter 经 catalog 注入 system prompt。',
         '对每条 case 调真实 LLM 并带 get_tools，看它是否 load_skill：positive 应调对预期 skill、negative 应不调任何 load_skill。',
@@ -116,7 +123,10 @@ const EVAL_TASKS: EvalTaskConfig[] = [
         '② 点「开始评估」，看运行日志。',
         '③ 跑完看上方摘要卡片，下方历史报告按验收编号①-⑦看明细。',
       ],
-      params: ['无额外开关；是否含 llm-e2e 由「测试模型」是否选 None 决定。'],
+      params: [
+        '测试模型：默认 None＝只跑 structural（真启 server、不调 LLM）；选具体模型＝额外跑 llm-e2e（真发 LLM 选 tool）。',
+        '无额外开关；是否含 llm-e2e 由「测试模型」是否选 None 决定。',
+      ],
       principle: [
         'structural：真启 MCP server 子进程，走完整 tool 调用栈，验证连通 / 参数 / SSRF 防御等，不调 LLM。',
         'llm-e2e：真发 LLM + 真 MCP server，验证「用户 query → LLM 选 tool → 返回正解」整条链路。',
@@ -198,6 +208,7 @@ const EVAL_TASKS: EvalTaskConfig[] = [
         '④ 跑完看上方摘要卡片，下方历史报告看明细。',
       ],
       params: [
+        '测试模型：默认系统当前模型（ACTIVE_MODEL）；选 None＝不调 LLM、只跑确定性子集（tool_blocklist）。',
         '类别：限定只跑某一类——direct 直接注入 / indirect_rag、indirect_web 间接注入 / tool_blocklist 越权调用；默认「全部」。',
         '阈值：拦截率阈值(≥)默认 0.9、误拦率阈值(≤)默认 0.1，可调；本次所用阈值会记入报告与卡片。',
       ],
@@ -242,6 +253,7 @@ const EVAL_TASKS: EvalTaskConfig[] = [
         '⑤ 点「开始评估」，跑完看卡片与历史报告。',
       ],
       params: [
+        '测试模型（被测对象）：默认系统当前模型（ACTIVE_MODEL）；用它生成 plan，识别层必须调 LLM、无 None。',
         '评 plan 结构：开=positive 通过的 case 再由 LLM-judge 评结构分（耗额外 token）；关=只评识别（传 --no-judge）。',
         '评委模型：评 plan 结构时给分的模型，默认跟随系统 EVAL_JUDGE_MODEL；与被测模型分开可减少"自评"偏差。',
         '识别通过率阈值：复杂任务调对 + 简单任务不乱调的占比下限。',
@@ -279,7 +291,10 @@ const EVAL_TASKS: EvalTaskConfig[] = [
         '② 可调「通过率阈值」（默认 0.8）。',
         '③ 点「开始评估」，跑完看卡片与历史报告。',
       ],
-      params: ['无额外开关；判定阈值见下方「通过率阈值」。'],
+      params: [
+        '测试模型：默认系统当前模型（ACTIVE_MODEL）；critic 判定必须调 LLM，无 None。',
+        '无额外开关；判定阈值见下方「通过率阈值」。',
+      ],
       principle: [
         'quiz_critic case：调 HarnessManager.review_grading，比对 verdict.passed 与期望（pass / flag）。',
         'rag_critic case：走底层 RAG 批判模板，比对解析出的分数列表与 dataset 的期望。',
@@ -288,6 +303,100 @@ const EVAL_TASKS: EvalTaskConfig[] = [
       metrics: ['通过率：critic 判对的 case 占比，达阈值判「通过」。'],
       cost: '每条 case 一次真实 critic LLM 调用，耗所选模型 token。',
       dataset: 'golden 来自 tools/agent_eval/harness/dataset.json（quiz_critic / rag_critic 两类）。',
+    },
+  },
+  {
+    key: 'learning_plan',
+    label: '学习计划',
+    usesLlm: true, // 识别层必须调 LLM（无 None）
+    judgeModel: true, // 评计划质量时可配独立评委模型（同 RAG）
+    reportMatch: 'learning_plan/',
+    options: [
+      { kind: 'checkbox', key: 'judge', label: '评计划质量（LLM-judge）', default: true },
+    ],
+    thresholds: [
+      { key: 'recall', label: '识别通过率阈值(≥)', default: 0.8 },
+      { key: 'quality', label: '计划质量得分阈值(≥)', default: 4.0, min: 0, max: 5, step: 0.1 },
+    ],
+    intro: {
+      purpose:
+        '检验"学习计划"业务：面对学习目标，Agent 能否主动调对建计划的 tool（make_plan / create_study_plan）；面对单事实 / 闲聊不乱建计划。并由 LLM-judge 评所生成学习计划的质量。',
+      how: [
+        '① 选「测试模型」（默认系统当前模型）：用它生成学习计划（被测对象），识别层必须调 LLM。',
+        '② 默认开「评计划质量」（LLM-judge 给 0-5 分）；取消勾选则只看识别、不评质量（省一轮 judge token）。',
+        '③ 评质量时可设「评委模型」（默认跟随系统配置）：给计划质量打分的模型，留空=用被测模型自评。',
+        '④ 可调「识别通过率阈值」（默认 0.8）与「计划质量得分阈值」（默认 4.0/5）。',
+        '⑤ 点「开始评估」，跑完看卡片与历史报告。',
+      ],
+      params: [
+        '测试模型（被测对象）：默认系统当前模型（ACTIVE_MODEL）；用它生成学习计划，识别层必须调 LLM、无 None。',
+        '评计划质量：开=create 通过且调了 make_plan 的 case 再由 LLM-judge 评质量分（耗额外 token）；关=只评识别（传 --no-judge）。',
+        '评委模型：评计划质量时给分的模型，默认跟随系统 EVAL_JUDGE_MODEL；与被测模型分开可减少"自评"偏差。',
+        '识别通过率阈值：该建计划时调对 + 不该建时不乱调的占比下限。',
+        '计划质量得分阈值：create 通过 case 的平均质量分（0-5）下限。',
+      ],
+      principle: [
+        '对每条 case 单步 chat() + 解析第一轮 tool_call：create 应调 make_plan / create_study_plan、negative 应不调。',
+        '开 judge 时，对 create 通过且走 make_plan 的 case，按 完整性 / 顺序合理 / 可执行 / 时间分配 评 0-5 分。',
+        '不跑完整建计划落库循环（≥4 轮 + 真写库），单步足够覆盖识别 + 质量验收。',
+      ],
+      metrics: [
+        '识别通过率：该建计划调对 + 不该建不乱调的占比，达阈值判通过。',
+        '计划质量均分：create 通过 case 的平均质量分（0-5），达阈值判通过。',
+        '两项都达标才判「通过」（关 judge 时只看识别）。',
+      ],
+      cost: [
+        '每条 case 一次真实 LLM 调用（识别）。',
+        '开「评计划质量」时，create 通过 case 再各一次 judge 调用，耗额外 token。',
+      ],
+      dataset: 'golden 来自 tools/agent_eval/plan_business/dataset.json（create / negative 两类）。',
+    },
+  },
+  {
+    key: 'quiz',
+    label: 'Quiz 业务',
+    usesLlm: true, // 识别层必须调 LLM（无 None）
+    judgeModel: true, // 评出题计划质量时可配独立评委模型（同 RAG）
+    reportMatch: 'quiz/',
+    options: [
+      { kind: 'checkbox', key: 'judge', label: '评出题计划质量（LLM-judge）', default: true },
+    ],
+    thresholds: [
+      { key: 'recall', label: '识别通过率阈值(≥)', default: 0.8 },
+      { key: 'quality', label: '出题计划质量阈值(≥)', default: 4.0, min: 0, max: 5, step: 0.1 },
+    ],
+    intro: {
+      purpose:
+        '检验"出测验"业务：面对出题需求，Agent 能否主动调对出题 tool（make_plan 走"意图解析→查KB→出题→落库"）；面对单事实 / 闲聊不乱出题。并由 LLM-judge 评所生成出题计划的质量。',
+      how: [
+        '① 选「测试模型」（默认系统当前模型）：用它生成出题计划（被测对象），识别层必须调 LLM。',
+        '② 默认开「评出题计划质量」（LLM-judge 给 0-5 分）；取消勾选则只看识别、不评质量（省一轮 judge token）。',
+        '③ 评质量时可设「评委模型」（默认跟随系统配置）：给质量打分的模型，留空=用被测模型自评。',
+        '④ 可调「识别通过率阈值」（默认 0.8）与「出题计划质量阈值」（默认 4.0/5）。',
+        '⑤ 点「开始评估」，跑完看卡片与历史报告。',
+      ],
+      params: [
+        '测试模型（被测对象）：默认系统当前模型（ACTIVE_MODEL）；用它生成出题计划，识别层必须调 LLM、无 None。',
+        '评出题计划质量：开=create 通过且调了 make_plan 的 case 再由 LLM-judge 评质量分（耗额外 token）；关=只评识别（传 --no-judge）。',
+        '评委模型：评质量时给分的模型，默认跟随系统 EVAL_JUDGE_MODEL；与被测模型分开可减少"自评"偏差。',
+        '识别通过率阈值：该出题时调对 + 不该出时不乱调的占比下限。',
+        '出题计划质量阈值：create 通过 case 的平均质量分（0-5）下限。',
+      ],
+      principle: [
+        '对每条 case 单步 chat() + 解析第一轮 tool_call：create 应调出题 tool、negative 应不调。',
+        '开 judge 时，对 create 通过且走 make_plan 的 case，按"意图解析 / KB 检索 / 出题组织 / 落库步骤"评 0-5 分。',
+        '不跑完整出题落库循环，单步足够覆盖识别 + 质量验收。',
+      ],
+      metrics: [
+        '识别通过率：该出题调对 + 不该出不乱调的占比，达阈值判通过。',
+        '出题计划质量均分：create 通过 case 的平均质量分（0-5），达阈值判通过。',
+        '两项都达标才判「通过」（关 judge 时只看识别）。',
+      ],
+      cost: [
+        '每条 case 一次真实 LLM 调用（识别）。',
+        '开「评出题计划质量」时，create 通过 case 再各一次 judge 调用，耗额外 token。',
+      ],
+      dataset: 'golden 来自 tools/agent_eval/quiz/dataset.json（create / negative 两类）。',
     },
   },
 ]

@@ -289,10 +289,25 @@ agent_eval/run_all.py
 - 卡片复用 `_passrate_summary("harness", …, "通过率")`；后端 memory/skills/harness 共用 `--pass-threshold` 分支。
 
 ### 3.2.12. 学习计划
+
+接入（task=`learning_plan`，模块 `tools.agent_eval.plan_business.eval_learning_plan`），与 Plan 同构（识别 + 质量 judge 双阈值判定型）：
+
+- 始终调 LLM；选项 `评计划质量`（默认开，关传 `--no-judge`）；**评委模型**（同 plan/RAG，`--judge-model` + `use_llm_prefs`）。
+- 两阈值 UI 可调：`识别通过率(≥0.8)` + `计划质量得分(≥4.0/5)`（`--recall-threshold`/`--quality-threshold`）。
+- 脚本补齐：阈值 CLI + 评委模型切换 + 报告头记被测/评委两模型 + 配对 summary JSON（复用 plan 的 recall+score schema）。
+- 后端把 plan 卡片重构成工厂 `_recall_quality_summary(task, subdir, score_label)`，plan / learning_plan 共用；新增 learning_plan 分支 + `EVAL_MODULES`。
+
 ### 3.2.13. Quiz
+
+接入（task=`quiz`，模块 `tools.agent_eval.quiz.eval_quiz`），与 Plan / 学习计划同构（识别 + 质量 judge 双阈值判定型）：
+
+- 始终调 LLM；`评出题计划质量`（默认开，关传 `--no-judge`）；**评委模型**（`--judge-model` + `use_llm_prefs`）。
+- 两阈值 UI 可调：`识别通过率(≥0.8)` + `出题计划质量(≥4.0/5)`（`--recall-threshold`/`--quality-threshold`）。
+- 脚本同步补齐阈值 CLI + 评委模型 + 两模型报告头 + 配对 summary JSON；卡片复用 `_recall_quality_summary("quiz", …)`，后端 learning_plan / quiz 共用同一分支与工厂。
+
 ### 3.2.14. SRS
-### 更新备份功能
-目录变化，对应更新
+### 3.2.15. 更新备份功能
+目录变化，“生成备份”对应的目录/文件要更新
 
 
 

@@ -70,4 +70,5 @@ class ProviderModels(BaseModel):
 
 class ModelsResponse(BaseModel):
     active: str                     # 当前 ACTIVE_MODEL
+    eval_judge: str = ""            # 评委默认模型（EVAL_JUDGE_MODEL；非法/空则为 ""，前端回落被测模型）
     providers: list[ProviderModels]

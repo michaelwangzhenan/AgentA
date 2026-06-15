@@ -80,7 +80,11 @@ def list_models(_: dict = Depends(get_current_user)) -> ModelsResponse:
         )
         for pname, models in by_provider.items()
     ]
-    return ModelsResponse(active=_cfg.ACTIVE_MODEL, providers=providers)
+    # 评委默认模型：EVAL_JUDGE_MODEL 合法则给前端直接选中显示，否则空（前端回落被测模型）
+    judge = (getattr(_cfg, "EVAL_JUDGE_MODEL", "") or "").strip()
+    if judge not in _cfg.MODEL_CONFIGS:
+        judge = ""
+    return ModelsResponse(active=_cfg.ACTIVE_MODEL, eval_judge=judge, providers=providers)
 
 
 @router.get("", response_model=ConfigResponse)
