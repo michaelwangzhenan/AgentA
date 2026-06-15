@@ -70,7 +70,7 @@ jobs:
       - name: Run perf_eval + grep gate
         run: |
           python -m tools.agent_eval.perf_eval --target all --sizes 100,1000
-          if grep -l 'FAIL' tools/agent_eval/reports/perf-*.md; then
+          if grep -l 'FAIL' tools/reports/perf/perf-*.md; then
             echo "::error::Perf judge failed; download 'perf-reports' artifact for details"
             exit 1
           fi
@@ -80,12 +80,12 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: perf-reports
-          path: tools/agent_eval/reports/perf-*.md
+          path: tools/reports/perf/perf-*.md
           if-no-files-found: warn
           retention-days: 30
 
   EVAL:
-    name: Eval Gate (non-token)
+    name: Evaluation Gate (non-LLM)
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -121,6 +121,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: eval-reports
-          path: tools/agent_eval/reports/run-all-*.md
+          path: tools/reports/run_all/run-all-*.md
           if-no-files-found: warn
           retention-days: 30

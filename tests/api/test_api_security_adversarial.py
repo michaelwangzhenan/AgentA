@@ -202,15 +202,12 @@ class TestNoLlmKinds:
 
 @pytest.fixture
 def reports_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """把 eval 路由的报告根目录指到 tmp_path/agent_eval。"""
+    """把 eval 路由的报告根目录指到 tmp_path；安全 sidecar 落 <root>/security/。"""
     import src.api.routes.eval as eval_routes
 
-    root = tmp_path / "agent_eval"
+    monkeypatch.setattr(eval_routes, "_reports_root", lambda: tmp_path)
+    root = tmp_path / "security"
     root.mkdir()
-    monkeypatch.setattr(
-        eval_routes, "_report_roots",
-        lambda: {"agent_eval": root, "rag_eval": tmp_path / "rag_eval"},
-    )
     return root
 
 
