@@ -35,7 +35,11 @@ function isInstantType(t: ConfigItemView['type']): boolean {
   return t === 'bool' || t === 'enum_str' || t === 'multi_enum_str'
 }
 
-export function SettingsView({ embedded = false }: { embedded?: boolean } = {}) {
+export function SettingsView({
+  embedded = false,
+  title,
+  description,
+}: { embedded?: boolean; title?: string; description?: string } = {}) {
   const [groups, setGroups] = useState<ConfigGroupView[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -491,7 +495,14 @@ export function SettingsView({ embedded = false }: { embedded?: boolean } = {}) 
   if (embedded) {
     return (
       <div className="flex h-full min-h-0 flex-col gap-3">
-        <div className="flex items-center justify-end gap-2">{toolbar}</div>
+        {/* 标题与工具条按钮同一行，省一行高度（title 由 SettingsPage 传入） */}
+        <div className="mb-1 flex items-start justify-between gap-3">
+          <div>
+            {title && <h2 className="text-sm font-semibold tracking-tight">{title}</h2>}
+            {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">{toolbar}</div>
+        </div>
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
           {content}
         </div>

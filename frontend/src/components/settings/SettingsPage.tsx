@@ -107,30 +107,30 @@ export function SettingsPage() {
         {/* 右侧内容 */}
         <div className="min-w-0 flex-1 overflow-y-auto p-6">
           {section === 'profile' && (
-            <div className="mx-auto max-w-2xl">
+            <div className="max-w-6xl">
               <PageHeader title="个人信息" description="管理用户名、头像与语言等基础资料。" />
               <ProfileSettings />
             </div>
           )}
           {section === 'password' && (
-            <div className="mx-auto max-w-2xl">
+            <div className="max-w-6xl">
               <PageHeader title="密码与安全" description="修改登录密码，保护账号安全。" />
               <PasswordSettings />
             </div>
           )}
           {section === 'system' && isAdmin && (
-            <div className="mx-auto flex h-full max-w-4xl flex-col">
-              <PageHeader
-                title="系统配置"
-                description="调整服务端运行参数，改完立即生效并持久化。"
-              />
+            <div className="flex h-full max-w-6xl flex-col">
               <div className="min-h-0 flex-1">
-                <SettingsView embedded />
+                <SettingsView
+                  embedded
+                  title="系统配置"
+                  description="调整服务端运行参数，改完立即生效并持久化。"
+                />
               </div>
             </div>
           )}
           {section === 'apikeys' && isAdmin && (
-            <div className="mx-auto max-w-2xl">
+            <div className="max-w-6xl">
               <PageHeader
                 title="API 密钥"
                 description="为各 LLM 厂商与 web 搜索配置密钥，保存后立即生效。"
@@ -139,13 +139,13 @@ export function SettingsPage() {
             </div>
           )}
           {section === 'users' && isAdmin && (
-            <div className="mx-auto max-w-3xl">
+            <div className="max-w-6xl">
               <PageHeader title="用户管理" description="查看并删除用户账号及其全部数据。" />
               <UserManagement />
             </div>
           )}
           {section === 'account' && (
-            <div className="mx-auto max-w-2xl">
+            <div className="max-w-6xl">
               <PageHeader title="注销账号" description="永久删除本账号及其全部数据，不可恢复。" />
               <AccountDeletion />
             </div>
