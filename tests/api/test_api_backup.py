@@ -68,16 +68,30 @@ def test_list_empty(client, backup_dir):
 
 
 def test_create_returns_snapshot(client, backup_dir, monkeypatch):
-    def fake_make_backup(out_dir, *, skip_vectors, timestamp=None):
+    seen: dict = {}
+
+    def fake_make_backup(out_dir, *, categories=None, timestamp=None):
+        seen["categories"] = categories
         return _write_dummy_backup(Path(out_dir))
 
     monkeypatch.setattr(backup_route.rb, "make_backup", fake_make_backup)
-    r = client.post("/api/admin/backup/create", json={"skip_vectors": False})
+    r = client.post("/api/admin/backup/create", json={"categories": ["A", "B", "C"]})
     assert r.status_code == 200
     body = r.json()
     assert body["name"].startswith("agenta-backup-")
     assert body["file_count"] == 1
     assert body["include_vectors"] is True
+    assert seen["categories"] == {"A", "B", "C"}
+
+
+def test_create_rejects_bad_category(client, backup_dir):
+    r = client.post("/api/admin/backup/create", json={"categories": ["A", "Z"]})
+    assert r.status_code == 400
+
+
+def test_create_rejects_empty_categories(client, backup_dir):
+    r = client.post("/api/admin/backup/create", json={"categories": []})
+    assert r.status_code == 400
 
 
 def test_list_after_create(client, backup_dir):

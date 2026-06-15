@@ -12,7 +12,6 @@ import { toast } from 'sonner'
 
 import { ResourcePage } from '@/components/resources/ResourcePage'
 import { Button } from '@/components/ui/button'
-import { Switch } from '@/components/ui/switch'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -49,11 +48,23 @@ function fmtTimestamp(ts: string): string {
   return `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}`
 }
 
+// 可备份类别（key 与后端 build_plan 一致）；含明文密钥 / 体积大的给提示
+const BACKUP_CATEGORIES: { key: string; label: string; note?: string }[] = [
+  { key: 'A', label: '敏感配置', note: '含明文密钥（.env / api_keys）' },
+  { key: 'B', label: '运行期数据库', note: '会话 / 记忆 / 用量 / golden 等 SQLite' },
+  { key: 'C', label: '向量库 / 索引', note: '体积大，约 100MB' },
+  { key: 'E', label: '黄金集', note: 'rag_eval golden.json' },
+  { key: 'F', label: '评估报告', note: 'tools/reports/' },
+  { key: 'K', label: '编辑器配置', note: '.vscode / *.code-workspace' },
+]
+
 export function BackupView() {
   const [snapshots, setSnapshots] = useState<BackupSnapshot[]>([])
   const [loading, setLoading] = useState(false)
   const [creating, setCreating] = useState(false)
-  const [skipVectors, setSkipVectors] = useState(false)
+  // 默认全选；用户可逐项取消
+  const [cats, setCats] = useState<Set<string>>(() => new Set(BACKUP_CATEGORIES.map((c) => c.key)))
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const [restoring, setRestoring] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [pendingFile, setPendingFile] = useState<File | null>(null)
@@ -75,10 +86,22 @@ export function BackupView() {
     void refresh()
   }, [refresh])
 
+  function toggleCat(key: string) {
+    setCats((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
   async function handleCreate() {
+    setConfirmOpen(false)
     setCreating(true)
     try {
-      const snap = await createBackup(skipVectors)
+      // 按固定顺序传，便于后端 / 日志可读
+      const ordered = BACKUP_CATEGORIES.map((c) => c.key).filter((k) => cats.has(k))
+      const snap = await createBackup(ordered)
       toast.success(`已生成备份：${snap.file_count} 个文件，${fmtSize(snap.zip_bytes)}`)
       await refresh()
     } catch (e) {
@@ -131,13 +154,27 @@ export function BackupView() {
           <h3 className="flex items-center gap-2 text-sm font-semibold">
             <HardDriveDownload className="h-4 w-4" /> 生成备份
           </h3>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Switch checked={skipVectors} onCheckedChange={setSkipVectors} id="skip-vectors" />
-            <label htmlFor="skip-vectors" className="cursor-pointer">
-              跳过向量库 / 索引（体积大，约 100MB）
-            </label>
+          <p className="text-xs text-muted-foreground">勾选要备份的类别（默认全选）：</p>
+          <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+            {BACKUP_CATEGORIES.map((c) => (
+              <label
+                key={c.key}
+                className="flex cursor-pointer items-start gap-2 rounded-md px-1.5 py-1 text-sm hover:bg-muted/50"
+              >
+                <input
+                  type="checkbox"
+                  checked={cats.has(c.key)}
+                  onChange={() => toggleCat(c.key)}
+                  className="mt-0.5 h-4 w-4 accent-primary"
+                />
+                <span>
+                  {c.label}
+                  {c.note && <span className="ml-1 text-xs text-muted-foreground">（{c.note}）</span>}
+                </span>
+              </label>
+            ))}
           </div>
-          <Button onClick={handleCreate} disabled={creating}>
+          <Button onClick={() => setConfirmOpen(true)} disabled={creating || cats.size === 0}>
             {creating ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
             生成备份
           </Button>
@@ -227,6 +264,26 @@ export function BackupView() {
           </div>
         </section>
       </div>
+
+      {/* 生成备份确认（回车=确认） */}
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <HardDriveDownload className="h-4 w-4" /> 确认生成备份
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              将备份以下类别：
+              {BACKUP_CATEGORIES.filter((c) => cats.has(c.key)).map((c) => c.label).join(' / ')}。
+              {cats.has('A') && '（含明文密钥，请妥善保管）'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void handleCreate()}>开始备份</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* 删除确认 */}
       <AlertDialog open={deleteTarget !== null} onOpenChange={(o) => !o && setDeleteTarget(null)}>

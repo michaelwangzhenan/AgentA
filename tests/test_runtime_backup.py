@@ -31,8 +31,8 @@ def _make_fake_root(root: Path) -> None:
 
     (root / "tools" / "rag_eval").mkdir(parents=True)
     (root / "tools" / "rag_eval" / "golden.json").write_text("[]", encoding="utf-8")
-    (root / "tools" / "agent_eval" / "reports").mkdir(parents=True)
-    (root / "tools" / "agent_eval" / "reports" / "r1.md").write_text("report", encoding="utf-8")
+    (root / "tools" / "reports" / "security").mkdir(parents=True)
+    (root / "tools" / "reports" / "security" / "r1.md").write_text("report", encoding="utf-8")
 
     (root / ".vscode").mkdir()
     (root / ".vscode" / "settings.json").write_text("{}", encoding="utf-8")
@@ -48,15 +48,24 @@ def _fake_config(root: Path) -> SimpleNamespace:
     )
 
 
-def test_skip_vectors_drops_c(tmp_path):
+def test_categories_filter_drops_c(tmp_path):
     root = tmp_path / "proj"
     root.mkdir()
     _make_fake_root(root)
     cfg = _fake_config(root)
-    with_c = [c for c, _, _ in rb.build_plan(root, cfg, skip_vectors=False)]
-    without_c = [c for c, _, _ in rb.build_plan(root, cfg, skip_vectors=True)]
+    with_c = [c for c, _, _ in rb.build_plan(root, cfg, categories=None)]  # None=全选
+    without_c = [c for c, _, _ in rb.build_plan(root, cfg, categories={"A", "B", "E", "F", "K"})]
     assert "C" in with_c
     assert "C" not in without_c
+
+
+def test_categories_only_b(tmp_path):
+    root = tmp_path / "proj"
+    root.mkdir()
+    _make_fake_root(root)
+    cfg = _fake_config(root)
+    cats = {c for c, _, _ in rb.build_plan(root, cfg, categories={"B"})}
+    assert cats == {"B"}
 
 
 def test_roundtrip_restores_all(tmp_path):
@@ -65,7 +74,7 @@ def test_roundtrip_restores_all(tmp_path):
     _make_fake_root(root)
     cfg = _fake_config(root)
 
-    plan = rb.build_plan(root, cfg, skip_vectors=False)
+    plan = rb.build_plan(root, cfg, categories=None)
     zip_path = rb.create_backup(
         plan, root, tmp_path / "out", include_vectors=True, timestamp="20260613-120000"
     )
@@ -85,7 +94,7 @@ def test_roundtrip_restores_all(tmp_path):
     n = rb.restore_backup(zip_path, dest, manifest)
     assert n == len(manifest["files"])
     assert (dest / ".env").read_text(encoding="utf-8") == "OPENAI_API_KEY=secret\n"
-    assert (dest / "tools" / "agent_eval" / "reports" / "r1.md").read_text(encoding="utf-8") == "report"
+    assert (dest / "tools" / "reports" / "security" / "r1.md").read_text(encoding="utf-8") == "report"
 
     conn = sqlite3.connect(dest / "db" / "sqlite" / "chat_history.db")
     rows = conn.execute("SELECT txt FROM msg").fetchall()
@@ -99,7 +108,7 @@ def test_list_snapshots_summary(tmp_path):
     _make_fake_root(root)
     cfg = _fake_config(root)
     out = tmp_path / "out"
-    plan = rb.build_plan(root, cfg, skip_vectors=True)
+    plan = rb.build_plan(root, cfg, categories={"A", "B", "E", "F", "K"})
     rb.create_backup(plan, root, out, include_vectors=False, timestamp="20260613-130000")
 
     snaps = rb.list_snapshots(out)

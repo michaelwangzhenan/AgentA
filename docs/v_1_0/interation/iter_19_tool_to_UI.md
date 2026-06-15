@@ -312,12 +312,20 @@ agent_eval/run_all.py
 - 始终调 LLM（触发识别，无 None、默认 ACTIVE_MODEL）；`识别通过率阈值(≥)` 默认 0.8（脚本加 `--pass-threshold` + 配对 summary JSON）。
 - 只测触发识别；SM-2 算法对齐由 UT 锁，不调 LLM-judge。
 - 卡片复用 `_passrate_summary("srs", …, "识别通过率")`；后端并入 memory/skills/harness/srs 共享的 `--pass-threshold` 分支；报告头单行模型改标「测试模型」。
+  
+### 3.2.15. 备份与恢复
 
-### 3.2.15. 更新备份功能
-目录变化，“生成备份”对应的目录/文件要更新
+
+**(1) reports 目录迁移修复**：备份 F 类（评估报告）路径从旧 `tools/agent_eval/reports`、`tools/rag_eval/reports` 合并成单根 `tools/reports`（`src/runtime_backup.py`）。E 类黄金集未动（归 §3.3）。
+
+**(2) 类别可选 + 确认框**（决策：用户跳过选项 → 按推荐做，记录于此）：
+- **类别可选**：6 类（A 敏感配置 / B 运行期 DB / C 向量库 / E 黄金集 / F 评估报告 / K 编辑器配置）逐项可勾选，默认全选；A（含密钥）可取消但给警示。
+- **categories 取代 skip_vectors**：`build_plan(root, cfg, categories)`、`make_backup(categories=)`、`CreateBackupRequest.categories`（校验是 {A,B,C,E,F,K} 子集、非空）；`include_vectors` 派生为 `"C" in categories`。CLI 改用 `--exclude A,C,...`（去掉 `--skip-vectors`）。
+- **确认框**：点「生成备份」先弹 `AlertDialog`，列出所选类别 + 密钥警示，确认后才备份（`AlertDialogAction` 自带聚焦 → 回车=确认）。全不选则禁用按钮。
+- 同步更新 backup 相关 UT（build_plan/make_backup/路由）。
+
 
 
 
 ## 3.3. Golden
-“质量看板->Golden管理” 与 
-"数据库 -> SQLite -> rag_golden.db" or "知识库 -> 入库" 整合
+“质量看板->Golden管理” 与  "数据库 -> SQLite -> rag_golden.db" or "知识库 -> 入库" 整合？

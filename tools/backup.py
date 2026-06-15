@@ -7,7 +7,7 @@
     A 敏感配置  B 运行期 DB  C 向量库 / 索引  E 黄金集  F 评估报告  K 编辑器配置
 
 用法：
-    python tools/backup.py backup  --out <dir> [--skip-vectors]
+    python tools/backup.py backup  --out <dir> [--exclude C,F]
     python tools/backup.py restore --zip <path> [--force]
     python tools/backup.py list    --out <dir>
 
@@ -43,8 +43,18 @@ def _fmt_size(n: int) -> str:
 
 def cmd_backup(args: argparse.Namespace) -> int:
     out_dir = Path(args.out).expanduser().resolve()
-    print(f"备份范围：A B C E F K{'（已跳过 C 向量库）' if args.skip_vectors else ''}")
-    zip_path = rb.make_backup(out_dir, skip_vectors=args.skip_vectors)
+    exclude = {c.strip().upper() for c in (args.exclude or "").split(",") if c.strip()}
+    bad = exclude - set(rb.ALL_CATEGORIES)
+    if bad:
+        print(f"非法类别：{sorted(bad)}；可选 {','.join(rb.ALL_CATEGORIES)}")
+        return 1
+    cats = set(rb.ALL_CATEGORIES) - exclude
+    if not cats:
+        print("至少保留一个备份类别。")
+        return 1
+    print(f"备份范围：{' '.join(c for c in rb.ALL_CATEGORIES if c in cats)}"
+          + (f"（已排除 {','.join(sorted(exclude))}）" if exclude else ""))
+    zip_path = rb.make_backup(out_dir, categories=cats)
     manifest = rb.read_manifest(zip_path)
     for cat in ("A", "B", "C", "E", "F", "K"):
         s = manifest["category_stats"].get(cat)
@@ -97,9 +107,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = p.add_subparsers(dest="command", required=True)
 
-    pb = sub.add_parser("backup", help="收集 A/B/C/E/F/K 七类数据打成 zip")
+    pb = sub.add_parser("backup", help="收集 A/B/C/E/F/K 六类数据打成 zip")
     pb.add_argument("--out", required=True, help="快照输出目录")
-    pb.add_argument("--skip-vectors", action="store_true", help="跳过 C 类向量库 / 索引（体积大）")
+    pb.add_argument(
+        "--exclude", default="",
+        help="逗号分隔要排除的类别（A=配置 B=DB C=向量库 E=黄金集 F=报告 K=编辑器），默认全备",
+    )
     pb.set_defaults(func=cmd_backup)
 
     pr = sub.add_parser("restore", help="从 zip 还原回项目根")

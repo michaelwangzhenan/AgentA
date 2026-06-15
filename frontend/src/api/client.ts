@@ -1342,11 +1342,11 @@ export async function listBackups(): Promise<BackupListResponse> {
   return (await res.json()) as BackupListResponse
 }
 
-export async function createBackup(skipVectors: boolean): Promise<BackupSnapshot> {
+export async function createBackup(categories: string[]): Promise<BackupSnapshot> {
   const res = await apiFetch('/api/admin/backup/create', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ skip_vectors: skipVectors }),
+    body: JSON.stringify({ categories }),
   })
   await _ensureOk(res)
   return (await res.json()) as BackupSnapshot

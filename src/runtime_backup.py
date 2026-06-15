@@ -36,6 +36,9 @@ _DB_CONFIG_ATTRS = (
 # C 类：向量库 / 检索索引的 config 属性名
 _VECTOR_CONFIG_ATTRS = ("CHROMA_DB_PATH", "BM25_INDEX_DIR")
 
+# 全部可备份类别（顺序即 UI / manifest 展示顺序）
+ALL_CATEGORIES: tuple[str, ...] = ("A", "B", "C", "E", "F", "K")
+
 
 def _abs(root: Path, raw: str) -> Path:
     """把 config 里的相对路径（如 ./db/chroma）解析为相对项目根的绝对路径。"""
@@ -43,7 +46,9 @@ def _abs(root: Path, raw: str) -> Path:
     return p if p.is_absolute() else (root / p)
 
 
-def build_plan(root: Path, cfg, skip_vectors: bool) -> list[tuple[str, str, Path]]:
+def build_plan(
+    root: Path, cfg, categories: "set[str] | None" = None
+) -> list[tuple[str, str, Path]]:
     """构建备份清单，返回 (类别, 收集方式, 绝对路径) 列表。
 
     收集方式：file=单文件拷贝 / tree=目录树拷贝 / sqlite=在线一致备份。
@@ -69,24 +74,25 @@ def build_plan(root: Path, cfg, skip_vectors: bool) -> list[tuple[str, str, Path
             plan.append(("B", "sqlite", _abs(root, raw)))
 
     # C 向量库 / 索引
-    if not skip_vectors:
-        for attr in _VECTOR_CONFIG_ATTRS:
-            raw = getattr(cfg, attr, None)
-            if raw:
-                plan.append(("C", "tree", _abs(root, raw)))
+    for attr in _VECTOR_CONFIG_ATTRS:
+        raw = getattr(cfg, attr, None)
+        if raw:
+            plan.append(("C", "tree", _abs(root, raw)))
 
     # E 黄金集
     plan.append(("E", "file", root / "tools" / "rag_eval" / "golden.json"))
 
-    # F 评估报告
-    plan.append(("F", "tree", root / "tools" / "agent_eval" / "reports"))
-    plan.append(("F", "tree", root / "tools" / "rag_eval" / "reports"))
+    # F 评估报告（统一在 tools/reports/<eval>/，旧的 agent_eval/reports、rag_eval/reports 已迁此）
+    plan.append(("F", "tree", root / "tools" / "reports"))
 
     # K 编辑器 / IDE
     plan.append(("K", "file", root / ".vscode" / "settings.json"))
     for ws in sorted(root.glob("*.code-workspace")):
         plan.append(("K", "file", ws))
 
+    # 只保留用户勾选的类别（categories=None → 全选）
+    if categories is not None:
+        plan = [e for e in plan if e[0] in categories]
     return plan
 
 
@@ -250,9 +256,15 @@ def list_snapshots(out_dir: Path) -> list[dict]:
     return out
 
 
-def make_backup(out_dir: Path, *, skip_vectors: bool, timestamp: str | None = None) -> Path:
-    """便捷入口：用项目根 + 全局 config 构建清单并生成备份，返回 zip 路径。"""
-    plan = build_plan(_PROJECT_ROOT, config, skip_vectors=skip_vectors)
+def make_backup(
+    out_dir: Path, *, categories: "set[str] | None" = None, timestamp: str | None = None
+) -> Path:
+    """便捷入口：用项目根 + 全局 config 构建清单并生成备份，返回 zip 路径。
+
+    categories=None → 全类别；否则只备份勾选的类别（{A,B,C,E,F,K} 子集）。
+    """
+    cats = set(categories) if categories is not None else set(ALL_CATEGORIES)
+    plan = build_plan(_PROJECT_ROOT, config, categories=cats)
     return create_backup(
-        plan, _PROJECT_ROOT, out_dir, include_vectors=not skip_vectors, timestamp=timestamp
+        plan, _PROJECT_ROOT, out_dir, include_vectors="C" in cats, timestamp=timestamp
     )

@@ -64,7 +64,13 @@ def _to_snapshot(s: dict) -> BackupSnapshot:
 
 @router.post("/create", response_model=BackupSnapshot)
 def create_backup(req: CreateBackupRequest) -> BackupSnapshot:
-    zip_path = rb.make_backup(_backup_dir(), skip_vectors=req.skip_vectors)
+    cats = set(req.categories)
+    invalid = cats - set(rb.ALL_CATEGORIES)
+    if invalid:
+        raise HTTPException(status_code=400, detail=f"非法备份类别：{sorted(invalid)}")
+    if not cats:
+        raise HTTPException(status_code=400, detail="至少选择一个备份类别")
+    zip_path = rb.make_backup(_backup_dir(), categories=cats)
     for s in rb.list_snapshots(_backup_dir()):
         if s["name"] == zip_path.name:
             return _to_snapshot(s)
