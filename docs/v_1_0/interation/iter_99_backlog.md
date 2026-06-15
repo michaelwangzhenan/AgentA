@@ -15,21 +15,28 @@ PPT
 
 # 3. V2.0
 
-## 3.1. 记忆/rules/skils/mcp 合并到一页
+## 3.1. UI 改进
+不同内容用不同 颜色，字体，高亮？
+图标？
+动画？
+logo?
+
+## 3.2. 记忆/rules/skils/mcp 合并到一页
 进去后还要带左边的图标
 其它2级页面也加图标
 
-## 3.2. embedding
+## 3.3. embedding
+消融实验选 模型
 
-## 3.3. support more doc types
+## 3.4. support more doc types
 
-## 3.4. 知识库
+## 3.5. 知识库
 用户只能删除自己入库文件
 
-## 3.5. harness
+## 3.6. harness
 agenta 的 harness 功能就是自我反思/自我纠正（Relection)? 只是harnness 概念里的一个子集？
 
-## 3.6. hardcode prompt to file
+## 3.7. hardcode prompt to file
 所有 hardcode 的 prompt 都做成文件，统一外置管理。
 1. 格式化 prompt， 加适用场景说明这段用在哪里
 2. 每个用途一个文件，还是一个大文件？
@@ -47,12 +54,12 @@ agenta 的 harness 功能就是自我反思/自我纠正（Relection)? 只是har
 
 **注**：纯"跟 eval 共享"不是外置理由——eval 经 `HarnessManager` 间接用，内联常量一样能共享。外置的真正价值是 prompt 与代码分离、便于不改码地 review/diff/迭代 prompt。改动面大（涉及多模块 + UT），单独立项再做。
 
-## 3.7. tool
+## 3.8. tool
 扫描并返回 可用的 LLM 列表。
 包括 agenta 未知的？
 
-## 3.8. 功能 Review
-## 3.9. workflow
-## 3.10. 多语言
-## 3.11. skill os
-## 3.12. 新业务
+## 3.9. 功能 Review
+## 3.10. workflow
+## 3.11. 多语言
+## 3.12. skill os
+## 3.13. 新业务
