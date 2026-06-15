@@ -86,6 +86,78 @@ def test_golden_status_filter(client: TestClient, golden: GoldenStore) -> None:
     assert body["items"][0]["query"] == "pending-q"
 
 
+def test_golden_doc_id_filter(client: TestClient, golden: GoldenStore) -> None:
+    golden.create("q-doc-a", doc_id="aaa")
+    golden.create("q-doc-b", doc_id="bbb")
+    golden.create("q-no-doc")
+    r = client.get("/api/eval/golden?doc_id=aaa")
+    body = r.json()
+    assert body["total"] == 1
+    assert body["items"][0]["query"] == "q-doc-a"
+
+
+def test_golden_source_contains_filter(client: TestClient, golden: GoldenStore) -> None:
+    golden.create("q-readme", expected_source_contains="docs/readme.md")
+    golden.create("q-guide", expected_source_contains="docs/guide.md")
+    r = client.get("/api/eval/golden?source_contains=readme")
+    body = r.json()
+    assert body["total"] == 1
+    assert body["items"][0]["query"] == "q-readme"
+
+
+def test_golden_export(client: TestClient, golden: GoldenStore) -> None:
+    golden.create("q1")
+    golden.create("q2")
+    r = client.get("/api/eval/golden/export")
+    assert r.status_code == 200
+    assert "attachment" in r.headers.get("content-disposition", "")
+    rows = r.json()
+    assert isinstance(rows, list) and len(rows) == 2
+
+
+def test_golden_generate_missing_file_404(client: TestClient) -> None:
+    r = client.post(
+        "/api/eval/golden/generate",
+        json={"model": "en", "source": "nope.md", "doc_id": "x"},
+    )
+    assert r.status_code == 404
+
+
+def test_golden_generate_ok(
+    client: TestClient, golden: GoldenStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import src.config as cfg
+    # 造一个 web_uploads/<model>/<source> 物理文件
+    upload_root = tmp_path / "web_uploads"
+    (upload_root / "en").mkdir(parents=True)
+    (upload_root / "en" / "doc.md").write_text("hello", encoding="utf-8")
+    monkeypatch.setattr(cfg, "WEB_UPLOAD_DIR", str(upload_root))
+    # 预置该 doc 的旧 pending 候选（应被重生成清掉）
+    golden.create("old-pending", doc_id="d1", status=STATUS_PENDING)
+    # mock LLM 出题：直接写两条
+    import src.rag.golden_gen as gg
+
+    def fake_run(file_path, source, doc_id="", max_q=None, force=False):
+        from src.memory.golden_store import SOURCE_AI, STATUS_PENDING as SP, get_shared_store
+        st = get_shared_store()
+        st.create(query="gen-1", expected_source_contains=source, source=SOURCE_AI, status=SP, doc_id=doc_id)
+        st.create(query="gen-2", expected_source_contains=source, source=SOURCE_AI, status=SP, doc_id=doc_id)
+        return 2
+
+    # generate 路由内部用 get_shared_store；让它与注入的 golden 是同一个
+    monkeypatch.setattr("src.memory.golden_store.get_shared_store", lambda: golden)
+    monkeypatch.setattr(gg, "run_generation_for_file", fake_run)
+
+    r = client.post(
+        "/api/eval/golden/generate",
+        json={"model": "en", "source": "doc.md", "doc_id": "d1"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["generated"] == 2
+    assert body["removed_pending"] == 1
+
+
 # ── trace 可观测 ─────────────────────────────────────────────────────────────
 
 

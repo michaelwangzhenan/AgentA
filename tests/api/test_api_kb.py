@@ -183,6 +183,11 @@ def _stub_successful_ingest(monkeypatch: pytest.MonkeyPatch, chunks: int = 3) ->
         }
 
     monkeypatch.setattr("src.api.routes.kb.ingest_one", fake_ingest_one)
+    # 出题改为入库流程内同步执行：测试里 stub 掉，避免真打 LLM（默认返回 2 条）
+    monkeypatch.setattr(
+        "src.api.routes.kb._generate_golden_sync",
+        lambda target_path, safe_name, doc_id: 2,
+    )
 
 
 def test_upload_success(
@@ -199,11 +204,14 @@ def test_upload_success(
     # 流式：含 progress 事件 + 最终 done 事件
     events = _sse_events(r.text)
     assert any(e["type"] == "progress" for e in events)
+    # 含 golden 出题相位
+    assert any(e["type"] == "progress" and e.get("phase") == "golden" for e in events)
     done = _final_event(r.text)
     assert done["type"] == "done"
     assert done["filename"] == "hello.md"
     assert done["chunks"] == 5
     assert done["doc_id"]  # 非空
+    assert done["golden_generated"] == 2
     # 物理文件落到 web_uploads/<alias>/ 子目录下
     saved = _tmp_upload_dir / config.DEFAULT_EMBEDDING_ALIAS / "hello.md"
     assert saved.exists()

@@ -140,7 +140,6 @@ export function BackupView() {
     <ResourcePage
       title="备份与恢复"
       subtitle="管理运行时数据备份（配置 / 数据库 / 向量库 / 报告 / 编辑器配置）"
-      maxWidthClassName="max-w-4xl"
     >
       <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto pb-6">
         {/* 含明文密钥警示 */}

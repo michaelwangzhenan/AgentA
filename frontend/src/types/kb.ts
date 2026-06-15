@@ -10,6 +10,8 @@ export type KBDocument = {
   ingested_at: number // 入库时间 (unix timestamp)；老数据为 0
   chunks: number
   total_chars: number
+  golden_total?: number   // 该文档关联的 golden 候选总数
+  golden_pending?: number // 其中待审数
 }
 
 export type KBDocumentListResponse = {
@@ -29,8 +31,8 @@ export type KBCollectionListResponse = {
   collections: KBCollection[]
 }
 
-// 入库进度阶段：解析 / 切分 / 嵌入
-export type IngestPhase = 'parse' | 'split' | 'embed'
+// 入库进度阶段：解析 / 切分 / 嵌入 / 出题（golden 生成）
+export type IngestPhase = 'parse' | 'split' | 'embed' | 'golden'
 
 export type IngestProgress = {
   phase: IngestPhase
@@ -45,6 +47,7 @@ export type IngestResult = {
   chunks: number
   skipped_unchanged: boolean
   status: string // ingested / skipped_unchanged / empty
+  golden_generated: number // 本次同步生成的 golden 候选数
   message: string
 }
 

@@ -150,6 +150,32 @@ def test_import_items_maps_new_fields(store: GoldenStore) -> None:
     assert rows[0]["type"] == "hyde"
 
 
+def test_doc_counts_and_delete_pending_by_doc(store: GoldenStore) -> None:
+    store.create("a1", doc_id="d1", source=SOURCE_AI, status=STATUS_PENDING)
+    store.create("a2", doc_id="d1", source=SOURCE_AI, status=STATUS_APPROVED)
+    store.create("b1", doc_id="d2", source=SOURCE_AI, status=STATUS_PENDING)
+    store.create("no-doc")  # 无 doc_id 不计入
+    dc = store.doc_counts()
+    assert dc["d1"] == {"total": 2, "pending": 1}
+    assert dc["d2"] == {"total": 1, "pending": 1}
+    assert "" not in dc
+    # 重生成清旧 pending：d1 的 pending(1) 删掉，approved 保留
+    removed = store.delete_pending_by_doc("d1")
+    assert removed == 1
+    dc2 = store.doc_counts()
+    assert dc2["d1"] == {"total": 1, "pending": 0}
+
+
+def test_list_doc_id_filter_and_export_all(store: GoldenStore) -> None:
+    store.create("q-a", doc_id="da")
+    store.create("q-b", doc_id="db")
+    rows, total = store.list(doc_id="da")
+    assert total == 1 and rows[0]["query"] == "q-a"
+    exported = store.export_all()
+    assert len(exported) == 2
+    assert {r["query"] for r in exported} == {"q-a", "q-b"}
+
+
 def test_migration_adds_columns_to_old_db(tmp_path: Path) -> None:
     """旧库（没有 expected_source / type 列）打开后应被 _migrate 自动补列。"""
     import sqlite3

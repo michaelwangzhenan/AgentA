@@ -16,7 +16,7 @@ export function ResourcePage({
   subtitle,
   toolbar,
   children,
-  maxWidthClassName = 'max-w-4xl',
+  maxWidthClassName = 'max-w-6xl',
 }: ResourcePageProps) {
   return (
     <div className="flex h-full flex-1 flex-col overflow-hidden">

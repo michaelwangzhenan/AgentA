@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Check, Plus, RotateCcw, Trash2, X } from 'lucide-react'
+import { ArrowLeft, Check, Download, Pencil, Plus, RotateCcw, Trash2, X } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
@@ -18,11 +18,21 @@ import {
 import {
   createGolden,
   deleteGolden,
+  exportGolden,
   getGolden,
   importGolden,
   updateGolden,
 } from '@/api/client'
 import type { GoldenItem, GoldenList, GoldenStatus } from '@/types/eval'
+
+// 跨页跳转：知识库 L2 点某文档候选数 → 带 docFilter 过来只看该文档
+export type GoldenDocFilter = { docId: string; label: string; fromAlias?: string }
+
+const SOURCE_FILTERS: { value: string; label: string }[] = [
+  { value: '', label: '全部来源' },
+  { value: 'ai', label: 'AI 生成' },
+  { value: 'manual', label: '手工' },
+]
 
 const STATUS_FILTERS: { value: string; label: string }[] = [
   { value: '', label: '全部' },
@@ -44,8 +54,19 @@ const STATUS_TEXT: Record<GoldenStatus, string> = {
 
 const PAGE_SIZE = 50
 
-export function GoldenManager() {
+export function GoldenManager({
+  docFilter,
+  onClearDocFilter,
+  onBackToKb,
+}: {
+  docFilter?: GoldenDocFilter
+  onClearDocFilter?: () => void
+  onBackToKb?: () => void
+} = {}) {
   const [status, setStatus] = useState('')
+  const [source, setSource] = useState('')
+  const [fileQ, setFileQ] = useState('')          // 来源文件搜索（输入框即时值）
+  const [fileQApplied, setFileQApplied] = useState('') // 防抖后真正用于查询的值
   const [data, setData] = useState<GoldenList | null>(null)
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
@@ -58,22 +79,42 @@ export function GoldenManager() {
   // 删除确认：单条或批量都走这里；null 表示对话框关闭
   const [deleteIds, setDeleteIds] = useState<number[] | null>(null)
   const [busy, setBusy] = useState(false)
+  const [editItem, setEditItem] = useState<GoldenItem | null>(null)
 
+  // 跨页跳转传入的"按文档过滤"用本地 state 持有：页内 ✕ 可立即清除，不依赖父组件回传时机；
+  // 父组件传入新的 docFilter（再次跳转）时同步刷新。
+  const [localDoc, setLocalDoc] = useState<GoldenDocFilter | undefined>(docFilter)
+  useEffect(() => {
+    setLocalDoc(docFilter)
+  }, [docFilter])
+  const docId = localDoc?.docId
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      setData(await getGolden({ status: status || undefined, limit: PAGE_SIZE }))
+      setData(await getGolden({
+        status: status || undefined,
+        source: source || undefined,
+        doc_id: docId || undefined,
+        source_contains: fileQApplied || undefined,
+        limit: PAGE_SIZE,
+      }))
       setSelected(new Set())
     } catch (e) {
       toast.error((e as Error).message)
     } finally {
       setLoading(false)
     }
-  }, [status])
+  }, [status, source, docId, fileQApplied])
 
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  // 来源文件搜索防抖（300ms）：输入停顿后才触发查询
+  useEffect(() => {
+    const t = setTimeout(() => setFileQApplied(fileQ.trim()), 300)
+    return () => clearTimeout(t)
+  }, [fileQ])
 
   const items = data?.items ?? []
   const allSelected = items.length > 0 && items.every((it) => selected.has(it.id))
@@ -167,6 +208,33 @@ export function GoldenManager() {
     }
   }
 
+  const doExport = async () => {
+    try {
+      if (await exportGolden()) toast.success('已导出 golden')
+    } catch (e) {
+      toast.error((e as Error).message)
+    }
+  }
+
+  const submitEdit = async () => {
+    if (!editItem) return
+    try {
+      await updateGolden(editItem.id, {
+        query: editItem.query.trim(),
+        expected_keywords: editItem.expected_keywords,
+        expected_source: editItem.expected_source.trim(),
+        expected_source_contains: editItem.expected_source_contains.trim(),
+        type: editItem.type.trim(),
+        note: editItem.note,
+      })
+      toast.success('已保存')
+      setEditItem(null)
+      void refresh()
+    } catch (e) {
+      toast.error((e as Error).message)
+    }
+  }
+
   const counts = data?.counts ?? {}
 
   return (
@@ -189,7 +257,27 @@ export function GoldenManager() {
             </button>
           ))}
         </div>
+        <select
+          value={source}
+          onChange={(e) => setSource(e.target.value)}
+          className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+        >
+          {SOURCE_FILTERS.map((f) => (
+            <option key={f.value} value={f.value}>{f.label}</option>
+          ))}
+        </select>
+        <input
+          type="text"
+          value={fileQ}
+          onChange={(e) => setFileQ(e.target.value)}
+          placeholder="按来源文件筛选…"
+          className="w-44 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+        />
         <div className="ml-auto flex items-center gap-2">
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={doExport}>
+            <Download className="h-3.5 w-3.5" />
+            导出 json
+          </Button>
           <Button variant="outline" size="sm" className="gap-1.5" onClick={doImport}>
             <RotateCcw className="h-3.5 w-3.5" />
             从 golden.json 导入
@@ -200,6 +288,35 @@ export function GoldenManager() {
           </Button>
         </div>
       </div>
+
+      {localDoc && (
+        <div className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs">
+          <span className="text-muted-foreground">仅看文档：</span>
+          <span className="font-medium text-foreground" title={localDoc.docId}>{localDoc.label}</span>
+          <div className="ml-auto flex items-center gap-1.5">
+            {onBackToKb && (
+              <button
+                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-primary hover:bg-primary/10"
+                title="返回知识库该文档列表"
+                onClick={() => onBackToKb()}
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                返回知识库{localDoc.fromAlias ? `（${localDoc.fromAlias}）` : ''}
+              </button>
+            )}
+            <button
+              className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+              title="清除筛选"
+              onClick={() => {
+                setLocalDoc(undefined)
+                onClearDocFilter?.()
+              }}
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {selected.size > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
@@ -226,11 +343,26 @@ export function GoldenManager() {
 
       {showCreate && (
         <div className="space-y-2 rounded-lg border border-border p-3">
-          <Input placeholder="问题 query（必填）" value={newQuery} onChange={(e) => setNewQuery(e.target.value)} />
-          <Input placeholder="期望关键词（逗号分隔）" value={newKeywords} onChange={(e) => setNewKeywords(e.target.value)} />
-          <Input placeholder="期望来源片段 expected_source_contains（子串匹配，可选）" value={newSource} onChange={(e) => setNewSource(e.target.value)} />
-          <Input placeholder="期望来源 expected_source（精确匹配，可选）" value={newSourceExact} onChange={(e) => setNewSourceExact(e.target.value)} />
-          <Input placeholder="分类 type（如 baseline / hyde，可选）" value={newType} onChange={(e) => setNewType(e.target.value)} />
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">问题 query（必填）</label>
+            <Input placeholder="评估用的提问" value={newQuery} onChange={(e) => setNewQuery(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">期望关键词（逗号分隔）</label>
+            <Input placeholder="如：RAG, 检索, 向量" value={newKeywords} onChange={(e) => setNewKeywords(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">期望来源片段（子串匹配，可选）</label>
+            <Input placeholder="命中来源含此片段即算对，如文件名" value={newSource} onChange={(e) => setNewSource(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">期望来源（精确匹配，可选）</label>
+            <Input placeholder="命中来源需完全等于此值" value={newSourceExact} onChange={(e) => setNewSourceExact(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">分类 type（可选）</label>
+            <Input placeholder="人工标签，如 baseline / hyde" value={newType} onChange={(e) => setNewType(e.target.value)} />
+          </div>
           <div className="flex justify-end gap-2">
             <Button variant="outline" size="sm" onClick={() => setShowCreate(false)}>
               取消
@@ -304,6 +436,13 @@ export function GoldenManager() {
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex items-center justify-end gap-1">
+                      <button
+                        className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                        title="编辑"
+                        onClick={() => setEditItem(it)}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
                       {it.status !== 'approved' && (
                         <button
                           className="rounded p-1 text-emerald-600 hover:bg-accent"
@@ -347,6 +486,38 @@ export function GoldenManager() {
       <p className="text-xs text-muted-foreground">
         golden 用于 RAG 检索评估的标准基准。入库新资料时会自动生成「待审核」候选；评估脚本默认只用「已通过」的。
       </p>
+
+      {editItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setEditItem(null)}>
+          <div className="w-full max-w-lg space-y-2 rounded-lg border border-border bg-background p-4 shadow-lg" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold">编辑 golden #{editItem.id}</h3>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">问题 query</label>
+              <Input placeholder="评估用的提问" value={editItem.query} onChange={(e) => setEditItem({ ...editItem, query: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">期望关键词（逗号分隔）</label>
+              <Input placeholder="如：RAG, 检索, 向量" value={editItem.expected_keywords.join(', ')} onChange={(e) => setEditItem({ ...editItem, expected_keywords: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">期望来源片段（子串匹配）</label>
+              <Input placeholder="命中来源含此片段即算对，如文件名" value={editItem.expected_source_contains} onChange={(e) => setEditItem({ ...editItem, expected_source_contains: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">期望来源（精确匹配）</label>
+              <Input placeholder="命中来源需完全等于此值（可选）" value={editItem.expected_source} onChange={(e) => setEditItem({ ...editItem, expected_source: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">分类 type</label>
+              <Input placeholder="人工标签，如 baseline / hyde（可选）" value={editItem.type} onChange={(e) => setEditItem({ ...editItem, type: e.target.value })} />
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" size="sm" onClick={() => setEditItem(null)}>取消</Button>
+              <Button size="sm" onClick={submitEdit} disabled={!editItem.query.trim()}>保存</Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <AlertDialog open={deleteIds !== null} onOpenChange={(o: boolean) => !o && setDeleteIds(null)}>
         <AlertDialogContent>

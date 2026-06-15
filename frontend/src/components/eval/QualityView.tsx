@@ -1,18 +1,38 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/auth'
 import { ResourcePage } from '@/components/resources/ResourcePage'
 import { TraceDashboard } from './TraceDashboard'
-import { GoldenManager } from './GoldenManager'
+import { GoldenManager, type GoldenDocFilter } from './GoldenManager'
 import { OfflineEvalView } from './OfflineEvalView'
 import { RuntimeMonitor } from './SecurityPanel'
 
 type Tab = 'trace' | 'security_runtime' | 'offline' | 'golden'
 
-export function QualityView() {
+export function QualityView({
+  goldenJump,
+  goldenTabSignal,
+  onGoldenJumpConsumed,
+  onBackToKb,
+}: {
+  goldenJump?: GoldenDocFilter | null
+  goldenTabSignal?: number
+  onGoldenJumpConsumed?: () => void
+  onBackToKb?: () => void
+} = {}) {
   const { isAdmin } = useAuth()
   const [tab, setTab] = useState<Tab>('trace')
+
+  // 知识库跳转过来：自动切到 Golden 管理 tab
+  useEffect(() => {
+    if (goldenJump) setTab('golden')
+  }, [goldenJump])
+
+  // 入库完成 toast 点"去 Golden 管理"：切到 Golden tab（无文档筛选）
+  useEffect(() => {
+    if (goldenTabSignal) setTab('golden')
+  }, [goldenTabSignal])
 
   const tabs: { value: Tab; label: string }[] = [
     { value: 'trace', label: '会话监控' },
@@ -31,8 +51,6 @@ export function QualityView() {
     <ResourcePage
       title="质量看板"
       subtitle="在线 trace 可观测 + RAG golden 管理 + 离线评估"
-      // 离线评估含报告正文 / 卡片，放宽到 max-w-6xl；其余标签保持默认
-      maxWidthClassName={active === 'offline' ? 'max-w-6xl' : 'max-w-4xl'}
     >
       <div className="flex min-h-0 flex-1 gap-4">
         {/* 左侧竖向导航（同设置页样式） */}
@@ -62,7 +80,13 @@ export function QualityView() {
           {active === 'trace' && <TraceDashboard />}
           {active === 'security_runtime' && isAdmin && <RuntimeMonitor />}
           {active === 'offline' && isAdmin && <OfflineEvalView />}
-          {active === 'golden' && isAdmin && <GoldenManager />}
+          {active === 'golden' && isAdmin && (
+            <GoldenManager
+              docFilter={goldenJump ?? undefined}
+              onClearDocFilter={onGoldenJumpConsumed}
+              onBackToKb={goldenJump ? onBackToKb : undefined}
+            />
+          )}
         </div>
       </div>
     </ResourcePage>

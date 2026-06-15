@@ -15,6 +15,8 @@ class KBDocument(BaseModel):
     ingested_at: float = Field(0.0, description="入库时间（unix timestamp）；老数据为 0")
     chunks: int = Field(0, description="切分后入库的 chunk 数")
     total_chars: int = Field(0, description="所有 chunks 文本总字符数")
+    golden_total: int = Field(0, description="该文档关联的 golden 候选总数")
+    golden_pending: int = Field(0, description="该文档关联的 golden 待审候选数")
 
 
 class KBDocumentListResponse(BaseModel):

@@ -327,5 +327,34 @@ agent_eval/run_all.py
 
 
 
-## 3.3. Golden
-“质量看板->Golden管理” 与  "数据库 -> SQLite -> rag_golden.db" or "知识库 -> 入库" 整合？
+## 3.3. Golden 整合
+
+打通 golden 在「知识库（产地）」与「质量看板（审核台）」之间的链路。
+
+### 3.3.1. 关键结论
+
+- **golden 全局一套，不按 embedding 库分**。理由：运行时 en/zh/m3 三库是**协同融合召回**（各库 RRF → 跨库 round-robin → rerank），生产产出的是融合后的统一结果；RAG eval 也调同一个 `retriever.search()` 评融合整体。故 golden 评的是"整个检索系统"，无"单库"对应物。
+- **数据源唯一**：`rag_golden.db`（`GoldenStore`）为权威；`golden.json` 仅一次性导入种子。
+- **三处分工**：知识库 = golden 产地（生成 + 可见 + 跳转）；质量看板 Golden 管理 = 审核台（审核 + 行内编辑 + 导入导出）；数据库浏览器 = 只读巡检（不动）。
+
+### 3.3.2. UI 落点
+
+| 整合项 | 落点 | 做法 |
+|---|---|---|
+| 行内编辑 | 质量看板 → Golden 管理 | 列表行可编辑 query / 关键词 / 来源（后端 PUT 已支持，仅补前端 UI）|
+| 导出 json | 质量看板 → Golden 管理 | 工具栏「导出 json」，与现有「从 json 导入」并排（新增后端 DB→json 导出）|
+| 手动生成 | 知识库 L2 文档行 / 库级 | 「生成评估题」按钮 → 复用 `golden_gen.run_generation_for_file` 产 pending 候选（与入库自动生成同源）|
+| 入库链路可见 | 知识库 + Golden 管理 | ① 入库完成提示「生成 N 条待审 → 去 Golden 管理」；② 知识库 L2 文档行显示「已生成 N 条候选（含待审）」；③ Golden 管理支持**按来源文档筛选**（golden 不带库维度，故只按 doc/来源、不按库），从 L2 点候选数跳转直达该文档候选 |
+
+### 3.3.3. 实现
+
+1. **后端 `GoldenStore`**：`list` 加 `doc_id` 过滤；新增 `doc_counts()`（按文档计候选/待审数）、`delete_pending_by_doc()`、`export_all()`。
+2. **后端路由**：`GET /eval/golden` 加 `doc_id` 参数；新增 `GET /eval/golden/export`（下载 json）、`POST /eval/golden/generate`（定位 `web_uploads/<model>/<source>` 物理文件 → 清旧 pending → `run_generation_for_file(force=True)`）。`golden_gen` 加 `force` 绕过自动开关。
+3. **后端 kb**：`list_documents` 每文档项带 `golden_total` / `golden_pending`（按 doc_id 聚合）。
+4. **前端 Golden 管理**：行内编辑（弹窗改 query/关键词/来源/分类）、「导出 json」按钮、来源(manual/ai)筛选、`docFilter` props（跨页跳转按文档筛选 + 可清除）。
+5. **前端知识库 L2**：文档行新增「评估题」列——候选数（含待审，点击跳转）+「生成评估题」按钮（`Sparkles`，转圈）。
+6. **跨页跳转**：`App` 持 `goldenJump` 状态 → 知识库 `onOpenGolden` 切到质量看板 + `QualityView` 自动切 Golden tab + 传 `docFilter` 给 `GoldenManager`。
+7. **UT**：store（doc_counts/删pending/导出/doc 筛选）+ 路由（export/generate/doc 筛选/缺文件 404）。
+
+> 调整：①「入库完成提示 N 条候选」——golden 生成是入库后**后台 fire-and-forget**，完成瞬间拿不到精确 N，故降级：可见性靠 ② L2 文档行候选数（刷新即显现）+ ③ 跳转，不在入库 toast 里报不准的数。
+> 暂不纳入：RAG eval「按 embedding 库子集消融」决定 en/zh/m3 去留——见 backlog。

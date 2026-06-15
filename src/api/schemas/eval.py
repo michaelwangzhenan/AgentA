@@ -49,6 +49,18 @@ class GoldenUpdateRequest(BaseModel):
     status: str | None = None
 
 
+class GoldenGenerateRequest(BaseModel):
+    """为某个已入库文档手动生成 golden 候选（pending/ai）。"""
+    model: str = Field(..., description="库别名 en/zh/m3")
+    source: str = Field(..., min_length=1, description="文档相对 web_uploads/<model> 的路径")
+    doc_id: str = Field("", description="KB 文档 doc_id；用于关联 + 重生成前清旧 pending")
+
+
+class GoldenGenerateResponse(BaseModel):
+    generated: int        # 本次写入的候选条数
+    removed_pending: int   # 重生成前清掉的旧 pending 数
+
+
 # ── trace 可观测 ─────────────────────────────────────────────────────────────
 
 class TraceOverview(BaseModel):

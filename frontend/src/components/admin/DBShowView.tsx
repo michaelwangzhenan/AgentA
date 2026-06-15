@@ -71,7 +71,6 @@ export function DBShowView() {
     <ResourcePage
       title="数据库"
       subtitle="Chroma / BM25 / SQLite 的结构与内容"
-      maxWidthClassName="max-w-6xl"
     >
       <div className="flex min-h-0 flex-1 gap-4">
         <nav className="sticky top-0 w-32 shrink-0 self-start">

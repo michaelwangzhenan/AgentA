@@ -11,6 +11,7 @@ export type IngestPanelProps = {
   collections: KBCollection[]
   defaultAlias: string
   onIngested: () => void
+  onGotoGolden?: () => void // 入库完成 toast 里"去 Golden 管理"链接
 }
 
 // 待入库条目：单文件 或 整个文件夹（折叠，不展开里面的文件）
@@ -38,7 +39,7 @@ function relPathOf(f: File): string {
   return (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name
 }
 
-export function IngestPanel({ collections, defaultAlias, onIngested }: IngestPanelProps) {
+export function IngestPanel({ collections, defaultAlias, onIngested, onGotoGolden }: IngestPanelProps) {
   const [target, setTarget] = useState(defaultAlias)
   const [items, setItems] = useState<StageItem[]>([])
   const [running, setRunning] = useState(false)
@@ -125,6 +126,7 @@ export function IngestPanel({ collections, defaultAlias, onIngested }: IngestPan
     let ok = 0
     let skip = 0
     let fail = 0
+    let gold = 0
     let cancelled = false
     setStats({ done: 0, total: flat.length, ok: 0, skip: 0, fail: 0 })
     try {
@@ -150,6 +152,7 @@ export function IngestPanel({ collections, defaultAlias, onIngested }: IngestPan
           )
           if (resp.chunks > 0 && resp.status === 'ingested') {
             ok++
+            gold += resp.golden_generated || 0
             sm[key] = 'ok'
           } else {
             skip++
@@ -173,9 +176,18 @@ export function IngestPanel({ collections, defaultAlias, onIngested }: IngestPan
       if (cancelled) {
         toast.info(`已取消入库（新增 ${ok}${skip ? ` · 未变 ${skip}` : ''}）`)
       } else {
-        const summary = `入库完成：新增 ${ok}${skip ? ` · 未变 ${skip}` : ''}${fail ? ` · 失败 ${fail}` : ''}`
-        if (fail > 0) toast.error(summary)
-        else toast.success(summary)
+        const goldPart = gold ? ` · 评估题 ${gold} 条待审` : ''
+        const summary = `入库完成：新增 ${ok}${skip ? ` · 未变 ${skip}` : ''}${fail ? ` · 失败 ${fail}` : ''}${goldPart}`
+        // 完成提示固定不消失、可手动关；有新候选时带"去 Golden 管理"跳转
+        const opts = {
+          duration: Infinity,
+          closeButton: true,
+          ...(gold && onGotoGolden
+            ? { action: { label: '去 Golden 管理', onClick: onGotoGolden } }
+            : {}),
+        }
+        if (fail > 0) toast.error(summary, opts)
+        else toast.success(summary, opts)
         setItems([])
         setStatus({})
       }
@@ -197,6 +209,7 @@ export function IngestPanel({ collections, defaultAlias, onIngested }: IngestPan
   const chunkText = (c: IngestProgress): string => {
     if (c.phase === 'parse') return '解析中…'
     if (c.phase === 'split') return `切分得 ${c.total} 块`
+    if (c.phase === 'golden') return '生成评估题候选中…'
     return `嵌入 第 ${c.done}/${c.total} 块`
   }
   const chunkPct = chunk && chunk.total > 0 ? Math.round((chunk.done / chunk.total) * 100) : 0

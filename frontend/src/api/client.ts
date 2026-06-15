@@ -1050,11 +1050,20 @@ export async function getTraceDetail(traceId: string): Promise<TraceDetail> {
 }
 
 export async function getGolden(
-  opts: { status?: string; source?: string; limit?: number; offset?: number } = {},
+  opts: {
+    status?: string
+    source?: string
+    doc_id?: string
+    source_contains?: string
+    limit?: number
+    offset?: number
+  } = {},
 ): Promise<GoldenList> {
   const params = new URLSearchParams()
   if (opts.status) params.set('status', opts.status)
   if (opts.source) params.set('source', opts.source)
+  if (opts.doc_id) params.set('doc_id', opts.doc_id)
+  if (opts.source_contains) params.set('source_contains', opts.source_contains)
   params.set('limit', String(opts.limit ?? 50))
   params.set('offset', String(opts.offset ?? 0))
   const res = await apiFetch(`/api/eval/golden?${params.toString()}`)
@@ -1095,6 +1104,73 @@ export async function importGolden(): Promise<{ added: number; source: string }>
   const res = await apiFetch('/api/eval/golden/import', { method: 'POST' })
   await _ensureOk(res)
   return (await res.json()) as { added: number; source: string }
+}
+
+// File System Access API 的最小类型（避免 any；仅 Chromium 系支持）
+type SaveFilePicker = (opts?: {
+  suggestedName?: string
+  types?: { description?: string; accept: Record<string, string[]> }[]
+}) => Promise<{
+  createWritable: () => Promise<{
+    write: (data: Blob) => Promise<void>
+    close: () => Promise<void>
+  }>
+}>
+
+// 导出全部 golden 为 json：优先弹"另存为"让用户选目录；不支持则回退默认下载目录。
+// 返回 true=已保存，false=用户取消。
+export async function exportGolden(): Promise<boolean> {
+  const suggestedName = `golden-export-${Date.now()}.json`
+  const picker = (window as unknown as { showSaveFilePicker?: SaveFilePicker }).showSaveFilePicker
+  // 先在用户手势内弹保存对话框（保住 transient activation），再去取数据
+  let handle: Awaited<ReturnType<SaveFilePicker>> | null = null
+  if (typeof picker === 'function') {
+    try {
+      handle = await picker({
+        suggestedName,
+        types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }],
+      })
+    } catch (e) {
+      if ((e as DOMException)?.name === 'AbortError') return false // 用户取消
+      handle = null // 其它失败 → 回退普通下载
+    }
+  }
+
+  const res = await apiFetch('/api/eval/golden/export')
+  await _ensureOk(res)
+  const blob = await res.blob()
+
+  if (handle) {
+    const w = await handle.createWritable()
+    await w.write(blob)
+    await w.close()
+    return true
+  }
+  // 回退：浏览器默认下载目录
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = suggestedName
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+  return true
+}
+
+// 为某已入库文档手动生成 golden 候选（pending）
+export async function generateGolden(
+  model: string,
+  source: string,
+  docId: string,
+): Promise<{ generated: number; removed_pending: number }> {
+  const res = await apiFetch('/api/eval/golden/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, source, doc_id: docId }),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as { generated: number; removed_pending: number }
 }
 
 export async function getReports(): Promise<ReportList> {

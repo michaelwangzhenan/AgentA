@@ -14,6 +14,7 @@ import {
 import {
   clearAllKBDocuments,
   deleteKBDocument,
+  generateGolden,
   getKBCollections,
   listKBDocuments,
 } from '@/api/client'
@@ -34,9 +35,27 @@ import {
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
 
-export function KnowledgeBaseView() {
+export function KnowledgeBaseView({
+  onOpenGolden,
+  onGotoGolden,
+  returnToAlias,
+  onReturnConsumed,
+}: {
+  onOpenGolden?: (docId: string, label: string, alias: string) => void
+  onGotoGolden?: () => void
+  returnToAlias?: string | null
+  onReturnConsumed?: () => void
+} = {}) {
   // null = 第一层（库列表 L1）；否则进第二层（该库的文档列表 L2）
   const [alias, setAlias] = useState<string | null>(null)
+
+  // 从 Golden 管理"返回"过来：直接打开该库 L2（一次性，消费后通知父组件清空）
+  useEffect(() => {
+    if (returnToAlias) {
+      setAlias(returnToAlias)
+      onReturnConsumed?.()
+    }
+  }, [returnToAlias, onReturnConsumed])
 
   return (
     <div className="flex h-full flex-1 flex-col overflow-hidden">
@@ -50,9 +69,9 @@ export function KnowledgeBaseView() {
       <div className="flex-1 overflow-y-auto p-6">
         <div className="mx-auto max-w-4xl space-y-6">
           {alias === null ? (
-            <L1View onOpen={setAlias} />
+            <L1View onOpen={setAlias} onGotoGolden={onGotoGolden} />
           ) : (
-            <LibraryView alias={alias} onBack={() => setAlias(null)} />
+            <LibraryView alias={alias} onBack={() => setAlias(null)} onOpenGolden={onOpenGolden} />
           )}
         </div>
       </div>
@@ -65,7 +84,13 @@ export function KnowledgeBaseView() {
 // 模块级缓存：在 KB 页反复进出时立即回显上次结果，后台再静默校验，避免每次都干等。
 let _cachedCollections: KBCollection[] | null = null
 
-function L1View({ onOpen }: { onOpen: (alias: string) => void }) {
+function L1View({
+  onOpen,
+  onGotoGolden,
+}: {
+  onOpen: (alias: string) => void
+  onGotoGolden?: () => void
+}) {
   const [collections, setCollections] = useState<KBCollection[]>(
     () => _cachedCollections ?? [],
   )
@@ -181,6 +206,7 @@ function L1View({ onOpen }: { onOpen: (alias: string) => void }) {
         collections={ordered}
         defaultAlias={defaultAlias}
         onIngested={() => load(true)}
+        onGotoGolden={onGotoGolden}
       />
     </div>
   )
@@ -208,11 +234,20 @@ function Stat({
 
 // ── L2：单个库的文档管理 ─────────────────────────────────────────────────────
 
-function LibraryView({ alias, onBack }: { alias: string; onBack: () => void }) {
+function LibraryView({
+  alias,
+  onBack,
+  onOpenGolden,
+}: {
+  alias: string
+  onBack: () => void
+  onOpenGolden?: (docId: string, label: string, alias: string) => void
+}) {
   const [documents, setDocuments] = useState<KBDocument[]>([])
   const [loading, setLoading] = useState(true)
   const [clearDialogOpen, setClearDialogOpen] = useState(false)
   const [clearing, setClearing] = useState(false)
+  const [genDocId, setGenDocId] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -286,6 +321,23 @@ function LibraryView({ alias, onBack }: { alias: string; onBack: () => void }) {
     }
   }, [alias, refresh])
 
+  const handleGenerate = useCallback(
+    async (doc: KBDocument) => {
+      setGenDocId(doc.doc_id)
+      try {
+        const r = await generateGolden(alias, doc.source, doc.doc_id)
+        const cleared = r.removed_pending ? `（清旧待审 ${r.removed_pending}）` : ''
+        toast.success(`已生成 ${r.generated} 条评估题候选${cleared}，去 Golden 管理审核`)
+        await refresh()
+      } catch (e) {
+        toast.error(`生成失败：${(e as Error).message}`)
+      } finally {
+        setGenDocId(null)
+      }
+    },
+    [alias, refresh],
+  )
+
   const totalChunks = documents.reduce((sum, d) => sum + d.chunks, 0)
 
   return (
@@ -322,6 +374,9 @@ function LibraryView({ alias, onBack }: { alias: string; onBack: () => void }) {
           loading={loading}
           onDelete={handleDelete}
           onDeleteMany={handleDeleteMany}
+          onGenerateGolden={handleGenerate}
+          generatingDocId={genDocId}
+          onOpenGolden={(docId, label) => onOpenGolden?.(docId, label, alias)}
         />
       </div>
 

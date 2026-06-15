@@ -37,11 +37,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# 持有后台 golden 生成任务的强引用，避免 asyncio 在任务跑完前把它当垃圾回收
-# （fire-and-forget 任务若无引用可能被 GC，见 asyncio.create_task 文档警示）。
-_bg_tasks: set = set()
-
-
 def _validate_alias(model: str) -> str:
     """校验 embedding 别名必须是已定义的（en/zh/m3），否则 400。"""
     if model not in config.EMBEDDING_MODELS:
@@ -73,8 +68,9 @@ def _safe_rel_target(upload_root: Path, relpath: str, filename: str) -> Path:
     return target
 
 
-def _md_to_kbdoc(md: dict) -> KBDocument:
-    """`list_kb_documents` 返回的 dict → KBDocument"""
+def _md_to_kbdoc(md: dict, golden: dict[str, int] | None = None) -> KBDocument:
+    """`list_kb_documents` 返回的 dict → KBDocument（golden 为该文档候选计数）"""
+    golden = golden or {}
     return KBDocument(
         doc_id=md["doc_id"],
         filename=md.get("filename", ""),
@@ -85,6 +81,8 @@ def _md_to_kbdoc(md: dict) -> KBDocument:
         ingested_at=float(md.get("ingested_at", 0.0)),
         chunks=int(md.get("chunks", 0)),
         total_chars=int(md.get("total_chars", 0)),
+        golden_total=int(golden.get("total", 0)),
+        golden_pending=int(golden.get("pending", 0)),
     )
 
 
@@ -117,10 +115,14 @@ def list_documents(
     model: str = Query(config.DEFAULT_EMBEDDING_ALIAS, description="库别名 en/zh/m3"),
     _: dict = Depends(get_current_user),
 ) -> KBDocumentListResponse:
-    """列出指定库内已入库的所有文档（按上传时间倒序）。"""
+    """列出指定库内已入库的所有文档（按上传时间倒序），附每文档的 golden 候选计数。"""
     _validate_alias(model)
     docs = list_kb_documents(model=model)
-    return KBDocumentListResponse(documents=[_md_to_kbdoc(d) for d in docs])
+    from src.memory.golden_store import get_shared_store
+    dc = get_shared_store().doc_counts()  # {doc_id: {total, pending}}
+    return KBDocumentListResponse(
+        documents=[_md_to_kbdoc(d, dc.get(d["doc_id"])) for d in docs]
+    )
 
 
 def _done_message(status: str, chunks: int) -> str:
@@ -132,20 +134,23 @@ def _done_message(status: str, chunks: int) -> str:
     return f"已入库 {chunks} 个 chunks"
 
 
-def _trigger_golden(target_path: Path, safe_name: str, doc_id: str) -> None:
-    """入库成功后台调 LLM 自动生成 golden 候选（不感知、软失败、不阻塞）。"""
+def _generate_golden_sync(target_path: Path, safe_name: str, doc_id: str) -> int:
+    """入库成功后同步生成 golden 候选（在工作线程里跑）。返回生成条数；软失败返回 0。
+
+    重生成前先清该文档旧的 pending 候选（避免重入库累积重复），approved/rejected 保留。
+    """
+    from src.memory.golden_store import get_shared_store
     from src.rag.golden_gen import run_generation_for_file
 
-    task = asyncio.create_task(
-        asyncio.to_thread(
-            run_generation_for_file,
-            file_path=str(target_path),
-            source=safe_name,
-            doc_id=doc_id,
+    try:
+        if doc_id:
+            get_shared_store().delete_pending_by_doc(doc_id)
+        return run_generation_for_file(
+            file_path=str(target_path), source=safe_name, doc_id=doc_id,
         )
-    )
-    _bg_tasks.add(task)
-    task.add_done_callback(_bg_tasks.discard)
+    except Exception:  # noqa: BLE001 — 出题失败不影响已完成的入库
+        logger.warning("[KB] golden 生成失败: %s", safe_name)
+        return 0
 
 
 async def _ingest_event_stream(target_path: Path, upload_root: Path, model: str, safe_name: str):
@@ -173,8 +178,13 @@ async def _ingest_event_stream(target_path: Path, upload_root: Path, model: str,
                 progress_cb=cb,
             )
             status, chunks, doc_id = result["status"], result["chunks"], result["doc_id"]
+            golden_n = 0
             if status == "ingested" and config.EVAL_AUTO_GOLDEN_ENABLED:
-                _trigger_golden(target_path, safe_name, doc_id)
+                # 同步出题：先推"出题中"相位，再在工作线程跑 LLM，完成后并入 done
+                q.put_nowait({"type": "progress", "phase": "golden", "done": 0, "total": 0})
+                golden_n = await asyncio.to_thread(
+                    _generate_golden_sync, target_path, safe_name, doc_id,
+                )
             q.put_nowait({
                 "type": "done",
                 "doc_id": doc_id,
@@ -182,6 +192,7 @@ async def _ingest_event_stream(target_path: Path, upload_root: Path, model: str,
                 "chunks": chunks,
                 "skipped_unchanged": status == "skipped_unchanged",
                 "status": status,
+                "golden_generated": golden_n,
                 "message": _done_message(status, chunks),
             })
         except Exception as exc:  # noqa: BLE001 — 任何入库异常都作为 error 事件回传

@@ -31,6 +31,14 @@ function App() {
   const [activeView, setActiveView] = useState<ViewKind>('chat')
   const [sessions, setSessions] = useState<Session[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  // 知识库 → 质量看板 Golden 管理跨页跳转：带上要筛选的来源文档 + 来源库（用于返回）
+  const [goldenJump, setGoldenJump] = useState<
+    { docId: string; label: string; fromAlias?: string } | null
+  >(null)
+  // 返回时让知识库重新打开到某个库的 L2（一次性，消费后清空）
+  const [kbReturn, setKbReturn] = useState<string | null>(null)
+  // 打开质量看板 Golden 管理 tab 的一次性信号（递增触发；入库完成 toast 点链接用）
+  const [goldenTabSignal, setGoldenTabSignal] = useState(0)
 
   // 发送后刷新 session 列表（首条消息会回填标题、更新排序）
   const refreshSessions = useCallback(async () => {
@@ -153,7 +161,20 @@ function App() {
           onSwitchVersion={switchVersion}
         />
       )}
-      {activeView === 'kb' && <KnowledgeBaseView />}
+      {activeView === 'kb' && (
+        <KnowledgeBaseView
+          returnToAlias={kbReturn}
+          onReturnConsumed={() => setKbReturn(null)}
+          onOpenGolden={(docId, label, alias) => {
+            setGoldenJump({ docId, label, fromAlias: alias })
+            setActiveView('quality')
+          }}
+          onGotoGolden={() => {
+            setGoldenTabSignal((s) => s + 1)
+            setActiveView('quality')
+          }}
+        />
+      )}
       {activeView === 'memory' && <MemoryView />}
       {activeView === 'rules' && <RulesView />}
       {activeView === 'skills' && isAdmin && <SkillsView />}
@@ -175,7 +196,18 @@ function App() {
         />
       )}
       {activeView === 'usage' && <UsageView />}
-      {activeView === 'quality' && <QualityView />}
+      {activeView === 'quality' && (
+        <QualityView
+          goldenJump={goldenJump}
+          goldenTabSignal={goldenTabSignal}
+          onGoldenJumpConsumed={() => setGoldenJump(null)}
+          onBackToKb={() => {
+            setKbReturn(goldenJump?.fromAlias ?? null)
+            setGoldenJump(null)
+            setActiveView('kb')
+          }}
+        />
+      )}
       {activeView === 'dbshow' && isAdmin && <DBShowView />}
       {activeView === 'backup' && isAdmin && <BackupView />}
       {activeView === 'settings' && <SettingsPage />}

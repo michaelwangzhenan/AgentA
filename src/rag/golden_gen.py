@@ -91,12 +91,14 @@ def run_generation_for_file(
     source: str,
     doc_id: str = "",
     max_q: int | None = None,
+    force: bool = False,
 ) -> int:
     """解析文件 → LLM 出题 → 写入 GoldenStore（pending / ai）。返回写入条数。
 
     全程软失败：任何异常只记日志、返回 0。供后台任务 fire-and-forget 调用。
+    force=True 时绕过 EVAL_AUTO_GOLDEN_ENABLED 开关（供 UI 手动生成显式触发）。
     """
-    if not config.EVAL_AUTO_GOLDEN_ENABLED:
+    if not force and not config.EVAL_AUTO_GOLDEN_ENABLED:
         return 0
     try:
         from src.rag.parser import parse_file

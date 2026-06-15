@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronUp, FileText, Trash2, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, FileText, Loader2, Sparkles, Trash2, X } from 'lucide-react'
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const
 const DEFAULT_PAGE_SIZE = 10
@@ -30,6 +30,11 @@ export type DocumentListProps = {
   loading: boolean
   onDelete: (docId: string) => Promise<void> | void
   onDeleteMany?: (docIds: string[]) => Promise<void> | void
+  // 为某文档生成 golden 评估题候选；generatingDocId = 正在生成的文档（转圈）
+  onGenerateGolden?: (doc: KBDocument) => Promise<void> | void
+  generatingDocId?: string | null
+  // 点候选数 → 跳质量看板 Golden 管理（按该文档筛选）
+  onOpenGolden?: (docId: string, label: string) => void
 }
 
 type SortKey =
@@ -111,6 +116,9 @@ export function DocumentList({
   loading,
   onDelete,
   onDeleteMany,
+  onGenerateGolden,
+  generatingDocId,
+  onOpenGolden,
 }: DocumentListProps) {
   const [deleteTarget, setDeleteTarget] = useState<KBDocument | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -398,6 +406,7 @@ export function DocumentList({
                 </th>
               )
             })}
+            <th className="w-28 px-3 py-2 text-right font-medium whitespace-nowrap">评估题</th>
             <th className="w-10 px-3 py-2" />
           </tr>
         </thead>
@@ -437,6 +446,42 @@ export function DocumentList({
               </td>
               <td className="px-3 py-2 text-xs text-muted-foreground">
                 {formatTime(d.ingested_at)}
+              </td>
+              <td className="px-3 py-2 text-right whitespace-nowrap">
+                <div className="flex items-center justify-end gap-1.5">
+                  {(d.golden_total ?? 0) > 0 ? (
+                    <button
+                      type="button"
+                      className="rounded px-1.5 py-0.5 text-xs text-primary hover:bg-primary/10"
+                      title="查看该文档的评估题候选"
+                      onClick={() => onOpenGolden?.(d.doc_id, d.filename || d.source)}
+                    >
+                      {d.golden_total}
+                      {(d.golden_pending ?? 0) > 0 && (
+                        <span className="ml-0.5 text-amber-600 dark:text-amber-400">·{d.golden_pending} 待审</span>
+                      )}
+                    </button>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">—</span>
+                  )}
+                  {onGenerateGolden && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-primary"
+                      disabled={generatingDocId === d.doc_id}
+                      onClick={() => void onGenerateGolden(d)}
+                      aria-label={`为 ${d.filename} 生成评估题`}
+                      title="生成评估题候选（LLM）"
+                    >
+                      {generatingDocId === d.doc_id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-4 w-4" />
+                      )}
+                    </Button>
+                  )}
+                </div>
               </td>
               <td className="px-3 py-2 text-right">
                 <Button

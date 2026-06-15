@@ -14,7 +14,7 @@ import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from src.api.deps import (
     get_current_user,
@@ -29,6 +29,8 @@ from src.api.schemas.eval import (
     EvalRunStatus,
     EvalSummary,
     GoldenCreateRequest,
+    GoldenGenerateRequest,
+    GoldenGenerateResponse,
     GoldenItem,
     GoldenList,
     GoldenUpdateRequest,
@@ -94,17 +96,69 @@ def _to_golden_item(d: dict) -> GoldenItem:
 def list_golden(
     status: str | None = Query(None),
     source: str | None = Query(None),
+    doc_id: str | None = Query(None, description="按关联 KB 文档筛选（来源文档）"),
+    source_contains: str | None = Query(None, description="按来源文件名/路径子串过滤"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     _: dict = Depends(require_admin),
     store: GoldenStore = Depends(get_golden_store),
 ) -> GoldenList:
-    """列出 RAG golden（可按状态 / 来源过滤）+ 各状态计数。"""
-    rows, total = store.list(status=status, source=source, limit=limit, offset=offset)
+    """列出 RAG golden（可按状态 / 来源 / 文档 / 来源文件过滤）+ 各状态计数。"""
+    rows, total = store.list(
+        status=status, source=source, doc_id=doc_id,
+        source_contains=source_contains, limit=limit, offset=offset,
+    )
     return GoldenList(
         items=[_to_golden_item(r) for r in rows],
         total=total, limit=limit, offset=offset, counts=store.counts(),
     )
+
+
+@router.get("/golden/export")
+def export_golden(
+    _: dict = Depends(require_admin),
+    store: GoldenStore = Depends(get_golden_store),
+) -> Response:
+    """导出全部 golden 为可下载的 json 文件。"""
+    import json as _json
+
+    payload = _json.dumps(store.export_all(), ensure_ascii=False, indent=2)
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    return Response(
+        content=payload,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="golden-export-{ts}.json"'},
+    )
+
+
+@router.post("/golden/generate", response_model=GoldenGenerateResponse)
+def generate_golden(
+    req: GoldenGenerateRequest,
+    _: dict = Depends(require_admin),
+    store: GoldenStore = Depends(get_golden_store),
+) -> GoldenGenerateResponse:
+    """为某已入库文档手动生成 golden 候选：定位 web_uploads 物理文件 → LLM 出题 → pending。
+
+    重生成前先清掉该文档旧的 pending 候选（approved/rejected 保留）。
+    """
+    import src.config as config
+    from src.rag.golden_gen import run_generation_for_file
+
+    # 定位物理文件：web_uploads/<model>/<source>，并防路径穿越（须落在该库上传根内）
+    upload_root = (Path(config.WEB_UPLOAD_DIR).resolve() / req.model)
+    target = (upload_root / req.source).resolve()
+    if upload_root not in target.parents and target != upload_root:
+        raise HTTPException(status_code=400, detail="非法文档路径")
+    if not target.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="文档物理文件不存在（仅 Web 上传的文档支持手动生成）",
+        )
+    removed = store.delete_pending_by_doc(req.doc_id) if req.doc_id else 0
+    n = run_generation_for_file(
+        file_path=target, source=req.source, doc_id=req.doc_id, force=True,
+    )
+    return GoldenGenerateResponse(generated=n, removed_pending=removed)
 
 
 @router.post("/golden", response_model=GoldenItem)

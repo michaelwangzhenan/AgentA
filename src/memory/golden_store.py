@@ -223,6 +223,8 @@ class GoldenStore:
         self,
         status: str | None = None,
         source: str | None = None,
+        doc_id: str | None = None,
+        source_contains: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -235,6 +237,12 @@ class GoldenStore:
         if source in _VALID_SOURCES:
             where += " AND source = ?"
             params.append(source)
+        if doc_id:  # 按关联 KB 文档筛选（仅 AI / 手动生成的候选有 doc_id）
+            where += " AND doc_id = ?"
+            params.append(str(doc_id))
+        if source_contains:  # 按来源文件名/路径子串过滤（expected_source_contains）
+            where += " AND expected_source_contains LIKE ?"
+            params.append(f"%{source_contains}%")
         with self._lock:
             total = int(
                 self._conn.execute(
@@ -259,6 +267,43 @@ class GoldenStore:
             out[r["status"]] = int(r["c"])
         out["total"] = sum(out.values())
         return out
+
+    def doc_counts(self) -> dict[str, dict[str, int]]:
+        """按关联文档 doc_id 统计候选数：{doc_id: {"total": n, "pending": m}}。
+
+        供知识库 L2 文档行显示「已生成 N 条候选（含待审）」。只含有 doc_id 的记录。
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT doc_id, status, COUNT(*) AS c FROM rag_golden "
+                "WHERE doc_id != '' GROUP BY doc_id, status"
+            ).fetchall()
+        out: dict[str, dict[str, int]] = {}
+        for r in rows:
+            d = out.setdefault(r["doc_id"], {"total": 0, "pending": 0})
+            d["total"] += int(r["c"])
+            if r["status"] == STATUS_PENDING:
+                d["pending"] += int(r["c"])
+        return out
+
+    def delete_pending_by_doc(self, doc_id: str) -> int:
+        """删某文档下所有 pending 候选（手动"重新生成"前清旧，approved/rejected 保留）。"""
+        if not doc_id:
+            return 0
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "DELETE FROM rag_golden WHERE doc_id = ? AND status = ?",
+                (str(doc_id), STATUS_PENDING),
+            )
+        return cur.rowcount
+
+    def export_all(self) -> list[dict[str, Any]]:
+        """导出全部 golden（完整字段，时间倒序），供"导出 json"下载。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM rag_golden ORDER BY created_at DESC, id DESC"
+            ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
 
     def list_for_eval(self, use_pending: bool = False) -> list[dict[str, Any]]:
         """取评估用 golden，字段对齐 rag_eval runner 黄金集格式。
