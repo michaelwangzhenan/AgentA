@@ -42,6 +42,7 @@ import json
 import platform
 import subprocess
 import sys
+from contextlib import nullcontext
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -174,21 +175,24 @@ def _judge_recall(
 
 
 def _llm_judge_plan_structure(
-    question: str, steps: list[str],
+    question: str, steps: list[str], judge_model: str = "",
 ) -> tuple[float | None, str]:
     """
     调一次 LLM judge，返回 (score, reason)。失败时返回 (None, error_msg)。
 
-    走 [`tools.eval_common.judge_with_llm`](../../eval_common/llm_judge.py) 公共 helper，
-    与 Phase 2.2 学习计划质量 judge 共享同一抽象（[§4.9.7 D6 / D11](../../docs/iter_2_agent.md#497-学习计划生成-phase-22)）。
+    judge_model 非空时用 use_llm_prefs 把评委调用切到该模型（关 thinking、温度 0），
+    与 RAG 答案质量评委一致；为空则用当前被测模型（自评）。
+    走 [`tools.eval_common.judge_with_llm`](../../eval_common/llm_judge.py) 公共 helper。
     """
     plan_block = "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(steps))
-    res = judge_with_llm(
-        role_intro="你是一个 Agent plan-execute 流程的评委",
-        prompt=question,
-        output=plan_block,
-        criteria=_JUDGE_CRITERIA,
-    )
+    ctx = config.use_llm_prefs(judge_model, False, 0) if judge_model else nullcontext()
+    with ctx:
+        res = judge_with_llm(
+            role_intro="你是一个 Agent plan-execute 流程的评委",
+            prompt=question,
+            output=plan_block,
+            criteria=_JUDGE_CRITERIA,
+        )
     return res.score, res.reason
 
 
@@ -197,7 +201,9 @@ def _llm_judge_plan_structure(
 # ── 单 case 执行 ─────────────────────────────────────────────────────────────
 
 
-def _run_case(case: dict[str, Any], judge_enabled: bool) -> dict[str, Any]:
+def _run_case(
+    case: dict[str, Any], judge_enabled: bool, judge_model: str = "",
+) -> dict[str, Any]:
     messages = [
         {"role": "system", "content": _BASE_PROMPT},
         {"role": "user", "content": case["question"]},
@@ -233,7 +239,7 @@ def _run_case(case: dict[str, Any], judge_enabled: bool) -> dict[str, Any]:
     judge_score: float | None = None
     judge_reason: str = ""
     if passed and case.get("category") == "positive" and steps and judge_enabled:
-        judge_score, judge_reason = _llm_judge_plan_structure(case["question"], steps)
+        judge_score, judge_reason = _llm_judge_plan_structure(case["question"], steps, judge_model)
         if judge_score is not None:
             reasons.append(
                 f"plan-structure: {judge_score:.1f}/5 — {judge_reason}"
@@ -278,7 +284,7 @@ def _collect_env() -> dict[str, str]:
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "git": git_part,
         "python": platform.python_version(),
-        "provider": getattr(config, "ACTIVE_MODEL", "?"),
+        # answer_model / judge_model 由 main 解析后注入（被测模型 + 评委模型）
     }
 
 
@@ -310,7 +316,9 @@ def _render_markdown(
     lines.append(f"- **时间**: {env['timestamp']}")
     lines.append(f"- **Git**: {env['git']}")
     lines.append(f"- **Python**: {env['python']}")
-    lines.append(f"- **Provider**: {env['provider']}")
+    lines.append(f"- **被测模型**: {env.get('answer_model', '?')}")
+    judge_line = env.get('judge_model', '?') if judge_enabled else "—（未评结构）"
+    lines.append(f"- **评委模型**: {judge_line}")
     lines.append(f"- **Dataset**: `{dataset_path}`")
     lines.append(f"- **LLM-judge**: {'开启' if judge_enabled else '关闭'}")
     lines.append("")
@@ -485,6 +493,10 @@ def main() -> None:
         "--struct-threshold", type=float, default=_PLAN_STRUCTURE_PASS_SCORE,
         help=f"plan 结构均分判据 0-5（默认 {_PLAN_STRUCTURE_PASS_SCORE}）",
     )
+    parser.add_argument(
+        "--judge-model", dest="judge_model", type=str, default="",
+        help="plan 结构评委模型 id（覆盖 EVAL_JUDGE_MODEL）；空=用配置默认（回落被测模型）",
+    )
     args = parser.parse_args()
 
     dataset = _load_dataset(args.dataset)
@@ -495,15 +507,27 @@ def main() -> None:
 
     judge_enabled = not args.no_judge
 
+    # 被测模型（生成 plan）= 当前 ACTIVE_MODEL；评委模型 = EVAL_JUDGE_MODEL（UI 可覆盖，回落被测）
+    answer_model = config.current_active_model()
+    if args.judge_model:
+        config.EVAL_JUDGE_MODEL = args.judge_model
+    judge_model = (config.EVAL_JUDGE_MODEL or "").strip()
+    if judge_model and judge_model not in config.MODEL_CONFIGS:
+        print(f"⚠️  EVAL_JUDGE_MODEL={judge_model!r} 不在 MODEL_CONFIGS，回落被测模型 {answer_model}")
+        judge_model = ""
+    judge_label = judge_model or answer_model
+
     print(
         f"\n🧪 Plan Recall + Structure 评估（{len(dataset)} case，"
         f"LLM-judge {'开' if judge_enabled else '关'}）\n"
+        f"   被测模型={answer_model}"
+        + (f"，评委模型={judge_label}\n" if judge_enabled else "\n")
     )
 
     results: list[dict[str, Any]] = []
     for i, case in enumerate(dataset, 1):
         print(f"  [{i:>2}/{len(dataset)}] {case['id']} ... ", end="", flush=True)
-        r = _run_case(case, judge_enabled)
+        r = _run_case(case, judge_enabled, judge_model)
         results.append(r)
         flag = "✅" if r["pass"] else "❌"
         print(flag)
@@ -540,6 +564,8 @@ def main() -> None:
 
     if not args.no_report:
         env = _collect_env()
+        env["answer_model"] = answer_model
+        env["judge_model"] = judge_label if judge_enabled else "—（未评结构）"
         report = _dump_report(
             results, passed, total, avg_judge, args.dataset, env,
             judge_enabled, recall_th, struct_th,

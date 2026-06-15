@@ -337,6 +337,25 @@ def test_eval_run_skills_pass_threshold(
     assert "0.75" in seen["args"]
 
 
+def test_eval_run_harness_pass_threshold(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict = {}
+    monkeypatch.setattr(
+        "src.eval_runner.start",
+        lambda task, args, model=None: (seen.update(args=args) or {
+            "state": "running", "task": task, "model": model, "args": args,
+            "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
+    )
+    r = client.post(
+        "/api/eval/run",
+        json={"task": "harness", "model": "kimi-k2.5", "thresholds": {"pass": 0.85}},
+    )
+    assert r.status_code == 200
+    assert "--pass-threshold" in seen["args"]
+    assert "0.85" in seen["args"]
+
+
 def test_eval_run_mcp_no_model_skips_llm(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -447,6 +466,48 @@ def test_eval_summary_plan_by_report(
     assert body["passed"] is True
     assert len(body["metrics"]) == 2
     assert body["metrics"][1]["label"] == "plan 结构均分"
+
+
+def test_eval_run_plan_judge_model_passed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict = {}
+    monkeypatch.setattr(
+        "src.eval_runner.start",
+        lambda task, args, model=None: (seen.update(args=args) or {
+            "state": "running", "task": task, "model": model, "args": args,
+            "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
+    )
+    # judge 开 + 指定评委模型 → 带 --judge-model
+    r = client.post(
+        "/api/eval/run",
+        json={"task": "plan", "model": "kimi-k2.5",
+              "options": {"judge": True, "judge_model": "deepseek-v4-pro"}},
+    )
+    assert r.status_code == 200
+    assert "--judge-model" in seen["args"]
+    assert "deepseek-v4-pro" in seen["args"]
+
+
+def test_eval_run_plan_no_judge_skips_judge_model(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict = {}
+    monkeypatch.setattr(
+        "src.eval_runner.start",
+        lambda task, args, model=None: (seen.update(args=args) or {
+            "state": "running", "task": task, "model": model, "args": args,
+            "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
+    )
+    # 关 judge → 即便给了评委模型也不传（评委无意义）
+    r = client.post(
+        "/api/eval/run",
+        json={"task": "plan", "model": "kimi-k2.5",
+              "options": {"judge": False, "judge_model": "deepseek-v4-pro"}},
+    )
+    assert r.status_code == 200
+    assert "--no-judge" in seen["args"]
+    assert "--judge-model" not in seen["args"]
 
 
 def test_eval_run_perf_target_all(

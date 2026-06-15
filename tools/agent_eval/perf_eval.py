@@ -187,6 +187,9 @@ def _render_report(results: dict[str, list[dict]], env: dict[str, str]) -> str:
     lines.append(f"- **时间**: {env['timestamp']}")
     lines.append(f"- **Git**: {env['git']}")
     lines.append(f"- **Python**: {env['python']}")
+    # 数据档位（--sizes）影响判据（以最大档位行对照），头部明示
+    sizes = sorted({r["size"] for rows in results.values() for r in rows})
+    lines.append(f"- **数据档位**: {', '.join(str(s) for s in sizes) or '—'}")
     lines.append("")
     for t, rows in results.items():
         lines.append(f"# {_TARGET_ZH.get(t, t)}")

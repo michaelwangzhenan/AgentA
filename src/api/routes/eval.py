@@ -445,7 +445,7 @@ def _build_eval_args(req: EvalRunRequest) -> list[str]:
         ts = _time.strftime("%Y%m%d-%H%M%S")
         out = _Path("tools") / "reports" / "rag" / f"rag-{ts}.md"
         args += ["-o", out.as_posix()]
-    elif req.task in ("memory", "skills"):
+    elif req.task in ("memory", "skills", "harness"):
         pt = _threshold(req, "pass")
         if pt is not None:
             args += ["--pass-threshold", str(pt)]
@@ -465,7 +465,8 @@ def _build_eval_args(req: EvalRunRequest) -> list[str]:
             args += ["--sizes", ",".join(parts)]
     elif req.task == "plan":
         # 始终调 LLM 评识别；取消勾选「评 plan 结构」才关 LLM-judge 结构评分
-        if opts.get("judge", True) is False:
+        judge_on = opts.get("judge", True) is not False
+        if not judge_on:
             args.append("--no-judge")
         recall = _threshold(req, "recall")
         if recall is not None:
@@ -473,6 +474,11 @@ def _build_eval_args(req: EvalRunRequest) -> list[str]:
         struct = _threshold(req, "struct", hi=5.0)
         if struct is not None:
             args += ["--struct-threshold", str(struct)]
+        # 评委模型（仅评结构时有意义）：同 RAG 走 CLI 参数（EVAL_JUDGE_MODEL 在 .env 里，env 注入会被覆盖）
+        if judge_on:
+            judge = opts.get("judge_model")
+            if judge and isinstance(judge, str):
+                args += ["--judge-model", judge]
     return args
 
 
@@ -808,6 +814,7 @@ _SUMMARY_BUILDERS = {
     "mcp": _mcp_summary,
     "perf": _perf_summary,
     "plan": _plan_summary,
+    "harness": _passrate_summary("harness", "harness", "通过率"),
 }
 
 

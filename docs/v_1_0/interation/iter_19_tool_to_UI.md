@@ -274,11 +274,19 @@ agent_eval/run_all.py
 接入（task=`plan`，模块 `tools.agent_eval.plan.eval_plan`），双阈值判定型：
 
 - **始终调 LLM**（识别层，无 None、默认 ACTIVE_MODEL）。选项 `评 plan 结构`（复选框，默认开；取消勾选传 `--no-judge`，只评识别、省一轮 judge token）。
+- **评委模型**（同 RAG，`judgeModel:true`）：评结构时给 plan 打分的模型，默认跟随 `EVAL_JUDGE_MODEL`，走 CLI `--judge-model`（`config.use_llm_prefs` 切模型），留空=被测模型自评。
 - **两阈值 UI 可调**：`识别通过率(≥0.8)` + `plan 结构得分(≥3.5/5)`（脚本加 `--recall-threshold`/`--struct-threshold`；后端 `_threshold` 加可选上限参数支持 0-5）。
 - **卡片**：判定型——`识别通过率` + `plan 结构均分` 两条指标（关 judge 时只有识别一条），两项达标才判「通过」；`--no-judge` 时 `partial=True`（只跑识别层）。
-- 产出：脚本新增配对 summary JSON（含 recall/struct_score + 两阈值 + passed + partial）；后端新增 `_plan_summary` + `EVAL_MODULES['plan']` + plan 分支。
+- **报告记两个 LLM**：报告头固定 `被测模型` + `评委模型` 两行（关 judge 时评委标"—（未评结构）"），去掉旧的单行 Provider。同步修 RAG 报告头：仅检索模式两行都标"—（仅检索，未调 LLM）"，不再显示没用上的模型名。
+- 产出：脚本新增配对 summary JSON（含 recall/struct_score + 两阈值 + passed + partial + answer_model/judge_model）；后端新增 `_plan_summary` + `EVAL_MODULES['plan']` + plan 分支（含 `--judge-model` 透传）。
 
 ### 3.2.11. Harness
+
+按统一标准接入（task=`harness`，模块 `tools.agent_eval.harness.eval_harness`），通过率型（同 memory/skills）：
+
+- 始终调 LLM（critic 判定，无 None、默认 ACTIVE_MODEL）；`通过率阈值(≥)` 默认 0.8（脚本加 `--pass-threshold` + 配对 summary JSON）。
+- 只评 critic 自身判定准确率（quiz_critic / rag_critic 两类），主路径产出由 quiz / RAG 评估覆盖。
+- 卡片复用 `_passrate_summary("harness", …, "通过率")`；后端 memory/skills/harness 共用 `--pass-threshold` 分支。
 
 ### 3.2.12. 学习计划
 ### 3.2.13. Quiz

@@ -222,6 +222,7 @@ const EVAL_TASKS: EvalTaskConfig[] = [
     key: 'plan',
     label: 'Plan 规划',
     usesLlm: true, // 识别层必须调 LLM（无 None）
+    judgeModel: true, // 评 plan 结构时可配独立评委模型（同 RAG）
     reportMatch: 'plan/',
     options: [
       { kind: 'checkbox', key: 'judge', label: '评 plan 结构（LLM-judge）', default: true },
@@ -234,13 +235,15 @@ const EVAL_TASKS: EvalTaskConfig[] = [
       purpose:
         '检验 Agent 的任务规划能力：面对复杂任务能否主动调 make_plan 拆解、面对简单任务不强行规划；并由 LLM-judge 评所生成 plan 的结构质量。',
       how: [
-        '① 选「测试模型」（默认系统当前模型）；识别层必须调 LLM。',
+        '① 选「测试模型」（默认系统当前模型）：用它生成 plan（被测对象），识别层必须调 LLM。',
         '② 默认开「评 plan 结构」（LLM-judge 给 0-5 分）；取消勾选则只看识别、不评结构（省一轮 judge token）。',
-        '③ 可调「识别通过率阈值」（默认 0.8）与「plan 结构得分阈值」（默认 3.5/5）。',
-        '④ 点「开始评估」，跑完看卡片与历史报告。',
+        '③ 评结构时可设「评委模型」（默认跟随系统配置）：给 plan 结构打分的模型，留空=用被测模型自评。',
+        '④ 可调「识别通过率阈值」（默认 0.8）与「plan 结构得分阈值」（默认 3.5/5）。',
+        '⑤ 点「开始评估」，跑完看卡片与历史报告。',
       ],
       params: [
         '评 plan 结构：开=positive 通过的 case 再由 LLM-judge 评结构分（耗额外 token）；关=只评识别（传 --no-judge）。',
+        '评委模型：评 plan 结构时给分的模型，默认跟随系统 EVAL_JUDGE_MODEL；与被测模型分开可减少"自评"偏差。',
         '识别通过率阈值：复杂任务调对 + 简单任务不乱调的占比下限。',
         'plan 结构得分阈值：positive 通过 case 的平均结构分（0-5）下限。',
       ],
@@ -259,6 +262,32 @@ const EVAL_TASKS: EvalTaskConfig[] = [
         '开「评 plan 结构」时，positive 通过 case 再各一次 judge 调用，耗额外 token。',
       ],
       dataset: 'golden 来自 tools/agent_eval/plan/dataset.json（positive / negative 两类）。',
+    },
+  },
+  {
+    key: 'harness',
+    label: 'Harness 自检',
+    usesLlm: true, // critic 判定必须调 LLM（无 None）
+    reportMatch: 'harness/',
+    options: [],
+    thresholds: [{ key: 'pass', label: '通过率阈值(≥)', default: 0.8 }],
+    intro: {
+      purpose:
+        '检验 harness 里的 critic（自动判分器）自身判得准不准：给定 (输入, 期望结论)，看 critic 的判定是否与期望一致。只评 critic 本身，不评主路径产出。',
+      how: [
+        '① 选「测试模型」（默认系统当前模型）；critic 判定必须调 LLM。',
+        '② 可调「通过率阈值」（默认 0.8）。',
+        '③ 点「开始评估」，跑完看卡片与历史报告。',
+      ],
+      params: ['无额外开关；判定阈值见下方「通过率阈值」。'],
+      principle: [
+        'quiz_critic case：调 HarnessManager.review_grading，比对 verdict.passed 与期望（pass / flag）。',
+        'rag_critic case：走底层 RAG 批判模板，比对解析出的分数列表与 dataset 的期望。',
+        '只评 critic 自身判定准确率；主路径产出好坏由 quiz / RAG 评估覆盖。',
+      ],
+      metrics: ['通过率：critic 判对的 case 占比，达阈值判「通过」。'],
+      cost: '每条 case 一次真实 critic LLM 调用，耗所选模型 token。',
+      dataset: 'golden 来自 tools/agent_eval/harness/dataset.json（quiz_critic / rag_critic 两类）。',
     },
   },
 ]

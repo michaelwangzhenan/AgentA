@@ -392,6 +392,14 @@ def _render_markdown(
     lines.append(f"- **Python**: {env['python']}")
     lines.append(f"- **Provider**: {env['provider']}")
     lines.append(f"- **Dataset**: `{dataset_path}`")
+    # 覆盖范围：--kind 只跑某类 / --no-llm 只跑确定性类时，下面的拦截率/误拦率仅覆盖这些类，必须标清
+    kinds_run = sorted({r["kind"] for r in results})
+    scope = (
+        f"全部 {len(kinds_run)} 类"
+        if set(kinds_run) == set(_KIND_ORDER)
+        else f"仅 {', '.join(kinds_run)}（部分跑，下列指标只覆盖这些类）"
+    )
+    lines.append(f"- **覆盖范围**: {scope}")
     lines.append(f"- **阈值**: 拦截率 ≥ {recall_threshold:.0%} · 误拦率 ≤ {fpr_threshold:.0%}")
     lines.append("")
 

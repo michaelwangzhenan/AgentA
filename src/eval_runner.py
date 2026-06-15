@@ -29,6 +29,7 @@ EVAL_MODULES: dict[str, str] = {
     "mcp": "tools.agent_eval.mcp.eval_mcp",
     "perf": "tools.agent_eval.perf_eval",
     "plan": "tools.agent_eval.plan.eval_plan",
+    "harness": "tools.agent_eval.harness.eval_harness",
 }
 
 _lock = threading.Lock()

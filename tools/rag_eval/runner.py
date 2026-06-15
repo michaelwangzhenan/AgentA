@@ -756,7 +756,14 @@ def _render_markdown(rep: EvalReport) -> str:
     lines.append(f"- **时间**: {env.get('timestamp', '?')}")
     lines.append(f"- **Git**: {git.get('commit', '?')}{dirty_flag}")
     lines.append(f"- **Python**: {env.get('python', '?')}")
-    lines.append(f"- **Provider**: {env.get('llm_provider', '?')}")
+    # 两个 LLM：仅检索模式不调 LLM，标注而非显示没用上的模型名
+    _aq = rep.answer_quality
+    if _aq is not None:
+        lines.append(f"- **被测模型**: {_aq.answer_model}")
+        lines.append(f"- **评委模型**: {_aq.judge_model}")
+    else:
+        lines.append("- **被测模型**: —（仅检索，未调 LLM）")
+        lines.append("- **评委模型**: —（仅检索，未调 LLM）")
     lines.append("")
 
     lines.append("## 核心指标")
