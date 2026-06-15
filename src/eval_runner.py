@@ -32,6 +32,7 @@ EVAL_MODULES: dict[str, str] = {
     "harness": "tools.agent_eval.harness.eval_harness",
     "learning_plan": "tools.agent_eval.plan_business.eval_learning_plan",
     "quiz": "tools.agent_eval.quiz.eval_quiz",
+    "srs": "tools.agent_eval.srs.eval_srs",
 }
 
 _lock = threading.Lock()

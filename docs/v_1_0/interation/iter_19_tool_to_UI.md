@@ -306,6 +306,13 @@ agent_eval/run_all.py
 - 脚本同步补齐阈值 CLI + 评委模型 + 两模型报告头 + 配对 summary JSON；卡片复用 `_recall_quality_summary("quiz", …)`，后端 learning_plan / quiz 共用同一分支与工厂。
 
 ### 3.2.14. SRS
+
+接入（task=`srs`，模块 `tools.agent_eval.srs.eval_srs`），通过率型（recall-only，无 judge / 无评委）：
+
+- 始终调 LLM（触发识别，无 None、默认 ACTIVE_MODEL）；`识别通过率阈值(≥)` 默认 0.8（脚本加 `--pass-threshold` + 配对 summary JSON）。
+- 只测触发识别；SM-2 算法对齐由 UT 锁，不调 LLM-judge。
+- 卡片复用 `_passrate_summary("srs", …, "识别通过率")`；后端并入 memory/skills/harness/srs 共享的 `--pass-threshold` 分支；报告头单行模型改标「测试模型」。
+
 ### 3.2.15. 更新备份功能
 目录变化，“生成备份”对应的目录/文件要更新
 

@@ -399,6 +399,34 @@ const EVAL_TASKS: EvalTaskConfig[] = [
       dataset: 'golden 来自 tools/agent_eval/quiz/dataset.json（create / negative 两类）。',
     },
   },
+  {
+    key: 'srs',
+    label: 'SRS 业务',
+    usesLlm: true, // 触发识别必须调 LLM（无 None）
+    reportMatch: 'srs/',
+    options: [],
+    thresholds: [{ key: 'pass', label: '识别通过率阈值(≥)', default: 0.8 }],
+    intro: {
+      purpose:
+        '检验"间隔重复复习（SRS）"业务的触发识别：面对复习类意图（看今天到期 / 加复习项 / 提交复习结果）能否主动调对 SRS tool；面对无关意图不乱调。',
+      how: [
+        '① 选「测试模型」（默认系统当前模型）；触发识别必须调 LLM。',
+        '② 可调「识别通过率阈值」（默认 0.8）。',
+        '③ 点「开始评估」，跑完看卡片与历史报告。',
+      ],
+      params: [
+        '测试模型：默认系统当前模型（ACTIVE_MODEL）；触发识别必须调 LLM，无 None。',
+        '无额外开关；判定阈值见下方「识别通过率阈值」。',
+      ],
+      principle: [
+        '对每条 case 单步 chat() + 解析第一轮 tool_call：复习类意图（due / add / review）应调对应 SRS tool，negative 应不调。',
+        'SM-2 算法本身的公式对齐由 UT 锁（tests/test_srs_scheduler.py），本评估只测触发识别、不调 LLM-judge。',
+      ],
+      metrics: ['识别通过率：复习类调对 + 无关不乱调的占比，达阈值判「通过」。'],
+      cost: '每条 case 一次真实 LLM 调用，耗所选模型 token。',
+      dataset: 'golden 来自 tools/agent_eval/srs/dataset.json（due / add / review / negative 几类）。',
+    },
+  },
 ]
 
 export function OfflineEvalView() {

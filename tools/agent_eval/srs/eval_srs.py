@@ -239,11 +239,12 @@ def _render_markdown(
     total: int,
     dataset_path: Path,
     env: dict[str, str],
+    pass_threshold: float = _RECALL_PASS_RATE,
 ) -> str:
     rate = passed / total if total else 0.0
     recall_verdict = (
-        f"✅ 合格 (≥ {_RECALL_PASS_RATE:.0%})" if rate >= _RECALL_PASS_RATE
-        else f"⚠️ 未达 {_RECALL_PASS_RATE:.0%} 判据"
+        f"✅ 合格 (≥ {pass_threshold:.0%})" if rate >= pass_threshold
+        else f"⚠️ 未达 {pass_threshold:.0%} 判据"
     )
     lines: list[str] = [
         "# SRS 业务 触发识别评估报告",
@@ -251,7 +252,7 @@ def _render_markdown(
         f"- **时间**: {env['timestamp']}",
         f"- **Git**: {env['git']}",
         f"- **Python**: {env['python']}",
-        f"- **Provider**: {env['provider']}",
+        f"- **测试模型**: {env['provider']}",
         f"- **Dataset**: `{dataset_path}`",
         "",
         "## 核心指标",
@@ -261,7 +262,7 @@ def _render_markdown(
         f"| 样本数 | {total} |",
         f"| 识别通过数 | {passed} |",
         f"| 识别通过率 | {rate:.1%} |",
-        f"| 识别判据 (≥ {_RECALL_PASS_RATE:.0%}) | {recall_verdict} |",
+        f"| 识别判据 (≥ {pass_threshold:.0%}) | {recall_verdict} |",
         "",
         "> SM-2 算法对齐由 UT 锁公式（`tests/test_srs_scheduler.py` 40 case），本评估不调 LLM-judge。",
         "",
@@ -328,13 +329,24 @@ def _dump_report(
     total: int,
     dataset_path: Path,
     env: dict[str, str],
+    pass_threshold: float = _RECALL_PASS_RATE,
 ) -> Path:
     from tools.eval_common.report_paths import reports_dir as eval_reports_dir
     reports_dir = eval_reports_dir("srs")
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     out = reports_dir / f"srs-eval-{ts}.md"
     out.write_text(
-        _render_markdown(results, passed, total, dataset_path, env),
+        _render_markdown(results, passed, total, dataset_path, env, pass_threshold),
+        encoding="utf-8",
+    )
+    # 配对 summary JSON（通过率型 schema，供「质量看板 → 离线评估」卡片读）
+    rate = passed / total if total else 0.0
+    out.with_suffix(".json").write_text(
+        json.dumps({
+            "timestamp": env.get("timestamp", ""), "git": env.get("git", ""),
+            "total": total, "passed": passed, "rate": rate,
+            "pass_threshold": pass_threshold, "ok": rate >= pass_threshold,
+        }, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     return out
@@ -359,6 +371,10 @@ def main() -> None:
     )
     parser.add_argument("--case", type=str, default="", help="只跑指定 id（精确匹配）")
     parser.add_argument("--no-report", action="store_true", help="不落盘 Markdown 报告")
+    parser.add_argument(
+        "--pass-threshold", dest="pass_threshold", type=float, default=_RECALL_PASS_RATE,
+        help=f"识别通过率判据（默认 {_RECALL_PASS_RATE}）",
+    )
     args = parser.parse_args()
 
     dataset = _load_dataset(args.dataset)
@@ -382,19 +398,20 @@ def main() -> None:
     passed = sum(1 for r in results if r["pass"])
     total = len(results)
     rate = passed / total if total else 0.0
+    pass_threshold = args.pass_threshold
 
     print(
         f"\n📊 识别通过 {passed}/{total} ({rate:.0%})  "
-        f"{'✅ 合格' if rate >= _RECALL_PASS_RATE else '⚠️  未达判据'}"
+        f"{'✅ 合格' if rate >= pass_threshold else '⚠️  未达判据'}"
     )
     print("")
 
     if not args.no_report:
         env = _collect_env()
-        report = _dump_report(results, passed, total, args.dataset, env)
+        report = _dump_report(results, passed, total, args.dataset, env, pass_threshold)
         print(f"📁 报告已存储：{report}\n")
 
-    sys.exit(0 if rate >= _RECALL_PASS_RATE else 1)
+    sys.exit(0 if rate >= pass_threshold else 1)
 
 
 if __name__ == "__main__":

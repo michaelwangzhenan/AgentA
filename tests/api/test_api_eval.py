@@ -565,6 +565,25 @@ def test_eval_summary_learning_plan_by_report(
     assert body["metrics"][1]["label"] == "plan 质量均分"
 
 
+def test_eval_run_srs_pass_threshold(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict = {}
+    monkeypatch.setattr(
+        "src.eval_runner.start",
+        lambda task, args, model=None: (seen.update(args=args) or {
+            "state": "running", "task": task, "model": model, "args": args,
+            "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
+    )
+    r = client.post(
+        "/api/eval/run",
+        json={"task": "srs", "model": "kimi-k2.5", "thresholds": {"pass": 0.7}},
+    )
+    assert r.status_code == 200
+    assert "--pass-threshold" in seen["args"]
+    assert "0.7" in seen["args"]
+
+
 def test_eval_run_quiz_args(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
