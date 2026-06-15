@@ -35,6 +35,8 @@ export type DocumentListProps = {
   generatingDocId?: string | null
   // 点候选数 → 跳质量看板 Golden 管理（按该文档筛选）
   onOpenGolden?: (docId: string, label: string) => void
+  // 是否显示「评估题」列（golden 仅 admin 可见）
+  showGolden?: boolean
 }
 
 type SortKey =
@@ -119,6 +121,7 @@ export function DocumentList({
   onGenerateGolden,
   generatingDocId,
   onOpenGolden,
+  showGolden,
 }: DocumentListProps) {
   const [deleteTarget, setDeleteTarget] = useState<KBDocument | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -407,7 +410,9 @@ export function DocumentList({
                 </th>
               )
             })}
-            <th className="w-28 px-3 py-2 text-right font-medium whitespace-nowrap">评估题</th>
+            {showGolden && (
+              <th className="w-28 px-3 py-2 text-right font-medium whitespace-nowrap">评估题</th>
+            )}
             <th className="w-10 px-3 py-2" />
           </tr>
         </thead>
@@ -448,6 +453,7 @@ export function DocumentList({
               <td className="px-3 py-2 text-xs text-muted-foreground">
                 {formatTime(d.ingested_at)}
               </td>
+              {showGolden && (
               <td className="px-3 py-2 text-right whitespace-nowrap">
                 <div className="flex items-center justify-end gap-1.5">
                   {(d.golden_total ?? 0) > 0 ? (
@@ -484,6 +490,7 @@ export function DocumentList({
                   )}
                 </div>
               </td>
+              )}
               <td className="px-3 py-2 text-right">
                 <Button
                   variant="ghost"

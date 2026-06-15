@@ -178,14 +178,17 @@ export function IngestPanel({ collections, defaultAlias, onIngested, onGotoGolde
       } else {
         const goldPart = gold ? ` · 评估题 ${gold} 条待审` : ''
         const summary = `入库完成：新增 ${ok}${skip ? ` · 未变 ${skip}` : ''}${fail ? ` · 失败 ${fail}` : ''}${goldPart}`
-        // 完成提示固定不消失、可手动关；有新候选时带"去 Golden 管理"跳转
-        const opts = {
-          duration: Infinity,
-          closeButton: true,
-          ...(gold && onGotoGolden
-            ? { action: { label: '去 Golden 管理', onClick: onGotoGolden } }
-            : {}),
-        }
+        // 有新 golden 候选时：提示固定不消失、可手动关、带"去 Golden 管理"跳转；否则正常自动消失
+        const opts =
+          gold > 0
+            ? {
+                duration: Infinity,
+                closeButton: true,
+                ...(onGotoGolden
+                  ? { action: { label: '去 Golden 管理', onClick: onGotoGolden } }
+                  : {}),
+              }
+            : undefined
         if (fail > 0) toast.error(summary, opts)
         else toast.success(summary, opts)
         setItems([])

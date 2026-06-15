@@ -34,6 +34,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
+import { useAuth } from '@/lib/auth'
 
 export function KnowledgeBaseView({
   onOpenGolden,
@@ -46,6 +47,8 @@ export function KnowledgeBaseView({
   returnToAlias?: string | null
   onReturnConsumed?: () => void
 } = {}) {
+  // golden 是 admin 维护的评估集：普通用户完全隐藏 golden 相关入口
+  const { isAdmin } = useAuth()
   // null = 第一层（库列表 L1）；否则进第二层（该库的文档列表 L2）
   const [alias, setAlias] = useState<string | null>(null)
 
@@ -69,9 +72,14 @@ export function KnowledgeBaseView({
       <div className="flex-1 overflow-y-auto p-6">
         <div className="max-w-6xl space-y-6">
           {alias === null ? (
-            <L1View onOpen={setAlias} onGotoGolden={onGotoGolden} />
+            <L1View onOpen={setAlias} onGotoGolden={isAdmin ? onGotoGolden : undefined} />
           ) : (
-            <LibraryView alias={alias} onBack={() => setAlias(null)} onOpenGolden={onOpenGolden} />
+            <LibraryView
+              alias={alias}
+              onBack={() => setAlias(null)}
+              showGolden={isAdmin}
+              onOpenGolden={isAdmin ? onOpenGolden : undefined}
+            />
           )}
         </div>
       </div>
@@ -238,10 +246,12 @@ function LibraryView({
   alias,
   onBack,
   onOpenGolden,
+  showGolden,
 }: {
   alias: string
   onBack: () => void
   onOpenGolden?: (docId: string, label: string, alias: string) => void
+  showGolden?: boolean
 }) {
   const [documents, setDocuments] = useState<KBDocument[]>([])
   const [loading, setLoading] = useState(true)
@@ -374,9 +384,12 @@ function LibraryView({
           loading={loading}
           onDelete={handleDelete}
           onDeleteMany={handleDeleteMany}
-          onGenerateGolden={handleGenerate}
+          showGolden={showGolden}
+          onGenerateGolden={showGolden ? handleGenerate : undefined}
           generatingDocId={genDocId}
-          onOpenGolden={(docId, label) => onOpenGolden?.(docId, label, alias)}
+          onOpenGolden={
+            showGolden ? (docId, label) => onOpenGolden?.(docId, label, alias) : undefined
+          }
         />
       </div>
 

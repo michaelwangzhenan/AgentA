@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import StreamingResponse
 
 import src.config as config
-from src.api.deps import get_current_user
+from src.api.deps import ROLE_ADMIN, get_current_user
 from src.api.schemas.kb import (
     KBClearAllResponse,
     KBCollection,
@@ -153,7 +153,9 @@ def _generate_golden_sync(target_path: Path, safe_name: str, doc_id: str) -> int
         return 0
 
 
-async def _ingest_event_stream(target_path: Path, upload_root: Path, model: str, safe_name: str):
+async def _ingest_event_stream(
+    target_path: Path, upload_root: Path, model: str, safe_name: str, gen_golden: bool,
+):
     """把同步 ingest 的进度桥接成 SSE 事件流。
 
     progress_cb 在工作线程里被调用，用 call_soon_threadsafe 把事件投进 asyncio.Queue；
@@ -179,7 +181,7 @@ async def _ingest_event_stream(target_path: Path, upload_root: Path, model: str,
             )
             status, chunks, doc_id = result["status"], result["chunks"], result["doc_id"]
             golden_n = 0
-            if status == "ingested" and config.EVAL_AUTO_GOLDEN_ENABLED:
+            if status == "ingested" and config.EVAL_AUTO_GOLDEN_ENABLED and gen_golden:
                 # 同步出题：先推"出题中"相位，再在工作线程跑 LLM，完成后并入 done
                 q.put_nowait({"type": "progress", "phase": "golden", "done": 0, "total": 0})
                 golden_n = await asyncio.to_thread(
@@ -215,7 +217,7 @@ async def upload_document(
     file: UploadFile = File(...),
     model: str = Form(config.DEFAULT_EMBEDDING_ALIAS),
     relpath: str = Form(""),
-    _: dict = Depends(get_current_user),
+    user: dict = Depends(get_current_user),
 ) -> StreamingResponse:
     """上传一个文件并以 SSE 流式回传入库进度 + 最终结果。
 
@@ -263,8 +265,10 @@ async def upload_document(
 
     # 单文件入库走 SSE 流：不再设硬超时（ingest 跑在 thread，进度实时回传，
     # 大文件也能看到逐块进度，不会再出现"超时误报但其实入库成功"）。
+    # golden 出题仅 admin 入库时触发（golden 是 admin 维护的评估集；普通用户入库不为此变慢）
+    gen_golden = user.get("role") == ROLE_ADMIN
     return StreamingResponse(
-        _ingest_event_stream(target_path, upload_root, model, rel_name),
+        _ingest_event_stream(target_path, upload_root, model, rel_name, gen_golden),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
