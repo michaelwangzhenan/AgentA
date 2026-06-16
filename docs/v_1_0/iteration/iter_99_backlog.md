@@ -1,8 +1,7 @@
 # 1. 文档更新
-design
-README
-用户手册
-代码指南：design中的部分移过来
+design -> 简化，重建
+README -> 重新设计
+代码指南 -> 重建
 
 项目介绍材料
 PPT
@@ -11,9 +10,7 @@ PPT
 
 
 
-
-
-# 3. V2.0
+# 3. Next Step
 
 ## 3.1. UI 改进
 不同内容用不同 颜色，字体，高亮？
@@ -26,6 +23,7 @@ logo?
 其它2级页面也加图标
 
 ## 3.3. embedding
+Embedding 模型 选择 与 管理
 消融实验选 模型
 
 ## 3.4. support more doc types
@@ -54,7 +52,7 @@ agenta 的 harness 功能就是自我反思/自我纠正（Relection)? 只是har
 
 **注**：纯"跟 eval 共享"不是外置理由——eval 经 `HarnessManager` 间接用，内联常量一样能共享。外置的真正价值是 prompt 与代码分离、便于不改码地 review/diff/迭代 prompt。改动面大（涉及多模块 + UT），单独立项再做。
 
-## 3.8. tool
+## 3.8. new tool
 扫描并返回 可用的 LLM 列表。
 包括 agenta 未知的？
 
