@@ -8,7 +8,6 @@ ToDo List：
 
 3. 重排序（Reranking）=> Done
   目标： 在向量检索结果上加 Cross-Encoder 二次排序，提升精度
-  背景:
     当前 retriever.py 采用两个 Bi-Encoder（SentenceTransformer）+ round-robin 合并：
       · all-MiniLM-L6-v2     → 英文向量化入库 / 召回 kb_en collection
       · BAAI/bge-small-zh    → 中文向量化入库 / 召回 kb_zh collection
@@ -811,7 +810,7 @@ ToDo List：
     · 端到端答案评估：用 LLM-as-Judge 评最终回答而非 chunk，覆盖
       "召回 → 生成"全链路。需要另一套评估脚本，超出 retriever 范畴。
 
-44. Web UI 优化 
+44. Web UI 优化 => Done, iter_4
   重新设计，不是硬搬CLI
 45. RAG run eval => Done
   tools.rag_eval.runner

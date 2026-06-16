@@ -25,9 +25,9 @@ beautifulsoup4
 lxml
 
 # PDF parse enhancement
-# pymupdf
-# pdfplumber
-# rapidocr-onnxruntime
+pymupdf
+pdfplumber
+rapidocr-onnxruntime
 
 # Web scraping
 requests

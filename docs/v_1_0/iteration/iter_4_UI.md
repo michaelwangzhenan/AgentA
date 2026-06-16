@@ -132,13 +132,12 @@ Agent 状态可视化：
 左侧栏可整体折叠收成图标列。
 
 
-
 # 5. 技术选型
 ## 5.1. 基础知识
-参见 [iter_4_5.1_UI基础知识.md](./knowledge/iter_4_5.1_UI基础知识.md)
+参见 [iter_4_5.1_UI基础知识.md](../../knowledge/iter_4_5.1_UI基础知识.md)
 
 ## 5.2. 相关技术
-参见 [iter_4_5.2_UI相关技术.md](./knowledge/iter_4_5.2_UI相关技术.md)
+参见 [iter_4_5.2_UI相关技术.md](../../knowledge/iter_4_5.2_UI相关技术.md)
 
 ## 5.3. 选型决策
 
@@ -339,7 +338,7 @@ AgentA/                              # 项目根
 ## 6.4 分步实现
 
 ### 6.4.1~6.4.8 Step 0~7
-参见 [iter_4_6.4_UI实现细节.md](./knowledge/iter_4_6.4_UI实现细节.md)
+参见 [iter_4_6.4_UI实现细节.md](../../knowledge/iter_4_6.4_UI实现细节.md)
 
 ### 6.4.9 Step 8 - 总体验收
 

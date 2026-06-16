@@ -1,34 +1,39 @@
-# 1. v1.0 backlog 整理
+# 1. iter_1 Review
 
-## 1.1. 项目介绍
+# 2. iter_2 backlog Review
+[iter2 Backlog](v_1_0/iteration/iter_2_agent.md#413-backlog)
+
+# 3. iter_99 Review
+
+## 3.1. 项目介绍
 项目介绍材料
 PPT
 
 
-## 1.2. embedding
+## 3.2. embedding
 Embedding 模型 选择 与 管理
 消融实验选 模型
 
-## 1.3. UI 改进
+## 3.3. UI 改进
 不同内容用不同 颜色，字体，高亮？
 图标？
 动画？
 logo?
 
-## 1.4. 记忆/rules/skils/mcp 合并到一页
+## 3.4. 记忆/rules/skils/mcp 合并到一页
 进去后还要带左边的图标
 其它2级页面也加图标
 
 
-## 1.5. support more doc types
+## 3.5. support more doc types
 
-## 1.6. 知识库
+## 3.6. 知识库
 用户只能删除自己入库文件
 
-## 1.7. harness
+## 3.7. harness
 agenta 的 harness 功能就是自我反思/自我纠正（Relection)? 只是harnness 概念里的一个子集？
 
-## 1.8. hardcode prompt to file
+## 3.8. hardcode prompt to file
 所有 hardcode 的 prompt 都做成文件，统一外置管理。
 1. 格式化 prompt， 加适用场景说明这段用在哪里
 2. 每个用途一个文件，还是一个大文件？
@@ -46,11 +51,16 @@ agenta 的 harness 功能就是自我反思/自我纠正（Relection)? 只是har
 
 **注**：纯"跟 eval 共享"不是外置理由——eval 经 `HarnessManager` 间接用，内联常量一样能共享。外置的真正价值是 prompt 与代码分离、便于不改码地 review/diff/迭代 prompt。改动面大（涉及多模块 + UT），单独立项再做。
 
-## 1.9. new tool
+## 3.9. new tool
 扫描并返回 可用的 LLM 列表。
 包括 agenta 未知的？
 
-## 1.10. workflow
-## 1.11. 多语言
-## 1.12. skill os
-## 1.13. 新业务
+## 3.10. download_models.py 上UI
+
+## 3.11. workflow
+## 3.12. 多语言
+## 3.13. skill os
+## 3.14. 新业务
+
+# 4. others
+## 4.1. WebUI 导出对话
