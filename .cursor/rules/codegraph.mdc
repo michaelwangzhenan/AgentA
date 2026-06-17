@@ -1,0 +1,27 @@
+---
+description: 用 CodeGraph 工具理解代码结构，优先于 grep / 逐文件阅读。
+alwaysApply: flase
+---
+
+# CodeGraph 优先
+
+本仓库已用 CodeGraph 建好代码知识图谱（存在 `.codegraph/` 目录）。理解代码时优先查图谱，而不是先 grep / 逐个读文件。
+
+## 何时用
+
+- 想搞清"X 是怎么工作的""请求怎么从 A 走到 B"
+- 找一个函数 / 类的定义、调用点、调用链
+- 评估"改动某个符号会影响哪些地方"
+
+## 用哪个工具
+
+- `codegraph_explore`：主力。一次问清机制 / 流程 / 某块代码，返回相关源码 + 关系 + 影响范围
+- `codegraph_search`：只想按名字定位某个符号
+- `codegraph_callers`：找某函数的所有调用点（含回调注册）
+- `codegraph_node`：看单个符号的完整源码 + 调用链，或按文件读取
+
+## 约定
+
+- 把 codegraph 返回的源码当作**已经读过**，不要再用 grep 重复确认同一件事
+- 改完文件后留意结果里的 staleness 提示（`⚠️`），提示某文件待同步时直接 Read 它
+- 仓库里没有 `.codegraph/` 索引时，正常用内置工具即可

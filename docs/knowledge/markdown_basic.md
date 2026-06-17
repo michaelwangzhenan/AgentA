@@ -77,3 +77,8 @@
 ```markdown
 [![替代文字](./images/demo.png)](https://example.com)
 ```
+
+
+# memaid 格式
+
+%%{init: {'theme':'base', 'themeVariables': {'fontSize':'11px'}, 'flowchart': {'padding':4, 'nodeSpacing':25, 'rankSpacing':30, 'diagramPadding':4}}}%%

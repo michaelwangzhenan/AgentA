@@ -1138,27 +1138,3 @@ glm (几乎非流式):
 
 ---
 
-
-# 11. 附录1. 缩写
-| 缩写 | 全称 | 含义 |
-|---|---|---|
-| **KB** | Knowledge Base | 知识库（向量库 + 关键词索引）|
-| **RAG** | Retrieval-Augmented Generation | 检索增强生成 |
-| **BM25** | Best Matching 25 | 经典关键词检索算法 |
-| **RRF** | Reciprocal Rank Fusion | 倒数排名融合（合并多路召回排序）|
-| **HyDE** | Hypothetical Document Embeddings | 假设性文档嵌入（让 LLM 先编一段答案再检索）|
-| **MRR** | Mean Reciprocal Rank | 平均倒数排名（评估指标）|
-| **nDCG** | normalized Discounted Cumulative Gain | 归一化折损累积增益（更细的评估指标）|
-| **OWASP** | Open Worldwide Application Security Project | 业界开放式应用安全项目（发布 LLM Top 10 等安全规范）|
-| **LLM01** | OWASP LLM Top 10 第 01 项 | Prompt Injection（LLM 应用首要风险）|
-| **MCP** | Model Context Protocol | 模型上下文协议（Anthropic 2024-11 开源标准，LLM 应用 ↔ 外部能力的通用接口）|
-| **JSON-RPC** | JSON Remote Procedure Call | 基于 JSON 的远程过程调用协议（MCP 底层消息格式）|
-| **SSE** | Server-Sent Events | 服务器推送事件（HTTP 单向流；MCP 旧 transport，已被 Streamable HTTP 取代）|
-| **SDK** | Software Development Kit | 软件开发工具包 |
-| **SSRF** | Server-Side Request Forgery | 服务端请求伪造（诱导 server 访问内网 / file:// 等）|
-| **Node.js** | (无缩写，原名) | JavaScript / TypeScript 服务端运行时（V8 引擎），跟 Python 解释器同生态位 |
-| **npm** | Node Package Manager | Node.js 的官方包管理器 + 包仓库（pypi.org 的对应物）|
-| **npx** | Node Package eXecute | npm 5.2+ 自带的"装包 + 跑命令"一步走工具（类比 Python 的 `pipx run`）|
-| **TS** | TypeScript | JavaScript 超集 + 静态类型；编译产物仍是 JS |
-| **WSL** | Windows Subsystem for Linux | Windows 内置的 Linux 子系统（v2 是完整内核） |
-

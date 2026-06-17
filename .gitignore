@@ -101,3 +101,5 @@ desktop.ini
 *.code-workspace
 *.exe
 
+# ── Codegraph ───────────────────────────────────────────────────
+.codegraph/
