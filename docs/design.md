@@ -6,21 +6,20 @@ AgentA 是"私有知识库 Agent"，按职责分为三层(表现层/ Agent Core 
 
 **纵向:三大业务模块**
 
-| 模块 | 职责 |
-|---|---|
-| 表现层 | CLI / Web UI / Tool 脚本: 采集输入、订阅事件流分层渲染、命令管理 |
-| Agent Core | 推理循环 + 工具调用 + 上下文管理 |
-| RAG | 异构文档多模型索引；对查询做精准召回 |
+| 模块       | 职责                                                             |
+| ---------- | ---------------------------------------------------------------- |
+| 表现层     | CLI / Web UI / Tool 脚本: 采集输入、订阅事件流分层渲染、命令管理 |
+| Agent Core | 推理循环 + 工具调用 + 上下文管理                                 |
+| RAG        | 异构文档多模型索引；对查询做精准召回                             |
 
 **横向:四档可换/可扩展**
 
-| 维度 | 选项 | 
-|---|---|
-| LLM Provider | 国内 / 国外 / 本地模型，按配置切换 | 
-| Embedding 模型 | en / zh / m3，支持多模型并存 | 
-| Agent 实现 | Python / LangChain / AutoGPT；共享公共层（Tools/Memory/LLM），差异只在 loop | 
-| Rules / Skills / MCP / Prompts | 文件驱动，**并存叠加 + 热更新** |
-
+| 维度                           | 选项                                                                        |
+| ------------------------------ | --------------------------------------------------------------------------- |
+| LLM Provider                   | 国内 / 国外 / 本地模型，按配置切换                                          |
+| Embedding 模型                 | en / zh / m3，支持多模型并存                                                |
+| Agent 实现                     | Python / LangChain / AutoGPT；共享公共层（Tools/Memory/LLM），差异只在 loop |
+| Rules / Skills / MCP / Prompts | 文件驱动，**并存叠加 + 热更新**                                       |
 
 ## 1.2. 整体架构
 
@@ -72,7 +71,6 @@ flowchart TB
     class IMP,LLMP,FILES,EMB swappable
 ```
 
-
 **设计要点**
 
 - **三层职责清晰**：表现层只管 IO，Agent core 只管推理与工具，RAG 只管检索；任一层换实现不影响其它层。
@@ -85,13 +83,13 @@ flowchart TB
 
 AgentA 模块间通过两套接口连接：
 
-| 接口 | 边界 | API 简介 |
-|---|---|---|
-| [AgentAPI](#31-agentapi) | 表现层 ↔ Agent core | `run`：执行一次完整推理循环，返回最终回答<br/> `activate_skill`：手动注入 Skill 指令到当前会话<br/> `set_event_callback`：注册事件回调（思考 / token / 工具调用 / 最终回答 / 错误 / plan 进度等）|
-| [RetrieverAPI](#221-retrieverapi) | Agent core ↔ RAG | `search`：多 query 召回 + RRF 融合 + 阈值过滤 + Rerank，返回 `Hit` 列表<br/> `expand_queries`：把原 query 扩展为 Multi-Query / HyDE / 翻译三轴<br/> `format_search_results`：把 `Hit` 列表格式化为 LLM 可读文本<br/> `warm_up`：启动时预热 embedding 与 reranker 模型 |
-
+| 接口                           | 边界                 | API 简介                                                                                                                                                                                                                                                                |
+| ------------------------------ | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [AgentAPI](#31-agentapi)          | 表现层 ↔ Agent core | `run`：执行一次完整推理循环，返回最终回答 `` `activate_skill`：手动注入 Skill 指令到当前会话`` `set_event_callback`：注册事件回调（思考 / token / 工具调用 / 最终回答 / 错误 / plan 进度等）                                                                        |
+| [RetrieverAPI](#221-retrieverapi) | Agent core ↔ RAG    | `search`：多 query 召回 + RRF 融合 + 阈值过滤 + Rerank，返回 `Hit` 列表 `` `expand_queries`：把原 query 扩展为 Multi-Query / HyDE / 翻译三轴`` `format_search_results`：把 `Hit` 列表格式化为 LLM 可读文本`` `warm_up`：启动时预热 embedding 与 reranker 模型 |
 
 # 2. RAG
+
 ## 2.1. Ingestion
 
 将各种格式的本地文档（PDF/DOCX/PPT等）转换为可被多路检索的索引数据。
@@ -122,8 +120,6 @@ flowchart LR
     P3 --> O
     P4 --> O
 ```
-
-
 
 ### 2.1.3. Clean清洗
 
@@ -167,11 +163,8 @@ flowchart LR
     HDB --> MD["chroma.sqlite3：<br/>doc_id/source 等元数据"]
 ```
 
-
 - **多模型并存 · 分库存储**：每个 embedding 模型对应独立 collection。通过别名（en/zh/m3）切换默认模型，召回支持多库并行再融合。
 - **统一 cosine 空间**：ChromaDB + HNSW 索引，统一使用 cosine 空间。
-
-
 - **幂等增量**：以文件 `content_sha1` ，未变化整文件跳过，变化时先删旧 chunks 再写新。
 
 ### 2.1.6. BM25（Sparse 索引）
@@ -196,15 +189,15 @@ flowchart LR
 
 `RetrieverAPI` 是 **Agent core ↔ RAG** 之间的接口，以 **module-level 函数** 形式分布在 `src/rag/retriever.py` 与 `src/rag/query_rewriter.py`。
 
-| 函数 | 说明 |
-|---|---|
-| `search` | 主入口；支持多查询并行（HyDE）与可选 reranker，返回 `list[Hit]` |
-| `expand_queries` | LLM 查询改写（HyDE），返回原查询 + 扩展查询 |
-| `format_search_results` | 把 hits 拼成可注入 prompt 的 markdown 字符串 |
-| `warm_up` | 预热全部 collection，避免首查延迟 |
+| 函数                      | 说明                                                              |
+| ------------------------- | ----------------------------------------------------------------- |
+| `search`                | 主入口；支持多查询并行（HyDE）与可选 reranker，返回 `list[Hit]` |
+| `expand_queries`        | LLM 查询改写（HyDE），返回原查询 + 扩展查询                       |
+| `format_search_results` | 把 hits 拼成可注入 prompt 的 markdown 字符串                      |
+| `warm_up`               | 预热全部 collection，避免首查延迟                                 |
 
 > **两套 API 风格**：`AgentAPI` 用 Protocol 类是因为 3 个实现并存，需 `isinstance` 校验任一实现没破约定；`RetrieverAPI` 仅 1 实现，按 Python 社区 idiom（`os.path` / `json` / `re` 风格）用 module 函数，未来出现第 2 个 retriever 实现时再升级为 Protocol。
-> 
+
 ### 2.2.2. 整体流程
 
 ```mermaid
@@ -251,6 +244,7 @@ flowchart TD
     RR --> TH["Dense 阈值过滤<br/>per-model · BM25 豁免"]
     TH --> OUT["候选交给 Reranker"]
 ```
+
 - **RRF 融合**：Dense (cosine) 与 BM25 (Okapi raw) 分数尺度完全不可比，解决跨尺度融合。
 - **多 query 召回量自适应**：每条 query 的召回窗口随改写条数收缩，总候选量与单 query 一致。
 - **跨 collection round-robin 合并**：不同 embedding 模型距离空间不同，直接按分数拼接会让某个模型的高分占满名额；round-robin 保证每个库公平出列。
@@ -263,7 +257,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    C["候选 hits"] --> G{"候选 &gt; top_k?"}
+    C["候选 hits"] --> G{"候选 > top_k?"}
     G -->|否| P["透传"]
     G -->|是| CE["Cross-Encoder<br/>逐对编码 query×doc"]
     CE --> N["Sigmoid 归一化到 [0,1]"]
@@ -273,24 +267,22 @@ flowchart TD
     D --> OUT["最终 top_k"]
 ```
 
-
 # 3. Agent
 
 ## 3.1. AgentAPI
 
 `AgentAPI` 是**表现层 ↔ Agent core** 之间的接口，以 `@runtime_checkable Protocol` 定义于 `src/agent/agent_api.py`，三种 Agent（Python / LangChain / AutoGPT）通过 duck typing 满足。
 
-| API | 说明 |
-|---|---|
-| `run` | 执行一轮推理，返回 LLM 最终回答；失败返回 `Error: <msg>` 不抛异常 |
-| `activate_skill` | 注入 Skill 到 system_prompt；`True`=新激活、`False`=已激活 |
-| `set_event_callback` | 设置统一事件回调（覆盖语义，传 `None` 清空） |
+| API                    | 说明                                                                |
+| ---------------------- | ------------------------------------------------------------------- |
+| `run`                | 执行一轮推理，返回 LLM 最终回答；失败返回 `Error: <msg>` 不抛异常 |
+| `activate_skill`     | 注入 Skill 到 system_prompt；`True`=新激活、`False`=已激活      |
+| `set_event_callback` | 设置统一事件回调（覆盖语义，传 `None` 清空）                      |
 
 **AgentEvent** —— `src/agent/core/event_bus.py` 的 frozen dataclass，三字段 `type` / `payload` / `ts`。两种订阅方式：
 
 - 简单：`agent.set_event_callback(fn)` —— 一个回调收所有类型事件，`fn` 收 `AgentEvent` 对象（含 `type` / `ts`）
 - 高级：`agent.events.subscribe(EVENT_X, fn)` —— 按事件类型订阅，`fn` 仅收 `payload`
-
 
 ## 3.2. 会话管理
 
@@ -298,23 +290,21 @@ flowchart TD
 
 **表结构**
 
-| 表 | 字段 | 用途 |
-|---|---|---|
-| `sessions` | `session_id` (PK) / `created_at` / `first_user_msg` / `prompt_name` | 会话元数据；`first_user_msg` 用于 list/搜索预览 |
-| `messages` | `id` (PK) / `session_id` (idx) / `role` / `content` / `tool_calls` (JSON) / `tool_call_id` / `timestamp` | 消息全量；`tool_calls` 序列化为 JSON |
+| 表           | 字段                                                                                                                   | 用途                                              |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `sessions` | `session_id` (PK) / `created_at` / `first_user_msg` / `prompt_name`                                            | 会话元数据；`first_user_msg` 用于 list/搜索预览 |
+| `messages` | `id` (PK) / `session_id` (idx) / `role` / `content` / `tool_calls` (JSON) / `tool_call_id` / `timestamp` | 消息全量；`tool_calls` 序列化为 JSON            |
 
 **Internal API**
 
-| 方法 | 说明 |
-|---|---|
-| `append(session_id, msg, prompt_name="")` | 写入单条 message；首次写入自动创建 session 元数据 |
-| `load(session_id)` | 全量加载 messages（按 id 升序），供 Agent 恢复上下文 |
-| `load_last_n_messages(session_id, n)` | 仅取末尾 n 条，规避长 session I/O 开销 |
-| `list_sessions(query=None, limit=None)` | 列出 session；`query` 按 id 前缀 OR `first_user_msg` LIKE（不区分大小写）过滤 |
-| `set_prompt_name(session_id, name)` | 更新当前 session 关联的自定义 Prompt 名 |
-| `clear / delete_session / clean_all_sessions` | 三档清理：当前重置 / 单 session 删除 / 全删 |
-
-
+| 方法                                            | 说明                                                                              |
+| ----------------------------------------------- | --------------------------------------------------------------------------------- |
+| `append(session_id, msg, prompt_name="")`     | 写入单条 message；首次写入自动创建 session 元数据                                 |
+| `load(session_id)`                            | 全量加载 messages（按 id 升序），供 Agent 恢复上下文                              |
+| `load_last_n_messages(session_id, n)`         | 仅取末尾 n 条，规避长 session I/O 开销                                            |
+| `list_sessions(query=None, limit=None)`       | 列出 session；`query` 按 id 前缀 OR `first_user_msg` LIKE（不区分大小写）过滤 |
+| `set_prompt_name(session_id, name)`           | 更新当前 session 关联的自定义 Prompt 名                                           |
+| `clear / delete_session / clean_all_sessions` | 三档清理：当前重置 / 单 session 删除 / 全删                                       |
 
 ## 3.3. 用户记忆
 
@@ -322,13 +312,13 @@ flowchart TD
 
 ### 3.3.1. 数据模型
 
-| 字段 | 用途 |
-|---|---|
-| `id` | 主键；`/memory` 列表 / `del` / `edit` 用 |
-| `text` | 自然语言整句；写入时做 prompt-injection sanitize |
-| `source` | 写入来源：auto / explicit / manual（详 §3.4.2） |
-| `created_at` | 写入时间 |
-| `updated_at` | 最后改写时间；UPDATE 时刷新 |
+| 字段           | 用途                                             |
+| -------------- | ------------------------------------------------ |
+| `id`         | 主键；`/memory` 列表 / `del` / `edit` 用   |
+| `text`       | 自然语言整句；写入时做 prompt-injection sanitize |
+| `source`     | 写入来源：auto / explicit / manual（详 §3.4.2） |
+| `created_at` | 写入时间                                         |
+| `updated_at` | 最后改写时间；UPDATE 时刷新                      |
 
 无类别、无 key、无唯一约束 — 去重去矛盾交给 LLM 合并（详 §3.4.2）。
 
@@ -336,11 +326,11 @@ flowchart TD
 
 **混合范式**（参考 ChatGPT / Cursor Memories）：三种写入路径共存于同一记忆池，`source` 字段标记来源便于审计与排错。
 
-| source | 触发条件 | 是否调 LLM |
-|---|---|---|
-| `explicit` | 用户本轮输入命中显式触发词（"请记住" / "记住这个" / "remember this" / "keep in mind" 等，大小写不敏感、子串匹配）；附最近若干轮历史作为 context | ✅ |
-| `auto` | `USER_MEMORY_AUTO_EXTRACT=true`、本轮**未**命中触发词、且过节流闸（详 §3.4.3） | ✅ |
-| `manual` | `/memory add` / `/memory edit` CLI、前端「用户记忆」页、API POST/PATCH | ❌ |
+| source       | 触发条件                                                                                                                                        | 是否调 LLM |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| `explicit` | 用户本轮输入命中显式触发词（"请记住" / "记住这个" / "remember this" / "keep in mind" 等，大小写不敏感、子串匹配）；附最近若干轮历史作为 context | ✅         |
+| `auto`     | `USER_MEMORY_AUTO_EXTRACT=true`、本轮**未**命中触发词、且过节流闸（详 §3.4.3）                                                         | ✅         |
+| `manual`   | `/memory add` / `/memory edit` CLI、前端「用户记忆」页、API POST/PATCH                                                                      | ❌         |
 
 **判定时机与优先级**：每轮对话结束后由 `MemoryManager.try_extract(user_input, agent_reply)` 统一判定，`explicit` 与 `auto` 互斥、`explicit` 优先。命中触发词即走 `explicit`——**不受节流限制、也不依赖 `USER_MEMORY_AUTO_EXTRACT` 开关**（自动提取关着，说"请记住"照样触发）；只有未命中且开了 `AUTO_EXTRACT` 才考虑 `auto`。两条路径都把提取派发到后台线程、**都带最近若干轮窗口**作为上下文，区别仅在 `source` 与 prompt 策略（`auto` 收长期信息、丢一次性内容；`explicit` 更积极）。`manual` 不走 `try_extract`，直接写库。
 
@@ -357,11 +347,11 @@ flowchart TD
 
 `MIN_INPUT_LEN` 早期是"只看触发那一条消息的长度"，会出现"恰好落在 N 倍数那条很短、旁边几轮的干货被整轮丢掉"的漏记。现改为**整窗过滤**：到点后 `auto` 也把最近窗口喂给 LLM（与 `explicit` 一致），长度判定也落在整窗而非单条，窗口里任一条实质消息都能被提取。
 
-| config | 默认 | 含义 |
-|---|---|---|
-| `USER_MEMORY_EXTRACT_EVERY_N` | 5 | 本 session 累计用户消息数为 N 的整数倍时才到提取点 |
-| `USER_MEMORY_EXTRACT_MIN_INPUT_LEN` | 20 | 到点后最近窗口里需至少有一条 ≥此长度的 user 消息才触发；设 0 禁用此过滤 |
-| `USER_MEMORY_MAX_ENTRIES` | 30 | 记忆总条数软上限，提示 LLM 合并时控制规模 |
+| config                                | 默认 | 含义                                                                     |
+| ------------------------------------- | ---- | ------------------------------------------------------------------------ |
+| `USER_MEMORY_EXTRACT_EVERY_N`       | 5    | 本 session 累计用户消息数为 N 的整数倍时才到提取点                       |
+| `USER_MEMORY_EXTRACT_MIN_INPUT_LEN` | 20   | 到点后最近窗口里需至少有一条 ≥此长度的 user 消息才触发；设 0 禁用此过滤 |
+| `USER_MEMORY_MAX_ENTRIES`           | 30   | 记忆总条数软上限，提示 LLM 合并时控制规模                                |
 
 节流判定是**无状态**的：每轮直接数本 session 的 user 消息条数取模，不依赖跨轮内存计数器（`MemoryManager` 每轮新建，内存计数器会被归零）。
 
@@ -379,33 +369,32 @@ flowchart TD
 
 每轮把记忆**全量按序注入** `<user_context>`（非按当前问题做相关性检索），格式为扁平自然语言 bullet（`- {text}`）：`manual` / `explicit`（用户手写）优先于 `auto`（自动提取），同级按 `updated_at` 倒序，累计超 `USER_MEMORY_MAX_CHARS` 截断。被动注入不刷新时间戳，避免门内条目永久占位、门外条目饥饿。拼接顺序参考 [§3.4.2 四层注入顺序](#342-四层注入顺序)。
 
-
-## 3.4. Prompt 管理
+## 3.4. Rules 管理
 
 每个用户维护一份 Markdown 偏好，Agent 每次对话自动遵守，无需每轮重申；多用户下每人一份、互不影响。
-对比 [§3.3 用户记忆](#33-用户记忆)：**静态偏好**（用户主动声明）vs. **动态偏好**（会话中学到）。
+[§3.3 用户记忆](#33-用户记忆) 是**动态偏好**（会话中学到）， Rules是**静态偏好**（用户主动声明） 。
 概念同 Cursor Rules / GHC Instructions（持久生效的偏好），区别是 AgentA 按用户存库、即时生效。
 
 ### 3.4.1. 存储与加载
 
-| 项 | 约定 |
-|---|---|
-| 存储 | `auth.db` 的 `user_rules` 表，每用户一条（`user_id` 主键） |
-| 格式 | 纯 Markdown / 文本，无 frontmatter，无元数据 |
-| 编辑 | Rules 页 / `PUT /api/rules`，只写当前用户那条 |
-| 加载时机 | 每轮对话即时读当前用户的 rules，改完即时生效 |
-| 异常处理 | 未设置 / 空 / `USER_RULES_ENABLED=false` → 静默跳过（不拼 `<user_rules>` 块） |
+| 项       | 约定                                                                              |
+| -------- | --------------------------------------------------------------------------------- |
+| 存储     | `auth.db` 的 `user_rules` 表，每用户一条（`user_id` 主键）                  |
+| 格式     | 纯 Markdown / 文本，无 frontmatter，无元数据                                      |
+| 编辑     | Rules 页 /`PUT /api/rules`，只写当前用户那条                                    |
+| 加载时机 | 每轮对话即时读当前用户的 rules，改完即时生效                                      |
+| 异常处理 | 未设置 / 空 /`USER_RULES_ENABLED=false` → 静默跳过（不拼 `<user_rules>` 块） |
 
 ### 3.4.2. 四层注入顺序
 
 system prompt 最终由四层拼成：
 
-| 层 | 来源 | 决定 | 切换粒度 |
-|---|---|---|---|
-| **`base system_prompt`** | `agent.py:SYSTEM_PROMPT` 常量 + 启动时拼接的 `<available_skills>` skill catalog（详 [§3.6.2](#362-渐进披露)） | "Agent 是谁" + "有哪些 skill 可调" | 常量全局不变；catalog 在 `/reload-skills` 后刷新 |
-| **`<user_rules>`** | 当前用户的 rules（`auth.db.user_rules`） | "Agent 要遵守该用户什么偏好" — 语言 / 格式 / 引用风格等静态偏好 | 每轮对话即时读当前用户的，改完即时生效 |
-| **`<user_context>`** | `UserMemoryStore` （[§3.3](#33-用户记忆)） | "Agent 这次会话还要注意什么" — 动态学到的临时偏好 | 每轮对话即时刷新 |
-| **`<active_study_plan>`** | 学习计划（[§3.8.4](#384-跨-session-状态可见性)） | "Agent 当前在帮用户跟踪哪个学习计划 / 进度到哪了" |  `/study load` 手动注入 |
+| 层                                | 来源                                                                                                            | 决定                                                             | 切换粒度                                           |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------- |
+| **`base system_prompt`**  | `agent.py:SYSTEM_PROMPT` 常量 + 启动时拼接的 `<available_skills>` skill catalog（详 [§3.6.2](#362-渐进披露)） | "Agent 是谁" + "有哪些 skill 可调"                               | 常量全局不变；catalog 在 `/reload-skills` 后刷新 |
+| **`<user_rules>`**        | 当前用户的 rules（`auth.db.user_rules`）                                                                      | "Agent 要遵守该用户什么偏好" — 语言 / 格式 / 引用风格等静态偏好 | 每轮对话即时读当前用户的，改完即时生效             |
+| **`<user_context>`**      | `UserMemoryStore` （[§3.3](#33-用户记忆)）                                                                      | "Agent 这次会话还要注意什么" — 动态学到的临时偏好               | 每轮对话即时刷新                                   |
+| **`<active_study_plan>`** | 学习计划（[§3.8.4](#384-跨-session-状态可见性)）                                                                  | "Agent 当前在帮用户跟踪哪个学习计划 / 进度到哪了"                | `/study load` 手动注入                           |
 
 ```mermaid
 flowchart TD
@@ -415,11 +404,11 @@ flowchart TD
     MEM[("user_memory 池<br/>动态偏好")]
     LP[("learning.db<br/>已 /study load 的 plan")]
 
-    SYS --> BASE["base system_prompt<br/>= 常量 + &lt;available_skills&gt; catalog"]
+    SYS --> BASE["base system_prompt<br/>= 常量 + skills catalog"]
     SKILLS -.->|"启动时拼 catalog"| BASE
-    RULES -.->|"每轮读当前用户"| R["拼 &lt;user_rules&gt; 块"]
-    MEM -.->|"每轮 load_for_context()"| C["拼 &lt;user_context&gt; 块"]
-    LP -.->|"仅当本 session 已 /study load"| P["拼 &lt;active_study_plan&gt; 块"]
+    RULES -.->|"每轮读当前用户"| R["+ user_rules 块"]
+    MEM -.->|"每轮 load_for_context()"| C["+ user_context 块"]
+    LP -.->|"本session load 过学习计划"| P["+ active_study_plan 块"]
 
     BASE --> R --> C --> P --> OUT["最终 system_prompt<br/>(发给 LLM)"]
 ```
@@ -429,19 +418,17 @@ flowchart TD
 
 **各层职责切分**：
 
-| 层 | 放什么 | 不放什么 |
-|---|---|---|
-| `SYSTEM_PROMPT` 常量 | **绝对系统指令**：工具调用协议、引用规范、untrusted 数据隔离等改了就破契约的硬约束 | 业务语义假设（KB 性质、应用场景） |
-| 用户 rules（`user_rules`） | **业务偏好**：应用场景、KB 性质、领域术语、何时该查 KB、回答风格 | 工具协议 / 引用规范 / 安全约束（已在 `SYSTEM_PROMPT`） |
+| 层                           | 放什么                                                                                   | 不放什么                                                 |
+| ---------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `SYSTEM_PROMPT` 常量       | **绝对系统指令**：工具调用协议、引用规范、untrusted 数据隔离等改了就破契约的硬约束 | 业务语义假设（KB 性质、应用场景）                        |
+| 用户 rules（`user_rules`） | **业务偏好**：应用场景、KB 性质、领域术语、何时该查 KB、回答风格                   | 工具协议 / 引用规范 / 安全约束（已在 `SYSTEM_PROMPT`） |
 
 - 两者**不重复**
 - rules 未设置时 `SYSTEM_PROMPT` 必须能独立工作（详 prompt 内 "工具策略 / Fallback" 段），由 `tests/test_system_prompt.py` 守护 fallback 文案与契约 token 不被删
 
-
 ### 3.4.3. 防 prompt injection
+
 参考 [§3.12 防 prompt injection](#312-防-prompt-injection)。
-
-
 
 ## 3.5. 引用展示（Citation）
 
@@ -452,23 +439,22 @@ flowchart TD
 
 引用所需元数据由 [§2.1.4 Split](#214-split分块) 阶段写入并由 [§2.2 Retrieve+Rerank](#22-retrieval) 透传。
 
-| 字段 | 来源 | 用于 |
-|---|---|---|
-| `source` | ingest 时的相对路径（如 `src/rag/retriever.py`） | 引用条目主键 |
-| `metadata.heading_path` | Splitter 提取的标题层级 | 章节级定位 |
-| `metadata.page_no` | PDF / DOCX ingest 写入 | 页码级定位（Markdown 来源无此字段，省略不显示） |
-| `id` | chunk 唯一 ID | builder 内部去重；不进 LLM 回答 |
+| 字段                      | 来源                                               | 用于                                            |
+| ------------------------- | -------------------------------------------------- | ----------------------------------------------- |
+| `source`                | ingest 时的相对路径（如 `src/rag/retriever.py`） | 引用条目主键                                    |
+| `metadata.heading_path` | Splitter 提取的标题层级                            | 章节级定位                                      |
+| `metadata.page_no`      | PDF / DOCX ingest 写入                             | 页码级定位（Markdown 来源无此字段，省略不显示） |
+| `id`                    | chunk 唯一 ID                                      | builder 内部去重；不进 LLM 回答                 |
 
 ### 3.5.2. 编号规则
 
 引用编号 `[n]` 由 `CitationBuilder` 统一分配，遵循三条约定：
 
-| 约定 | 含义 |
-|---|---|
-| **每轮独立** | 每次 `Agent.run()` 实例化新 builder，编号从 `[1]` 起；不跨轮累计 |
+| 约定               | 含义                                                                                                           |
+| ------------------ | -------------------------------------------------------------------------------------------------------------- |
+| **每轮独立** | 每次 `Agent.run()` 实例化新 builder，编号从 `[1]` 起；不跨轮累计                                           |
 | **同轮累计** | 同一轮内多次 `search_knowledge` tool_call 共用一个 builder，编号连续递增（第一次 [1][2]，第二次接着 [3][4]） |
-| **同源合并** | 同 `(source, heading_path)` 的多个 chunk 共享同一编号，在展示行附 `chunks=N` |
-
+| **同源合并** | 同 `(source, heading_path)` 的多个 chunk 共享同一编号，在展示行附 `chunks=N`                               |
 
 ```mermaid
     sequenceDiagram
@@ -495,12 +481,11 @@ flowchart TD
 
 LLM "造引用"是已知风险（写 `[7]` 但实际只有 `[3]`，或编造不存在的文件路径）。三道防线：
 
-| 防线 | 机制 |
-|---|---|
-| **编号源头唯一** | `[n]` 完全由 builder 分配；LLM 只能从 prompt 给的"可见编号"里选 |
-| **未分配静默丢弃** | `extract_used` 只回填 builder 已分配过的编号；LLM 写了 `[99]` 直接被滤掉 |
+| 防线                         | 机制                                                                                |
+| ---------------------------- | ----------------------------------------------------------------------------------- |
+| **编号源头唯一**       | `[n]` 完全由 builder 分配；LLM 只能从 prompt 给的"可见编号"里选                   |
+| **未分配静默丢弃**     | `extract_used` 只回填 builder 已分配过的编号；LLM 写了 `[99]` 直接被滤掉        |
 | **sources 块程序生成** | 块内容（文件路径 / heading / page）从 builder 内部存的真实 Hit 取，LLM 写不动这部分 |
-
 
 ## 3.6. Agent Skills
 
@@ -508,25 +493,25 @@ LLM "造引用"是已知风险（写 `[7]` 但实际只有 `[3]`，或编造不�
 
 ### 3.6.1. 数据来源与生命周期
 
-| 项 | 约定 |
-|---|---|
-| 目录路径 |  `.agenta/skills/<name>/SKILL.md` |
-| 加载时机 | 启动时扫描；CLI `/reload-skills` 或 Web `POST /api/skills/reload` 热更新 |
-| frontmatter 必填 | `description`（用于 catalog）；`name` 缺失则回退用目录名 |
+| 项                   | 约定                                                                                                                                                                                                                                   |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 目录路径             | `.agenta/skills/<name>/SKILL.md`                                                                                                                                                                                                     |
+| 加载时机             | 启动时扫描；CLI `/reload-skills` 或 Web `POST /api/skills/reload` 热更新                                                                                                                                                           |
+| frontmatter 必填     | `description`（用于 catalog）；`name` 缺失则回退用目录名                                                                                                                                                                           |
 | frontmatter 其他字段 | name / description 之外的字段（如 agentskills.io 标准 `allowed-tools` / `model`）→ **passthrough 保留**：解析时收集到 `frontmatter_extra`，写回时原样输出，不丢失（runtime 当前不强制 `allowed-tools`，仅做元数据保留） |
-| 异常处理 | skill load失败由 CLI / WebUI 显式回显 |
-| 启用 / 禁用 | 走"状态分离"模式：状态存独立文件 `.agenta/skills/disabled.json`（详 §3.7.3），SKILL.md 保持纯净 |
-| 改名 | 通过 `POST /api/skills/{name}/rename` 强一致改名：移动目录 + 同步 frontmatter `name:` 字段 + 迁移 disabled list 状态；目录名永远 == frontmatter `name` |
-| Web UI 管理 | 完整 CRUD + 改名 + toggle 启停 + 一键 reload + 搜索 / 排序 / 批量启停；编辑器用 CodeMirror 6 提供 markdown 高亮 + Edit/Split/Preview 三态预览。详 [iter_4_UI.md §5 API 总览](./iter_4_UI.md) |
+| 异常处理             | skill load失败由 CLI / WebUI 显式回显                                                                                                                                                                                                  |
+| 启用 / 禁用          | 走"状态分离"模式：状态存独立文件 `.agenta/skills/disabled.json`（详 §3.7.3），SKILL.md 保持纯净                                                                                                                                     |
+| 改名                 | 通过 `POST /api/skills/{name}/rename` 强一致改名：移动目录 + 同步 frontmatter `name:` 字段 + 迁移 disabled list 状态；目录名永远 == frontmatter `name`                                                                           |
+| Web UI 管理          | 完整 CRUD + 改名 + toggle 启停 + 一键 reload + 搜索 / 排序 / 批量启停；编辑器用 CodeMirror 6 提供 markdown 高亮 + Edit/Split/Preview 三态预览。详[iter_4_UI.md §5 API 总览](./iter_4_UI.md)                                              |
 
 ### 3.6.2. 渐进披露
 
 Skills 规范定义的**渐进披露（progressive disclosure）**有三层：catalog（目录）/ prompt body（正文）/ scripts（脚本）。AgentA 目前实现前两层。
 
-| 层 | 内容 | 何时 | 进哪 | 目的 |
-|---|---|---|---|---|
-| **Catalog** | 每个 skill 的 name + description 渲染为 `<available_skills>` XML 块 | 启动时拼到 base system_prompt 末尾 | base system_prompt（[§3.4.2](#342-四层注入顺序)） | LLM 浏览目录、主动认出该用谁 |
-| **Prompt Body** | SKILL.md 正文（专业指令、模板、流程约束） | LLM 调 `load_skill` tool 时 | messages 历史（作为 `role: "tool"` 响应，不进 system_prompt） | 完整指令只在用到时才占 context |
+| 层                    | 内容                                                                  | 何时                               | 进哪                                                            | 目的                           |
+| --------------------- | --------------------------------------------------------------------- | ---------------------------------- | --------------------------------------------------------------- | ------------------------------ |
+| **Catalog**     | 每个 skill 的 name + description 渲染为 `<available_skills>` XML 块 | 启动时拼到 base system_prompt 末尾 | base system_prompt（[§3.4.2](#342-四层注入顺序)）                 | LLM 浏览目录、主动认出该用谁   |
+| **Prompt Body** | SKILL.md 正文（专业指令、模板、流程约束）                             | LLM 调 `load_skill` tool 时      | messages 历史（作为 `role: "tool"` 响应，不进 system_prompt） | 完整指令只在用到时才占 context |
 
 ```mermaid
     sequenceDiagram
@@ -548,15 +533,15 @@ Skills 规范定义的**渐进披露（progressive disclosure）**有三层：ca
 
 业内"agent-instructions"类配置普遍采用**状态分离**模式（Cursor 用户本地偏好 / Claude.ai 云端 DB）：skill 定义跟启用状态分两层存。AgentA 也走这条路 —— SKILL.md 保持纯净（仅 name / description / 标准字段），禁用名单存独立文件。
 
-| 项 | 约定 |
-|---|---|
-| 文件路径 | `.agenta/skills/disabled.json`（可由 `SKILLS_DISABLED_FILE` 环境变量覆盖）|
-| 文件格式 | JSON 字符串数组，name 排序写入，例：`["skill_a", "skill_b"]` |
-| 是否进 git | **进 git**（个人项目自己用，团队偏好可共享）；个人临时禁用不想入 git 自己加 `.gitignore` |
-| 写入语义 | **原子写**：tempfile + rename，防多 tab 并发交错 |
-| 启动行为 | scan 时把 disabled 名单里的 skill 分流到 `ScanResult.disabled`；**不进 `## Skills` catalog 也不暴露 `load_skill` 工具**，但 UI 仍能看到 + toggle 回 enabled |
-| **孤儿自愈** | scan 时若 disabled 名单里某 name 在磁盘已不存在 → 自动从文件移除（写回） |
-| 立即生效范围 | toggle 后 `cache_clear()` Agent 单例，**下一轮新对话立即生效**；当前 session 因 system prompt 已下发 LLM 不可撤回 |
+| 项                 | 约定                                                                                                                                                                    |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 文件路径           | `.agenta/skills/disabled.json`（可由 `SKILLS_DISABLED_FILE` 环境变量覆盖）                                                                                          |
+| 文件格式           | JSON 字符串数组，name 排序写入，例：`["skill_a", "skill_b"]`                                                                                                          |
+| 是否进 git         | **进 git**（个人项目自己用，团队偏好可共享）；个人临时禁用不想入 git 自己加 `.gitignore`                                                                        |
+| 写入语义           | **原子写**：tempfile + rename，防多 tab 并发交错                                                                                                                  |
+| 启动行为           | scan 时把 disabled 名单里的 skill 分流到 `ScanResult.disabled`；**不进 `## Skills` catalog 也不暴露 `load_skill` 工具**，但 UI 仍能看到 + toggle 回 enabled |
+| **孤儿自愈** | scan 时若 disabled 名单里某 name 在磁盘已不存在 → 自动从文件移除（写回）                                                                                               |
+| 立即生效范围       | toggle 后 `cache_clear()` Agent 单例，**下一轮新对话立即生效**；当前 session 因 system prompt 已下发 LLM 不可撤回                                               |
 
 **为什么不把 `enabled` 字段塞进 SKILL.md frontmatter**：跟 Claude.ai / Cursor / VS Code Copilot 业内主流做法对齐，让 SKILL.md 保持纯净，符合 [agentskills.io](https://agentskills.io) 开放标准 → SKILL.md 可跨工具复用，团队协作 git push 时不会"我帮你决定哪个 skill 启用"。
 
@@ -570,20 +555,20 @@ Plan存储在 `messages.tool_calls` JSON 字段里。任意时点的 plan 状态
 
 **数据模型**：
 
-| 类 | 字段 |
-|---|---|
-| `PlanStep` | `id` (int 从 1 起) / `text` (str) / `status` (StepStatus) / `note` (str) |
-| `PlanState` | `steps: list[PlanStep]` / `aborted: bool` |
-### 3.7.2. 三个 tool 
+| 类            | 字段                                                                             |
+| ------------- | -------------------------------------------------------------------------------- |
+| `PlanStep`  | `id` (int 从 1 起) / `text` (str) / `status` (StepStatus) / `note` (str) |
+| `PlanState` | `steps: list[PlanStep]` / `aborted: bool`                                    |
+
+### 3.7.2. 三个 tool
 
 Plan 用 OpenAI Function Calling 暴露给 LLM，跟普通 tool 同一列表。
 
-| tool | 必填参数 | 语义 | 返回内容（写回 LLM 的下一轮 prompt） |
-|---|---|---|---|
-| `make_plan` | `steps: list[str]` | 列计划（3-6 步，每步 10-30 字） | "已记录 plan，共 N 步" + 步骤清单 + "下一步：第 1 步 — xxx" 指引 |
-| `update_step` | `step_id` (int ≥1) / `status` ("success" \| "failed" \| "skipped") + 可选 `note` | 标记某步结果 | "✓/✗step N..." + 当前进度 + 下一 pending 步指引（plan 完成则提示综合答案） |
-| `abort_plan` | （都可选） + 可选 `reason` | 主动放弃整个 plan | "plan 已中止" + "请综合已有信息总结答案" |
-
+| tool            | 必填参数                                                                                | 语义                            | 返回内容（写回 LLM 的下一轮 prompt）                                         |
+| --------------- | --------------------------------------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------------------------- |
+| `make_plan`   | `steps: list[str]`                                                                    | 列计划（3-6 步，每步 10-30 字） | "已记录 plan，共 N 步" + 步骤清单 + "下一步：第 1 步 — xxx" 指引            |
+| `update_step` | `step_id` (int ≥1) / `status` ("success" \| "failed" \| "skipped") + 可选 `note` | 标记某步结果                    | "✓/✗step N..." + 当前进度 + 下一 pending 步指引（plan 完成则提示综合答案） |
+| `abort_plan`  | （都可选） + 可选 `reason`                                                            | 主动放弃整个 plan               | "plan 已中止" + "请综合已有信息总结答案"                                     |
 
 ### 3.7.3. 完整流程
 
@@ -631,17 +616,17 @@ sequenceDiagram
 `Agent.run()` 的 ReAct loop 有两层上限：tool 轮次上限（达到后强制 LLM 出文本回答）与总轮次上限（达到后终止 loop）。
 Plan 步数多了需要更大预算，所以 tool 轮次上限需按 plan 步数动态调整。
 
-| 状态 | tool 上限 | 总上限 | 硬上限（防极端） |
-|---|---|---|---|
-| 无 plan / plan 完成/ plan 中止 | `MAX_TOOL_ROUNDS` (默认8) | `Agent.max_iterations` (默认 12) | `MAX_HARD_CAP_ROUNDS` (默认50) |
-| 有 active plan N 步 | `max(MAX_TOOL_ROUNDS, N×4 + 2)` | `max(Agent.max_iterations, tool 上限 + 4)` | `MAX_HARD_CAP_ROUNDS` (默认50) |
+| 状态                           | tool 上限                          | 总上限                                       | 硬上限（防极端）                 |
+| ------------------------------ | ---------------------------------- | -------------------------------------------- | -------------------------------- |
+| 无 plan / plan 完成/ plan 中止 | `MAX_TOOL_ROUNDS` (默认8)        | `Agent.max_iterations` (默认 12)           | `MAX_HARD_CAP_ROUNDS` (默认50) |
+| 有 active plan N 步            | `max(MAX_TOOL_ROUNDS, N×4 + 2)` | `max(Agent.max_iterations, tool 上限 + 4)` | `MAX_HARD_CAP_ROUNDS` (默认50) |
 
 **Note:**
+
 - 每轮 LLM 调用前重算（每轮都 reconstruct 一次 messages → PlanState）。
 - reconstruct 是 O(messages 长度) 纯内存遍历，开销小可忽略。
 - 一旦超过总上限 loop 强制退出，走"达最大迭代次数"兜底文本。
 - Plan step 失败时**不由程序控制重试 / 跳过 / 中止**，完全交给 LLM 看 `update_step` 的返回后自决：
-
 
 ## 3.8. 学习计划制定
 
@@ -650,13 +635,13 @@ Plan 步数多了需要更大预算，所以 tool 轮次上限需按 plan 步数
 
 与 [§3.7 Plan-Execute](#37-plan-execute) 的"用完即弃 plan"互为对照 —— 两者都叫 plan，但生命周期与定位不同：
 
-| 维度 | §3.8 Plan-Execute | §3.9 学习计划 |
-|---|---|---|
-| 用途 | Agent 给**当前问题**拆步骤 | 用户管**长期学习目标** |
-| 生命周期 | 单次问答内 | 周 / 月级，跨 session |
-| 持久化 | 寄生 messages.tool_calls | 独立 SQLite |
-| 谁是状态主人 | Agent（LLM 自决） | 用户（Agent 协助维护） |
-| 失败时 | LLM 自决 retry / skip / abort | 用户主动 abandon |
+| 维度         | §3.8 Plan-Execute               | §3.9 学习计划               |
+| ------------ | -------------------------------- | ---------------------------- |
+| 用途         | Agent 给**当前问题**拆步骤 | 用户管**长期学习目标** |
+| 生命周期     | 单次问答内                       | 周 / 月级，跨 session        |
+| 持久化       | 寄生 messages.tool_calls         | 独立 SQLite                  |
+| 谁是状态主人 | Agent（LLM 自决）                | 用户（Agent 协助维护）       |
+| 失败时       | LLM 自决 retry / skip / abort    | 用户主动 abandon             |
 
 ### 3.8.1. 数据模型
 
@@ -664,29 +649,29 @@ Plan 步数多了需要更大预算，所以 tool 轮次上限需按 plan 步数
 
 **`learning_plans`** —— 计划元信息
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `id` | INTEGER (PK) | plan 唯一 ID |
-| `goal` | TEXT | 学习目标描述（如 "8 周准备 ML 面试"） |
-| `weeks` | INTEGER | 总周数，0 表示未指定 |
-| `status` | TEXT | `active` / `completed` / `abandoned` |
-| `is_active` | INTEGER | 当前活跃标记，全表至多 1 条为 1 |
-| `created_at` / `updated_at` | TEXT | ISO 8601 时间戳 |
+| 字段                            | 类型         | 说明                                       |
+| ------------------------------- | ------------ | ------------------------------------------ |
+| `id`                          | INTEGER (PK) | plan 唯一 ID                               |
+| `goal`                        | TEXT         | 学习目标描述（如 "8 周准备 ML 面试"）      |
+| `weeks`                       | INTEGER      | 总周数，0 表示未指定                       |
+| `status`                      | TEXT         | `active` / `completed` / `abandoned` |
+| `is_active`                   | INTEGER      | 当前活跃标记，全表至多 1 条为 1            |
+| `created_at` / `updated_at` | TEXT         | ISO 8601 时间戳                            |
 
 索引：`is_active`、`status` 各一份。
 
 **`learning_tasks`** —— 计划下的任务
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `id` | INTEGER (PK) | task 唯一 ID |
-| `plan_id` | INTEGER (FK → learning_plans.id) | 所属 plan，`ON DELETE CASCADE` 级联删除 |
-| `stage_idx` | INTEGER | 阶段编号（Week 1, 2...），从 1 起 |
-| `order_idx` | INTEGER | 同阶段内顺序，从 1 起 |
-| `title` | TEXT | 任务描述（动词起头） |
-| `status` | TEXT | `pending` / `success` / `skipped` |
-| `note` | TEXT | 完成备注 / 失败原因，写入时截断到 200 字 |
-| `completed_at` | TEXT | `success` / `skipped` 时填，否则空串 |
+| 字段             | 类型                              | 说明                                      |
+| ---------------- | --------------------------------- | ----------------------------------------- |
+| `id`           | INTEGER (PK)                      | task 唯一 ID                              |
+| `plan_id`      | INTEGER (FK → learning_plans.id) | 所属 plan，`ON DELETE CASCADE` 级联删除 |
+| `stage_idx`    | INTEGER                           | 阶段编号（Week 1, 2...），从 1 起         |
+| `order_idx`    | INTEGER                           | 同阶段内顺序，从 1 起                     |
+| `title`        | TEXT                              | 任务描述（动词起头）                      |
+| `status`       | TEXT                              | `pending` / `success` / `skipped`   |
+| `note`         | TEXT                              | 完成备注 / 失败原因，写入时截断到 200 字  |
+| `completed_at` | TEXT                              | `success` / `skipped` 时填，否则空串  |
 
 索引：`(plan_id, stage_idx, order_idx)` 复合索引，用于按计划取任务并按阶段渲染。
 
@@ -701,11 +686,11 @@ Plan 步数多了需要更大预算，所以 tool 轮次上限需按 plan 步数
 
 操作学习计划用 OpenAI Function Calling 暴露给 LLM。
 
-| tool | 必填参数 | 语义 | 返回内容（写回 LLM 下一轮 prompt） |
-|---|---|---|---|
-| `create_study_plan` | `goal` / `tasks: [{stage_idx, order_idx, title}]` + 可选 `weeks` | 一次性创建 plan + 全部 task | "✓ 已创建 plan_id=N..." + 任务数 + 用户呈现指引 |
-| `update_study_progress` | `plan_id` / `task_id` / `status` + 可选 `note` | 标记单任务状态 | "✓ task_id=N → status" + 当前进度 + 下一个待办（全 success 时自动 complete plan） |
-| `query_study_status` | （都可选）`plan_id` / `list_all` / `detail` | 查 plan：默认 active / 指定 / 全部摘要 | 摘要 markdown（detail=true 含全任务清单） |
+| tool                      | 必填参数                                                               | 语义                                   | 返回内容（写回 LLM 下一轮 prompt）                                                  |
+| ------------------------- | ---------------------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------- |
+| `create_study_plan`     | `goal` / `tasks: [{stage_idx, order_idx, title}]` + 可选 `weeks` | 一次性创建 plan + 全部 task            | "✓ 已创建 plan_id=N..." + 任务数 + 用户呈现指引                                    |
+| `update_study_progress` | `plan_id` / `task_id` / `status` + 可选 `note`                 | 标记单任务状态                         | "✓ task_id=N → status" + 当前进度 + 下一个待办（全 success 时自动 complete plan） |
+| `query_study_status`    | （都可选）`plan_id` / `list_all` / `detail`                      | 查 plan：默认 active / 指定 / 全部摘要 | 摘要 markdown（detail=true 含全任务清单）                                           |
 
 ### 3.8.3. 完整流程
 
@@ -758,7 +743,7 @@ sequenceDiagram
 
 让用户当前有什么计划、进度到哪：
 
-手动 load 注入, 默认不注入。 
+手动 load 注入, 默认不注入。
 用户用 `/study load [id]` 显式激活后，**仅当前 session** 注入；切 session 失效需重新 load。
 如何注入见 [§3.4.2 四层注入顺序](#342-四层注入顺序)。
 
@@ -770,13 +755,11 @@ sequenceDiagram
 - 超出 `LEARNING_PLAN_MAX_INJECT_CHARS`（1500）截断 —— 极端长 plan 不撑爆 context
 - 未 load / load 已失效时整段不输出（不留空 `<active_study_plan></active_study_plan>` tag）
 
-
 ## 3.9. 测验与批改
 
 让 Agent 帮用户**周期性自检知识掌握度**：用户描述出题主题（或绑定学习计划某阶段）→ Agent 从知识库检索内容自动出 5-15 道混合题（单选 / 多选 / 简答）→ 用户用一段自然语言批量作答 → Agent 自动批改给逐题反馈 + 总分 + 薄弱点；测验结果保存起来可跨 session 复盘。
 类似 Anki / Quizlet，在 Agent 形态下，题目要从用户私有 KB 产出，批改采用混合制(string-match + LLM-judge)，跨 session 错题可追溯（为后续 SRS 喂数据）。
 与 [§3.8 学习计划制定](#38-学习计划制定) 互补 —— 学习计划是"长期目标跟踪"，测验是"周期性练习"：
-
 
 ### 3.9.1. 数据模型
 
@@ -784,35 +767,35 @@ sequenceDiagram
 
 **`quiz_sets`** —— 测验集元信息
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `id` | INTEGER (PK) | 测验集唯一 ID |
-| `topic` | TEXT | 出题主题 |
-| `plan_id` | INTEGER | 软引用 `learning_plans.id`（无 FK，详 [§3.8](#38-学习计划制定)） |
-| `stage_idx` | INTEGER | 软引用阶段编号（与 `plan_id` 配对） |
-| `num_questions` | INTEGER | 题目总数（出题阶段固定 5-15） |
-| `status` | TEXT | `created` / `graded` / `archived` |
-| `total_score` | REAL | 批改后的总分；未批改为 NULL |
-| `created_at` / `graded_at` / `updated_at` | TEXT | ISO 8601 时间戳 |
+| 字段                                            | 类型         | 说明                                                             |
+| ----------------------------------------------- | ------------ | ---------------------------------------------------------------- |
+| `id`                                          | INTEGER (PK) | 测验集唯一 ID                                                    |
+| `topic`                                       | TEXT         | 出题主题                                                         |
+| `plan_id`                                     | INTEGER      | 软引用 `learning_plans.id`（无 FK，详 [§3.8](#38-学习计划制定)） |
+| `stage_idx`                                   | INTEGER      | 软引用阶段编号（与 `plan_id` 配对）                            |
+| `num_questions`                               | INTEGER      | 题目总数（出题阶段固定 5-15）                                    |
+| `status`                                      | TEXT         | `created` / `graded` / `archived`                          |
+| `total_score`                                 | REAL         | 批改后的总分；未批改为 NULL                                      |
+| `created_at` / `graded_at` / `updated_at` | TEXT         | ISO 8601 时间戳                                                  |
 
 索引：`status`、`plan_id` 各一份。
 
 **`quiz_questions`** —— 测验集下的题目
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `id` | INTEGER (PK) | 题目唯一 ID |
-| `quiz_set_id` | INTEGER (FK → quiz_sets.id) | 所属测验集，`ON DELETE CASCADE` 级联删除 |
-| `order_idx` | INTEGER | 同测验内题号（应用层维护，允许跳号） |
-| `q_type` | TEXT | `mcq_single` / `mcq_multi` / `short_answer` |
-| `stem` | TEXT | 题干 |
-| `options` | TEXT | 选项 JSON 字符串（简答题为空串） |
-| `correct_answer` | TEXT | 标准答案 |
-| `explanation` | TEXT | 答案解析 |
-| `user_answer` | TEXT | 用户作答（批改前为空串） |
-| `score` | REAL | 单题得分 0.0-1.0（MCQ 整对 1.0 / 否则 0；简答按 LLM-judge） |
-| `feedback` | TEXT | 批改反馈，写入时截断到 500 字 |
-| `harness_flagged` | INTEGER | critic 自检标记位（详 [§3.11](#311-harness-自检)） |
+| 字段                | 类型                         | 说明                                                        |
+| ------------------- | ---------------------------- | ----------------------------------------------------------- |
+| `id`              | INTEGER (PK)                 | 题目唯一 ID                                                 |
+| `quiz_set_id`     | INTEGER (FK → quiz_sets.id) | 所属测验集，`ON DELETE CASCADE` 级联删除                  |
+| `order_idx`       | INTEGER                      | 同测验内题号（应用层维护，允许跳号）                        |
+| `q_type`          | TEXT                         | `mcq_single` / `mcq_multi` / `short_answer`           |
+| `stem`            | TEXT                         | 题干                                                        |
+| `options`         | TEXT                         | 选项 JSON 字符串（简答题为空串）                            |
+| `correct_answer`  | TEXT                         | 标准答案                                                    |
+| `explanation`     | TEXT                         | 答案解析                                                    |
+| `user_answer`     | TEXT                         | 用户作答（批改前为空串）                                    |
+| `score`           | REAL                         | 单题得分 0.0-1.0（MCQ 整对 1.0 / 否则 0；简答按 LLM-judge） |
+| `feedback`        | TEXT                         | 批改反馈，写入时截断到 500 字                               |
+| `harness_flagged` | INTEGER                      | critic 自检标记位（详[§3.11](#311-harness-自检)）             |
 
 索引：`(quiz_set_id, order_idx)` 复合索引，用于按测验取题并按题号渲染。
 
@@ -826,11 +809,11 @@ sequenceDiagram
 
 ### 3.9.2. 三个 tool
 
-| tool | 必填参数 | 语义 | 返回内容 |
-|---|---|---|---|
-| `create_quiz` | `questions: [{order_idx, q_type, stem, options?, correct_answer, explanation?}]` + 至少一个 `topic` 或 `plan_id` | 一次性创建测验 + 全部题目落库 | "✓ 已创建 quiz_set_id=N..." + 题数 + 用户呈现指引 |
-| `grade_quiz` | `quiz_set_id` / `user_answers: {question_id: 答案串}` | 批改 + 落库批改结果 + 计算总分 | 总分 + 错题清单（含考点 / 标答 / LLM 反馈） |
-| `query_quiz_history` | 全部可选（`quiz_set_id` / `plan_id` / `limit` / `detail`） | 三路径互斥查询 | 单套测验详情 / plan 关联列表 / 全局列表（按优先级取一种） |
+| tool                   | 必填参数                                                                                                               | 语义                           | 返回内容                                                  |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------ | --------------------------------------------------------- |
+| `create_quiz`        | `questions: [{order_idx, q_type, stem, options?, correct_answer, explanation?}]` + 至少一个 `topic` 或 `plan_id` | 一次性创建测验 + 全部题目落库  | "✓ 已创建 quiz_set_id=N..." + 题数 + 用户呈现指引        |
+| `grade_quiz`         | `quiz_set_id` / `user_answers: {question_id: 答案串}`                                                              | 批改 + 落库批改结果 + 计算总分 | 总分 + 错题清单（含考点 / 标答 / LLM 反馈）               |
+| `query_quiz_history` | 全部可选（`quiz_set_id` / `plan_id` / `limit` / `detail`）                                                     | 三路径互斥查询                 | 单套测验详情 / plan 关联列表 / 全局列表（按优先级取一种） |
 
 ### 3.9.3. 完整流程
 
@@ -891,10 +874,10 @@ sequenceDiagram
 
 不同题型需要不同判分器：
 
-| 题型 | 判分器 | 
-|---|---|
-| 选择题 | 字符串归一化比对：等则 1.0 / 否则 0.0 | 
-| 简答题 |  LLM-judge 调 `chat()` 给 0-1 浮点 + ≤ 60 字反馈 | 
+| 题型   | 判分器                                             |
+| ------ | -------------------------------------------------- |
+| 选择题 | 字符串归一化比对：等则 1.0 / 否则 0.0              |
+| 简答题 | LLM-judge 调 `chat()` 给 0-1 浮点 + ≤ 60 字反馈 |
 
 **LLM-judge 失败软返回 0.0**：网络问题 / JSON 解析失败时不抛异常，返回 (0.0, 错误说明)，避免单题失败让整次测验失败。
 
@@ -909,24 +892,25 @@ sequenceDiagram
 
 **`srs_cards`** —— SRS 卡片
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `id` | INTEGER (PK) | 卡片唯一 ID |
-| `source_type` | TEXT | 来源类型：`quiz_question`（测验错题）/ `manual`（用户手动加） |
-| `source_ref` | INTEGER | 软引用源数据 ID（如 `quiz_questions.id`）；`manual` 来源时为 NULL |
-| `front` | TEXT | 卡正面（问题），从源数据冗余复制 |
-| `back` | TEXT | 卡背面（答案），从源数据冗余复制 |
-| `note` | TEXT | 用户备注 |
-| `ease_factor` | REAL | SM-2 难度系数，默认 2.5，写库前夹紧到 ≥ 1.3 |
-| `interval_days` | INTEGER | 复习间隔天数，默认 0（新卡），写库前夹紧到 ≥ 1 |
-| `repetitions` | INTEGER | 累计答对次数 |
-| `lapses` | INTEGER | 累计 again 次数 |
-| `next_review_at` | TEXT | 下次到期时间 ISO 8601；新卡初始化 = `created_at`（立即 due） |
-| `last_reviewed_at` | TEXT | 上次复习时间 ISO 8601；从未复习为空串 |
-| `status` | TEXT | `active`（在 due 队列）/ `suspended`（用户暂停）/ `archived`（软删，list 默认不显示） |
-| `created_at` / `updated_at` | TEXT | ISO 8601 时间戳 |
+| 字段                            | 类型         | 说明                                                                                        |
+| ------------------------------- | ------------ | ------------------------------------------------------------------------------------------- |
+| `id`                          | INTEGER (PK) | 卡片唯一 ID                                                                                 |
+| `source_type`                 | TEXT         | 来源类型：`quiz_question`（测验错题）/ `manual`（用户手动加）                           |
+| `source_ref`                  | INTEGER      | 软引用源数据 ID（如 `quiz_questions.id`）；`manual` 来源时为 NULL                       |
+| `front`                       | TEXT         | 卡正面（问题），从源数据冗余复制                                                            |
+| `back`                        | TEXT         | 卡背面（答案），从源数据冗余复制                                                            |
+| `note`                        | TEXT         | 用户备注                                                                                    |
+| `ease_factor`                 | REAL         | SM-2 难度系数，默认 2.5，写库前夹紧到 ≥ 1.3                                                |
+| `interval_days`               | INTEGER      | 复习间隔天数，默认 0（新卡），写库前夹紧到 ≥ 1                                             |
+| `repetitions`                 | INTEGER      | 累计答对次数                                                                                |
+| `lapses`                      | INTEGER      | 累计 again 次数                                                                             |
+| `next_review_at`              | TEXT         | 下次到期时间 ISO 8601；新卡初始化 =`created_at`（立即 due）                               |
+| `last_reviewed_at`            | TEXT         | 上次复习时间 ISO 8601；从未复习为空串                                                       |
+| `status`                      | TEXT         | `active`（在 due 队列）/ `suspended`（用户暂停）/ `archived`（软删，list 默认不显示） |
+| `created_at` / `updated_at` | TEXT         | ISO 8601 时间戳                                                                             |
 
 索引：
+
 - `(status, next_review_at)` 复合索引，用于按 due 时间筛 active 卡
 - `(source_type, source_ref)` 复合索引，用于防重复入队查询
 
@@ -938,16 +922,14 @@ sequenceDiagram
 - 同源去重：以 `(source_type, source_ref)` 在 `status != archived` 范围查重；存在则跳过新增（防一张错题入两次）
 - `archived` / `suspended` 卡拒绝 `update_review_state`（store 层兜底，scheduler 层不感知）
 
-
 ### 3.10.2. 四个 tool
 
-| tool | 必填参数 | 语义 | 返回内容 |
-|---|---|---|---|
-| `add_to_srs` | `source_type`（`quiz_question` / `manual`）+ `question_ids` 或 `front`+`back` | 卡入队（quiz 批量 / manual 单卡）；防重复 | "✓ 新增 N 张 / 跳过 M 张" + card_id 列表 |
-| `query_srs_due` | 全部可选（`limit` / `detail`） | 列 active 且 `next_review_at <= now` 的 due 卡 | 摘要列表 / detail=true 时含完整 front+back |
-| `review_srs_card` | `card_id` + `rating`（4 档之一）| 调 srs_scheduler 算出新状态 → 写库 | "✓ 新 ease=X / iv=Yd / next=Z" |
-| `query_srs_stats` | 无 | 队列摘要统计 | total_active / due_count / 平均 ease / mature(≥21d) 数 |
-
+| tool                | 必填参数                                                                                  | 语义                                             | 返回内容                                                |
+| ------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------- |
+| `add_to_srs`      | `source_type`（`quiz_question` / `manual`）+ `question_ids` 或 `front`+`back` | 卡入队（quiz 批量 / manual 单卡）；防重复        | "✓ 新增 N 张 / 跳过 M 张" + card_id 列表               |
+| `query_srs_due`   | 全部可选（`limit` / `detail`）                                                        | 列 active 且 `next_review_at <= now` 的 due 卡 | 摘要列表 / detail=true 时含完整 front+back              |
+| `review_srs_card` | `card_id` + `rating`（4 档之一）                                                      | 调 srs_scheduler 算出新状态 → 写库              | "✓ 新 ease=X / iv=Yd / next=Z"                         |
+| `query_srs_stats` | 无                                                                                        | 队列摘要统计                                     | total_active / due_count / 平均 ease / mature(≥21d) 数 |
 
 ### 3.10.3. 完整流程
 
@@ -1004,30 +986,28 @@ sequenceDiagram
 
 自检覆盖的场景：
 
-| 路径 | 触发位置 | critic 复审什么 | 
-|---|---|---|
-| **Q1 — 测验批改** | `grade_quiz` 跑完简答题 LLM-judge 之后 | "Agent 给的 score + feedback 跟用户答案 vs 标答的实际语义贴合度是否一致" | 
-| **R1 — RAG 召回** | `search_knowledge` 拿到 hits 之后 / 格式化之前 | "每条召回片段是否与用户问题相关（5/0 二分类）" | 
-
+| 路径                     | 触发位置                                         | critic 复审什么                                                          |
+| ------------------------ | ------------------------------------------------ | ------------------------------------------------------------------------ |
+| **Q1 — 测验批改** | `grade_quiz` 跑完简答题 LLM-judge 之后         | "Agent 给的 score + feedback 跟用户答案 vs 标答的实际语义贴合度是否一致" |
+| **R1 — RAG 召回** | `search_knowledge` 拿到 hits 之后 / 格式化之前 | "每条召回片段是否与用户问题相关（5/0 二分类）"                           |
 
 ### 3.11.1. 自检实现
 
 `HarnessManager`以进程级单例承载两路 critic，由主路径 tool 直接调用（不走 skill）：
 
-| 路径 | 入口 | critic 调用 | 失败软返回 |
-|---|---|---|---|
-| **Q1** | `_tool_grade_quiz` → `_run_quiz_critic`（仅 `short_answer`，MCQ 跳过） | 单题逐次调 `review_grading()`，内部复用 `judge_with_llm` helper；critic 0-5 分，< 阈值即 flag `harness_flagged` | 超时 / 解析失败 → `HarnessVerdict(passed=True, failure=True)`，不 flag |
-| **R1** | `_tool_search_knowledge`（hits 之后、格式化之前） | 一次 LLM 调用批量评 K 条，prompt 内附编号 1..K 要求返回 `{"verdicts": [...]}` JSON；单条 score ≥ 3.0 保留 | 超时 / 解析失败 → 返回原始 hits 不过滤 |
+| 路径         | 入口                                                                          | critic 调用                                                                                                           | 失败软返回                                                               |
+| ------------ | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| **Q1** | `_tool_grade_quiz` → `_run_quiz_critic`（仅 `short_answer`，MCQ 跳过） | 单题逐次调 `review_grading()`，内部复用 `judge_with_llm` helper；critic 0-5 分，< 阈值即 flag `harness_flagged` | 超时 / 解析失败 →`HarnessVerdict(passed=True, failure=True)`，不 flag |
+| **R1** | `_tool_search_knowledge`（hits 之后、格式化之前）                           | 一次 LLM 调用批量评 K 条，prompt 内附编号 1..K 要求返回 `{"verdicts": [...]}` JSON；单条 score ≥ 3.0 保留          | 超时 / 解析失败 → 返回原始 hits 不过滤                                  |
 
 **配置项**
 
-| 配置项 | 用途 | 默认 |
-|---|---|---|
-| `HARNESS_QUIZ_ENABLED` | Q1 全局开关 | `true` |
-| `HARNESS_RAG_ENABLED` | R1 全局开关 | `true` |
-| `HARNESS_LLM_TIMEOUT_SEC` | critic 单次调用超时（秒） | `15` |
-| `HARNESS_GRADING_THRESHOLD` | Q1 critic 阈值（< 该值即 flag） | `3.5` |
-
+| 配置项                        | 用途                            | 默认     |
+| ----------------------------- | ------------------------------- | -------- |
+| `HARNESS_QUIZ_ENABLED`      | Q1 全局开关                     | `true` |
+| `HARNESS_RAG_ENABLED`       | R1 全局开关                     | `true` |
+| `HARNESS_LLM_TIMEOUT_SEC`   | critic 单次调用超时（秒）       | `15`   |
+| `HARNESS_GRADING_THRESHOLD` | Q1 critic 阈值（< 该值即 flag） | `3.5`  |
 
 ### 3.11.2. 完整流程
 
@@ -1094,14 +1074,15 @@ sequenceDiagram
     end
 ```
 
-
 ## 3.12. 防 prompt injection
 
 让 Agent 在面对外部不可信数据（RAG 召回 / web 抓取 / MCP server 返回）时不被诱导调危险 tool / 泄露系统 prompt，并给 plan-execute 多步任务提供用户审批入口。
 SSRF / URL 校验在 [§3.13](#313-mcp-支持)实现。
 
 ### 3.12.1. 防御层次
+
 对照：
+
 ```mermaid
 flowchart LR
     INPUT["L1 输入侧<br/>user msg / 命令"]
@@ -1111,13 +1092,15 @@ flowchart LR
 
     INPUT --> SUPPLY --> PROCESS --> OUTPUT
 ```
+
 目前实现：
-| 层 | 在 AgentA 的落点 | 注入点 |
-|---|---|---|
-| L2 数据供应侧 | 不可信数据进 LLM context 前过 [`security_filter.scrub_injection`](../src/agent/core/security_filter.py) 段级删除 + [`wrap_untrusted`](../src/agent/core/security_filter.py) 标签包装（kind `doc` / `web` / `tool`） | [`format_search_results`](../src/rag/retriever.py) / [`_tool_web_search`](../src/agent/tools.py) / [`_tool_fetch_url`](../src/agent/tools.py) / MCP tool 转发出口 [`_execute_mcp_tool`](../src/agent/tools.py) |
-| L3 处理侧 | [`SYSTEM_PROMPT`](../src/agent/agent.py) 末尾「数据隔离原则」段告知 LLM `<untrusted_*>` 标签内的内容是数据不是指令 | `SYSTEM_PROMPT` 静态段 |
-| L4 输出侧 · 名单门 | tool 名单门：[`get_tools`](../src/agent/tools.py) 按 `SECURITY_MODE` 切换 fail-open + `TOOL_BLOCKLIST` 或 fail-close + `TOOL_ALLOWLIST`；[`execute_tool`](../src/agent/tools.py) 入口 double-check | `get_tools` + `execute_tool` |
-| L4 输出侧 · plan 审批 | `make_plan` 调用成功后 [`tool_call_engine._maybe_publish_plan_events`](../src/agent/core/tool_call_engine.py) 调 [`Agent.request_plan_approval`](../src/agent/agent.py)；用户回 "no" → 抛 `PlanAbortedByUser` 让 `agent.run` break loop | `tool_call_engine` make_plan 分支 + UI 端 `approval_callback` 注册 |
+
+| 层                     | 在 AgentA 的落点                                                                                                                                                                                                                             | 注入点                                                                                                                                                                                                     |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| L2 数据供应侧          | 不可信数据进 LLM context 前过[`security_filter.scrub_injection`](../src/agent/core/security_filter.py) 段级删除 + [`wrap_untrusted`](../src/agent/core/security_filter.py) 标签包装（kind `doc` / `web` / `tool`）                       | [`format_search_results`](../src/rag/retriever.py) / [`_tool_web_search`](../src/agent/tools.py) / [`_tool_fetch_url`](../src/agent/tools.py) / MCP tool 转发出口 [`_execute_mcp_tool`](../src/agent/tools.py) |
+| L3 处理侧              | [`SYSTEM_PROMPT`](../src/agent/agent.py) 末尾「数据隔离原则」段告知 LLM `<untrusted_*>` 标签内的内容是数据不是指令                                                                                                                          | `SYSTEM_PROMPT` 静态段                                                                                                                                                                                   |
+| L4 输出侧 · 名单门    | tool 名单门：[`get_tools`](../src/agent/tools.py) 按 `SECURITY_MODE` 切换 fail-open + `TOOL_BLOCKLIST` 或 fail-close + `TOOL_ALLOWLIST`；[`execute_tool`](../src/agent/tools.py) 入口 double-check                                       | `get_tools` + `execute_tool`                                                                                                                                                                           |
+| L4 输出侧 · plan 审批 | `make_plan` 调用成功后 [`tool_call_engine._maybe_publish_plan_events`](../src/agent/core/tool_call_engine.py) 调 [`Agent.request_plan_approval`](../src/agent/agent.py)；用户回 "no" → 抛 `PlanAbortedByUser` 让 `agent.run` break loop | `tool_call_engine` make_plan 分支 + UI 端 `approval_callback` 注册                                                                                                                                     |
 
 ### 3.12.2. 完整流程
 
@@ -1169,17 +1152,18 @@ sequenceDiagram
 ```
 
 ## 3.13. MCP 支持
+
 Agent 作为 MCP Host 支持 [标准 MCP协议](https://modelcontextprotocol.io) 。
-Agent 通过本地配置文件`.agenta/mcp/config.json`接入 MCP server（如 `@modelcontextprotocol/server-filesystem` / `mcp-server-fetch`），把 server 暴露的 tool 合并后发给 LLM，LLM 像调内置 tool 一样调用这些 server 暴露的 tool。
+Agent 通过本地配置文件 `.agenta/mcp/config.json`接入 MCP server（如 `@modelcontextprotocol/server-filesystem` / `mcp-server-fetch`），把 server 暴露的 tool 合并后发给 LLM，LLM 像调内置 tool 一样调用这些 server 暴露的 tool。
 同时实现 SSRF（Server-Side Request Forgery）防御，统一拦截内置 `fetch_url` 与 MCP `fetch.fetch` 双入口。
 
 ### 3.13.1. 角色映射
 
-| MCP 角色 | 在 AgentA 的实体 |
-|---|---|
-| Host | `python main.py` 主进程（含 Agent core + LLM 客户端） |
-| Client | [`MCPManager`](../src/agent/core/mcp_manager.py)：每个 server 对应一个 `ClientSession`，由模块级单例 + 后台 thread 持有 |
-| Server | 配置文件里写的 `command + args` 启起来的子进程（stdio transport） |
+| MCP 角色 | 在 AgentA 的实体                                                                                                         |
+| -------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Host     | `python main.py` 主进程（含 Agent core + LLM 客户端）                                                                  |
+| Client   | [`MCPManager`](../src/agent/core/mcp_manager.py)：每个 server 对应一个 `ClientSession`，由模块级单例 + 后台 thread 持有 |
+| Server   | 配置文件里写的 `command + args` 启起来的子进程（stdio transport）                                                      |
 
 ```mermaid
 flowchart TB
@@ -1212,14 +1196,14 @@ flowchart TB
 
 [`url_guard.is_url_safe(url) -> bool`](../src/agent/core/url_guard.py) 是 host 侧针对**内置 `fetch_url`** 的入口防线，覆盖如下拒绝类别：
 
-| 拒绝类别 | 覆盖范围 |
-|---|---|
-| 非法 scheme | 非 `http(s)`（含 `file://` / `ftp://` / 自定义 scheme） |
-| localhost 字面值 | `localhost` / `localhost.localdomain` / `ip6-localhost` / `ip6-loopback` |
-| 私有 IPv4 | 10/8、172.16/12、192.168/16、127/8 |
-| 保留 IP | loopback / link-local（含 AWS metadata `169.254.169.254`）/ multicast / reserved / unspecified |
-| 域名 DNS 反查 | `socket.gethostbyname` 解析后再判私有/保留段，防 DNS rebinding |
-| 解析失败 | 一律拒（保守路径） |
+| 拒绝类别         | 覆盖范围                                                                                         |
+| ---------------- | ------------------------------------------------------------------------------------------------ |
+| 非法 scheme      | 非 `http(s)`（含 `file://` / `ftp://` / 自定义 scheme）                                    |
+| localhost 字面值 | `localhost` / `localhost.localdomain` / `ip6-localhost` / `ip6-loopback`                 |
+| 私有 IPv4        | 10/8、172.16/12、192.168/16、127/8                                                               |
+| 保留 IP          | loopback / link-local（含 AWS metadata `169.254.169.254`）/ multicast / reserved / unspecified |
+| 域名 DNS 反查    | `socket.gethostbyname` 解析后再判私有/保留段，防 DNS rebinding                                 |
+| 解析失败         | 一律拒（保守路径）                                                                               |
 
 **双入口的拦截路径**（以代码实际为准）：
 
@@ -1260,17 +1244,16 @@ sequenceDiagram
 
 > **现状说明**：内置 `fetch_url` 与 MCP `fetch.fetch` 的 URL 拦截**并未共用** host 侧 `url_guard`——前者在 `_tool_fetch_url` 里显式调 `is_url_safe`（[tools.py L758-759](../src/agent/tools.py)），后者在 `_execute_mcp_tool` 里直接转发给子进程（[tools.py L2228+](../src/agent/tools.py)），依赖 MCP server 自身实现 SSRF 防御（`mcp-server-fetch` 默认不抓内网，但这是 server 端约定而非 host 强制）。`url_guard.py` docstring 写的"二者共用同一道防线"是设计意图，**当前实现尚未对齐**。
 
-
 ### 3.13.3. 配置文件
 
 `.agenta/mcp/config.json` 参考 Cursor / Claude Desktop 配置文件格式：
 
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `servers.<name>` | object | ✅ | server 名作为 namespace 前缀；禁含 `.` |
-| `servers.<name>.command` | string | ✅ | 可执行命令名或绝对路径（如 `npx` / `.venv/Scripts/python.exe`） |
-| `servers.<name>.args` | string[] | 可选 | 命令行参数，缺省为 `[]` |
-| `servers.<name>.env` | object | 可选 | 注入 server 子进程的环境变量；value 内 `${VAR}` 从进程 env 展开，缺失保留原样 |
+| 字段                       | 类型     | 必填 | 说明                                                                            |
+| -------------------------- | -------- | ---- | ------------------------------------------------------------------------------- |
+| `servers.<name>`         | object   | ✅   | server 名作为 namespace 前缀；禁含 `.`                                        |
+| `servers.<name>.command` | string   | ✅   | 可执行命令名或绝对路径（如 `npx` / `.venv/Scripts/python.exe`）             |
+| `servers.<name>.args`    | string[] | 可选 | 命令行参数，缺省为 `[]`                                                       |
+| `servers.<name>.env`     | object   | 可选 | 注入 server 子进程的环境变量；value 内 `${VAR}` 从进程 env 展开，缺失保留原样 |
 
 **启停状态分离**：是否启用某 server 不写在 `config.json` 内，而是存独立的
 `.agenta/mcp/disabled.json`（JSON 字符串数组，原子写）。`config.json` 保持纯净，
@@ -1280,22 +1263,20 @@ sequenceDiagram
 
 UI 通过 `/api/mcp/*` 端点对 server 做 CRUD（详 iter_4_UI.md §6.4.6 API 表）：
 
-| 操作 | 文件影响 | 运行时影响 |
-|---|---|---|
-| 新建 / 编辑 / 删除 | 写 `config.json` | `MCPManager.start_one` / `stop_one` 立即作用到子进程，不重启 uvicorn |
-| 改名 | `config.json` key 改写 + `disabled.json` 状态迁移 | 旧 name `stop_one` + 新 name `start_one`（除非禁用） |
-| 启用 / 禁用 | 仅写 `disabled.json` | toggle on → `start_one`；toggle off → `stop_one` |
-| 重新加载 | 重读 `config.json` + `disabled.json` | `MCPManager.reload(specs, disabled)` 按差异 diff 启停（新增拉起 / 移除关闭 / spec 改动重启） |
+| 操作               | 文件影响                                              | 运行时影响                                                                                     |
+| ------------------ | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| 新建 / 编辑 / 删除 | 写 `config.json`                                    | `MCPManager.start_one` / `stop_one` 立即作用到子进程，不重启 uvicorn                       |
+| 改名               | `config.json` key 改写 + `disabled.json` 状态迁移 | 旧 name `stop_one` + 新 name `start_one`（除非禁用）                                       |
+| 启用 / 禁用        | 仅写 `disabled.json`                                | toggle on →`start_one`；toggle off → `stop_one`                                          |
+| 重新加载           | 重读 `config.json` + `disabled.json`              | `MCPManager.reload(specs, disabled)` 按差异 diff 启停（新增拉起 / 移除关闭 / spec 改动重启） |
 
 `MCPManager` 在 `start_all` 之外暴露三个新公共方法：
 
-| 方法 | 语义 | idempotent |
-|---|---|---|
-| `start_one(spec)` | 启动单 server，最长等 `MCP_CONNECT_TIMEOUT_SEC + 1s`；同名 handle 已 connecting/connected 则跳过 | ✅ |
-| `stop_one(name)` | 触发该 server 的 close event 让 _serve 协程退出，回收 handle；非阻塞等 5s | ✅（不存在直接 no-op） |
-| `reload(specs, disabled)` | 按 diff 把当前运行集合切换到目标集合：spec 一致跳过，spec 改动 stop+start，新增 start，缺失 stop | ✅ |
-
-
+| 方法                        | 语义                                                                                               | idempotent             |
+| --------------------------- | -------------------------------------------------------------------------------------------------- | ---------------------- |
+| `start_one(spec)`         | 启动单 server，最长等 `MCP_CONNECT_TIMEOUT_SEC + 1s`；同名 handle 已 connecting/connected 则跳过 | ✅                     |
+| `stop_one(name)`          | 触发该 server 的 close event 让 _serve 协程退出，回收 handle；非阻塞等 5s                          | ✅（不存在直接 no-op） |
+| `reload(specs, disabled)` | 按 diff 把当前运行集合切换到目标集合：spec 一致跳过，spec 改动 stop+start，新增 start，缺失 stop   | ✅                     |
 
 # 4. 表现层
 
@@ -1326,7 +1307,7 @@ flowchart TB
 
     subgraph FILES["文件驱动配置"]
         direction LR
-        SK[".agenta/skills/&lt;name&gt;/SKILL.md"]
+        SK[".agenta/skills/<name>/SKILL.md"]
     end
 
     H -->|"调用"| AAPI
@@ -1364,22 +1345,21 @@ flowchart LR
 
 **渲染约定**
 
-| 维度 | 约定 |
-|---|---|
-| 段起止 | 首段 thinking_chunk 到来时打 header（`💭 思考中...`），段切换时打 footer（`─── 思考结束 ───`）|
-| 段切换信号 | `token_chunk` / `plan_created` / `plan_step_end` / `tool_call_start` 任一事件到达，渲染层先关闭未关闭的 thinking 段再渲染目标事件 |
-| 多轮编号 | 单 query 多轮 thinking（tool 调用后再思考）独立分段；首轮不带编号，第 N≥2 轮 header / footer 带 `（第 N 轮）`，编号由渲染层自管不污染 EventBus payload |
-| 行前缀 | 每行 thinking 文本前注入 `│ ` 视觉前缀，与正文 `Agent: ...` 行视觉区分；按行检测 + chunk 跨行状态机驱动 |
-| 关 thinking | `THINKING_ENABLED=false` 时 Provider 不推 thinking_chunk，渲染层零 artifact（无 `💭` 头 / 无 `─── ───` 尾）|
-| 异常隔离 | 渲染端抛异常由 `EventBus.publish` try/except 吞掉，不影响 `agent.run()` 主循环 |
-| `run_query` finally | 兜底 `_close_thinking_segment()`，覆盖"仅 thinking 无 token / 异常 / 中断"三种边界 |
+| 维度                  | 约定                                                                                                                                                      |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 段起止                | 首段 thinking_chunk 到来时打 header（`💭 思考中...`），段切换时打 footer（`─── 思考结束 ───`）                                                  |
+| 段切换信号            | `token_chunk` / `plan_created` / `plan_step_end` / `tool_call_start` 任一事件到达，渲染层先关闭未关闭的 thinking 段再渲染目标事件                 |
+| 多轮编号              | 单 query 多轮 thinking（tool 调用后再思考）独立分段；首轮不带编号，第 N≥2 轮 header / footer 带 `（第 N 轮）`，编号由渲染层自管不污染 EventBus payload |
+| 行前缀                | 每行 thinking 文本前注入 `│ ` 视觉前缀，与正文 `Agent: ...` 行视觉区分；按行检测 + chunk 跨行状态机驱动                                              |
+| 关 thinking           | `THINKING_ENABLED=false` 时 Provider 不推 thinking_chunk，渲染层零 artifact（无 `💭` 头 / 无 `─── ───` 尾）                                   |
+| 异常隔离              | 渲染端抛异常由 `EventBus.publish` try/except 吞掉，不影响 `agent.run()` 主循环                                                                        |
+| `run_query` finally | 兜底 `_close_thinking_segment()`，覆盖"仅 thinking 无 token / 异常 / 中断"三种边界                                                                      |
 
 **与其他渲染分支共存**：CLI `_event_router` 同时订阅 thinking / token / plan_created / plan_step_end，按段切换协议互不交错；Chainlit 端 `_event_router` 把 thinking / token / plan 各自推到独立 `cl.Message`，与 CLI 渲染策略解耦。
 
 ## 4.2. WebUI
 
 ## 4.3. Tool 脚本
-
 
 # 5. IMP
 
@@ -1391,25 +1371,26 @@ flowchart LR
 
 **公共层复用粒度**
 
-| 共享组件 | 类型 | 职责 | Python | LangChain | AutoGPT |
-|---|---|---|---|---|---|
-| `tools.py`（工具实现） | 依赖 | 业务 tool（`search_knowledge` / `web_search` / `fetch_url` / `load_skill`）+ plan-execute 三 tool（`make_plan` / `update_step` / `abort_plan`，详 [§3.7](#37-plan-execute)）+ 学习计划业务三 tool（`create_study_plan` / `update_study_progress` / `query_study_status`，详 [§3.8](#38-学习计划制定)）+ 测验业务三 tool（`create_quiz` / `grade_quiz` / `query_quiz_history`，详 [§3.9](#39-测验与批改)）+ SRS 业务四 tool（`add_to_srs` / `query_srs_due` / `review_srs_card` / `query_srs_stats`，详 [§3.10](#310-主动复习srs)）JSON Schema 定义与 `execute_tool` 路由 | ✓ | ✓（StructuredTool 包装） | ✓ |
-| `LLMProvider` | 依赖 | 多 provider chat + Extended Thinking + 流式 token 抽象 | ✓ | △（可选，framework 自带） | ✓ |
-| `ChatHistoryStore` | 依赖 | session 内消息持久化与按 N 条加载（CRUD） | ✓ | ✓（adapter） | ✓ |
-| `UserMemoryStore` | 依赖 | 跨 session 用户偏好 / 背景持久化（CRUD） | ✓ | ✓ | ✓ |
-| `LearningPlanStore` | 依赖 | 跨 session 学习计划与任务持久化（CRUD + active 互斥，详 [§3.8](#38-学习计划制定)） | ✓ | ✓ | ✓ |
-| `QuizStore` | 依赖 | 跨 session 测验与题目持久化（CRUD + 三态生命周期 + 软引用 learning_plan，详 [§3.9](#39-测验与批改)） | ✓ | ✓ | ✓ |
-| `SRSStore` | 依赖 | 跨 session SRS 卡片持久化（CRUD + 三态 + SM-2 调度字段，详 [§3.10.1](#3101-数据模型)） | ✓ | ✓ | ✓ |
-| `EventBus` | Helper | 统一流式事件分发（thinking / token / tool / plan / final） | ✓ | ✓ | ✓ |
-| `ToolCallEngine` | Helper | 工具调用编排：执行 + 结果格式化 + 引导提示注入 + 写历史 + plan tool 调用后叠加发 `plan_*` 事件 | ✓ | ✓ | ✓ |
-| `HistoryManager` | Helper | 历史按轮截断 + skill_pair 完整性保护 + system 拼接 | ✓ | ✓ | △（用 summary 替代） |
-| `MemoryManager` | Helper | UserMemory 触发判定 + 提取 + 注入 system_prompt | ✓ | ✓ | ✓ |
-| `ThinkingPolicy` | Helper | adaptive thinking budget 估算（LOW / MED / HIGH 三档） | ✓ | ✓ | △（子任务不启用） |
-| `plan_manager` | Helper | `PlanStep` / `PlanState` dataclass + `reconstruct_from_messages()`；plan 状态从 messages 历史 reconstruct（详 [§3.7.1](#371-数据载体)） | ✓ | ✓ | ✓ |
-| `srs_scheduler` | Helper | SM-2 公式纯函数（4 档 → ease/interval/repetitions/lapses 调度计算，详 [§3.10](#310-主动复习srs)） | ✓ | ✓ | ✓ |
-| `HarnessManager` | Helper | Q1 测验批改自检 + R1 RAG 召回过滤；复用 `judge_with_llm` + 自管 batch prompt + ThreadPoolExecutor timeout（详 [§3.11](#311-harness-自检)） | ✓ | ✓ | ✓ |
+| 共享组件                 | 类型   | 职责                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Python | LangChain                  | AutoGPT               |
+| ------------------------ | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | -------------------------- | --------------------- |
+| `tools.py`（工具实现） | 依赖   | 业务 tool（`search_knowledge` / `web_search` / `fetch_url` / `load_skill`）+ plan-execute 三 tool（`make_plan` / `update_step` / `abort_plan`，详 [§3.7](#37-plan-execute)）+ 学习计划业务三 tool（`create_study_plan` / `update_study_progress` / `query_study_status`，详 [§3.8](#38-学习计划制定)）+ 测验业务三 tool（`create_quiz` / `grade_quiz` / `query_quiz_history`，详 [§3.9](#39-测验与批改)）+ SRS 业务四 tool（`add_to_srs` / `query_srs_due` / `review_srs_card` / `query_srs_stats`，详 [§3.10](#310-主动复习srs)）JSON Schema 定义与 `execute_tool` 路由 | ✓     | ✓（StructuredTool 包装）  | ✓                    |
+| `LLMProvider`          | 依赖   | 多 provider chat + Extended Thinking + 流式 token 抽象                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | ✓     | △（可选，framework 自带） | ✓                    |
+| `ChatHistoryStore`     | 依赖   | session 内消息持久化与按 N 条加载（CRUD）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | ✓     | ✓（adapter）              | ✓                    |
+| `UserMemoryStore`      | 依赖   | 跨 session 用户偏好 / 背景持久化（CRUD）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | ✓     | ✓                         | ✓                    |
+| `LearningPlanStore`    | 依赖   | 跨 session 学习计划与任务持久化（CRUD + active 互斥，详[§3.8](#38-学习计划制定)）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | ✓     | ✓                         | ✓                    |
+| `QuizStore`            | 依赖   | 跨 session 测验与题目持久化（CRUD + 三态生命周期 + 软引用 learning_plan，详[§3.9](#39-测验与批改)）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | ✓     | ✓                         | ✓                    |
+| `SRSStore`             | 依赖   | 跨 session SRS 卡片持久化（CRUD + 三态 + SM-2 调度字段，详[§3.10.1](#3101-数据模型)）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | ✓     | ✓                         | ✓                    |
+| `EventBus`             | Helper | 统一流式事件分发（thinking / token / tool / plan / final）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | ✓     | ✓                         | ✓                    |
+| `ToolCallEngine`       | Helper | 工具调用编排：执行 + 结果格式化 + 引导提示注入 + 写历史 + plan tool 调用后叠加发 `plan_*` 事件                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | ✓     | ✓                         | ✓                    |
+| `HistoryManager`       | Helper | 历史按轮截断 + skill_pair 完整性保护 + system 拼接                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | ✓     | ✓                         | △（用 summary 替代） |
+| `MemoryManager`        | Helper | UserMemory 触发判定 + 提取 + 注入 system_prompt                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | ✓     | ✓                         | ✓                    |
+| `ThinkingPolicy`       | Helper | adaptive thinking budget 估算（LOW / MED / HIGH 三档）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | ✓     | ✓                         | △（子任务不启用）    |
+| `plan_manager`         | Helper | `PlanStep` / `PlanState` dataclass + `reconstruct_from_messages()`；plan 状态从 messages 历史 reconstruct（详 [§3.7.1](#371-数据载体)）                                                                                                                                                                                                                                                                                                                                                                                                                                                          | ✓     | ✓                         | ✓                    |
+| `srs_scheduler`        | Helper | SM-2 公式纯函数（4 档 → ease/interval/repetitions/lapses 调度计算，详[§3.10](#310-主动复习srs)）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | ✓     | ✓                         | ✓                    |
+| `HarnessManager`       | Helper | Q1 测验批改自检 + R1 RAG 召回过滤；复用 `judge_with_llm` + 自管 batch prompt + ThreadPoolExecutor timeout（详 [§3.11](#311-harness-自检)）                                                                                                                                                                                                                                                                                                                                                                                                                                                           | ✓     | ✓                         | ✓                    |
 
 > **类型说明**
+>
 > - **依赖**：底层能力，不感知 Agent loop 语义（turn / skill_pair / thinking budget），可独立测试与替换实现（如 SQLite → Postgres）。命名约定：数据存储用 `*Store` 后缀。
 > - **Helper**：公共层抽象，封装"何时调依赖、如何编排结果"的业务策略，被三种 Agent 实现共享。命名约定：编排类用 `*Manager` / `*Engine` / `*Policy` / `*Bus` 后缀。
 
@@ -1439,21 +1420,20 @@ src/agent/core/
 - AutoGPT：持有 `events: EventBus` 与 `set_thinking/token_callback` 转发方法，接口对齐；流式事件 emit 视后续 LLM 调用是否接入
 - LangChain：保留骨架代码，对接公共层放在后续任务（依赖环境 `langchain.agents.create_agent` 修复）
 
-
-## 5.1. Python 
+## 5.1. Python
 
 ## 5.2. LangChain
 
 LangChain 实现把 loop 交给 `AgentExecutor`，只在适配层把公共层接上去。详见 [iter_a_LangChain.md](./iter_a_LangChain.md)。
 
-| 维度 | 落点 | 说明 |
-|---|---|---|
-| 工具 | `src/agent/langchain_tools.py` | 遍历 `get_tools()` 的 JSON schema 动态包装为 `StructuredTool`，路由 `execute_tool`——全 17+ 工具与 Python / AutoGPT 单一真相源一致（含 MCP 合流、名单门、security / harness） |
-| 四层 prompt | `src/agent/langchain_agent.py · run()` | base(+skill catalog) → `<user_rules>` → `<user_context>` → `<active_study_plan>`，每轮重建 executor |
-| 事件流 | `_EventBridgeHandler`(BaseCallbackHandler) | token_chunk / tool_call_start / tool_call_end / plan_*（plan 为 best-effort，详 iter_a §4） |
-| 引用 | per-run `CitationBuilder` 经 `citation_getter` 透传 | RAG 回答带 `[n]` 与末尾 `— sources —` 块 |
-| 记忆 | `MemoryManager.try_extract` | 与 Python 同源的自动 / 显式提取 |
-| API 形态 | `create_tool_calling_agent + AgentExecutor`（legacy） | 本迭代不切 LangChain 1.0 `create_agent`，留独立任务（iter_a §2.3） |
+| 维度        | 落点                                                    | 说明                                                                                                                                                                                 |
+| ----------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 工具        | `src/agent/langchain_tools.py`                        | 遍历 `get_tools()` 的 JSON schema 动态包装为 `StructuredTool`，路由 `execute_tool`——全 17+ 工具与 Python / AutoGPT 单一真相源一致（含 MCP 合流、名单门、security / harness） |
+| 四层 prompt | `src/agent/langchain_agent.py · run()`               | base(+skill catalog) →`<user_rules>` → `<user_context>` → `<active_study_plan>`，每轮重建 executor                                                                          |
+| 事件流      | `_EventBridgeHandler`(BaseCallbackHandler)            | token_chunk / tool_call_start / tool_call_end / plan_*（plan 为 best-effort，详 iter_a §4）                                                                                         |
+| 引用        | per-run `CitationBuilder` 经 `citation_getter` 透传 | RAG 回答带 `[n]` 与末尾 `— sources —` 块                                                                                                                                       |
+| 记忆        | `MemoryManager.try_extract`                           | 与 Python 同源的自动 / 显式提取                                                                                                                                                      |
+| API 形态    | `create_tool_calling_agent + AgentExecutor`（legacy） | 本迭代不切 LangChain 1.0 `create_agent`，留独立任务（iter_a §2.3）                                                                                                                |
 
 **已知限制**：thinking 流不发；plan 进度 reconstruct 在 legacy AgentExecutor 下保真度有限。
 
@@ -1467,12 +1447,12 @@ CLI 终端的所有可见输出（banner / 用户输入 / Agent 回答 / 模块�
 
 **输出流分布**
 
-| 来源 | 路径 | 是否落盘 |
-|---|---|---|
-| `print()` 调用 | `sys.stdout` | ✅ 通过 stdout tee |
-| `logger.*` 调用 | `logging.StreamHandler` → `sys.stderr` | ✅ 通过 stderr tee（复用，不另起 `FileHandler`） |
-| `prompt_toolkit` 渲染（`你: ` 提示符 / 补全菜单 / 控制码） | 终端原生 API（Win32 console / Vt100），绕 Python stream | ❌ 控制码进文件无意义 |
-| 用户键入字符 | TTY 驱动回显，不经 Python | ❌ → 由主循环显式补写 `你: <input>` 行 |
+| 来源                                                           | 路径                                                    | 是否落盘                                           |
+| -------------------------------------------------------------- | ------------------------------------------------------- | -------------------------------------------------- |
+| `print()` 调用                                               | `sys.stdout`                                          | ✅ 通过 stdout tee                                 |
+| `logger.*` 调用                                              | `logging.StreamHandler` → `sys.stderr`             | ✅ 通过 stderr tee（复用，不另起 `FileHandler`） |
+| `prompt_toolkit` 渲染（`你: ` 提示符 / 补全菜单 / 控制码） | 终端原生 API（Win32 console / Vt100），绕 Python stream | ❌ 控制码进文件无意义                              |
+| 用户键入字符                                                   | TTY 驱动回显，不经 Python                               | ❌ → 由主循环显式补写 `你: <input>` 行          |
 
 **数据流**
 
@@ -1491,21 +1471,20 @@ flowchart LR
 
 **设计取舍**
 
-| 维度 | 选择 | 取舍 |
-|---|---|---|
-| 分流机制 | Python 内置 `_Tee` 包装 `sys.stdout` / `sys.stderr` | 不用 shell 重定向 / `tee` 管道 —— 后者破坏 TTY，`prompt_toolkit` 检测不到 TTY 退化为盲打，且 Win / bash 不通用 |
-| logger 衔接 | 复用 stderr tee | 不另起 `FileHandler` 避免与 tee 重复写 |
-| 用户输入 | 主循环手动写文件，不走 stdout | 不在终端重复打一遍（TTY 已回显过） |
-| 文件粒度 | 模式枚举（`SINGLE` 单文件 append / `MULTI` 多文件分卷），不含 rotation | 同一开关收口"长期追加排查"与"单次会话复盘"两种用法；rotation 需求出现再扩 |
+| 维度        | 选择                                                                       | 取舍                                                                                                                |
+| ----------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| 分流机制    | Python 内置 `_Tee` 包装 `sys.stdout` / `sys.stderr`                  | 不用 shell 重定向 /`tee` 管道 —— 后者破坏 TTY，`prompt_toolkit` 检测不到 TTY 退化为盲打，且 Win / bash 不通用 |
+| logger 衔接 | 复用 stderr tee                                                            | 不另起 `FileHandler` 避免与 tee 重复写                                                                            |
+| 用户输入    | 主循环手动写文件，不走 stdout                                              | 不在终端重复打一遍（TTY 已回显过）                                                                                  |
+| 文件粒度    | 模式枚举（`SINGLE` 单文件 append / `MULTI` 多文件分卷），不含 rotation | 同一开关收口"长期追加排查"与"单次会话复盘"两种用法；rotation 需求出现再扩                                           |
 
 **`_Tee` 透明性约定**：包装类只代理 `write` / `flush`，其余属性（`isatty` / `fileno` / `encoding` / `buffer` 等）透传原 stream，确保 `prompt_toolkit` 的 TTY 检测与底层二进制 buffer 访问不受影响。
 
 **配置**
 
-| key | 类型 | 默认 | 含义 |
-|---|---|---|---|
-| `CLI_LOG_MODE` | str | `NONE` | tee 落盘模式（`NONE` / `SINGLE` / `MULTI`，大小写不敏感）：`NONE` 不写；`SINGLE` 固定 `./logs/agenta.log` 跨启动 append；`MULTI` 每次启动新建 `./logs/agenta-YYYYMMDD-HHMMSS.log` 覆盖；非法值降级 `NONE` 并 warn |
-| `LOG_LEVEL` | str | `INFO` | root logger 输出级别（`DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL`）；同时作用于终端 stderr 与落盘文件（同一 stream 两路输出）；非法值降级 `INFO` 并 warn。三方噪声库（`httpx` / `chromadb` 等）独立固定 `WARNING`，不随本值缩放 |
+| key              | 类型 | 默认     | 含义                                                                                                                                                                                                                                                      |
+| ---------------- | ---- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CLI_LOG_MODE` | str  | `NONE` | tee 落盘模式（`NONE` / `SINGLE` / `MULTI`，大小写不敏感）：`NONE` 不写；`SINGLE` 固定 `./logs/agenta.log` 跨启动 append；`MULTI` 每次启动新建 `./logs/agenta-YYYYMMDD-HHMMSS.log` 覆盖；非法值降级 `NONE` 并 warn                       |
+| `LOG_LEVEL`    | str  | `INFO` | root logger 输出级别（`DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL`）；同时作用于终端 stderr 与落盘文件（同一 stream 两路输出）；非法值降级 `INFO` 并 warn。三方噪声库（`httpx` / `chromadb` 等）独立固定 `WARNING`，不随本值缩放 |
 
 实施细节详 [`iter_8_debugging.md §1`](iter_8_debugging.md#1-cli-打印写文件)（落盘）与 [`§2`](iter_8_debugging.md#2-logger-级别可配置)（级别）。
-

@@ -160,20 +160,20 @@ def chat(
     on_token_chunk: Callable[[str], None] | None = None,
 ) -> Any:
     """
-    统一 LLM 调用入口。
+    统一 LLM 调用入口，按当前模型的 provider 自动选择 OpenAI 兼容 API 或 anthropic 原生 SDK。
 
     Args:
-        messages: 对话历史，格式遵循 OpenAI messages 规范。
+        messages: 对话历史，入参统一用 OpenAI messages 格式（anthropic 分支内部自行适配）。
         tools: Function Calling 工具列表（JSON Schema 格式），为 None 时走普通对话。
         temperature: 采样温度，0.0 ~ 1.0，越低越确定性。
         on_token_chunk: 每收到一段正文 token 时的回调，为 None 时走非流式。
 
     Returns:
-        始终返回完整的 ChatCompletion response 对象，供 Agent 读取 choices 和 usage。
+        统一返回 OpenAI 结构的 response 对象（anthropic 分支会包装成兼容结构），供 Agent 读取 choices 和 usage。
 
     Raises:
-        openai.APIError: OpenAI 兼容 API 调用失败时抛出。
-        anthropic.APIError: 当前模型走 anthropic SDK 时，原生 SDK 调用失败时抛出。
+        openai.APIError: 走 OpenAI 兼容 API 调用失败时抛出。
+        anthropic.APIError: 走 anthropic 原生 SDK 调用失败时抛出。
     """
     provider_config, model_config = config.get_active_model()
 
