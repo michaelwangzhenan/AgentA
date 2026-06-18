@@ -10,12 +10,12 @@ ResearchEngine —— Deep Research（深度研究）四阶段编排
 设计要点（详见 docs/iter_14_enh.md §3.2）：
 - 独立路径：普通 chat 完全不走本引擎；普通 `Agent.run` 行为零改动。
 - 受限子代理：引擎内精简 ReAct loop，只给 3 个检索 tool、独立 in-memory 上下文，
-  **不读不写** ChatHistoryStore —— 研究中间过程不污染用户会话历史。
+  **不读不写** SessionStore —— 研究中间过程不污染用户会话历史。
 - 共享引用器：所有子代理共用一个 `CitationBuilder`（线程安全），KB + web 统一 `[n]`。
 - 软失败：单子代理异常 / 全空 → 标记失败、记 note，不中断整体，报告里照常说明缺口。
 - 进度可视化：发一组 `research_*` 事件给前端研究面板（不发 `plan_*`）。
 - 收尾对齐 `Agent.run`：流式 token_chunk 推正文、`final_answer` 带聚合 usage，
-  最终"用户问题 + 报告"写入 ChatHistoryStore（仅此一条，中间过程不落库）。
+  最终"用户问题 + 报告"写入 SessionStore（仅此一条，中间过程不落库）。
 """
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ from src.agent.core.event_bus import (
 )
 from src.agent.tools import execute_tool, get_research_tools
 from src.llm.provider import chat
-from src.memory.chat_history import ChatHistoryStore
+from src.memory.session_store import SessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -144,11 +144,11 @@ class ResearchEngine:
     """Deep Research 四阶段编排引擎。
 
     一次 `run()` = 一个 chat 请求；内部用线程池派子代理（占用同一信号量名额）。
-    依赖向下：llm.provider / tools / citation_builder / event_bus / chat_history。
+    依赖向下：llm.provider / tools / citation_builder / event_bus / session_store。
     """
 
-    def __init__(self, chat_history: ChatHistoryStore, user_id: int | None = None) -> None:
-        self._chat_history = chat_history
+    def __init__(self, session_store: SessionStore, user_id: int | None = None) -> None:
+        self._session_store = session_store
         self._user_id = user_id
         # 整次研究的总来源计数（跨子代理线程共享，加锁）；run() 每次重置
         self._total_sources = 0
@@ -176,7 +176,7 @@ class ResearchEngine:
         self._sources_lock = threading.Lock()
 
         # 用户问题先落库（首次自动建 session 并归属 user）
-        self._chat_history.append(
+        self._session_store.append(
             session_id, {"role": "user", "content": query}, user_id=self._user_id,
         )
         bus.publish(AgentEvent(type=EVENT_INFO, payload={
@@ -473,7 +473,7 @@ class ResearchEngine:
         report, sources_block = citation_builder.renumber_and_render(report)
         report = report + sources_block
 
-        self._chat_history.append(
+        self._session_store.append(
             session_id, {"role": "assistant", "content": report}, user_id=self._user_id,
         )
         bus.publish(AgentEvent(type=EVENT_FINAL_ANSWER, payload={

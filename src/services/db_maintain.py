@@ -27,7 +27,7 @@ _EVENT_TABLES = ("usage_events", "agent_traces", "cache_lookups", "saving_events
 # child=(子表, 子表外键, 父表关联键)：选中的父行删除前先级联删其子行；None 表示无子表。
 # users 账号行本身不在内（删账号走用户管理入口）。
 _PURGE_TABLES: list[tuple[str, str, tuple[str, str, str] | None]] = [
-    ("chat_history", "sessions", ("messages", "session_id", "session_id")),
+    ("session", "sessions", ("messages", "session_id", "session_id")),
     ("usage", "usage_events", None),
     ("usage", "agent_traces", ("trace_spans", "trace_id", "trace_id")),
     ("usage", "cache_lookups", None),

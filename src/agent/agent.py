@@ -2,7 +2,7 @@
 Agent 主控逻辑 —— ReAct（Reason + Act）循环
 
 执行流程：
-    1. 接收用户问题，从 ChatHistoryStore 加载历史消息
+    1. 接收用户问题，从 SessionStore 加载历史消息
     2. 拼接为 [system] + history + [user]，超长时自动截断
     3. 调用 LLM（携带工具定义）
     4. 若 LLM 返回 tool_calls → 执行工具 → 将结果追加到 messages → 继续循环
@@ -42,11 +42,11 @@ from src.agent.core.agent_commons import (  # noqa: F401 — re-export
     build_active_study_plan_block,
 )
 from src.agent.core.agent_commons import get_active_rules as _get_active_rules
-from src.agent.core.agent_commons import get_shared_chat_history as _get_shared_chat_history
+from src.agent.core.agent_commons import get_shared_session_store as _get_shared_session_store
 from src.agent.tools import get_tools
 from src.agent.core.skill_loader import SkillInfo, build_skill_catalog
 from src.llm.provider import chat, call_with_thinking
-from src.memory.chat_history import ChatHistoryStore
+from src.memory.session_store import SessionStore
 from src.memory.user_memory import UserMemoryStore
 import src.config as _cfg
 
@@ -59,7 +59,7 @@ _shared_user_memory_lock = threading.Lock()
 
 # 多用户：rules 改为按用户独享，存 UserStore（auth.db 的 user_rules 表）。
 # 不再用进程级缓存的项目文件 —— 每轮按 current_user_id() 读当前用户的 rules。
-# TokenUsage / SYSTEM_PROMPT / PlanAbortedByUser / _get_shared_chat_history /
+# TokenUsage / SYSTEM_PROMPT / PlanAbortedByUser / _get_shared_session_store /
 # _get_active_rules / build_active_study_plan_block 等公共资产已抽到 agent_commons
 # 并在文件顶部 re-export（保持本模块旧 import 路径不变）。
 
@@ -109,7 +109,7 @@ class Agent:
         verbose: bool = True,
         session_id: str | None = None,
         max_history_turns: int = 20,
-        chat_history: ChatHistoryStore | None = None,
+        session_store: SessionStore | None = None,
         skills: dict[str, SkillInfo] | None = None,
         thinking_config: ThinkingConfig | None = None,
         user_memory: UserMemoryStore | None = None,
@@ -129,9 +129,9 @@ class Agent:
         self.verbose = verbose
         self.session_id: str = session_id or str(uuid.uuid4())
         self.max_history_turns = max_history_turns
-        # 支持从外部传入 chat_history（便于测试 mock），默认使用模块级共享实例
-        self._chat_history: ChatHistoryStore = (
-            chat_history if chat_history is not None else _get_shared_chat_history()
+        # 支持从外部传入 session_store（便于测试 mock），默认使用模块级共享实例
+        self._session_store: SessionStore = (
+            session_store if session_store is not None else _get_shared_session_store()
         )
         self.last_usage: TokenUsage | None = None  # 最近一次 run() 的 token 统计
         # Extended Thinking 配置：共享同一 ThinkingConfig 实例，修改后无需重建 Agent
@@ -220,7 +220,7 @@ class Agent:
         """
         执行完整的 ReAct 循环，返回最终回答文本。
 
-        会先从 ChatHistoryStore 加载历史消息，拼接到当前轮对话后一起发送给 LLM。
+        会先从 SessionStore 加载历史消息，拼接到当前轮对话后一起发送给 LLM。
         每轮工具调用和最终回答均实时写入 SQLite。
 
         Args:
@@ -255,7 +255,7 @@ class Agent:
             return _on_token if bus.subscribers(EVENT_TOKEN_CHUNK) else None
 
         # 加载历史，应用截断策略
-        history_mgr = HistoryManager(self._chat_history, sid, self.max_history_turns)
+        history_mgr = HistoryManager(self._session_store, sid, self.max_history_turns)
         history = history_mgr.load_truncated()
 
         # 构建 system 消息：base → <user_rules>（静态偏好）→ <user_context>（动态记忆）
@@ -264,7 +264,7 @@ class Agent:
         # 学习计划与"下一步"决策强相关，放最末贴近 user 消息。
         # 注意：学习计划默认**不**注入，必须用户用 CLI `/study load [id]` 显式激活；
         # 对标 Agent Skills 的 load_skill 生命周期。
-        memory_mgr = MemoryManager(self._user_memory, self._chat_history, sid, chat)
+        memory_mgr = MemoryManager(self._user_memory, self._session_store, sid, chat)
         base_with_rules = self.system_prompt + build_rules_block(_get_active_rules())
         system_content = memory_mgr.build_system_prompt(base_with_rules)
         system_content = system_content + build_active_study_plan_block(sid)
@@ -280,7 +280,7 @@ class Agent:
         ]
 
         # 将当前轮用户输入写入 DB（首次会自动创建 session 记录）
-        self._chat_history.append(
+        self._session_store.append(
             sid,
             {"role": "user", "content": user_input},
         )
@@ -296,7 +296,7 @@ class Agent:
         # 每轮 new CitationBuilder，跨同轮多次 search_knowledge 累计编号
         citation_builder = CitationBuilder()
         tool_engine = ToolCallEngine(
-            self._chat_history, sid, self._skill_bodies,
+            self._session_store, sid, self._skill_bodies,
             verbose=self.verbose, events=bus,
             citation_builder=citation_builder,
             approval_fn=self.request_plan_approval,
@@ -388,7 +388,7 @@ class Agent:
                 except PlanAbortedByUser as exc:
                     logger.info("[Agent] plan 被用户拒绝 — 中止当前 query：%s", exc)
                     cancel_msg = "已按用户要求取消执行 plan。如需重新规划请发起新提问。"
-                    self._chat_history.append(
+                    self._session_store.append(
                         sid,
                         {"role": "assistant", "content": cancel_msg},
                     )
@@ -424,7 +424,7 @@ class Agent:
                     _on_token(sources_block)
                 final_answer = final_answer + sources_block
                 # 将最终回答（含 sources 块）写入 DB，下一轮 LLM 可见统一来源
-                self._chat_history.append(
+                self._session_store.append(
                     sid,
                     {"role": "assistant", "content": final_answer},
                 )
@@ -504,7 +504,7 @@ class Agent:
 
         LLM 跑到最后一步时常常直接产出最终答案而不调 `update_step`，于是该步的
         plan_step_end 永不发出、前端那一步永远转圈。这里 reconstruct 当前 plan，
-        把剩余 pending 步统一标成 success 收尾（仅发事件，不写 chat_history —— plan
+        把剩余 pending 步统一标成 success 收尾（仅发事件，不写 session_store —— plan
         状态本就靠 messages 里的 tool_calls 重建，这是纯 UI 收敛）。
 
         bus 由 run() 传入（本次运行的局部 bus 或 self.events），保证并发隔离。

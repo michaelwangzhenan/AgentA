@@ -569,7 +569,7 @@ def _chat_openai_reasoning(
     - spec.thinking_model 不为 None 时切到该 provider 的专用思考模型（如 deepseek-reasoner）。
 
     thinking 内容通过 on_thinking_chunk 透传，并由 _run_openai_stream 挂到 message.reasoning_content，
-    供 agent 多轮工具调用时回传（kimi 等不回传会 400）；但不写入 chat_history（防 prompt injection）。
+    供 agent 多轮工具调用时回传（kimi 等不回传会 400）；但不写入 session_store（防 prompt injection）。
     """
     provider_config, model_config = config.get_active_model()
 

@@ -57,7 +57,7 @@ class _FakeToolCall:
 
 
 class FakeHistory:
-    """最小 ChatHistoryStore：只记录 append 调用。"""
+    """最小 SessionStore：只记录 append 调用。"""
 
     def __init__(self) -> None:
         self.appended: list[dict[str, Any]] = []

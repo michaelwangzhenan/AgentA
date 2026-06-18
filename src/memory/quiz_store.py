@@ -72,7 +72,7 @@ class QuizStore:
     命名约定：数据存储用 `*Store` 后缀，与 `*Manager` helper 区分。
 
     线程安全：连接以 `check_same_thread=False` 跨线程共享，所有读写经 `threading.Lock`
-    串行化（与 `ChatHistoryStore` / `UserStore` 一致）。进程级共享单例在 Web 线程池里
+    串行化（与 `SessionStore` / `UserStore` 一致）。进程级共享单例在 Web 线程池里
     被多请求并发访问时安全。
     """
 

@@ -19,7 +19,7 @@ load_dotenv(override=True)
 import pytest
 
 import src.agent.agent as _agent_module
-# _chat_history 单例已抽到公共层 agent_commons（三实现共享）；隔离需 patch 这里。
+# _session_store 单例已抽到公共层 agent_commons（三实现共享）；隔离需 patch 这里。
 import src.agent.core.agent_commons as _commons_module
 
 
@@ -67,19 +67,19 @@ def _isolated_agent_memory(tmp_path, _neutralize_runtime_overrides):
     依赖 `_neutralize_runtime_overrides` 先复位 config 到 env 基线，确保本 fixture 对
     USER_MEMORY_ENABLED 等的关闭发生在复位之后、不被复位覆盖回 env 值。
 
-    - 替换 _chat_history：隔离对话历史 DB
+    - 替换 _session_store：隔离对话历史 DB
     - 替换 _shared_user_memory 为 None，并临时关闭 USER_MEMORY_ENABLED：
       防止 MemoryManager.try_extract 向真实 DB 写入、或额外调用 LLM 干扰 mock 计数
     - 临时关闭 SEMANTIC_CACHE_ENABLED：语义缓存共用进程级 ChromaDB（不随测试隔离），
       历次跑积累的条目会让 chat 端点测试随机命中缓存、跳过 agent.run 而失败；
       默认关掉保证确定性。需要验证缓存的测试自行 monkeypatch 设回 True。
     """
-    from src.memory.chat_history import ChatHistoryStore
+    from src.memory.session_store import SessionStore
 
     # ── 对话历史隔离 ──────────────────────────────────────────────────────────
-    _orig_mem = _commons_module._chat_history
-    mem = ChatHistoryStore(db_path=str(tmp_path / "agent_test.db"))
-    _commons_module._chat_history = mem
+    _orig_mem = _commons_module._session_store
+    mem = SessionStore(db_path=str(tmp_path / "agent_test.db"))
+    _commons_module._session_store = mem
 
     # ── 用户记忆隔离 ──────────────────────────────────────────────────────────
     _orig_user_mem = _agent_module._shared_user_memory
@@ -133,7 +133,7 @@ def _isolated_agent_memory(tmp_path, _neutralize_runtime_overrides):
     yield
 
     # ── 恢复原始状态 ──────────────────────────────────────────────────────────
-    _commons_module._chat_history = _orig_mem
+    _commons_module._session_store = _orig_mem
     _agent_module._shared_user_memory = _orig_user_mem
     _agent_module._cfg.USER_MEMORY_ENABLED = _orig_enabled
     _agent_module._cfg.USER_MEMORY_AUTO_EXTRACT = _orig_auto

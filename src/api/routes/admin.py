@@ -11,7 +11,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.api.deps import (
-    get_chat_history,
+    get_session_store,
     get_plan_store,
     get_quiz_store,
     get_srs_store,
@@ -31,7 +31,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 def purge_user_data(user_id: int) -> None:
     """级联清理某用户的全部业务数据（会话 / 记忆 / 计划 / 测验 / SRS）。"""
-    get_chat_history().delete_all_for_user(user_id)
+    get_session_store().delete_all_for_user(user_id)
     mem = get_user_memory_store()
     if mem is not None:
         mem.clear(user_id)

@@ -270,12 +270,12 @@ prompt 之外：
 - message 存 OpenAI 四种 role（`system`/`user`/`assistant`/`tool`），tool_call / tool 结果也作为消息入表。
 - 权限隔离：每个读写先过归属校验，非本人 session 读返回空、写不操作（纵深防御）。
 - 生命周期：rename / create_empty / delete / clear  等。
-- 分层：`ChatHistoryStore` 只做 CRUD，截断/轮次/skill 完整性等 loop 语义在 `HistoryManager`。
+- 分层：`SessionStore` 只做 CRUD，截断/轮次/skill 完整性等 loop 语义在 `HistoryManager`。
 
 代码：
 
-- 存储 + 表结构 → `memory/chat_history.py · ChatHistoryStore`（`sessions` / `messages` 两表）
-- 归属校验 → `chat_history.py · _owns_unlocked()` / `owns_session()`
+- 存储 + 表结构 → `memory/session_store.py · SessionStore`（`sessions` / `messages` 两表）
+- 归属校验 → `session_store.py · _owns_unlocked()` / `owns_session()`
 - 历史加载 + 截断 → `agent/core/history_manager.py · HistoryManager.load_truncated()`
 
 ### 2.5.7. User Rules

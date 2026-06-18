@@ -244,9 +244,9 @@ def _run_c7(case: dict[str, Any]) -> tuple[bool, str]:
 def _run_llm_e2e(case: dict[str, Any], manager: MCPManager) -> tuple[bool, str]:
     """真发 LLM，看 LLM 是否触发期望的 MCP tool。"""
     from src.agent.agent import Agent
-    from src.memory.chat_history import ChatHistoryStore
+    from src.memory.session_store import SessionStore
 
-    chat_history = ChatHistoryStore(":memory:")
+    session_store = SessionStore(":memory:")
     agent = Agent(verbose=False)
 
     tool_calls_observed: list[str] = []
@@ -263,7 +263,7 @@ def _run_llm_e2e(case: dict[str, Any], manager: MCPManager) -> tuple[bool, str]:
     except Exception as exc:
         return False, f"agent.run 抛错：{exc}"
     finally:
-        chat_history.close()
+        session_store.close()
 
     expected_called = case["expect"].get("tool_called")
     expected_not = case["expect"].get("tool_not_called")

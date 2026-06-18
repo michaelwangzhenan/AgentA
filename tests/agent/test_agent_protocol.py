@@ -68,7 +68,7 @@ class TestPythonAgentProtocol:
         from unittest.mock import MagicMock
         mock_history = MagicMock()
         mock_history.load_last_n_messages.return_value = []
-        a = Agent(verbose=False, chat_history=mock_history, user_memory=None)
+        a = Agent(verbose=False, session_store=mock_history, user_memory=None)
         assert isinstance(a.session_id, str) and len(a.session_id) > 0
 
 
@@ -98,7 +98,7 @@ class TestAutoGPTAgentProtocol:
         from unittest.mock import MagicMock
         mock_history = MagicMock()
         mock_history.load_last_n_messages.return_value = []
-        a = AutoGPTAgent(verbose=False, chat_history=mock_history)
+        a = AutoGPTAgent(verbose=False, session_store=mock_history)
         assert isinstance(a.session_id, str) and len(a.session_id) > 0
 
 
@@ -124,7 +124,7 @@ class TestEventBusInstanceContract:
         from src.agent.core.event_bus import EventBus
         mock_history = MagicMock()
         mock_history.load_last_n_messages.return_value = []
-        a = Agent(verbose=False, chat_history=mock_history, user_memory=None)
+        a = Agent(verbose=False, session_store=mock_history, user_memory=None)
         assert isinstance(a.events, EventBus)
 
     def test_autogpt_agent_has_events_attr(self) -> None:
@@ -134,7 +134,7 @@ class TestEventBusInstanceContract:
         from src.agent.core.event_bus import EventBus
         mock_history = MagicMock()
         mock_history.load_last_n_messages.return_value = []
-        a = AutoGPTAgent(verbose=False, chat_history=mock_history)
+        a = AutoGPTAgent(verbose=False, session_store=mock_history)
         assert isinstance(a.events, EventBus)
 
     def test_langchain_agent_has_events_attr(self) -> None:
@@ -145,7 +145,7 @@ class TestEventBusInstanceContract:
         # 全 mock 掉 LLM / tools / 共享 ChatHistory，避免真实 langchain 调用与磁盘读写
         with patch("src.agent.langchain_agent.build_chat_model"), \
              patch("src.agent.langchain_agent.build_langchain_tools", return_value=[]), \
-             patch("src.agent.langchain_agent.get_shared_chat_history"):
+             patch("src.agent.langchain_agent.get_shared_session_store"):
             a = LangChainAgent(session_id="x", verbose=False)
         assert isinstance(a.events, EventBus)
 
@@ -160,7 +160,7 @@ class TestAgentAPIIsInstance:
         from unittest.mock import MagicMock
         mock_history = MagicMock()
         mock_history.load_last_n_messages.return_value = []
-        a = Agent(verbose=False, chat_history=mock_history, user_memory=None)
+        a = Agent(verbose=False, session_store=mock_history, user_memory=None)
         assert isinstance(a, AgentAPI)
 
     def test_autogpt_agent_satisfies_agent_api(self) -> None:
@@ -169,7 +169,7 @@ class TestAgentAPIIsInstance:
         from unittest.mock import MagicMock
         mock_history = MagicMock()
         mock_history.load_last_n_messages.return_value = []
-        a = AutoGPTAgent(verbose=False, chat_history=mock_history)
+        a = AutoGPTAgent(verbose=False, session_store=mock_history)
         assert isinstance(a, AgentAPI)
 
     def test_langchain_agent_satisfies_agent_api(self) -> None:
@@ -178,6 +178,6 @@ class TestAgentAPIIsInstance:
         from unittest.mock import patch
         with patch("src.agent.langchain_agent.build_chat_model"), \
              patch("src.agent.langchain_agent.build_langchain_tools", return_value=[]), \
-             patch("src.agent.langchain_agent.get_shared_chat_history"):
+             patch("src.agent.langchain_agent.get_shared_session_store"):
             a = LangChainAgent(session_id="x", verbose=False)
         assert isinstance(a, AgentAPI)

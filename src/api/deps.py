@@ -4,12 +4,12 @@
 
 1. **shared singleton**（plan / quiz / srs / mcp）：复用各 store 模块的
    `get_shared_store()`，跟 LLM 工具共用同一份 connection，无写锁竞争。
-2. **独立 connection**（chat_history / user_memory）：API 层用 `lru_cache`
+2. **独立 connection**（session_store / user_memory）：API 层用 `lru_cache`
    各起一份 connection，跟 Agent 内置 store 走两个连接、共用底层 DB 文件。
    SQLite 文件级锁保证安全，多 connection 串行写不会损坏数据。
 
 两套并存的历史原因：plan / quiz / srs 的 store 早期就提供了 `get_shared_store()`
-便于 LLM 工具复用；chat_history / user_memory 没有，暂不改动以缩小影响面。
+便于 LLM 工具复用；session_store / user_memory 没有，暂不改动以缩小影响面。
 未来可统一为 shared，但代价是 Agent 构造路径也要改。
 """
 
@@ -25,7 +25,7 @@ from src.memory.user_context import set_current_user
 from src.agent.agent import Agent
 from src.agent.agent_api import AgentAPI
 from src.agent.core.mcp_manager import MCPManager, get_shared_manager
-from src.memory.chat_history import ChatHistoryStore
+from src.memory.session_store import SessionStore
 from src.memory.learning_plan_store import LearningPlanStore
 from src.memory.learning_plan_store import get_shared_store as _get_shared_plan_store
 from src.memory.quiz_store import QuizStore
@@ -78,12 +78,12 @@ def get_agent() -> AgentAPI:
 
 
 @lru_cache(maxsize=1)
-def get_chat_history() -> ChatHistoryStore:
-    """返回进程级单例 ChatHistoryStore（API 层独立 connection，与 Agent 共用底层 DB 文件）。
+def get_session_store() -> SessionStore:
+    """返回进程级单例 SessionStore（API 层独立 connection，与 Agent 共用底层 DB 文件）。
 
     SQLite 在文件级锁下天然支持多 connection 串行写。
     """
-    return ChatHistoryStore()
+    return SessionStore()
 
 
 @lru_cache(maxsize=1)

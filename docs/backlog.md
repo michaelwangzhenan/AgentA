@@ -116,7 +116,7 @@ agenta 的 harness 功能就是自我反思/自我纠正（Relection）? 只是h
 **现状**：根因没治本，只在读取侧兜底——
 
 - 产生侧：`_run_openai_stream` 流式拼接初始 `name=""` 靠 delta 累加，provider 若给了 `id` 却始终不推 `name`（畸形流）仍可能拼出空名。
-- 写入侧：`tool_call_engine.process` 无条件先把 assistant 消息落库（`self._chat_history.append`）再解析执行，**没有"空名不落库"校验**，今天产生的空名仍会被持久化。
+- 写入侧：`tool_call_engine.process` 无条件先把 assistant 消息落库（`self._session_store.append`）再解析执行，**没有"空名不落库"校验**，今天产生的空名仍会被持久化。
 - 读取侧：provider 层每次调用都 O(历史长度) 全量扫一遍兜底。
 - 注：`.` → `__`（MCP namespaced tool 名适配）是常态需求、永久保留，不在本优化范围。
 

@@ -13,7 +13,7 @@
 - 截断时含 `<skill_content>` 的 assistant+tool 消息组被保护
 - SQL 层粗粒度过滤上限 = max_history_turns × _HISTORY_FETCH_MULTIPLIER
 
-设计：直接 mock `ChatHistoryStore.load_last_n_messages`，绕开 SQLite。
+设计：直接 mock `SessionStore.load_last_n_messages`，绕开 SQLite。
 """
 from __future__ import annotations
 
@@ -25,14 +25,14 @@ import pytest
 from src.agent.core.history_manager import HistoryManager, _HISTORY_FETCH_MULTIPLIER
 
 
-# ── 测试夹具：构造一个 HistoryManager + mock 过的 ChatHistoryStore ───────────────
+# ── 测试夹具：构造一个 HistoryManager + mock 过的 SessionStore ───────────────
 
 def _make_mgr(messages: list[dict[str, Any]], max_history_turns: int = 20) -> HistoryManager:
     """构造 HistoryManager，把 load_last_n_messages mock 成固定返回 messages。"""
     mock_history = MagicMock()
     mock_history.load_last_n_messages.return_value = messages
     return HistoryManager(
-        chat_history=mock_history,
+        session_store=mock_history,
         session_id="test-session",
         max_history_turns=max_history_turns,
     )
@@ -69,8 +69,8 @@ class TestLoadTruncatedBasics:
     def test_sql_fetch_limit_uses_multiplier(self) -> None:
         mgr = _make_mgr([], max_history_turns=20)
         mgr.load_truncated()
-        mgr._chat_history.load_last_n_messages.assert_called_once()
-        _, n_arg = mgr._chat_history.load_last_n_messages.call_args[0]
+        mgr._session_store.load_last_n_messages.assert_called_once()
+        _, n_arg = mgr._session_store.load_last_n_messages.call_args[0]
         assert n_arg == 20 * _HISTORY_FETCH_MULTIPLIER
 
 

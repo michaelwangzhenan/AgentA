@@ -167,7 +167,7 @@ from src.cli.ui import BANNER, HELP_TEXT
 from src.cli.tab_complete import make_completer
 from src.agent.core.skill_loader import scan_skills, SkillInfo, format_scan_banner
 from src.cli import handlers
-from src.memory.chat_history import ChatHistoryStore
+from src.memory.session_store import SessionStore
 import src.config as config
 
 # 如果用户记忆功能开启，提前导入以备 main() 中直接使用
@@ -230,8 +230,8 @@ def main() -> None:
     print("⏳ 正在初始化 Agent…", flush=True)
     from src.agent.agent import SYSTEM_PROMPT, ThinkingConfig
 
-    # 共享 ChatHistoryStore 实例，整个进程生命周期内复用
-    chat_history = ChatHistoryStore()
+    # 共享 SessionStore 实例，整个进程生命周期内复用
+    session_store = SessionStore()
 
     # 启动时扫描 Skills 目录，并把"已加载 N 个 / 失败 N 个"显式打到 stdout，
     # 让用户即便没看 log 也能感知 skill 状态（满足 Step 0 验收 ④ "失败可见"）
@@ -261,23 +261,23 @@ def main() -> None:
     # Phase 3.3：按 .agenta/mcp/config.json 拉起 MCP server 子进程；失败永远不阻塞 Agent
     _bootstrap_mcp()
 
-    agent = handlers.make_agent(chat_history, skills_map, thinking_cfg, SYSTEM_PROMPT, user_memory=user_memory)
+    agent = handlers.make_agent(session_store, skills_map, thinking_cfg, SYSTEM_PROMPT, user_memory=user_memory)
     print(f"💬 当前 Session: {agent.session_id}\n")
 
     prompt_session: PromptSession[str] = PromptSession(
         history=InMemoryHistory(),
-        completer=make_completer(chat_history, list(skill_cmds.keys())),
+        completer=make_completer(session_store, list(skill_cmds.keys())),
         complete_while_typing=False,  # 仅 Tab 触发，不干扰正常输入
     )
 
     while True:
         try:
             # 每轮刷新补全器，确保新建/删除的 session id 即时更新
-            prompt_session.completer = make_completer(chat_history, list(skill_cmds.keys()))
+            prompt_session.completer = make_completer(session_store, list(skill_cmds.keys()))
             user_input = prompt_session.prompt("你: ").strip()
         except (KeyboardInterrupt, EOFError):
             print("👋 再见1！")
-            handlers.quit_sys(chat_history, user_memory)
+            handlers.quit_sys(session_store, user_memory)
             
         if not user_input:
             continue
@@ -300,22 +300,22 @@ def main() -> None:
         match cmd_name:
             case "/quit" | "/exit":
                 print("👋 再见2！")
-                handlers.quit_sys(chat_history, user_memory)
+                handlers.quit_sys(session_store, user_memory)
             case "/help":
                 print(HELP_TEXT)
                 continue
             case "/clear":
-                chat_history.clear(agent.session_id)
-                agent = handlers.make_agent(chat_history, skills_map, thinking_cfg, SYSTEM_PROMPT, user_memory=user_memory)
+                session_store.clear(agent.session_id)
+                agent = handlers.make_agent(session_store, skills_map, thinking_cfg, SYSTEM_PROMPT, user_memory=user_memory)
                 print(f"✅ 对话历史已清空，Agent 已重置。\n💬 新 Session: {agent.session_id}\n")
                 continue
             case "/history":
-                handlers.show_history(chat_history, agent.session_id)
+                handlers.show_history(session_store, agent.session_id)
                 continue
             case "/sessions":
                 query = cmd_parts[1].strip() if len(cmd_parts) > 1 else None
                 handlers.list_sessions(
-                    chat_history,
+                    session_store,
                     query=query,
                     current_session_id=agent.session_id,
                 )
@@ -326,7 +326,7 @@ def main() -> None:
                     print("⚠️  /session 需要 session id 参数。用 /sessions 查看列表，或 /sessions <关键词> 搜索。\n")
                     continue
                 new_agent = handlers.switch_session(
-                    chat_history, session_arg, SYSTEM_PROMPT, skills_map,
+                    session_store, session_arg, SYSTEM_PROMPT, skills_map,
                     thinking_cfg, user_memory=user_memory
                 )
                 if new_agent is not None:
@@ -339,22 +339,22 @@ def main() -> None:
                 elif target_id == agent.session_id:
                     print("⚠️  不能删除当前活跃 session，请先用 /session <id> 切换到其他 session 后再删除。\n")
                 else:
-                    deleted = chat_history.delete_session(target_id)
+                    deleted = session_store.delete_session(target_id)
                     if deleted:
                         print(f"🗑️  Session {target_id} 已彻底删除。\n")
                     else:
                         print(f"❌ Session {target_id} 不存在。\n")
                 continue
             case "/clean-session":
-                sessions = chat_history.list_sessions()
+                sessions = session_store.list_sessions()
                 if not sessions:
                     print("📭 暂无历史 session 记录，无需清空。\n")
                 else:
                     confirm = input(f"⚠️  即将清空全部 {len(sessions)} 个 session 记录（不可恢复），确认请输入 yes：").strip().lower()
                     if confirm == "yes":
-                        count = chat_history.clean_all_sessions()
+                        count = session_store.clean_all_sessions()
                         # 当前 Agent 的历史也已被清除，重建一个新 session
-                        agent = handlers.make_agent(chat_history, skills_map, thinking_cfg, SYSTEM_PROMPT, user_memory=user_memory)
+                        agent = handlers.make_agent(session_store, skills_map, thinking_cfg, SYSTEM_PROMPT, user_memory=user_memory)
                         print(f"🗑️  已清空全部 {count} 个 session 记录。新 Session: {agent.session_id}\n")
                     else:
                         print("已取消。\n")
@@ -365,7 +365,7 @@ def main() -> None:
                 skill_cmds = {f"/{name}": info.body for name, info in skills_map.items()}
                 # 重建 Agent，使 system_prompt 中的 catalog 立即刷新
                 agent = handlers.make_agent(
-                    chat_history, skills_map, thinking_cfg,
+                    session_store, skills_map, thinking_cfg,
                     SYSTEM_PROMPT, session_id=agent.session_id,
                     user_memory=user_memory,
                 )
@@ -380,7 +380,7 @@ def main() -> None:
                 if not save_arg:
                     print("⚠️  请指定文件名，例：/save my-chat\n")
                 else:
-                    handlers.save_history(chat_history, agent.session_id, save_arg)
+                    handlers.save_history(session_store, agent.session_id, save_arg)
                 continue
             case "/thinking":
                 think_tokens = (

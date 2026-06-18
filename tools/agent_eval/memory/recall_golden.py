@@ -98,7 +98,7 @@ def _build_system_prompt(
                 store.add(text, source="manual")
             mgr = MemoryManager(
                 user_memory=store,
-                chat_history=MagicMock(),  # 不会用到
+                session_store=MagicMock(),  # 不会用到
                 session_id="eval-session",
                 llm_chat=MagicMock(),
             )

@@ -28,7 +28,7 @@ def _text_response(content: str) -> Any:
 def _mk_agent() -> Agent:
     mock_history = MagicMock()
     mock_history.load_last_n_messages.return_value = []
-    return Agent(verbose=False, chat_history=mock_history, user_memory=None)
+    return Agent(verbose=False, session_store=mock_history, user_memory=None)
 
 
 # ── per-run 入参不污染实例状态 ───────────────────────────────────────────────
@@ -141,7 +141,7 @@ class TestConcurrentRunsIsolated:
         # 落库的 user 消息与各自 session_id 配对正确
         appended = {
             (call.args[0], call.args[1]["content"])
-            for call in agent._chat_history.append.call_args_list
+            for call in agent._session_store.append.call_args_list
             if call.args[1].get("role") == "user"
         }
         assert ("sid-A", "msg-A") in appended

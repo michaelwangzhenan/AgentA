@@ -19,7 +19,7 @@ def _make_fake_root(root: Path) -> None:
     (root / ".agenta" / "config_overrides.json").write_text('{"a":1}', encoding="utf-8")
 
     (root / "db" / "sqlite").mkdir(parents=True)
-    db = root / "db" / "sqlite" / "chat_history.db"
+    db = root / "db" / "sqlite" / "session.db"
     conn = sqlite3.connect(db)
     conn.execute("CREATE TABLE msg (id INTEGER, txt TEXT)")
     conn.execute("INSERT INTO msg VALUES (1, 'hello')")
@@ -41,7 +41,7 @@ def _make_fake_root(root: Path) -> None:
 
 def _fake_config(root: Path) -> SimpleNamespace:
     return SimpleNamespace(
-        MEMORY_DB_PATH=str(root / "db" / "sqlite" / "chat_history.db"),
+        MEMORY_DB_PATH=str(root / "db" / "sqlite" / "session.db"),
         AUTH_DB_PATH=str(root / "db" / "sqlite" / "auth.db"),  # 不存在 → 应跳过
         CHROMA_DB_PATH=str(root / "db" / "chroma"),
         BM25_INDEX_DIR=str(root / "db" / "bm25"),  # 不存在 → 应跳过
@@ -83,7 +83,7 @@ def test_roundtrip_restores_all(tmp_path):
     manifest = rb.read_manifest(zip_path)
     assert manifest["include_vectors"] is True
     arcs = {f["arc"] for f in manifest["files"]}
-    assert "db/sqlite/chat_history.db" in arcs
+    assert "db/sqlite/session.db" in arcs
     assert "db/chroma/chroma.sqlite3" in arcs
     assert ".env" in arcs and "ws.code-workspace" in arcs
     assert not any("auth.db" in a for a in arcs)  # 不存在的库不进 manifest
@@ -96,7 +96,7 @@ def test_roundtrip_restores_all(tmp_path):
     assert (dest / ".env").read_text(encoding="utf-8") == "OPENAI_API_KEY=secret\n"
     assert (dest / "tools" / "reports" / "security" / "r1.md").read_text(encoding="utf-8") == "report"
 
-    conn = sqlite3.connect(dest / "db" / "sqlite" / "chat_history.db")
+    conn = sqlite3.connect(dest / "db" / "sqlite" / "session.db")
     rows = conn.execute("SELECT txt FROM msg").fetchall()
     conn.close()
     assert rows == [("hello",)]

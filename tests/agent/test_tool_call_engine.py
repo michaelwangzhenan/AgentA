@@ -34,7 +34,7 @@ def _message(*tool_calls: Any) -> Any:
 
 def _mk_engine(events: EventBus | None = None) -> ToolCallEngine:
     return ToolCallEngine(
-        chat_history=MagicMock(),
+        session_store=MagicMock(),
         session_id="s1",
         skill_bodies={},
         verbose=False,

@@ -7,7 +7,7 @@ agent_commons —— 三种 Agent 实现共享的「公共代码」（Helper 层
 - `SYSTEM_PROMPT`            ：绝对系统指令常量（工具协议 / 引用规范 / 安全约束）
 - `TokenUsage`              ：单次 run() 的 token 统计 NamedTuple
 - `PlanAbortedByUser`       ：plan 审批被用户拒绝时抛出的异常
-- `get_shared_chat_history`：进程级共享 ChatHistoryStore（双检锁懒加载）
+- `get_shared_session_store`：进程级共享 SessionStore（双检锁懒加载）
 - `get_active_rules`        ：读当前用户 rules 文本
 - `build_active_study_plan_block`：渲染 `<active_study_plan>` system 块
 - `build_layered_system_prompt`  ：四层 system prompt 组装（base → rules → memory → study_plan）
@@ -24,7 +24,7 @@ from typing import Any, Callable, NamedTuple
 import src.config as _cfg
 from src.agent.core.memory_manager import MemoryManager
 from src.agent.core.rules_loader import build_rules_block
-from src.memory.chat_history import ChatHistoryStore
+from src.memory.session_store import SessionStore
 from src.memory.learning_plan_store import get_shared_store as _get_shared_learning_plan_store
 from src.memory.user_memory import UserMemoryStore
 
@@ -42,19 +42,19 @@ class PlanAbortedByUser(Exception):
     """用户在 plan 审批 mode 下选择 no 时抛出，agent.run 接住 break loop。"""
 
 
-# 模块级共享 ChatHistoryStore 实例（单进程内所有 Agent 共享同一个 DB 连接，双检锁保护）
-_chat_history: ChatHistoryStore | None = None
-_chat_history_lock = threading.Lock()
+# 模块级共享 SessionStore 实例（单进程内所有 Agent 共享同一个 DB 连接，双检锁保护）
+_session_store: SessionStore | None = None
+_session_store_lock = threading.Lock()
 
 
-def get_shared_chat_history() -> ChatHistoryStore:
-    """获取模块级共享 ChatHistoryStore（双检锁，线程安全懒加载）。"""
-    global _chat_history
-    if _chat_history is None:
-        with _chat_history_lock:
-            if _chat_history is None:
-                _chat_history = ChatHistoryStore()
-    return _chat_history
+def get_shared_session_store() -> SessionStore:
+    """获取模块级共享 SessionStore（双检锁，线程安全懒加载）。"""
+    global _session_store
+    if _session_store is None:
+        with _session_store_lock:
+            if _session_store is None:
+                _session_store = SessionStore()
+    return _session_store
 
 
 def get_active_rules() -> str | None:
@@ -112,7 +112,7 @@ def build_layered_system_prompt(
     *,
     session_id: str,
     user_memory: UserMemoryStore | None,
-    chat_history: ChatHistoryStore,
+    session_store: SessionStore,
     llm_chat: Callable[..., Any],
 ) -> tuple[str, MemoryManager]:
     """四层 system prompt 组装（三实现共享的单一组装点）。
@@ -123,7 +123,7 @@ def build_layered_system_prompt(
     Returns:
         (system_content, memory_mgr)：memory_mgr 供调用方在产出最终答案后做 try_extract。
     """
-    memory_mgr = MemoryManager(user_memory, chat_history, session_id, llm_chat)
+    memory_mgr = MemoryManager(user_memory, session_store, session_id, llm_chat)
     system_content = base_system_prompt + build_rules_block(get_active_rules())
     system_content = memory_mgr.build_system_prompt(system_content)
     system_content = system_content + build_active_study_plan_block(session_id)

@@ -22,13 +22,13 @@ from sse_starlette.sse import EventSourceResponse
 import src.config as _cfg
 from src.agent.agent_api import AgentAPI
 from src.memory.user_context import use_user
-from src.api.deps import get_agent, get_chat_history, get_current_user, get_user_store
+from src.api.deps import get_agent, get_session_store, get_current_user, get_user_store
 from src.api.routes.auth import effective_llm_prefs
 from src.api.schemas.chat import ChatRequest, ChatResponse
 from src.llm import model_router
 from src.llm.model_router import RouteDecision
 from src.memory import semantic_cache
-from src.memory.chat_history import ChatHistoryStore
+from src.memory.session_store import SessionStore
 from src.memory.trace_store import TraceCollector, record_trace_safe
 from src.memory.usage_store import (
     cost_of,
@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _check_session_owner(store: ChatHistoryStore, session_id: str | None, user_id: int) -> None:
+def _check_session_owner(store: SessionStore, session_id: str | None, user_id: int) -> None:
     """若 session 已存在且不属于当前用户 → 403。新 session（不存在）放行。"""
     if not session_id:
         return
@@ -87,7 +87,7 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(text or "") // 4)
 
 
-def _is_fresh_session(history: ChatHistoryStore, session_id: str, user_id: int) -> bool:
+def _is_fresh_session(history: SessionStore, session_id: str, user_id: int) -> bool:
     """会话此前无消息 = 单轮起步，才允许语义缓存查询 / 写入。"""
     try:
         return not history.load_last_n_messages(session_id, n=1, user_id=user_id)
@@ -202,7 +202,7 @@ def chat(
     req: ChatRequest,
     agent: AgentAPI = Depends(get_agent),
     user: dict = Depends(get_current_user),
-    history: ChatHistoryStore = Depends(get_chat_history),
+    history: SessionStore = Depends(get_session_store),
     users: UserStore = Depends(get_user_store),
 ) -> ChatResponse:
     """单轮聊天：先查缓存 → 路由选模型 → Agent.run（带 fallback）→ 写缓存 + 记节省。
@@ -308,7 +308,7 @@ async def chat_stream(
     req: ChatRequest,
     agent: AgentAPI = Depends(get_agent),
     user: dict = Depends(get_current_user),
-    history: ChatHistoryStore = Depends(get_chat_history),
+    history: SessionStore = Depends(get_session_store),
     users: UserStore = Depends(get_user_store),
 ) -> EventSourceResponse:
     """SSE 流式聊天：Agent.run 扔 thread pool，事件经 asyncio.Queue 流给 SSE。

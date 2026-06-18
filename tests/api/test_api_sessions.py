@@ -1,7 +1,7 @@
 """Session 管理端点 UT —— list / create / rename / delete / get messages
 
-不走真 Agent；用临时 SQLite 文件构造独立 `ChatHistoryStore`。
-也顺便覆盖 `ChatHistoryStore.rename_session` 和 `create_empty_session`。
+不走真 Agent；用临时 SQLite 文件构造独立 `SessionStore`。
+也顺便覆盖 `SessionStore.rename_session` 和 `create_empty_session`。
 """
 
 from __future__ import annotations
@@ -12,16 +12,16 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from src.api.deps import get_chat_history
+from src.api.deps import get_session_store
 from src.api.main import app
-from src.memory.chat_history import ChatHistoryStore
+from src.memory.session_store import SessionStore
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> Iterator[ChatHistoryStore]:
+def store(tmp_path: Path) -> Iterator[SessionStore]:
     """每个测试一份独立 SQLite 文件 + Store 实例（互不污染）。"""
-    db = tmp_path / "test_chat_history.db"
-    s = ChatHistoryStore(str(db))
+    db = tmp_path / "test_session.db"
+    s = SessionStore(str(db))
     yield s
     s.close()
 
@@ -33,8 +33,8 @@ def _clear_overrides() -> Iterator[None]:
 
 
 @pytest.fixture
-def client(store: ChatHistoryStore) -> TestClient:
-    app.dependency_overrides[get_chat_history] = lambda: store
+def client(store: SessionStore) -> TestClient:
+    app.dependency_overrides[get_session_store] = lambda: store
     return TestClient(app)
 
 
@@ -134,14 +134,14 @@ def test_delete_nonexistent_session_returns_deleted_false(client: TestClient) ->
 # ─── GET /api/sessions/{id}/messages ─────────────────────────────────────
 
 
-def test_get_messages_empty(client: TestClient, store: ChatHistoryStore) -> None:
+def test_get_messages_empty(client: TestClient, store: SessionStore) -> None:
     created = client.post("/api/sessions").json()
     r = client.get(f"/api/sessions/{created['id']}/messages")
     assert r.status_code == 200
     assert r.json() == {"messages": []}
 
 
-def test_get_messages_returns_appended(client: TestClient, store: ChatHistoryStore) -> None:
+def test_get_messages_returns_appended(client: TestClient, store: SessionStore) -> None:
     """直接通过 store.append 写两条 message，再用 API 拉出来。"""
     created = client.post("/api/sessions").json()
     sid = created["id"]
@@ -169,7 +169,7 @@ def test_get_messages_nonexistent_session_returns_empty(client: TestClient) -> N
 # ─── POST /api/sessions/{id}/truncate ────────────────────────────────────
 
 
-def _seed_turns(store: ChatHistoryStore, sid: str, n: int) -> None:
+def _seed_turns(store: SessionStore, sid: str, n: int) -> None:
     """写 n 轮对话：u0,a0,u1,a1,...（共 2n 行）"""
     for i in range(n):
         store.append(sid, {"role": "user", "content": f"q{i}"})
@@ -177,7 +177,7 @@ def _seed_turns(store: ChatHistoryStore, sid: str, n: int) -> None:
 
 
 def test_truncate_drops_from_user_message_and_after(
-    client: TestClient, store: ChatHistoryStore
+    client: TestClient, store: SessionStore
 ) -> None:
     sid = client.post("/api/sessions").json()["id"]
     _seed_turns(store, sid, 3)  # u0 a0 u1 a1 u2 a2
@@ -191,7 +191,7 @@ def test_truncate_drops_from_user_message_and_after(
 
 
 def test_truncate_first_user_message_clears_all_messages(
-    client: TestClient, store: ChatHistoryStore
+    client: TestClient, store: SessionStore
 ) -> None:
     sid = client.post("/api/sessions").json()["id"]
     _seed_turns(store, sid, 2)  # 4 行
@@ -202,7 +202,7 @@ def test_truncate_first_user_message_clears_all_messages(
 
 
 def test_truncate_out_of_range_index_deletes_nothing(
-    client: TestClient, store: ChatHistoryStore
+    client: TestClient, store: SessionStore
 ) -> None:
     sid = client.post("/api/sessions").json()["id"]
     _seed_turns(store, sid, 1)  # u0 a0
@@ -218,11 +218,11 @@ def test_truncate_negative_index_returns_422(client: TestClient) -> None:
     assert r.status_code == 422  # 请求模型 ge=0 校验
 
 
-# ─── ChatHistoryStore 方法本身（被上面的端点测覆盖，这里再直接测细节）──
+# ─── SessionStore 方法本身（被上面的端点测覆盖，这里再直接测细节）──
 
 
 def test_store_truncate_positions_by_user_ordinal_with_interleaved_rows(
-    store: ChatHistoryStore,
+    store: SessionStore,
 ) -> None:
     """中间夹多条 assistant 行，仍按 user 序号（而非行序号）定位截断点。"""
     sid = "s-trunc"
@@ -238,7 +238,7 @@ def test_store_truncate_positions_by_user_ordinal_with_interleaved_rows(
     assert [m["content"] for m in store.load(sid)] == ["u0", "a0a", "a0b"]
 
 
-def test_store_truncate_negative_index_noop(store: ChatHistoryStore) -> None:
+def test_store_truncate_negative_index_noop(store: SessionStore) -> None:
     sid = "s-neg"
     store.create_empty_session(sid)
     store.append(sid, {"role": "user", "content": "u0"})
@@ -246,10 +246,10 @@ def test_store_truncate_negative_index_noop(store: ChatHistoryStore) -> None:
     assert len(store.load(sid)) == 1
 
 
-def test_store_rename_returns_false_when_not_exist(store: ChatHistoryStore) -> None:
+def test_store_rename_returns_false_when_not_exist(store: SessionStore) -> None:
     assert store.rename_session("not-exist", "new") is False
 
 
-def test_store_create_empty_idempotent(store: ChatHistoryStore) -> None:
+def test_store_create_empty_idempotent(store: SessionStore) -> None:
     assert store.create_empty_session("s1") is True
     assert store.create_empty_session("s1") is False

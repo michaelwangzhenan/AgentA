@@ -79,7 +79,7 @@ def test_prune_rejects_zero_days(usage_db):
 
 @pytest.fixture
 def chat_db(tmp_path, monkeypatch):
-    db = tmp_path / "chat_history.db"
+    db = tmp_path / "session.db"
     _mk(
         db,
         [
@@ -110,7 +110,7 @@ def test_purge_user_preview_lists_rows(chat_db):
 
 
 def test_purge_user_all_cascade(chat_db):
-    maintain.purge_user(1, [{"db": "chat_history", "table": "sessions", "all": True, "rowids": []}])
+    maintain.purge_user(1, [{"db": "session", "table": "sessions", "all": True, "rowids": []}])
     conn = sqlite3.connect(chat_db)
     assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1  # s2 留存
     assert conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 1  # s2 的消息留存
@@ -122,7 +122,7 @@ def test_purge_user_selected_rowids_cascade(chat_db):
     pre = maintain.purge_user_preview(1)
     sess = next(t for t in pre["tables"] if t["table"] == "sessions")
     rid = sess["rows"][0]["rowid"]
-    out = maintain.purge_user(1, [{"db": "chat_history", "table": "sessions", "all": False, "rowids": [rid]}])
+    out = maintain.purge_user(1, [{"db": "session", "table": "sessions", "all": False, "rowids": [rid]}])
     by = {i["table"]: i["deleted"] for i in out["items"]}
     assert by["sessions"] == 1
     assert by["messages"] == 2
@@ -132,7 +132,7 @@ def test_purge_user_selected_rowids_cascade(chat_db):
 
 
 def test_vacuum_runs(chat_db):
-    out = maintain.vacuum("chat_history")
+    out = maintain.vacuum("session")
     assert out["results"][0]["ok"] is True
 
 

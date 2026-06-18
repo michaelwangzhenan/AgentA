@@ -71,7 +71,7 @@ class SRSStore:
     命名约定：数据存储用 `*Store` 后缀；公式 / 调度逻辑放 `*_scheduler.py` 助手模块。
 
     线程安全：连接以 `check_same_thread=False` 跨线程共享，所有读写经 `threading.Lock`
-    串行化（与 `ChatHistoryStore` / `UserStore` 一致）。进程级单例在 Web 线程池里被多
+    串行化（与 `SessionStore` / `UserStore` 一致）。进程级单例在 Web 线程池里被多
     请求并发访问时安全。
     """
 

@@ -1,5 +1,5 @@
 """
-langchain_history —— ChatHistoryStore ↔ LangChain 消息桥
+langchain_history —— SessionStore ↔ LangChain 消息桥
 
 提供两类能力（均为 LangChain 子实现专用，故文件以 langchain 命名）：
 1. `SQLiteChatMessageHistory`：BaseChatMessageHistory 适配（保留向后兼容，少量代码仍 import）。
@@ -17,11 +17,11 @@ from typing import Any, List
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
-from src.memory.chat_history import ChatHistoryStore
+from src.memory.session_store import SessionStore
 
 
 def to_lc_messages(raw: list[dict[str, Any]]) -> list[BaseMessage]:
-    """把 ChatHistoryStore 的 dict 历史转换为 LangChain BaseMessage 列表。
+    """把 SessionStore 的 dict 历史转换为 LangChain BaseMessage 列表。
 
     仅保留 user / assistant 正文：
     - system 不进历史（system_prompt 单独拼接）；
@@ -40,14 +40,14 @@ def to_lc_messages(raw: list[dict[str, Any]]) -> list[BaseMessage]:
 
 
 def load_truncated_lc_messages(
-    chat_history: ChatHistoryStore,
+    session_store: SessionStore,
     session_id: str,
     max_history_turns: int,
 ) -> list[BaseMessage]:
     """复用公共层 `HistoryManager` 截断历史，再转 LangChain 消息（不含本轮 user）。"""
     from src.agent.core.history_manager import HistoryManager
 
-    raw = HistoryManager(chat_history, session_id, max_history_turns).load_truncated()
+    raw = HistoryManager(session_store, session_id, max_history_turns).load_truncated()
     return to_lc_messages(raw)
 
 
@@ -56,7 +56,7 @@ class SQLiteChatMessageHistory(BaseChatMessageHistory):
 
     def __init__(self, session_id: str, db_path: str | None = None):
         self._session_id = session_id
-        self._history = ChatHistoryStore(db_path=db_path) if db_path else ChatHistoryStore()
+        self._history = SessionStore(db_path=db_path) if db_path else SessionStore()
 
     @property
     def messages(self) -> List[BaseMessage]:

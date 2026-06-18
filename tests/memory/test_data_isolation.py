@@ -11,7 +11,7 @@ import pytest
 
 import src.config as config
 from src.memory.user_context import current_user_id, use_user
-from src.memory.chat_history import ChatHistoryStore
+from src.memory.session_store import SessionStore
 from src.memory.learning_plan_store import LearningPlanStore
 from src.memory.quiz_store import QuizStore
 from src.memory.srs_store import SRSStore
@@ -60,7 +60,7 @@ class TestLlmPrefsOverride:
 
 class TestChatHistoryIsolation:
     def test_sessions_scoped_by_user(self, tmp_path: Path) -> None:
-        store = ChatHistoryStore(db_path=str(tmp_path / "chat.db"))
+        store = SessionStore(db_path=str(tmp_path / "chat.db"))
         store.create_empty_session("s-a", "A 的会话", user_id=1)
         store.create_empty_session("s-b", "B 的会话", user_id=2)
 
@@ -71,7 +71,7 @@ class TestChatHistoryIsolation:
         store.close()
 
     def test_owns_session(self, tmp_path: Path) -> None:
-        store = ChatHistoryStore(db_path=str(tmp_path / "chat.db"))
+        store = SessionStore(db_path=str(tmp_path / "chat.db"))
         store.create_empty_session("s-a", "", user_id=1)
         assert store.owns_session("s-a", user_id=1) is True
         assert store.owns_session("s-a", user_id=2) is False
@@ -151,8 +151,8 @@ class TestSRSIsolation:
 class TestCascadeDeleteByUser:
     """admin 删用户时各 store 的 delete_all_for_user 只清目标用户，不误伤他人。"""
 
-    def test_chat_history(self, tmp_path: Path) -> None:
-        store = ChatHistoryStore(db_path=str(tmp_path / "chat.db"))
+    def test_session_store(self, tmp_path: Path) -> None:
+        store = SessionStore(db_path=str(tmp_path / "chat.db"))
         store.create_empty_session("s-a", "A", user_id=1)
         store.append("s-a", {"role": "user", "content": "hi"}, user_id=1)
         store.create_empty_session("s-b", "B", user_id=2)

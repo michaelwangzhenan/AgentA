@@ -67,7 +67,7 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(override=True)
 
 from src.cli import handlers  # noqa: E402
-from src.memory.chat_history import ChatHistoryStore  # noqa: E402
+from src.memory.session_store import SessionStore  # noqa: E402
 from src.memory.user_memory import UserMemoryStore  # noqa: E402
 
 
@@ -250,7 +250,7 @@ def _dump_report(results: dict[str, list[dict]], env: dict[str, str]) -> Path:
 
 # ── target: session ────────────────────────────────────────────────────────
 
-def _seed_sessions(store: ChatHistoryStore, n: int) -> None:
+def _seed_sessions(store: SessionStore, n: int) -> None:
     """生成 n 个 session，首问内容含 ReAct/RAG/Memory 关键词便于 keyword 过滤测试。"""
     for i in range(n):
         sid = f"sess-{i:06d}-{'foo' if i % 3 == 0 else 'bar'}"
@@ -263,7 +263,7 @@ def _bench_session_size(size: int) -> dict[str, float]:
     # 句柄仍持有 perf.db，TemporaryDirectory.__exit__ 走 rmtree 会在 Windows 上
     # 抛 WinError 32（文件被占用），把真异常埋掉。
     with tempfile.TemporaryDirectory() as td:
-        store = ChatHistoryStore(db_path=str(Path(td) / "perf.db"))
+        store = SessionStore(db_path=str(Path(td) / "perf.db"))
         try:
             _seed_sessions(store, size)
 

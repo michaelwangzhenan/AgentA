@@ -6,7 +6,7 @@ ToolCallEngine —— 工具调用编排（Helper 层）
 - 逐个执行 tool_call → 拿到 ToolResult
 - DB 写入"干净内容"（无引导提示），messages 注入"含引导提示"版本
   · 这种"写历史 vs 进 LLM context"的分支属于业务策略，是 Helper 的核心价值
-- 全程串到 ChatHistoryStore（依赖层），不感知 thinking / streaming 等其它 loop 状态
+- 全程串到 SessionStore（依赖层），不感知 thinking / streaming 等其它 loop 状态
 
 被三种 Agent 实现共享：Python / LangChain / AutoGPT。
 """
@@ -29,7 +29,7 @@ from src.agent.core.event_bus import (
     tool_progress_scope,
 )
 from src.agent.tools import execute_tool, ToolResult
-from src.memory.chat_history import ChatHistoryStore
+from src.memory.session_store import SessionStore
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -59,7 +59,7 @@ class ToolCallEngine:
     工具调用编排 helper。
 
     Args:
-        chat_history:     ChatHistoryStore 实例（CRUD 依赖）。
+        session_store:    SessionStore 实例（CRUD 依赖）。
         session_id:       当前会话 ID。
         skill_bodies:     已加载的 skill 正文映射，传给 execute_tool 用于 load_skill。
         verbose:          是否打印调用 / 结果预览（CLI 调试用）。
@@ -70,7 +70,7 @@ class ToolCallEngine:
 
     def __init__(
         self,
-        chat_history: ChatHistoryStore,
+        session_store: SessionStore,
         session_id: str,
         skill_bodies: dict[str, str],
         verbose: bool = False,
@@ -78,7 +78,7 @@ class ToolCallEngine:
         citation_builder: "CitationBuilder | None" = None,
         approval_fn: "Callable[[dict[str, Any]], str] | None" = None,
     ) -> None:
-        self._chat_history = chat_history
+        self._session_store = session_store
         self._session_id = session_id
         self._skill_bodies = skill_bodies
         self._verbose = verbose
@@ -98,13 +98,13 @@ class ToolCallEngine:
         assistant_msg = self.assistant_message(message)
         # thinking provider 的多轮工具调用：本轮 reasoning_content 必须随 assistant 消息回传，
         # 否则部分 provider（如 kimi）下一轮直接 400。只挂到内存 messages 供后续轮次发送，
-        # 不写入 chat_history（thinking 内容不持久化，防 prompt injection）。
+        # 不写入 session_store（thinking 内容不持久化，防 prompt injection）。
         reasoning = getattr(message, "reasoning_content", None)
         if reasoning:
             messages.append({**assistant_msg, "reasoning_content": reasoning})
         else:
             messages.append(assistant_msg)
-        self._chat_history.append(self._session_id, assistant_msg)
+        self._session_store.append(self._session_id, assistant_msg)
 
         parsed = [
             (tc, tc.function.name, json.loads(tc.function.arguments))
@@ -214,14 +214,14 @@ class ToolCallEngine:
 
         # DB 写入干净内容（无引导提示），避免污染历史。
         # 先写入 tool 结果再调 plan 审批 hook，保证 PlanAbortedByUser
-        # 抛出时 chat_history 一致性（assistant_msg 已写入 + tool_msg 已写入）。
+        # 抛出时 session_store 一致性（assistant_msg 已写入 + tool_msg 已写入）。
         db_content = result.to_llm_str()
         db_msg: dict[str, Any] = {
             "role": "tool",
             "tool_call_id": tool_call.id,
             "content": db_content,
         }
-        self._chat_history.append(self._session_id, db_msg)
+        self._session_store.append(self._session_id, db_msg)
 
         # 当前轮 messages 注入含引导提示的版本，引导 LLM 下一步决策
         llm_content = db_content
@@ -236,7 +236,7 @@ class ToolCallEngine:
         # plan tool 调用成功后叠加发 plan_* 事件，供 CLI 渲染 plan checkbox 进度。
         # reconstruct_from_messages 此时 messages 已含本轮 assistant tool_calls，
         # 所以 update_step 状态即得最新 plan 视图。make_plan 分支内会调 approval_fn，
-        # 用户拒绝即抛 PlanAbortedByUser；此时 chat_history 已含 assistant_msg + tool_msg
+        # 用户拒绝即抛 PlanAbortedByUser；此时 session_store 已含 assistant_msg + tool_msg
         # （一致性保住），让上游 agent.run 接住异常后追加 cancel_msg 即可。
         if self._events is not None and result.status == "ok":
             self._maybe_publish_plan_events(tool_name, tool_args, messages)

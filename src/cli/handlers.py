@@ -12,7 +12,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import src.config as config
-from src.memory.chat_history import ChatHistoryStore
+from src.memory.session_store import SessionStore
 from src.memory.learning_plan_store import LearningPlanStore
 from src.memory.quiz_store import QuizStore
 from src.memory.srs_store import SRSStore
@@ -59,20 +59,20 @@ def _conversation_messages(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
-def quit_sys(chat_history: ChatHistoryStore, user_memory: UserMemoryStore | None) -> None:
-    chat_history.close()
+def quit_sys(session_store: SessionStore, user_memory: UserMemoryStore | None) -> None:
+    session_store.close()
     if user_memory is not None:
         user_memory.close()
     sys.exit(0)
 
 def save_history(
-    chat_history: ChatHistoryStore,
+    session_store: SessionStore,
     session_id: str,
     filename: str,
     out: OutputFn = _stdout,
 ) -> None:
     """将当前 session 的 user/assistant 对话导出到 history/<filename>.md。"""
-    msgs = _conversation_messages(chat_history.load(session_id))
+    msgs = _conversation_messages(session_store.load(session_id))
     if not msgs:
         out("📭 当前 session 暂无对话历史，无可导出内容。\n")
         return
@@ -113,12 +113,12 @@ def save_history(
 
 
 def show_history(
-    chat_history: ChatHistoryStore,
+    session_store: SessionStore,
     session_id: str,
     out: OutputFn = _stdout,
 ) -> None:
     """展示当前 session 的历史对话摘要（角色 + 内容前 60 字）。"""
-    msgs = _conversation_messages(chat_history.load(session_id))
+    msgs = _conversation_messages(session_store.load(session_id))
     if not msgs:
         out("📭 当前 session 暂无对话历史。\n")
         return
@@ -156,7 +156,7 @@ def _format_relative_time(iso_ts: str) -> str:
 
 
 def list_sessions(
-    chat_history: ChatHistoryStore,
+    session_store: SessionStore,
     query: str | None = None,
     current_session_id: str | None = None,
     out: OutputFn = _stdout,
@@ -164,12 +164,12 @@ def list_sessions(
     """列出历史 session，可选关键词过滤与当前 session 高亮。
 
     Args:
-        chat_history: 存储依赖。
+        session_store: 存储依赖。
         query: 可选搜索词，按 session_id 前缀 OR first_user_msg LIKE 过滤。
         current_session_id: 若提供，在列表中用 "▶" 标记当前活跃 session。
         out: 输出适配器，便于测试注入。
     """
-    sessions = chat_history.list_sessions(query=query)
+    sessions = session_store.list_sessions(query=query)
     if not sessions:
         if query:
             out(f"📭 没有匹配 {query!r} 的 session。\n")
@@ -192,7 +192,7 @@ def list_sessions(
 
 
 def make_agent(
-    chat_history: ChatHistoryStore,
+    session_store: SessionStore,
     skills_map: "dict[str, SkillInfo]",
     thinking_cfg: "ThinkingConfig",
     system_prompt: str,
@@ -205,7 +205,7 @@ def make_agent(
         from src.agent.autogpt_agent import AutoGPTAgent
         return AutoGPTAgent(
             verbose=verbose,
-            chat_history=chat_history,
+            session_store=session_store,
             session_id=session_id,
             system_prompt=system_prompt,
             skills=skills_map or None,
@@ -216,7 +216,7 @@ def make_agent(
         from src.agent.langchain_agent import LangChainAgent
         return LangChainAgent(
             verbose=verbose,
-            chat_history=chat_history,
+            session_store=session_store,
             session_id=session_id,
             system_prompt=system_prompt,
             skills=skills_map or None,
@@ -226,7 +226,7 @@ def make_agent(
     from src.agent.agent import Agent
     return Agent(
         verbose=verbose,
-        chat_history=chat_history,
+        session_store=session_store,
         session_id=session_id,
         system_prompt=system_prompt,
         skills=skills_map or None,
@@ -451,7 +451,7 @@ def handle_thinking_cfg(
 
 
 def switch_session(
-    chat_history: ChatHistoryStore,
+    session_store: SessionStore,
     session_arg: str,
     default_system_prompt: str,
     skills_map: "dict[str, SkillInfo]",
@@ -473,7 +473,7 @@ def switch_session(
         return None
 
     agent = make_agent(
-        chat_history=chat_history,
+        session_store=session_store,
         skills_map=skills_map,
         thinking_cfg=thinking_cfg,
         system_prompt=default_system_prompt,
@@ -481,7 +481,7 @@ def switch_session(
         user_memory=user_memory,
         verbose=verbose,
     )
-    history = chat_history.load(session_arg)
+    history = session_store.load(session_arg)
     msg_count = len([m for m in history if m["role"] != "system"])
     out(f"✅ 已切换到 Session: {session_arg}（共 {msg_count} 条历史消息）")
 

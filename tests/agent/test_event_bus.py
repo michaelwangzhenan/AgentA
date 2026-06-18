@@ -41,7 +41,7 @@ def _mk_agent(on_thinking_chunk=None) -> Agent:
     mock_history.load_last_n_messages.return_value = []
     return Agent(
         verbose=False,
-        chat_history=mock_history,
+        session_store=mock_history,
         user_memory=None,
         on_thinking_chunk=on_thinking_chunk,
     )

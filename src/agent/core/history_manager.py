@@ -1,8 +1,8 @@
 """
 HistoryManager —— 历史消息加载与截断策略（Helper 层）
 
-职责：封装"何时调 ChatHistoryStore CRUD、按什么策略截断、哪些消息要保护"的业务逻辑。
-ChatHistoryStore 本身只做 CRUD，不感知"轮（turn）/ skill_pair / system 拼接"等 loop 语义。
+职责：封装"何时调 SessionStore CRUD、按什么策略截断、哪些消息要保护"的业务逻辑。
+SessionStore 本身只做 CRUD，不感知"轮（turn）/ skill_pair / system 拼接"等 loop 语义。
 
 被三种 Agent 实现共享：Python / LangChain / AutoGPT。
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from src.memory.chat_history import ChatHistoryStore
+from src.memory.session_store import SessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -24,24 +24,24 @@ class HistoryManager:
     历史消息管理 helper。
 
     Args:
-        chat_history:       底层 ChatHistoryStore 实例（CRUD 依赖）。
+        session_store:      底层 SessionStore 实例（CRUD 依赖）。
         session_id:         当前会话 ID。
         max_history_turns:  保留最近 N 轮（一轮以 user 消息为起点）。
     """
 
     def __init__(
         self,
-        chat_history: ChatHistoryStore,
+        session_store: SessionStore,
         session_id: str,
         max_history_turns: int,
     ) -> None:
-        self._chat_history = chat_history
+        self._session_store = session_store
         self._session_id = session_id
         self._max_history_turns = max_history_turns
 
     def load_truncated(self) -> list[dict[str, Any]]:
         """
-        从 ChatHistoryStore 加载历史，并按 `max_history_turns` 截断。
+        从 SessionStore 加载历史，并按 `max_history_turns` 截断。
 
         截断策略：
           1. SQL 层粗粒度过滤上限 = `max_history_turns * 8`，避免全量加载长 session
@@ -51,7 +51,7 @@ class HistoryManager:
         """
         limit = self._max_history_turns * _HISTORY_FETCH_MULTIPLIER
         history = [
-            m for m in self._chat_history.load_last_n_messages(self._session_id, limit)
+            m for m in self._session_store.load_last_n_messages(self._session_id, limit)
             if m["role"] != "system"
         ]
 

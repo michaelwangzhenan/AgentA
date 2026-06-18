@@ -11,7 +11,7 @@ Auto-GPT 风格 Agent —— Plan → Execute → Review 三阶段循环
     2. [Execute] 对每个任务运行迷你 ReAct 子循环（最多 MAX_TASK_TOOL_ROUNDS 轮工具调用），
                  子循环复用公共层 `ToolCallEngine`（工具编排 + 引用编号 + plan 事件）
     3. [Review]  汇总所有任务结果，按「四层 system」拼接后 LLM 综合生成最终回答 + 引用块
-    4. [Persist] 仅将 user + 最终 assistant 消息写入 ChatHistoryStore SQLite
+    4. [Persist] 仅将 user + 最终 assistant 消息写入 SessionStore SQLite
 
 与 design.md §5 对齐：复用公共层（`src/agent/core/*`）helper 组装 loop，差异只在三阶段编排。
 本文件为 AutoGPT 实现专属代码（含 `_AutoGPTEphemeralHistory` 等 autogpt 命名隔离件）；
@@ -60,7 +60,7 @@ from src.agent.core.tool_call_engine import ToolCallEngine
 from src.agent.tools import get_tools
 from src.agent.core.skill_loader import SkillInfo, build_skill_catalog
 from src.llm.provider import chat, call_with_thinking
-from src.memory.chat_history import ChatHistoryStore
+from src.memory.session_store import SessionStore
 from src.memory.user_memory import UserMemoryStore
 import src.config as _cfg
 
@@ -160,11 +160,11 @@ _REVIEW_USER_TMPL = """用户目标：{goal}
 class _AutoGPTEphemeralHistory:
     """AutoGPT 专属：Execute 子循环用的内存临时历史。
 
-    `ToolCallEngine` 会把每轮 assistant / tool 中间消息 `append` 到 chat_history。
+    `ToolCallEngine` 会把每轮 assistant / tool 中间消息 `append` 到 session_store。
     AutoGPT 约定「只持久化 user + 最终 assistant」，因此子循环改用本内存对象承接
-    中间消息，`run()` 结束即随对象一起丢弃，绝不污染真实 ChatHistoryStore。
+    中间消息，`run()` 结束即随对象一起丢弃，绝不污染真实 SessionStore。
 
-    仅实现 `ToolCallEngine` 用到的 `append`；其余 ChatHistoryStore 方法不需要。
+    仅实现 `ToolCallEngine` 用到的 `append`；其余 SessionStore 方法不需要。
     """
 
     def __init__(self) -> None:
@@ -194,7 +194,7 @@ class AutoGPTAgent:
         system_prompt: str = SYSTEM_PROMPT,
         verbose: bool = True,
         session_id: str | None = None,
-        chat_history: ChatHistoryStore | None = None,
+        session_store: SessionStore | None = None,
         skills: dict[str, SkillInfo] | None = None,
         thinking_config: ThinkingConfig | None = None,
         user_memory: UserMemoryStore | None = None,
@@ -216,9 +216,9 @@ class AutoGPTAgent:
             self._skill_bodies = {name: info.body for name, info in skills.items()}
             self._system_prompt = self._system_prompt + build_skill_catalog(skills)
 
-        # ChatHistoryStore：支持外部注入（便于测试 mock），默认懒加载全局实例
-        self._chat_history: ChatHistoryStore = (
-            chat_history if chat_history is not None else self._get_shared_chat_history()
+        # SessionStore：支持外部注入（便于测试 mock），默认懒加载全局实例
+        self._session_store: SessionStore = (
+            session_store if session_store is not None else self._get_shared_session_store()
         )
 
         # 用户记忆：支持外部注入，默认复用模块级共享实例（与 Python Agent 一致）
@@ -332,7 +332,7 @@ class AutoGPTAgent:
             print("[AutoGPT] 综合子任务结果，生成最终回答...\n")
         final_answer = self._review(user_input, task_results)
 
-        # Persist to ChatHistoryStore（只写 user + 最终 assistant）
+        # Persist to SessionStore（只写 user + 最终 assistant）
         self._persist(user_input, final_answer)
 
         # Record token usage
@@ -550,7 +550,7 @@ class AutoGPTAgent:
         保证 IMP_METHOD=AUTOGPT 与 PYTHON 的偏好 / 记忆 / 学习计划注入行为一致。
         """
         base = self._system_prompt + build_rules_block(_get_active_rules())
-        mem_mgr = MemoryManager(self._user_memory, self._chat_history, self.session_id, chat)
+        mem_mgr = MemoryManager(self._user_memory, self._session_store, self.session_id, chat)
         base = mem_mgr.build_system_prompt(base)
         base = base + build_active_study_plan_block(self.session_id)
         return base
@@ -592,17 +592,17 @@ class AutoGPTAgent:
     # ── 内部：辅助方法 ────────────────────────────────────────────────────────
 
     @staticmethod
-    def _get_shared_chat_history() -> ChatHistoryStore:
-        """懒加载全局共享 ChatHistoryStore（复用 agent.py 的同一进程级实例）。"""
-        from src.agent.agent import _get_shared_chat_history
-        return _get_shared_chat_history()
+    def _get_shared_session_store() -> SessionStore:
+        """懒加载全局共享 SessionStore（复用 agent.py 的同一进程级实例）。"""
+        from src.agent.agent import _get_shared_session_store
+        return _get_shared_session_store()
 
     def _build_history_summary(self) -> str:
         """
         加载最近若干轮历史，压缩为文本摘要供 Plan 阶段参考。
         只取 user / assistant 角色，忽略 tool 消息，限制总字符。
         """
-        raw = self._chat_history.load_last_n_messages(
+        raw = self._session_store.load_last_n_messages(
             self.session_id, _HISTORY_FETCH_LIMIT
         )
         lines: list[str] = []
@@ -617,12 +617,12 @@ class AutoGPTAgent:
         return "\n".join(lines[-20:])
 
     def _persist(self, user_input: str, final_answer: str) -> None:
-        """将 user + 最终 assistant 消息写入 ChatHistoryStore SQLite。"""
-        self._chat_history.append(
+        """将 user + 最终 assistant 消息写入 SessionStore SQLite。"""
+        self._session_store.append(
             self.session_id,
             {"role": "user", "content": user_input},
         )
-        self._chat_history.append(
+        self._session_store.append(
             self.session_id,
             {"role": "assistant", "content": final_answer},
         )
@@ -631,7 +631,7 @@ class AutoGPTAgent:
         """跨 session 用户记忆提取（复用 MemoryManager 节流策略）。user_memory 为 None 时 no-op。"""
         if self._user_memory is None:
             return
-        mem_mgr = MemoryManager(self._user_memory, self._chat_history, self.session_id, chat)
+        mem_mgr = MemoryManager(self._user_memory, self._session_store, self.session_id, chat)
         mem_mgr.try_extract(user_input, final_answer)
 
     def _accumulate_usage(self, response: Any) -> None:

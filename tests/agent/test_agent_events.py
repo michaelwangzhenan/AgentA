@@ -59,7 +59,7 @@ def _tool_call_response(name: str, args: dict, call_id: str = "c1") -> Any:
 def _mk_agent() -> Agent:
     mock_history = MagicMock()
     mock_history.load_last_n_messages.return_value = []
-    return Agent(verbose=False, chat_history=mock_history, user_memory=None)
+    return Agent(verbose=False, session_store=mock_history, user_memory=None)
 
 
 # ── 直接回答路径：info → final_answer ──────────────────────────────────────

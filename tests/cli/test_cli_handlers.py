@@ -15,7 +15,7 @@ from src.cli.handlers import (
     _render_plan_step_end,
     _sanitize_cli_text,
 )
-from src.memory.chat_history import ChatHistoryStore
+from src.memory.session_store import SessionStore
 
 
 def test_sanitize_cli_text_strips_carriage_returns() -> None:
@@ -130,8 +130,8 @@ class TestFormatRelativeTime:
 # ── list_sessions 输出强化 ───────────────────────────────────────────────────
 
 @pytest.fixture
-def store(tmp_path: Path) -> ChatHistoryStore:
-    db = ChatHistoryStore(db_path=str(tmp_path / "handlers_test.db"))
+def store(tmp_path: Path) -> SessionStore:
+    db = SessionStore(db_path=str(tmp_path / "handlers_test.db"))
     yield db
     db.close()
 
@@ -139,22 +139,22 @@ def store(tmp_path: Path) -> ChatHistoryStore:
 class TestListSessionsOutput:
     """覆盖 list_sessions 输出的过滤、空态、高亮、query 标题。"""
 
-    def _seed(self, store: ChatHistoryStore) -> None:
+    def _seed(self, store: SessionStore) -> None:
         store.append("aaa11111-pre", {"role": "user", "content": "RAG 怎么做"})
         store.append("bbb22222-cur", {"role": "user", "content": "Agent ReAct"})
 
-    def test_empty_store_shows_empty_hint(self, store: ChatHistoryStore) -> None:
+    def test_empty_store_shows_empty_hint(self, store: SessionStore) -> None:
         lines: list[str] = []
         handlers.list_sessions(store, out=lines.append)
         assert any("暂无历史 session" in s for s in lines)
 
-    def test_query_no_match_mentions_query(self, store: ChatHistoryStore) -> None:
+    def test_query_no_match_mentions_query(self, store: SessionStore) -> None:
         self._seed(store)
         lines: list[str] = []
         handlers.list_sessions(store, query="nope-xxx", out=lines.append)
         assert any("没有匹配" in s and "nope-xxx" in s for s in lines)
 
-    def test_query_in_title_when_filtered(self, store: ChatHistoryStore) -> None:
+    def test_query_in_title_when_filtered(self, store: SessionStore) -> None:
         self._seed(store)
         lines: list[str] = []
         handlers.list_sessions(store, query="ReAct", out=lines.append)
@@ -164,7 +164,7 @@ class TestListSessionsOutput:
         assert "bbb22222" in full
         assert "aaa11111" not in full
 
-    def test_current_session_is_marked(self, store: ChatHistoryStore) -> None:
+    def test_current_session_is_marked(self, store: SessionStore) -> None:
         self._seed(store)
         lines: list[str] = []
         handlers.list_sessions(store, current_session_id="bbb22222-cur", out=lines.append)
@@ -181,7 +181,7 @@ class TestListSessionsOutput:
 class TestSwitchSessionPreview:
     """覆盖 switch_session 末尾的最近消息预览（B3）+ 无参防御。"""
 
-    def test_empty_arg_returns_none_with_hint(self, store: ChatHistoryStore) -> None:
+    def test_empty_arg_returns_none_with_hint(self, store: SessionStore) -> None:
         lines: list[str] = []
         # 用 patch 防止真的去构造 Agent（依赖 LLM provider 配置）
         with patch.object(handlers, "make_agent") as m:
@@ -193,7 +193,7 @@ class TestSwitchSessionPreview:
         assert m.call_count == 0
         assert any("/session 需要 session id" in s for s in lines)
 
-    def test_switch_appends_recent_preview(self, store: ChatHistoryStore) -> None:
+    def test_switch_appends_recent_preview(self, store: SessionStore) -> None:
         sid = "preview-sid"
         store.append(sid, {"role": "user", "content": "Q1"})
         store.append(sid, {"role": "assistant", "content": "A1"})
@@ -213,7 +213,7 @@ class TestSwitchSessionPreview:
         # Q1/A1 不应出现在预览（但切换信息行的 session 计数无关）
         assert "Q1" not in full and "A1" not in full
 
-    def test_switch_with_no_history_skips_preview(self, store: ChatHistoryStore) -> None:
+    def test_switch_with_no_history_skips_preview(self, store: SessionStore) -> None:
         lines: list[str] = []
         with patch.object(handlers, "make_agent", return_value=object()):
             handlers.switch_session(

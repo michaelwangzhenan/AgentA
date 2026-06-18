@@ -15,7 +15,7 @@ from typing import Any, Callable
 
 import src.config as _cfg
 from src.memory.user_context import current_user_id
-from src.memory.chat_history import ChatHistoryStore
+from src.memory.session_store import SessionStore
 from src.memory.user_memory import (
     UserMemoryStore,
     extract_memory_ops,
@@ -31,7 +31,7 @@ class MemoryManager:
 
     Args:
         user_memory:   UserMemoryStore 实例。`None` 表示功能禁用（USER_MEMORY_ENABLED=false）。
-        chat_history:  ChatHistoryStore 实例，用于提取记忆时加载最近若干轮上下文。
+        session_store: SessionStore 实例，用于提取记忆时加载最近若干轮上下文。
         session_id:    当前会话 ID。
         llm_chat:      LLM chat 调用函数（注入式依赖），便于测试 mock。
     """
@@ -39,12 +39,12 @@ class MemoryManager:
     def __init__(
         self,
         user_memory: UserMemoryStore | None,
-        chat_history: ChatHistoryStore,
+        session_store: SessionStore,
         session_id: str,
         llm_chat: Callable[..., Any],
     ) -> None:
         self._user_memory = user_memory
-        self._chat_history = chat_history
+        self._session_store = session_store
         self._session_id = session_id
         self._llm_chat = llm_chat
 
@@ -111,7 +111,7 @@ class MemoryManager:
         # 自动模式节流：消息数取模到点才继续；显式触发不受限
         if not is_explicit:
             every_n = max(1, _cfg.USER_MEMORY_EXTRACT_EVERY_N)
-            msg_count = self._chat_history.count_user_messages(self._session_id, user_id=uid)
+            msg_count = self._session_store.count_user_messages(self._session_id, user_id=uid)
             if msg_count == 0 or msg_count % every_n != 0:
                 logger.debug(
                     "[MemoryManager] auto-extract 节流：累计 user 消息 %d 非 %d 的整数倍，跳过",
@@ -179,7 +179,7 @@ class MemoryManager:
 
     def _load_recent_turns(self, uid: int) -> list[dict[str, Any]]:
         """加载最近 10 条非空 user/assistant 消息（供窗口拼接 + 实质性判定共用）。"""
-        recent = self._chat_history.load_last_n_messages(self._session_id, n=10, user_id=uid)
+        recent = self._session_store.load_last_n_messages(self._session_id, n=10, user_id=uid)
         return [
             m for m in recent
             if m.get("role") in ("user", "assistant") and m.get("content")

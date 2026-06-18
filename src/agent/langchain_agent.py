@@ -3,7 +3,7 @@ LangChainAgent —— 基于 LangChain 1.x `create_agent`（LangGraph）的 Agen
 
 设计取舍（design.md §5 / iter_a_LangChain.md）：
 - 与 Python `Agent` / `AutoGPTAgent` 共享公共层：tools / LLM provider / Skill loader /
-  ChatHistoryStore / HistoryManager / EventBus / CitationBuilder / MemoryManager /
+  SessionStore / HistoryManager / EventBus / CitationBuilder / MemoryManager /
   agent_commons（SYSTEM_PROMPT / 四层 prompt 组装 / plan 审批）；差异只在 loop 由
   LangChain 的 LangGraph runtime 接管。本文件 import 公共层，不反向依赖 Python 实现。
 - 用 langchain 1.x 的 `create_agent`（取代已被移除的 legacy `AgentExecutor`）。
@@ -32,7 +32,7 @@ from src.agent.core.agent_commons import (
     SYSTEM_PROMPT,
     TokenUsage,
     build_layered_system_prompt,
-    get_shared_chat_history,
+    get_shared_session_store,
     resolve_plan_approval,
 )
 from src.agent.core.citation_builder import CitationBuilder
@@ -171,7 +171,7 @@ class LangChainAgent:
         verbose: bool = True,
         session_id: str | None = None,
         max_history_turns: int = 20,
-        chat_history: Any = None,
+        session_store: Any = None,
         skills: dict | None = None,
         thinking_config: Any = None,
         user_memory: Any = None,
@@ -203,8 +203,8 @@ class LangChainAgent:
         # 每轮 run() 重置的 CitationBuilder（工具闭包通过 getter 读取）
         self._citation: CitationBuilder | None = None
 
-        # 共享 ChatHistoryStore（与 Python / AutoGPT 同源，避免跨实现污染）
-        self._chat_history = chat_history if chat_history is not None else get_shared_chat_history()
+        # 共享 SessionStore（与 Python / AutoGPT 同源，避免跨实现污染）
+        self._session_store = session_store if session_store is not None else get_shared_session_store()
 
         # 构造 LLM（streaming 驱动 token_chunk；thinking best-effort）+ tools（动态全覆盖）
         self._llm = build_chat_model(streaming=True, thinking_cfg=self.thinking_cfg)
@@ -245,12 +245,12 @@ class LangChainAgent:
             self._system_prompt,
             session_id=sid,
             user_memory=self._user_memory,
-            chat_history=self._chat_history,
+            session_store=self._session_store,
             llm_chat=chat,
         )
 
         # 截断历史（复用公共层 HistoryManager）→ LangChain 消息（不含本轮 user）
-        history_msgs = load_truncated_lc_messages(self._chat_history, sid, self.max_history_turns)
+        history_msgs = load_truncated_lc_messages(self._session_store, sid, self.max_history_turns)
         messages_in: list[BaseMessage] = [*history_msgs, HumanMessage(content=user_input)]
 
         agent = self._build_agent(system_content)
@@ -399,7 +399,7 @@ class LangChainAgent:
     def _persist(self, user_input: str, answer: str) -> None:
         """只持久化 user + 最终 assistant（省略中间工具轮次），共享 store。"""
         try:
-            self._chat_history.append(self._session_id, {"role": "user", "content": user_input})
-            self._chat_history.append(self._session_id, {"role": "assistant", "content": answer})
+            self._session_store.append(self._session_id, {"role": "user", "content": user_input})
+            self._session_store.append(self._session_id, {"role": "assistant", "content": answer})
         except Exception as e:
             logger.warning("[LangChainAgent] 历史写回失败，已忽略: %s", e)

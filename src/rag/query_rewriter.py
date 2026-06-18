@@ -12,7 +12,7 @@ Query 改写模块 —— RAG 召回前的语义扩展
 设计要点：
     - 失败静默降级：单轴 LLM 失败只影响该轴，expand_queries 至少保留原 query；
     - 进程级 LRU 缓存：multi / hyde / translate 各自缓存，同 query 重复调用零 token；
-    - 不依赖 chat_history：指代消解由 Agent 在调用 search 前自行补全 query。
+    - 不依赖 session_store：指代消解由 Agent 在调用 search 前自行补全 query。
 """
 
 from __future__ import annotations

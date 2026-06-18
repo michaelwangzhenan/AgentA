@@ -1,7 +1,7 @@
 """
 plan_manager —— Plan-Execute 状态封装与 reconstruct
 
-Plan 不在 ChatHistoryStore 新建表，完全依赖 messages 历史中的
+Plan 不在 SessionStore 新建表，完全依赖 messages 历史中的
 `make_plan` / `update_step` / `abort_plan` 三类 tool call 自然落库：
 
     [assistant, tool_calls=[make_plan(steps=[...])]]

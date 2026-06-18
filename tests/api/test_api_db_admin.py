@@ -165,7 +165,7 @@ def test_maintenance_purge_user_execute(client, monkeypatch):
     monkeypatch.setattr(maintain, "purge_user", _purge)
     r = client.post(
         "/api/admin/db/maintenance/purge-user",
-        json={"user_id": 1, "selections": [{"db": "chat_history", "table": "sessions", "all": True, "rowids": []}]},
+        json={"user_id": 1, "selections": [{"db": "session", "table": "sessions", "all": True, "rowids": []}]},
     )
     assert r.status_code == 200
     assert captured["uid"] == 1

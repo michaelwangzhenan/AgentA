@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from src.api.deps import get_chat_history, get_current_user
+from src.api.deps import get_session_store, get_current_user
 from src.api.schemas.session import (
     SessionCreateRequest,
     SessionDeleteResponse,
@@ -19,7 +19,7 @@ from src.api.schemas.session import (
     SessionTruncateRequest,
     SessionTruncateResponse,
 )
-from src.memory.chat_history import ChatHistoryStore
+from src.memory.session_store import SessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -29,14 +29,14 @@ router = APIRouter()
 _DEFAULT_SESSION_TITLE = "New Chat"
 
 
-def _require_owned(store: ChatHistoryStore, session_id: str, user_id: int) -> None:
+def _require_owned(store: SessionStore, session_id: str, user_id: int) -> None:
     """session 必须归属当前用户，否则 404（不暴露他人 session 是否存在）。"""
     if not store.owns_session(session_id, user_id):
         raise HTTPException(status_code=404, detail=f"session not found: {session_id}")
 
 
 def _row_to_session_info(row: dict[str, Any]) -> SessionInfo:
-    """ChatHistoryStore.list_sessions 行 → SessionInfo（空标题统一显示为 "New Chat"）"""
+    """SessionStore.list_sessions 行 → SessionInfo（空标题统一显示为 "New Chat"）"""
     sid: str = row["session_id"]
     raw_title: str = row.get("first_user_msg") or ""
     title = raw_title or _DEFAULT_SESSION_TITLE
@@ -50,7 +50,7 @@ def _row_to_session_info(row: dict[str, Any]) -> SessionInfo:
 
 @router.get("/sessions", response_model=SessionListResponse)
 def list_sessions(
-    store: ChatHistoryStore = Depends(get_chat_history),
+    store: SessionStore = Depends(get_session_store),
     user: dict = Depends(get_current_user),
 ) -> SessionListResponse:
     """列出当前用户的 session，按 created_at 倒序。"""
@@ -61,7 +61,7 @@ def list_sessions(
 @router.post("/sessions", response_model=SessionInfo)
 def create_session(
     req: SessionCreateRequest | None = None,
-    store: ChatHistoryStore = Depends(get_chat_history),
+    store: SessionStore = Depends(get_session_store),
     user: dict = Depends(get_current_user),
 ) -> SessionInfo:
     """新建空 session（归属当前用户）。后端生成 uuid，返回完整元数据。"""
@@ -80,7 +80,7 @@ def create_session(
 def rename_session(
     session_id: str,
     req: SessionRenameRequest,
-    store: ChatHistoryStore = Depends(get_chat_history),
+    store: SessionStore = Depends(get_session_store),
     user: dict = Depends(get_current_user),
 ) -> SessionInfo:
     """重命名 session。404 if 不存在或非本人所有。"""
@@ -97,7 +97,7 @@ def rename_session(
 @router.delete("/sessions/{session_id}", response_model=SessionDeleteResponse)
 def delete_session(
     session_id: str,
-    store: ChatHistoryStore = Depends(get_chat_history),
+    store: SessionStore = Depends(get_session_store),
     user: dict = Depends(get_current_user),
 ) -> SessionDeleteResponse:
     """硬删 session（级联清 messages + sessions 表）；非本人所有返回 deleted=False。"""
@@ -113,7 +113,7 @@ def delete_session(
 def truncate_session(
     session_id: str,
     req: SessionTruncateRequest,
-    store: ChatHistoryStore = Depends(get_chat_history),
+    store: SessionStore = Depends(get_session_store),
     user: dict = Depends(get_current_user),
 ) -> SessionTruncateResponse:
     """从第 N 条 user 消息起截断 session（编辑重发 / 重新生成的前置步骤）。
@@ -133,7 +133,7 @@ def truncate_session(
 )
 def get_session_messages(
     session_id: str,
-    store: ChatHistoryStore = Depends(get_chat_history),
+    store: SessionStore = Depends(get_session_store),
     user: dict = Depends(get_current_user),
 ) -> SessionMessagesResponse:
     """拉某 session 的完整 messages 历史（OpenAI messages 格式，含 tool_calls）。

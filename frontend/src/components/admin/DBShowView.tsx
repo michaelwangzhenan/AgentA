@@ -1048,7 +1048,7 @@ function SqlitePanel() {
 
 // 各业务库的中文名（键为文件名去扩展名，与后端 db.key 对齐）
 const DB_LABELS: Record<string, string> = {
-  chat_history: '对话历史',
+  session: '对话历史',
   auth: '认证',
   usage: '用量统计',
   rag_golden: 'RAG 评估 Golden集',

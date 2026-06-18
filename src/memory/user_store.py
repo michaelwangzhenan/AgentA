@@ -1,6 +1,6 @@
 """多用户账号 / 登录态 / 每用户 rules 的 SQLite 存储层。
 
-独立于业务数据库（chat_history / user_memory 等），单独存 `./db/sqlite/auth.db`。
+独立于业务数据库（session / user_memory 等），单独存 `./db/sqlite/auth.db`。
 密码用标准库 `hashlib.pbkdf2_hmac`（零新依赖）+ 每用户随机 salt 哈希，不存明文。
 
 三张表：

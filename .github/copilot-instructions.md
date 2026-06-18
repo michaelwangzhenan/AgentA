@@ -69,7 +69,7 @@
 
 **保持单一语言**：中文叙述里不要随手夹英文词；只有以下情况才允许保留英文：
 
-1. **代码标识符 / API 名**：`get_tools()` / `chat_history` / `EventBus`
+1. **代码标识符 / API 名**：`get_tools()` / `session_store` / `EventBus`
 2. **行业专有名词**：`RAG` / `LLM` / `ReAct` / `prompt injection` / `ReWoo`
 3. **翻译后不准确或带歧义**：当中文译法不止一种或译后失真时保留英文 + 首次出现给中文解释
 

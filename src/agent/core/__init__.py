@@ -3,7 +3,7 @@ Agent 公共层 helpers —— 三种 Agent 实现（Python / LangChain / AutoGP
 
 设计原则：
 - 此包内的 helper 封装"何时调依赖、如何编排结果"的业务策略
-- 依赖层（ChatHistoryStore / UserMemoryStore / LLMProvider）仍位于 src/memory/ 与 src/llm/
+- 依赖层（SessionStore / UserMemoryStore / LLMProvider）仍位于 src/memory/ 与 src/llm/
 - helper 命名约定：*Manager / *Engine / *Policy / *Bus
 
 模块清单：

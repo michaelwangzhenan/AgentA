@@ -254,7 +254,7 @@ class UserMemoryStore:
     """
     跨 session 用户记忆存储（扁平自然语言列表）。
 
-    独立于对话历史 ChatHistoryStore，使用单独的 SQLite 文件。
+    独立于会话存储 SessionStore，使用单独的 SQLite 文件。
     同一进程建议复用单个实例；内置 threading.Lock，可被多线程安全读写。
     """
 

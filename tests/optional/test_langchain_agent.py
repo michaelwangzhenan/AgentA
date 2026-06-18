@@ -111,7 +111,7 @@ def _mk(sess='sid', prompt='p', tc=None):
     """
     with patch('src.agent.langchain_agent.build_chat_model') as p_llm, \
          patch('src.agent.langchain_agent.build_langchain_tools') as p_tools, \
-         patch('src.agent.langchain_agent.get_shared_chat_history') as p_ch:
+         patch('src.agent.langchain_agent.get_shared_session_store') as p_ch:
         p_llm.return_value = MagicMock()
         p_tools.return_value = []
         p_ch.return_value = MagicMock()

@@ -55,12 +55,12 @@ class TestToolCallEngineApprovalHook:
 
     def _make_engine(self, approval_fn):
         from src.agent.core.event_bus import EventBus
-        from src.memory.chat_history import ChatHistoryStore
-        # MagicMock chat_history（不写真 DB）
+        from src.memory.session_store import SessionStore
+        # MagicMock session_store（不写真 DB）
         from unittest.mock import MagicMock
-        ch = MagicMock(spec=ChatHistoryStore)
+        ch = MagicMock(spec=SessionStore)
         return ToolCallEngine(
-            chat_history=ch,
+            session_store=ch,
             session_id="test-session",
             skill_bodies={},
             verbose=False,

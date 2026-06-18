@@ -26,10 +26,10 @@ def _get_save_history():
     return handlers.save_history
 
 
-# ── 辅助：构造 mock ChatHistoryStore ──────────────────────────────────────────────
+# ── 辅助：构造 mock SessionStore ──────────────────────────────────────────────
 
 def _mock_memory(messages: list[dict]) -> MagicMock:
-    """返回一个 load() 会返回 messages 的 mock ChatHistoryStore。"""
+    """返回一个 load() 会返回 messages 的 mock SessionStore。"""
     mem = MagicMock()
     mem.load.return_value = messages
     return mem

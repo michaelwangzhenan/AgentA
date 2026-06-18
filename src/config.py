@@ -367,7 +367,7 @@ ACTIVE_MODEL: str = os.getenv("AGENTA_EVAL_ACTIVE_MODEL") or os.getenv("ACTIVE_M
 CHROMA_DB_PATH: str = os.getenv("CHROMA_DB_PATH", "./db/chroma")
 
 # 对话历史 SQLite 路径，可通过 .env 中的 MEMORY_DB_PATH 覆盖
-MEMORY_DB_PATH: str = os.getenv("MEMORY_DB_PATH", "./db/sqlite/chat_history.db")
+MEMORY_DB_PATH: str = os.getenv("MEMORY_DB_PATH", "./db/sqlite/session.db")
 
 # ── 多用户 / 认证 ────────────────────────────────────────────────────────────
 # 是否启用多用户认证（可选值：true / false）；false 时不校验登录，全部落到 DEFAULT_USER_ID

@@ -1,8 +1,9 @@
 """
-对话记忆持久化模块 —— SQLite 存储层
+Session 持久化模块 —— SQLite 存储层
 
-将 Agent 的 messages 历史持久化到本地 SQLite 数据库，支持多 session 管理。
-重启后可通过 session_id 恢复完整的对话上下文。
+管理会话（session）及其消息：持久化到本地 SQLite，支持多 session 管理与
+按 session_id 恢复完整对话上下文。除消息 CRUD 外，还负责 session 生命周期
+（list / rename / create / delete）与按 user_id 的归属隔离。
 
 表结构：
     messages(
@@ -40,11 +41,11 @@ MEMORY_DB_PATH: str = config.MEMORY_DB_PATH
 _FIRST_MSG_PREVIEW_LEN: int = 80
 
 
-class ChatHistoryStore:
+class SessionStore:
     """
-    SQLite 对话记忆存储（CRUD 依赖层）。
+    SQLite 会话存储（CRUD 依赖层）：管理 session 元数据 + 其下消息。
 
-    职责单一：消息的 append / load / delete / list_sessions / clear。
+    职责：消息的 append / load / delete + session 生命周期 list_sessions / rename / clear。
     不感知"轮（turn）/ skill_pair 完整性 / max_history_turns 截断"等 loop 语义 ——
     这些业务策略由 `src/agent/core/history_manager.py` 的 `HistoryManager` 封装。
 
@@ -59,7 +60,7 @@ class ChatHistoryStore:
         初始化存储，自动创建数据库文件和表结构。
 
         Args:
-            db_path: SQLite 文件路径，默认 ./db/sqlite/chat_history.db。
+            db_path: SQLite 文件路径，默认 ./db/sqlite/session.db。
         """
         self._db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -67,7 +68,7 @@ class ChatHistoryStore:
         self._conn.row_factory = sqlite3.Row
         self._lock = threading.Lock()
         self._create_tables()
-        logger.info("ChatHistoryStore 初始化完成: %s", db_path)
+        logger.info("SessionStore 初始化完成: %s", db_path)
 
     # ── 表结构初始化 ──────────────────────────────────────────────────────────
 
@@ -472,7 +473,7 @@ class ChatHistoryStore:
         """关闭数据库连接。"""
         self._conn.close()
 
-    def __enter__(self) -> "ChatHistoryStore":
+    def __enter__(self) -> "SessionStore":
         return self
 
     def __exit__(self, *_: object) -> None:

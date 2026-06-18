@@ -37,7 +37,7 @@ class AgentAPI(Protocol):
         events:        `EventBus` 实例 —— 高级订阅者直接 `agent.events.subscribe(...)`
                        即可订阅特定事件类型；普通用例用 `set_event_callback` 即可
 
-    Note: 不在此 Protocol 中暴露 `_chat_history / _llm / _tools` 等实现内部字段，
+    Note: 不在此 Protocol 中暴露 `_session_store / _llm / _tools` 等实现内部字段，
     避免把表现层耦合到具体实现。
     """
 

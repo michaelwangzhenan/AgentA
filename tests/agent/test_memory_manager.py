@@ -37,7 +37,7 @@ _UID = current_user_id()
 
 
 def _mk_mgr(user_memory=None, recent_messages=None, user_msg_count: int = 1) -> MemoryManager:
-    """构造 MemoryManager + mock ChatHistoryStore + mock llm_chat。
+    """构造 MemoryManager + mock SessionStore + mock llm_chat。
 
     user_msg_count 控制无状态节流读取的"本 session 累计 user 消息数"。
     """
@@ -47,7 +47,7 @@ def _mk_mgr(user_memory=None, recent_messages=None, user_msg_count: int = 1) -> 
     llm_chat = MagicMock()
     return MemoryManager(
         user_memory=user_memory,
-        chat_history=ch,
+        session_store=ch,
         session_id="test-session",
         llm_chat=llm_chat,
     )
@@ -368,7 +368,7 @@ class TestExtractTriggerPolicy:
         ):
             _run(mgr, "请记住这个", "r")
         mock_extract.assert_called_once()
-        mgr._chat_history.count_user_messages.assert_not_called()
+        mgr._session_store.count_user_messages.assert_not_called()
 
     def test_source_field_in_apply_ops(self) -> None:
         """auto 路径传 source='auto'，explicit 路径传 source='explicit'（均带 user_id）。"""
