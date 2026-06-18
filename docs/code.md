@@ -274,7 +274,7 @@ prompt 之外：
 
 代码：
 
-- 存储 + 表结构 → `memory/session_store.py · SessionStore`（`sessions` / `messages` 两表）
+- 存储 + 表结构 → `stores/session_store.py · SessionStore`（`sessions` / `messages` 两表）
 - 归属校验 → `session_store.py · _owns_unlocked()` / `owns_session()`
 - 历史加载 + 截断 → `agent/core/history_manager.py · HistoryManager.load_truncated()`
 
@@ -291,7 +291,7 @@ prompt 之外：
 
 - 拼块 : `agent/core/rules_loader.py · build_rules_block()`；
 - 注入 : `agent/agent.py`（`base + build_rules_block(...)`）
-- 存取 : `memory/user_store.py · get_rules()` / `set_rules()`；
+- 存取 : `stores/user_store.py · get_rules()` / `set_rules()`；
 - 后端 api : `api/schemas/rules.py`
 
 ### 2.5.8. User Memory
@@ -305,7 +305,7 @@ prompt 之外：
 
 代码：
 
-- 存储 + 提取合并 : `memory/user_memory.py · UserMemoryStore`（`user_memories` 表，含 `source`）
+- 存储 + 提取合并 : `stores/user_memory.py · UserMemoryStore`（`user_memories` 表，含 `source`）
 - 触发节流 + 注入 : `agent/core/memory_manager.py · MemoryManager`（`try_extract()` / `build_system_prompt()`）
 - 节流开关 : `.env · USER_MEMORY_AUTO_EXTRACT` / `USER_MEMORY_EXTRACT_EVERY_N`
 

@@ -153,7 +153,7 @@ flowchart TB
 | **LANGCHAIN** | `src/agent/langchain_agent.py` | 基于 LangChain `AgentExecutor`，使用社区生态的 tool / memory 抽象 |
 | **AUTOGPT** | `src/agent/autogpt_agent.py` | 自主目标分解 + 长周期任务循环风格实现 |
 
-三套实现共享同一份工具（`tools.py`）/ 记忆（`memory/`）/ 评估集，关注点是 Agent 控制流本身的差异。
+三套实现共享同一份工具（`tools.py`）/ 记忆（`stores/`）/ 评估集，关注点是 Agent 控制流本身的差异。
 
 ---
 
