@@ -137,7 +137,7 @@ flowchart TB
 
 | 形态 | 入口 | 适用场景 |
 |---|---|---|
-| **CLI** | `python main.py` | 开发调试 / 无 GUI 环境；支持斜杠命令 + Tab 补全 + 流式输出 |
+| **CLI** | `python -m src.cli.main` | 开发调试 / 无 GUI 环境；支持斜杠命令 + Tab 补全 + 流式输出 |
 | **Web UI** | `chainlit run chainlit_app.py` | 日常使用，浏览器内聊天界面，支持上传 / 思考过程展示 |
 | **SDK**(TBD) | `from src.agent.agent_api import AgentAPI` | 二次集成 / 脚本调用；事件回调可订阅 Agent 内部步骤 |
 
@@ -244,7 +244,7 @@ chainlit run chainlit_app.py --port 8000
 CLI 模式（开发调试 / 无 GUI 场景）：
 
 ```bash
-python main.py
+python -m src.cli.main
 # 进入后输入 /help 查看全部命令
 ```
 

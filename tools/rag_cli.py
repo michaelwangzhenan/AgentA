@@ -625,7 +625,7 @@ def _build_parser() -> argparse.ArgumentParser:
             1) python tools/download_models.py 3          # 拉 bge-m3
             2) python tools/rag_cli.py ingest -m m3       # 把 ./datasets/data_en 灌进 kb_m3
             3) python tools/rag_cli.py status             # 验证 chunks > 0、model/docs_dir 已记录
-            4) python main.py                             # 启动 CLI
+            4) python -m src.cli.main                     # 启动 CLI
 
           单 alias 重建（改了 chunk_size 等切分参数后）：
             1) python tools/rag_cli.py clear -m m3        # 只抹 m3 库

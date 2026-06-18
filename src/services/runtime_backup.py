@@ -18,7 +18,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 import src.config as config
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent  # src/services/x.py → 仓库根
 
 MANIFEST_NAME = "backup-manifest.json"
 

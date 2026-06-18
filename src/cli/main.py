@@ -1,6 +1,8 @@
 ﻿"""
 CLI 入口 —— 私有知识库 Agent 对话界面
 
+启动：`python -m src.cli.main`（须在仓库根目录，相对路径 logs/ .agenta/ 按 cwd 解析）
+
 命令：
     输入问题后回车即可对话
     输入 /help  查看帮助

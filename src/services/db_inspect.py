@@ -14,7 +14,7 @@ from pathlib import Path
 
 import src.config as config
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent  # src/services/x.py → 仓库根
 
 DOC_PREVIEW_MAX = 400
 

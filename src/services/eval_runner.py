@@ -16,7 +16,7 @@ import threading
 import time
 from pathlib import Path
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent  # src/services/x.py → 仓库根
 _LOG_DIR = _PROJECT_ROOT / "logs" / "eval_runs"
 _IS_WIN = os.name == "nt"
 
