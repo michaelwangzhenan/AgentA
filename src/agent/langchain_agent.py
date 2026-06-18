@@ -192,7 +192,7 @@ class LangChainAgent:
         base = system_prompt or SYSTEM_PROMPT
         self._skill_bodies: dict[str, str] = {}
         if skills:
-            from src.skills.skill_loader import build_skill_catalog
+            from src.agent.core.skill_loader import build_skill_catalog
             self._skill_bodies = {name: info.body for name, info in skills.items()}
             base = base + build_skill_catalog(skills)
         self._system_prompt: str = base

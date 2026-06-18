@@ -64,7 +64,7 @@ def get_agent() -> AgentAPI:
     注意：LANGCHAIN / AUTOGPT 两套实现未做 per-request 事件隔离，多用户并发会串台，
     仅适合单用户使用 / 横向对比。
     """
-    from src.skills.skill_loader import scan_skills
+    from src.agent.core.skill_loader import scan_skills
     skills_map = scan_skills().loaded or None
     imp = (_cfg.IMP_METHOD or "PYTHON").upper()
     logger.info("[get_agent] 构造 Agent 实例，IMP_METHOD=%s", imp)

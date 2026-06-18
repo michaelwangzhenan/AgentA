@@ -16,7 +16,7 @@ import pytest
 
 from src.agent.agent import Agent
 from src.agent.tools import execute_tool, get_tools
-from src.skills.skill_loader import (
+from src.agent.core.skill_loader import (
     ScanResult,
     SkillInfo,
     SkillLoadFailure,

@@ -26,7 +26,7 @@ _SWITCH_PREVIEW_COUNT: int = 2
 _SWITCH_PREVIEW_LEN: int = 80
 if TYPE_CHECKING:
     from src.agent.agent import Agent, ThinkingConfig
-    from src.skills.skill_loader import SkillInfo
+    from src.agent.core.skill_loader import SkillInfo
 
 
 OutputFn = Callable[[str], None]

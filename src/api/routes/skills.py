@@ -27,7 +27,7 @@ from src.api.schemas.skills import (
     SkillToggleResponse,
     SkillUpdateRequest,
 )
-from src.skills.skill_loader import (
+from src.agent.core.skill_loader import (
     SkillIOError,
     create_skill,
     delete_skill,

@@ -48,7 +48,7 @@ load_dotenv(override=True)
 
 import src.config as config  # noqa: E402 — 必须在 load_dotenv 之后
 from src.agent.tools import get_tools  # noqa: E402
-from src.skills.skill_loader import build_skill_catalog, scan_skills  # noqa: E402
+from src.agent.core.skill_loader import build_skill_catalog, scan_skills  # noqa: E402
 from src.llm.provider import chat  # noqa: E402
 
 

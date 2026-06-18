@@ -58,7 +58,7 @@ from src.agent.core.rules_loader import build_rules_block
 from src.agent.core.thinking_policy import ThinkingPolicy
 from src.agent.core.tool_call_engine import ToolCallEngine
 from src.agent.tools import get_tools
-from src.skills.skill_loader import SkillInfo, build_skill_catalog
+from src.agent.core.skill_loader import SkillInfo, build_skill_catalog
 from src.llm.provider import chat, call_with_thinking
 from src.memory.chat_history import ChatHistoryStore
 from src.memory.user_memory import UserMemoryStore

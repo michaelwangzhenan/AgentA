@@ -88,7 +88,7 @@ def _make_agent(
 
 
 def _make_skill_info(name: str, desc: str, body: str) -> Any:
-    from src.skills.skill_loader import SkillInfo
+    from src.agent.core.skill_loader import SkillInfo
     return SkillInfo(
         name=name,
         description=desc,

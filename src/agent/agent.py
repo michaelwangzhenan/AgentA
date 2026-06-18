@@ -44,7 +44,7 @@ from src.agent.core.agent_commons import (  # noqa: F401 — re-export
 from src.agent.core.agent_commons import get_active_rules as _get_active_rules
 from src.agent.core.agent_commons import get_shared_chat_history as _get_shared_chat_history
 from src.agent.tools import get_tools
-from src.skills.skill_loader import SkillInfo, build_skill_catalog
+from src.agent.core.skill_loader import SkillInfo, build_skill_catalog
 from src.llm.provider import chat, call_with_thinking
 from src.memory.chat_history import ChatHistoryStore
 from src.memory.user_memory import UserMemoryStore
