@@ -136,6 +136,7 @@ alwaysApply: true
 | API 运行时配置 | `src/api/runtime/` | `config_meta` / `config_overrides` / `config_hooks` / `api_keys`（非 HTTP，启动与设置页用） |
 | API 请求 / 响应模型 | `src/api/schemas/<feature>.py` | Pydantic 模型，文件名与对应路由同名 |
 | API 公共依赖 | `src/api/deps.py` | 鉴权等 `Depends`（如 `get_current_user` / `require_admin`） |
+| 共享服务 / 运维 | `src/services/` | CLI 脚本(`tools/`)与 API 共用的后端逻辑（如 `db_inspect.py` / `db_maintain.py` / `runtime_backup.py` / `eval_runner.py` / `log_setup.py`），不属于 agent / memory / rag / llm 任一子系统 |
 | 配置项 | `src/config.py` | `os.getenv("XXX", ...)`；多处同步见 [§1.3.4 新增配置规范](#134-新增配置规范) |
 | CLI 命令处理 | `src/cli/handlers.py` | `handle_<command>` 函数 |
 | 评估脚本 | `tools/agent_eval/<feature>/` | `<task>.py`（如 `recall_golden.py` / `perf_eval.py`） |

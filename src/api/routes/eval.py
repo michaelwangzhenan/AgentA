@@ -51,7 +51,7 @@ from src.api.schemas.eval import (
     TraceSeriesRow,
     TraceSpan,
 )
-import src.eval_runner as eval_runner
+import src.services.eval_runner as eval_runner
 from src.memory.golden_store import GoldenStore
 from src.memory.security_event_store import SecurityEventStore
 from src.memory.trace_store import TraceStore

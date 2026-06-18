@@ -1,4 +1,4 @@
-"""数据库 /admin/db/* 端点 UT：mock src.db_inspect，只验证 HTTP 封装与 404。
+"""数据库 /admin/db/* 端点 UT：mock src.services.db_inspect，只验证 HTTP 封装与 404。
 
 鉴权由 conftest 的 _disable_auth_by_default 兜底为 admin。
 """
@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import src.api.routes.db_admin as db_admin
-import src.db_maintain as maintain
+import src.services.db_maintain as maintain
 from src.api.main import app
 
 

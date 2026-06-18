@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-import src.eval_runner as eval_runner
+import src.services.eval_runner as eval_runner
 
 
 @pytest.fixture(autouse=True)

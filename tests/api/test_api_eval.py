@@ -235,7 +235,7 @@ def test_eval_run_busy_409(client: TestClient, monkeypatch: pytest.MonkeyPatch) 
     def boom(task, args, model=None):
         raise RuntimeError("已有评估在运行")
 
-    monkeypatch.setattr("src.eval_runner.start", boom)
+    monkeypatch.setattr("src.services.eval_runner.start", boom)
     r = client.post("/api/eval/run", json={"task": "security"})
     assert r.status_code == 409
 
@@ -252,7 +252,7 @@ def test_eval_run_security_builds_args(
         return {"state": "running", "task": task, "model": model, "args": args,
                 "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}
 
-    monkeypatch.setattr("src.eval_runner.start", fake_start)
+    monkeypatch.setattr("src.services.eval_runner.start", fake_start)
     r = client.post(
         "/api/eval/run",
         json={
@@ -281,7 +281,7 @@ def test_eval_run_rag_retrieval_only(
         return {"state": "running", "task": task, "model": model, "args": args,
                 "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}
 
-    monkeypatch.setattr("src.eval_runner.start", fake_start)
+    monkeypatch.setattr("src.services.eval_runner.start", fake_start)
     # 复选框正向：rewriter/rerank=False → 关闭 → 传 --no-*
     r = client.post(
         "/api/eval/run",
@@ -302,7 +302,7 @@ def test_eval_run_rag_rewriter_on_no_flag(
     """rewriter/rerank=True（默认开）→ 不传 --no-*。"""
     seen: dict = {}
     monkeypatch.setattr(
-        "src.eval_runner.start",
+        "src.services.eval_runner.start",
         lambda task, args, model=None: (seen.update(args=args) or {
             "state": "running", "task": task, "model": model, "args": args,
             "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
@@ -326,7 +326,7 @@ def test_eval_run_rag_with_model_adds_llm(
         return {"state": "running", "task": task, "model": model, "args": args,
                 "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}
 
-    monkeypatch.setattr("src.eval_runner.start", fake_start)
+    monkeypatch.setattr("src.services.eval_runner.start", fake_start)
     r = client.post(
         "/api/eval/run",
         json={
@@ -351,7 +351,7 @@ def test_eval_run_thresholds_to_args(
         return {"state": "running", "task": task, "model": model, "args": args,
                 "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}
 
-    monkeypatch.setattr("src.eval_runner.start", fake_start)
+    monkeypatch.setattr("src.services.eval_runner.start", fake_start)
     r = client.post(
         "/api/eval/run",
         json={"task": "security", "thresholds": {"recall": 0.8, "fpr": 0.2}},
@@ -376,7 +376,7 @@ def test_eval_run_memory_pass_threshold(
 ) -> None:
     seen: dict = {}
     monkeypatch.setattr(
-        "src.eval_runner.start",
+        "src.services.eval_runner.start",
         lambda task, args, model=None: (seen.update(args=args) or {
             "state": "running", "task": task, "model": model, "args": args,
             "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
@@ -395,7 +395,7 @@ def test_eval_run_skills_pass_threshold(
 ) -> None:
     seen: dict = {}
     monkeypatch.setattr(
-        "src.eval_runner.start",
+        "src.services.eval_runner.start",
         lambda task, args, model=None: (seen.update(args=args) or {
             "state": "running", "task": task, "model": model, "args": args,
             "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
@@ -414,7 +414,7 @@ def test_eval_run_harness_pass_threshold(
 ) -> None:
     seen: dict = {}
     monkeypatch.setattr(
-        "src.eval_runner.start",
+        "src.services.eval_runner.start",
         lambda task, args, model=None: (seen.update(args=args) or {
             "state": "running", "task": task, "model": model, "args": args,
             "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
@@ -433,7 +433,7 @@ def test_eval_run_mcp_no_model_skips_llm(
 ) -> None:
     seen: dict = {}
     monkeypatch.setattr(
-        "src.eval_runner.start",
+        "src.services.eval_runner.start",
         lambda task, args, model=None: (seen.update(args=args, model=model) or {
             "state": "running", "task": task, "model": model, "args": args,
             "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
@@ -449,7 +449,7 @@ def test_eval_run_mcp_with_model_full(
 ) -> None:
     seen: dict = {}
     monkeypatch.setattr(
-        "src.eval_runner.start",
+        "src.services.eval_runner.start",
         lambda task, args, model=None: (seen.update(args=args, model=model) or {
             "state": "running", "task": task, "model": model, "args": args,
             "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
@@ -465,7 +465,7 @@ def test_eval_run_plan_thresholds_and_judge(
 ) -> None:
     seen: dict = {}
     monkeypatch.setattr(
-        "src.eval_runner.start",
+        "src.services.eval_runner.start",
         lambda task, args, model=None: (seen.update(args=args, model=model) or {
             "state": "running", "task": task, "model": model, "args": args,
             "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
@@ -491,7 +491,7 @@ def test_eval_run_plan_judge_on_no_flag(
 ) -> None:
     seen: dict = {}
     monkeypatch.setattr(
-        "src.eval_runner.start",
+        "src.services.eval_runner.start",
         lambda task, args, model=None: (seen.update(args=args) or {
             "state": "running", "task": task, "model": model, "args": args,
             "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
@@ -545,7 +545,7 @@ def test_eval_run_plan_judge_model_passed(
 ) -> None:
     seen: dict = {}
     monkeypatch.setattr(
-        "src.eval_runner.start",
+        "src.services.eval_runner.start",
         lambda task, args, model=None: (seen.update(args=args) or {
             "state": "running", "task": task, "model": model, "args": args,
             "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
@@ -566,7 +566,7 @@ def test_eval_run_plan_no_judge_skips_judge_model(
 ) -> None:
     seen: dict = {}
     monkeypatch.setattr(
-        "src.eval_runner.start",
+        "src.services.eval_runner.start",
         lambda task, args, model=None: (seen.update(args=args) or {
             "state": "running", "task": task, "model": model, "args": args,
             "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
@@ -587,7 +587,7 @@ def test_eval_run_learning_plan_args(
 ) -> None:
     seen: dict = {}
     monkeypatch.setattr(
-        "src.eval_runner.start",
+        "src.services.eval_runner.start",
         lambda task, args, model=None: (seen.update(args=args) or {
             "state": "running", "task": task, "model": model, "args": args,
             "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
@@ -642,7 +642,7 @@ def test_eval_run_srs_pass_threshold(
 ) -> None:
     seen: dict = {}
     monkeypatch.setattr(
-        "src.eval_runner.start",
+        "src.services.eval_runner.start",
         lambda task, args, model=None: (seen.update(args=args) or {
             "state": "running", "task": task, "model": model, "args": args,
             "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
@@ -661,7 +661,7 @@ def test_eval_run_quiz_args(
 ) -> None:
     seen: dict = {}
     monkeypatch.setattr(
-        "src.eval_runner.start",
+        "src.services.eval_runner.start",
         lambda task, args, model=None: (seen.update(args=args) or {
             "state": "running", "task": task, "model": model, "args": args,
             "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
@@ -684,7 +684,7 @@ def test_eval_run_perf_target_all(
 ) -> None:
     seen: dict = {}
     monkeypatch.setattr(
-        "src.eval_runner.start",
+        "src.services.eval_runner.start",
         lambda task, args, model=None: (seen.update(args=args, model=model) or {
             "state": "running", "task": task, "model": model, "args": args,
             "started_at": 1.0, "finished_at": None, "returncode": None, "tail": ""}),
@@ -741,7 +741,7 @@ def test_eval_summary_perf_by_report(
 
 def test_eval_run_status_ok(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "src.eval_runner.status",
+        "src.services.eval_runner.status",
         lambda: {"state": "idle", "args": [], "tail": ""},
     )
     r = client.get("/api/eval/run/status")

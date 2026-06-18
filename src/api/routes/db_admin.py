@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """数据库：只读巡检 Chroma / SQLite / BM25 的管理员 API。
 
-读逻辑全部委托 src.db_inspect（与 tools/db_show.py CLI 共用）；本文件只负责
+读逻辑全部委托 src.services.db_inspect（与 tools/db_show.py CLI 共用）；本文件只负责
 HTTP 封装与 404 处理。全部 GET、只读，依赖 require_admin。
 """
 from __future__ import annotations
@@ -11,8 +11,8 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-import src.db_inspect as inspect
-import src.db_maintain as maintain
+import src.services.db_inspect as inspect
+import src.services.db_maintain as maintain
 from src.api.deps import require_admin
 from pydantic import BaseModel, Field
 

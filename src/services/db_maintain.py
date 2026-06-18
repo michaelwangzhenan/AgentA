@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 import src.config as config
-import src.db_inspect as inspect
+import src.services.db_inspect as inspect
 
 # Chroma 持久化根下 segment 目录名是 UUID；用它识别段目录，避开 bm25_*.pkl / chroma.sqlite3 等
 _CHROMA_UUID_RE = re.compile(

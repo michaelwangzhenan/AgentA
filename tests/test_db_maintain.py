@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 
 import src.config as config
-import src.db_inspect as inspect
-import src.db_maintain as maintain
+import src.services.db_inspect as inspect
+import src.services.db_maintain as maintain
 
 
 def _mk(path, ddl, rows):

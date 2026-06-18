@@ -120,7 +120,7 @@ class TestParallelToolExecution:
         锁住 iter_8_13 验证报告 §2.1 的修复（copy_context）：不修时子线程取默认 '-'，
         并行工具的日志会丢成 `s:-`，无法按 session 串链路。
         """
-        from src.log_setup import get_session_id, set_session_id
+        from src.services.log_setup import get_session_id, set_session_id
 
         engine = _mk_engine()
         seen: dict[str, str] = {}

@@ -127,10 +127,10 @@ def build_uvicorn_log_config(
         "version": 1,
         "disable_existing_loggers": False,
         "filters": {
-            "ctx": {"()": "src.log_setup.ContextFilter"},
+            "ctx": {"()": "src.services.log_setup.ContextFilter"},
         },
         "formatters": {
-            "tagged": {"()": "src.log_setup.TaggedFormatter"},
+            "tagged": {"()": "src.services.log_setup.TaggedFormatter"},
         },
         "handlers": {
             "file": {

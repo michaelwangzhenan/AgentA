@@ -21,7 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 # 经 src.api.run 启动时，uvicorn 已用 build_uvicorn_log_config 把 root 挂上文件 handler，
 # 这里检测到 root 已有 handler 就不再重配（否则会冲掉文件 handler）；只有在被直接
 # `uvicorn src.api.main:app` 拉起（root 无 handler）时，才补一套终端 logging 兜底。
-from src import log_setup  # noqa: E402
+from src.services import log_setup  # noqa: E402
 
 if not logging.getLogger().handlers:
     log_setup.setup_cli_logging(os.getenv("LOG_LEVEL"))

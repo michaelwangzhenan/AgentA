@@ -34,7 +34,7 @@ for _key in ("HF_ENDPOINT", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE"):
     if _val:
         os.environ[_key] = _val
 
-import src.db_inspect as inspect  # noqa: E402
+import src.services.db_inspect as inspect  # noqa: E402
 
 # 复用公共模块的读逻辑；保留下划线别名供单测引用。
 _truncate = inspect.truncate

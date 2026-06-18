@@ -39,7 +39,7 @@ from src.memory.usage_store import (
     record_usage,
 )
 from src.memory.user_store import UserStore
-from src.log_setup import set_session_id
+from src.services.log_setup import set_session_id
 
 logger = logging.getLogger(__name__)
 

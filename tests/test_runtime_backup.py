@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-import src.runtime_backup as rb
+import src.services.runtime_backup as rb
 
 ROOT = Path(__file__).resolve().parents[1]
 

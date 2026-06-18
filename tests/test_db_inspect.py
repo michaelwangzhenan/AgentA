@@ -5,7 +5,7 @@ import sqlite3
 
 import pytest
 
-import src.db_inspect as inspect
+import src.services.db_inspect as inspect
 
 
 def test_is_sensitive_column():

@@ -155,8 +155,8 @@ if _CLI_LOG_MODE != "NONE":
         _CLI_LOG_PATH = None
 
 # logger 配置（必须在 _Tee 包装之后，handler 才绑定到 tee → 日志进文件）。
-# 格式 / 级别 / 上下文注入统一收口到 src.log_setup。
-from src import log_setup  # noqa: E402
+# 格式 / 级别 / 上下文注入统一收口到 src.services.log_setup。
+from src.services import log_setup  # noqa: E402
 
 log_setup.setup_cli_logging(os.getenv("LOG_LEVEL"))
 

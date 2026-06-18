@@ -18,7 +18,7 @@ load_dotenv(override=True)
 import uvicorn  # noqa: E402
 
 import src.config as config  # noqa: E402
-from src.log_setup import build_uvicorn_log_config  # noqa: E402
+from src.services.log_setup import build_uvicorn_log_config  # noqa: E402
 
 # 与原 ui.ps1 行为对齐：监听 127.0.0.1:8000，--reload 监视 src/
 _HOST = "127.0.0.1"
