@@ -118,7 +118,7 @@ def list_documents(
     """列出指定库内已入库的所有文档（按上传时间倒序），附每文档的 golden 候选计数。"""
     _validate_alias(model)
     docs = list_kb_documents(model=model)
-    from src.memory.golden_store import get_shared_store
+    from src.stores.golden_store import get_shared_store
     dc = get_shared_store().doc_counts()  # {doc_id: {total, pending}}
     return KBDocumentListResponse(
         documents=[_md_to_kbdoc(d, dc.get(d["doc_id"])) for d in docs]
@@ -139,7 +139,7 @@ def _generate_golden_sync(target_path: Path, safe_name: str, doc_id: str) -> int
 
     重生成前先清该文档旧的 pending 候选（避免重入库累积重复），approved/rejected 保留。
     """
-    from src.memory.golden_store import get_shared_store
+    from src.stores.golden_store import get_shared_store
     from src.rag.golden_gen import run_generation_for_file
 
     try:

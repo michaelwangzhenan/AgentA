@@ -4,6 +4,6 @@
 提供基于 SQLite 的 messages 持久化存储，支持多 session 管理。
 """
 
-from src.memory.session_store import SessionStore
+from src.stores.session_store import SessionStore
 
 __all__ = ["SessionStore"]

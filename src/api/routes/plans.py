@@ -14,7 +14,7 @@ from src.api.schemas.plan import (
     PlanSummary,
     UpdateTaskRequest,
 )
-from src.memory.learning_plan_store import LearningPlanStore
+from src.stores.learning_plan_store import LearningPlanStore
 
 router = APIRouter(prefix="/plans", tags=["plans"])
 

@@ -49,7 +49,7 @@ from src.agent.core.event_bus import (
 )
 from src.agent.tools import execute_tool, get_research_tools
 from src.llm.provider import chat
-from src.memory.session_store import SessionStore
+from src.stores.session_store import SessionStore
 
 logger = logging.getLogger(__name__)
 

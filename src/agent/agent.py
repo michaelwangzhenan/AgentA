@@ -46,8 +46,8 @@ from src.agent.core.agent_commons import get_shared_session_store as _get_shared
 from src.agent.tools import get_tools
 from src.agent.core.skill_loader import SkillInfo, build_skill_catalog
 from src.llm.provider import chat, call_with_thinking
-from src.memory.session_store import SessionStore
-from src.memory.user_memory import UserMemoryStore
+from src.stores.session_store import SessionStore
+from src.stores.user_memory import UserMemoryStore
 import src.config as _cfg
 
 logger = logging.getLogger(__name__)

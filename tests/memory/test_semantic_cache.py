@@ -10,8 +10,8 @@ import time
 import pytest
 
 import src.config as config
-from src.memory import semantic_cache
-from src.memory.semantic_cache import SemanticCacheStore
+from src.stores import semantic_cache
+from src.stores.semantic_cache import SemanticCacheStore
 
 
 class FakeCollection:

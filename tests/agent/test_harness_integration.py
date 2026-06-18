@@ -23,8 +23,8 @@ import pytest
 from src.agent.core import harness_manager as hm
 from src.agent.core.harness_manager import HarnessVerdict
 from src.agent.tools import ToolResult, execute_tool
-from src.memory import quiz_store as quiz_store_module
-from src.memory.quiz_store import QuizStore
+from src.stores import quiz_store as quiz_store_module
+from src.stores.quiz_store import QuizStore
 
 
 # ── fixtures ──────────────────────────────────────────────────────────────────

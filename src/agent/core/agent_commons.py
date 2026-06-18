@@ -24,9 +24,9 @@ from typing import Any, Callable, NamedTuple
 import src.config as _cfg
 from src.agent.core.memory_manager import MemoryManager
 from src.agent.core.rules_loader import build_rules_block
-from src.memory.session_store import SessionStore
-from src.memory.learning_plan_store import get_shared_store as _get_shared_learning_plan_store
-from src.memory.user_memory import UserMemoryStore
+from src.stores.session_store import SessionStore
+from src.stores.learning_plan_store import get_shared_store as _get_shared_learning_plan_store
+from src.stores.user_memory import UserMemoryStore
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +65,8 @@ def get_active_rules() -> str | None:
     if not _cfg.USER_RULES_ENABLED:
         return None
     try:
-        from src.memory.user_context import current_user_id
-        from src.memory.user_store import get_shared_store as _get_user_store
+        from src.stores.user_context import current_user_id
+        from src.stores.user_store import get_shared_store as _get_user_store
         text = _get_user_store().get_rules(current_user_id())
     except Exception as exc:
         logger.warning("[agent_commons] 读取用户 rules 失败：%s", exc)

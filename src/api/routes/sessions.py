@@ -19,7 +19,7 @@ from src.api.schemas.session import (
     SessionTruncateRequest,
     SessionTruncateResponse,
 )
-from src.memory.session_store import SessionStore
+from src.stores.session_store import SessionStore
 
 logger = logging.getLogger(__name__)
 

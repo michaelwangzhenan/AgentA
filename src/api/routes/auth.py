@@ -25,7 +25,7 @@ from src.api.schemas.auth import (
     UpdateUsernameRequest,
     UserInfo,
 )
-from src.memory.user_store import ROLE_ADMIN, ROLE_USER, UserStore
+from src.stores.user_store import ROLE_ADMIN, ROLE_USER, UserStore
 
 logger = logging.getLogger(__name__)
 

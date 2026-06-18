@@ -62,7 +62,7 @@ from src.agent.core.citation_builder import CitationBuilder  # noqa: E402
 from src.agent.core.memory_manager import MemoryManager  # noqa: E402
 from src.agent.core.rules_loader import build_rules_block  # noqa: E402
 from src.llm.provider import chat  # noqa: E402
-from src.memory.user_memory import UserMemoryStore  # noqa: E402
+from src.stores.user_memory import UserMemoryStore  # noqa: E402
 from src.rag.retriever import Hit, format_search_results  # noqa: E402
 
 

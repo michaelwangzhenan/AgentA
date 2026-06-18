@@ -29,7 +29,7 @@ from src.agent.core.event_bus import (
     tool_progress_scope,
 )
 from src.agent.tools import execute_tool, ToolResult
-from src.memory.session_store import SessionStore
+from src.stores.session_store import SessionStore
 
 if TYPE_CHECKING:
     from collections.abc import Callable

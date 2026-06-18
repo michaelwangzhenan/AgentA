@@ -583,7 +583,7 @@ def _tool_web_search(
         lines.append(f"{marker} {title}{flag}\n    URL: {link}\n    摘要: {cleaned_snippet}")
 
     if any_scrubbed:
-        from src.memory.security_event_store import EVENT_SCRUB, record_security_event
+        from src.stores.security_event_store import EVENT_SCRUB, record_security_event
         record_security_event(EVENT_SCRUB, "web 搜索")
     return ToolResult(status="ok", content=wrap_untrusted("\n\n".join(lines), kind="web"))
 
@@ -807,7 +807,7 @@ def _tool_fetch_url(
     # SSRF 防御统一入口，拦 file:// / 内网 IP / 解析失败的域名
     from src.agent.core.url_guard import is_url_safe
     if not is_url_safe(url):
-        from src.memory.security_event_store import EVENT_SSRF, record_security_event
+        from src.stores.security_event_store import EVENT_SSRF, record_security_event
         record_security_event(EVENT_SSRF, url)
         return ToolResult(
             status="error",
@@ -833,7 +833,7 @@ def _tool_fetch_url(
         from src.agent.core.security_filter import scrub_injection, wrap_untrusted
         cleaned, scrubbed = scrub_injection(result.content)
         if scrubbed:
-            from src.memory.security_event_store import EVENT_SCRUB, record_security_event
+            from src.stores.security_event_store import EVENT_SCRUB, record_security_event
             record_security_event(EVENT_SCRUB, "网页抓取")
         flag = "[⚠️ 已清洗] " if scrubbed else ""
         # cite_web 时把本 URL 注册进引用器（与 web_search 同一 url 去重 → 复用编号），
@@ -967,7 +967,7 @@ def _tool_abort_plan(
 
 def _get_study_plan_store() -> Any:
     """延迟 import，返回 learning_plan_store 模块级共享 store。"""
-    from src.memory.learning_plan_store import get_shared_store
+    from src.stores.learning_plan_store import get_shared_store
     return get_shared_store()
 
 
@@ -1349,7 +1349,7 @@ _QUIZ_TOOLS: list[dict[str, Any]] = [
 
 def _get_quiz_store() -> Any:
     """延迟 import，返回 quiz_store 模块级共享 store。"""
-    from src.memory.quiz_store import get_shared_store
+    from src.stores.quiz_store import get_shared_store
     return get_shared_store()
 
 
@@ -1489,7 +1489,7 @@ def _tool_create_quiz(
     # plan_id + stage_idx 时若 topic 缺，从 LearningPlanStore 拉 goal 作 topic
     if not topic_clean and plan_id is not None:
         try:
-            from src.memory.learning_plan_store import get_shared_store as _lp_store
+            from src.stores.learning_plan_store import get_shared_store as _lp_store
             plan = _lp_store().get_plan(plan_id)
             if plan is None:
                 return ToolResult(status="error", content=f"plan_id={plan_id} 不存在，无法派生 topic；请显式传 topic。")
@@ -1919,7 +1919,7 @@ _SRS_TOOLS: list[dict[str, Any]] = [
 
 def _get_srs_store() -> Any:
     """延迟 import，返回 srs_store 模块级共享 store。"""
-    from src.memory.srs_store import get_shared_store
+    from src.stores.srs_store import get_shared_store
     return get_shared_store()
 
 
@@ -2083,7 +2083,7 @@ def _tool_add_to_srs(
 
     # 从 QuizStore 拿题面 + 标答作为冗余存储
     try:
-        from src.memory.quiz_store import get_shared_store as _qz_store
+        from src.stores.quiz_store import get_shared_store as _qz_store
         quiz_store = _qz_store()
     except Exception as e:
         return ToolResult(status="error", content=f"读取 QuizStore 失败 — {e}")
@@ -2305,7 +2305,7 @@ def _execute_mcp_tool(name: str, args: dict[str, Any]) -> ToolResult:
     if isinstance(url_arg, str) and url_arg.strip():
         from src.agent.core.url_guard import is_url_safe
         if not is_url_safe(url_arg):
-            from src.memory.security_event_store import EVENT_SSRF, record_security_event
+            from src.stores.security_event_store import EVENT_SSRF, record_security_event
             record_security_event(EVENT_SSRF, url_arg)
             logger.warning("[tool] MCP %s 的 url 被 SSRF 防御拒绝：%s", name, url_arg)
             return ToolResult(
@@ -2327,7 +2327,7 @@ def _execute_mcp_tool(name: str, args: dict[str, Any]) -> ToolResult:
 
     cleaned, scrubbed = scrub_injection(text or "")
     if scrubbed:
-        from src.memory.security_event_store import EVENT_SCRUB, record_security_event
+        from src.stores.security_event_store import EVENT_SCRUB, record_security_event
         record_security_event(EVENT_SCRUB, f"MCP 工具 {name}")
     flag = "[⚠️ 已清洗] " if scrubbed else ""
     wrapped = wrap_untrusted(f"{flag}{cleaned}", kind="tool")
@@ -2371,7 +2371,7 @@ def execute_tool(
     # 命中即拒绝（status=error 让 tool_call_engine 引导 LLM 换工具），防绕过。
     from src.agent.core.security_filter import is_tool_allowed
     if not is_tool_allowed(name):
-        from src.memory.security_event_store import EVENT_TOOL, record_security_event
+        from src.stores.security_event_store import EVENT_TOOL, record_security_event
         record_security_event(EVENT_TOOL, name)
         return ToolResult(
             status="error",

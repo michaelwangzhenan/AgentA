@@ -640,7 +640,7 @@ def _load_golden_from_db() -> list[dict[str, Any]]:
     默认只取 approved；置 ``EVAL_GOLDEN_USE_PENDING=true`` 时把 pending 也纳入。
     空库返回空列表，由调用方给"先导入 / 审核"的提示（本期起不再回退读 golden.json）。
     """
-    from src.memory.golden_store import get_shared_store
+    from src.stores.golden_store import get_shared_store
 
     return get_shared_store().list_for_eval(use_pending=config.EVAL_GOLDEN_USE_PENDING)
 

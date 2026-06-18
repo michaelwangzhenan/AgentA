@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from src.api.deps import get_session_store
 from src.api.main import app
-from src.memory.session_store import SessionStore
+from src.stores.session_store import SessionStore
 
 
 @pytest.fixture

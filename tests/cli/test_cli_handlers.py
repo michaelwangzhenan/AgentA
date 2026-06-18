@@ -15,7 +15,7 @@ from src.cli.handlers import (
     _render_plan_step_end,
     _sanitize_cli_text,
 )
-from src.memory.session_store import SessionStore
+from src.stores.session_store import SessionStore
 
 
 def test_sanitize_cli_text_strips_carriage_returns() -> None:
@@ -228,7 +228,7 @@ class TestSwitchSessionPreview:
 # ── Phase 1.2 /memory 子命令（iter_2_agent.md §4.9.2） ──────────────────────────
 
 from collections.abc import Iterator
-from src.memory.user_memory import UserMemoryStore
+from src.stores.user_memory import UserMemoryStore
 
 
 @pytest.fixture

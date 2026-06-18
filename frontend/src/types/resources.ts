@@ -128,7 +128,7 @@ export type MCPReloadResponse = {
   failed: number
 }
 
-// memory 写入来源中文 label（跟后端 src/memory/user_memory.py SOURCE_LABELS 对齐）
+// memory 写入来源中文 label（跟后端 src/stores/user_memory.py SOURCE_LABELS 对齐）
 export const SOURCE_LABELS: Record<string, string> = {
   auto: '自动',
   explicit: '请记住',

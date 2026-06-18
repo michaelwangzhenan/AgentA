@@ -19,7 +19,7 @@ from unittest.mock import patch
 import pytest
 
 from src.cli.handlers import handle_srs
-from src.memory.srs_store import SRSStore
+from src.stores.srs_store import SRSStore
 
 
 @pytest.fixture

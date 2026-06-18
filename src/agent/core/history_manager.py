@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from src.memory.session_store import SessionStore
+from src.stores.session_store import SessionStore
 
 logger = logging.getLogger(__name__)
 

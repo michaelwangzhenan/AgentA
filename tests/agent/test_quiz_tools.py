@@ -21,8 +21,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.agent.tools import ToolResult, execute_tool, get_tools
-from src.memory import quiz_store as quiz_store_module
-from src.memory.quiz_store import QuizStore
+from src.stores import quiz_store as quiz_store_module
+from src.stores.quiz_store import QuizStore
 
 
 @pytest.fixture(autouse=True)
@@ -162,7 +162,7 @@ class TestCreateQuiz:
     def test_topic_derived_from_plan(self, store: QuizStore) -> None:
         """topic 缺 + plan_id 给 → 用 plan goal 派生 topic。"""
         # mock LearningPlanStore.get_plan
-        from src.memory import learning_plan_store as lp_mod
+        from src.stores import learning_plan_store as lp_mod
         mock_lp = MagicMock()
         mock_lp.get_plan.return_value = {"id": 7, "goal": "8 周准备 ML 面试"}
         lp_mod.reset_shared_store_for_testing(mock_lp)
@@ -178,7 +178,7 @@ class TestCreateQuiz:
             lp_mod.reset_shared_store_for_testing(None)
 
     def test_topic_missing_plan_not_exist_returns_error(self, store: QuizStore) -> None:
-        from src.memory import learning_plan_store as lp_mod
+        from src.stores import learning_plan_store as lp_mod
         mock_lp = MagicMock()
         mock_lp.get_plan.return_value = None
         lp_mod.reset_shared_store_for_testing(mock_lp)

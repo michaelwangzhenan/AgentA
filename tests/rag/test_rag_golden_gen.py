@@ -9,8 +9,8 @@ from unittest.mock import patch
 import pytest
 
 import src.config as config
-from src.memory import golden_store
-from src.memory.golden_store import GoldenStore, STATUS_PENDING, SOURCE_AI
+from src.stores import golden_store
+from src.stores.golden_store import GoldenStore, STATUS_PENDING, SOURCE_AI
 from src.rag import golden_gen
 
 

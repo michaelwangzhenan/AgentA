@@ -167,12 +167,12 @@ from src.cli.ui import BANNER, HELP_TEXT
 from src.cli.tab_complete import make_completer
 from src.agent.core.skill_loader import scan_skills, SkillInfo, format_scan_banner
 from src.cli import handlers
-from src.memory.session_store import SessionStore
+from src.stores.session_store import SessionStore
 import src.config as config
 
 # 如果用户记忆功能开启，提前导入以备 main() 中直接使用
 if config.USER_MEMORY_ENABLED:
-    from src.memory.user_memory import UserMemoryStore
+    from src.stores.user_memory import UserMemoryStore
 
 def _warm_up_rag_models() -> None:
     """启动时预加载 embedding（及可选 reranker），并提示用户勿误以为卡死。"""
@@ -395,15 +395,15 @@ def main() -> None:
                     handlers.handle_memory(user_memory, cmd_parts)
                 continue
             case "/study":
-                from src.memory.learning_plan_store import get_shared_store as _get_lp_store
+                from src.stores.learning_plan_store import get_shared_store as _get_lp_store
                 handlers.handle_study(_get_lp_store(), cmd_parts, session_id=agent.session_id)
                 continue
             case "/quiz":
-                from src.memory.quiz_store import get_shared_store as _get_quiz_store
+                from src.stores.quiz_store import get_shared_store as _get_quiz_store
                 handlers.handle_quiz(_get_quiz_store(), cmd_parts)
                 continue
             case "/srs":
-                from src.memory.srs_store import get_shared_store as _get_srs_store
+                from src.stores.srs_store import get_shared_store as _get_srs_store
                 handlers.handle_srs(_get_srs_store(), cmd_parts)
                 continue
             case "/mcp":

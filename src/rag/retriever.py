@@ -600,6 +600,6 @@ def format_search_results(
             f"{cleaned_doc}"
         )
     if any_scrubbed:
-        from src.memory.security_event_store import EVENT_SCRUB, record_security_event
+        from src.stores.security_event_store import EVENT_SCRUB, record_security_event
         record_security_event(EVENT_SCRUB, "知识库检索")
     return wrap_untrusted("\n\n---\n\n".join(parts), kind="doc")

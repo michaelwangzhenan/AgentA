@@ -15,8 +15,8 @@ from fastapi.testclient import TestClient
 
 from src.api.deps import get_golden_store, get_trace_store
 from src.api.main import app
-from src.memory.golden_store import GoldenStore, STATUS_PENDING
-from src.memory.trace_store import TraceStore
+from src.stores.golden_store import GoldenStore, STATUS_PENDING
+from src.stores.trace_store import TraceStore
 
 
 @pytest.fixture
@@ -138,14 +138,14 @@ def test_golden_generate_ok(
     import src.rag.golden_gen as gg
 
     def fake_run(file_path, source, doc_id="", max_q=None, force=False):
-        from src.memory.golden_store import SOURCE_AI, STATUS_PENDING as SP, get_shared_store
+        from src.stores.golden_store import SOURCE_AI, STATUS_PENDING as SP, get_shared_store
         st = get_shared_store()
         st.create(query="gen-1", expected_source_contains=source, source=SOURCE_AI, status=SP, doc_id=doc_id)
         st.create(query="gen-2", expected_source_contains=source, source=SOURCE_AI, status=SP, doc_id=doc_id)
         return 2
 
     # generate 路由内部用 get_shared_store；让它与注入的 golden 是同一个
-    monkeypatch.setattr("src.memory.golden_store.get_shared_store", lambda: golden)
+    monkeypatch.setattr("src.stores.golden_store.get_shared_store", lambda: golden)
     monkeypatch.setattr(gg, "run_generation_for_file", fake_run)
 
     r = client.post(

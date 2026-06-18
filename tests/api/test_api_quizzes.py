@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from src.api.deps import get_quiz_store
 from src.api.main import app
-from src.memory.quiz_store import QuizStore
+from src.stores.quiz_store import QuizStore
 
 
 @pytest.fixture

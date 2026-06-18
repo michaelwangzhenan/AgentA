@@ -20,8 +20,8 @@ from pathlib import Path
 import pytest
 
 from src.agent.tools import ToolResult, execute_tool, get_tools
-from src.memory import learning_plan_store as lp_store_module
-from src.memory.learning_plan_store import LearningPlanStore
+from src.stores import learning_plan_store as lp_store_module
+from src.stores.learning_plan_store import LearningPlanStore
 
 
 @pytest.fixture

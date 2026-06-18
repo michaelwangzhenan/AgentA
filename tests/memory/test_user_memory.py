@@ -20,7 +20,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.memory.user_memory import (
+from src.stores.user_memory import (
     MEMORY_SOURCES,
     UserMemoryStore,
     _sanitize,

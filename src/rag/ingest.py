@@ -320,7 +320,7 @@ def ingest_one(
 def _invalidate_semantic_cache() -> None:
     """KB 变更后作废语义缓存；出错只记 log，不影响入库 / 删除主流程。"""
     try:
-        from src.memory.semantic_cache import invalidate_all_soft
+        from src.stores.semantic_cache import invalidate_all_soft
 
         invalidate_all_soft()
     except Exception as e:

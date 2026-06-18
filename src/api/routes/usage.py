@@ -33,8 +33,8 @@ from src.api.schemas.usage import (
     UserUsageList,
     SeriesRow,
 )
-from src.memory.usage_store import UsageStore, cost_of, merged_pricing
-from src.memory.user_store import UserStore
+from src.stores.usage_store import UsageStore, cost_of, merged_pricing
+from src.stores.user_store import UserStore
 
 logger = logging.getLogger(__name__)
 

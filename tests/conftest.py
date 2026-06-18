@@ -74,7 +74,7 @@ def _isolated_agent_memory(tmp_path, _neutralize_runtime_overrides):
       历次跑积累的条目会让 chat 端点测试随机命中缓存、跳过 agent.run 而失败；
       默认关掉保证确定性。需要验证缓存的测试自行 monkeypatch 设回 True。
     """
-    from src.memory.session_store import SessionStore
+    from src.stores.session_store import SessionStore
 
     # ── 对话历史隔离 ──────────────────────────────────────────────────────────
     _orig_mem = _commons_module._session_store
@@ -98,7 +98,7 @@ def _isolated_agent_memory(tmp_path, _neutralize_runtime_overrides):
     # 任何走 agent.run / execute_tool / API 而忘了自己隔离的测试会静默读写真实库
     # —— 例如 Agent.run 经 build_active_study_plan_block 只读真实 learning.db。
     # 各测试文件原有的文件内 reset / dependency_overrides 仍在测试体内覆盖本兜底，互不冲突。
-    from src.memory import (
+    from src.stores import (
         golden_store,
         learning_plan_store,
         quiz_store,

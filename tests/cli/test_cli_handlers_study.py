@@ -19,7 +19,7 @@ from unittest.mock import patch
 import pytest
 
 from src.cli.handlers import handle_study
-from src.memory.learning_plan_store import LearningPlanStore
+from src.stores.learning_plan_store import LearningPlanStore
 
 
 @pytest.fixture

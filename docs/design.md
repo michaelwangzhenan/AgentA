@@ -1412,7 +1412,7 @@ src/agent/core/
 └── harness_manager.py        # HarnessManager + HarnessVerdict（Q1/R1 critic，详 §3.12）
 ```
 
-依赖层（`src/memory/session_store.py` 的 `SessionStore` / `src/memory/user_memory.py` 的 `UserMemoryStore` / `src/memory/learning_plan_store.py` 的 `LearningPlanStore` / `src/memory/quiz_store.py` 的 `QuizStore` / `src/memory/srs_store.py` 的 `SRSStore` / `src/llm/provider.py`）位置不动，被 helper 调用。
+依赖层（`src/stores/session_store.py` 的 `SessionStore` / `src/stores/user_memory.py` 的 `UserMemoryStore` / `src/stores/learning_plan_store.py` 的 `LearningPlanStore` / `src/stores/quiz_store.py` 的 `QuizStore` / `src/stores/srs_store.py` 的 `SRSStore` / `src/llm/provider.py`）位置不动，被 helper 调用。
 
 **实现进度**
 

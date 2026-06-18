@@ -52,7 +52,7 @@ from src.agent.core.event_bus import (
 from src.agent.langchain_tools import build_langchain_tools
 from src.llm.langchain_provider import build_chat_model
 from src.llm.provider import chat
-from src.memory.langchain_history import load_truncated_lc_messages
+from src.stores.langchain_history import load_truncated_lc_messages
 
 logger = logging.getLogger(__name__)
 

@@ -55,7 +55,7 @@ class TestToolCallEngineApprovalHook:
 
     def _make_engine(self, approval_fn):
         from src.agent.core.event_bus import EventBus
-        from src.memory.session_store import SessionStore
+        from src.stores.session_store import SessionStore
         # MagicMock session_store（不写真 DB）
         from unittest.mock import MagicMock
         ch = MagicMock(spec=SessionStore)

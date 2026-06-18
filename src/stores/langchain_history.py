@@ -17,7 +17,7 @@ from typing import Any, List
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
-from src.memory.session_store import SessionStore
+from src.stores.session_store import SessionStore
 
 
 def to_lc_messages(raw: list[dict[str, Any]]) -> list[BaseMessage]:

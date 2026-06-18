@@ -4,7 +4,7 @@
 - 在线 trace 可观测：`/eval/trace/*`（本人视角；admin 可 `scope=all` 看全员）
 - 评估报告浏览（**仅 admin**）：`/eval/reports` 列表 + 单份内容（只读 reports 目录）
 
-trace 数据来自 chat 链路旁路采集（见 src/memory/trace_store.py）；golden 由入库自动
+trace 数据来自 chat 链路旁路采集（见 src/stores/trace_store.py）；golden 由入库自动
 生成（pending）或人工录入（approved），评估脚本默认只用 approved。
 """
 
@@ -52,9 +52,9 @@ from src.api.schemas.eval import (
     TraceSpan,
 )
 import src.services.eval_runner as eval_runner
-from src.memory.golden_store import GoldenStore
-from src.memory.security_event_store import SecurityEventStore
-from src.memory.trace_store import TraceStore
+from src.stores.golden_store import GoldenStore
+from src.stores.security_event_store import SecurityEventStore
+from src.stores.trace_store import TraceStore
 
 logger = logging.getLogger(__name__)
 

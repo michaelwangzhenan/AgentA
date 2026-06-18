@@ -14,7 +14,7 @@ from src.api.schemas.quiz import (
     QuizSetSummary,
     SubmitQuizRequest,
 )
-from src.memory.quiz_store import QuizStore
+from src.stores.quiz_store import QuizStore
 
 router = APIRouter(prefix="/quizzes", tags=["quizzes"])
 

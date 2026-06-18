@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from src.memory.user_store import ROLE_ADMIN, ROLE_USER, UserStore
+from src.stores.user_store import ROLE_ADMIN, ROLE_USER, UserStore
 
 
 @pytest.fixture

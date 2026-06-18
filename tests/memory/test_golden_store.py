@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from src.memory.golden_store import (
+from src.stores.golden_store import (
     SOURCE_AI,
     STATUS_APPROVED,
     STATUS_PENDING,

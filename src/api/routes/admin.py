@@ -22,7 +22,7 @@ from src.api.deps import (
     require_admin,
 )
 from src.api.schemas.auth import OkResponse, UserInfo, UserListResponse
-from src.memory.user_store import ROLE_ADMIN, UserStore
+from src.stores.user_store import ROLE_ADMIN, UserStore
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ def purge_user_data(user_id: int) -> None:
     get_usage_store().delete_all_for_user(user_id)
     get_trace_store().delete_all_for_user(user_id)
     # 语义缓存按 user_id 隔离，删号时一并清掉该用户的缓存答案（软失败）
-    from src.memory.semantic_cache import delete_for_user_soft
+    from src.stores.semantic_cache import delete_for_user_soft
     delete_for_user_soft(user_id)
 
 

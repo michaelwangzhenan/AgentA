@@ -12,11 +12,11 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import src.config as config
-from src.memory.session_store import SessionStore
-from src.memory.learning_plan_store import LearningPlanStore
-from src.memory.quiz_store import QuizStore
-from src.memory.srs_store import SRSStore
-from src.memory.user_memory import UserMemoryStore
+from src.stores.session_store import SessionStore
+from src.stores.learning_plan_store import LearningPlanStore
+from src.stores.quiz_store import QuizStore
+from src.stores.srs_store import SRSStore
+from src.stores.user_memory import UserMemoryStore
 
 # 历史记录预览截断长度
 _HISTORY_PREVIEW_LEN: int = 60
@@ -249,7 +249,7 @@ def _record_cli_usage(agent: "Agent") -> None:
     用量。落到 DEFAULT_USER_ID（CLI 即单机自用）。旁路，record_usage 内部已吞异常。
     """
     import src.config as _cfg
-    from src.memory.usage_store import record_usage
+    from src.stores.usage_store import record_usage
 
     record_usage(
         user_id=_cfg.DEFAULT_USER_ID,
@@ -523,7 +523,7 @@ def _print_memory_list(
           [ 5] 回答控制在 200 字以内                  请记住  · 昨天 18:05
           [ 9] 引用统一用 APA 7th 格式                手工    · 3 天前
     """
-    from src.memory.user_memory import SOURCE_LABELS
+    from src.stores.user_memory import SOURCE_LABELS
 
     entries = user_memory.load_all()
     if not entries:

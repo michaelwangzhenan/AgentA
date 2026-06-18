@@ -12,7 +12,7 @@ import pytest
 
 import src.config as config
 from src.agent.core.event_bus import AgentEvent
-from src.memory.trace_store import (
+from src.stores.trace_store import (
     TraceCollector,
     TraceStore,
     record_trace_safe,

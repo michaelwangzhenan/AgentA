@@ -17,7 +17,7 @@ from unittest.mock import patch
 import pytest
 
 from src.cli.handlers import handle_quiz
-from src.memory.quiz_store import QuizStore
+from src.stores.quiz_store import QuizStore
 
 
 @pytest.fixture

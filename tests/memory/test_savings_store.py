@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from src.memory.usage_store import UsageStore
+from src.stores.usage_store import UsageStore
 
 
 @pytest.fixture

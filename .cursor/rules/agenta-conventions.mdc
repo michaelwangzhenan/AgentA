@@ -129,7 +129,7 @@ alwaysApply: true
 | 类型 | 位置 | 命名 |
 |---|---|---|
 | Agent 核心组件 | `src/agent/core/` | `*_manager.py` / `*_engine.py` / `*_policy.py` / `*_bus.py` / `*_loader.py` |
-| 数据持久化 | `src/memory/` | `<name>.py`，含 `<Name>Store` 类（如 `UserMemoryStore`）；多用户隔离的请求级用户上下文见 `user_context.py` |
+| 数据持久化 | `src/stores/` | `<name>.py`，含 `<Name>Store` 类（如 `UserMemoryStore`）；多用户隔离的请求级用户上下文见 `user_context.py` |
 | RAG 流程 | `src/rag/` | `<task>.py`（如 `ingest.py` / `golden_gen.py`） |
 | LLM 调用入口 | `src/llm/` | `provider.py` 里一个 `chat(...)` 为主出口；模型相关另放（如 `model_router.py`） |
 | API 路由 | `src/api/routes/<feature>.py` | 每文件一个 `router = APIRouter(prefix="/<feature>")`，在 `src/api/main.py` 注册 |

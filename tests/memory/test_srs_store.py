@@ -1,5 +1,5 @@
 """
-测试 [SRSStore](../src/memory/srs_store.py)（Phase 2.4 G1 / D3 / D8-D10）。
+测试 [SRSStore](../src/stores/srs_store.py)（Phase 2.4 G1 / D3 / D8-D10）。
 
 覆盖：
     - 表结构幂等初始化、独立 db 文件
@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from src.memory.srs_store import (
+from src.stores.srs_store import (
     EASE_FACTOR_INIT,
     EASE_FACTOR_MIN,
     INTERVAL_MIN_DAYS,
@@ -345,7 +345,7 @@ class TestStats:
 
 class TestSharedStore:
     def test_get_returns_same_instance(self, tmp_path: Path) -> None:
-        from src.memory import srs_store as mod
+        from src.stores import srs_store as mod
 
         reset_shared_store_for_testing(None)
         original_path = mod.SRS_DB_PATH

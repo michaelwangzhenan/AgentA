@@ -24,10 +24,10 @@ from pathlib import Path
 import pytest
 
 from src.agent.tools import ToolResult, execute_tool, get_tools
-from src.memory import quiz_store as quiz_store_module
-from src.memory import srs_store as srs_store_module
-from src.memory.quiz_store import QuizStore
-from src.memory.srs_store import SRSStore
+from src.stores import quiz_store as quiz_store_module
+from src.stores import srs_store as srs_store_module
+from src.stores.quiz_store import QuizStore
+from src.stores.srs_store import SRSStore
 
 
 @pytest.fixture

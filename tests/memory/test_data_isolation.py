@@ -10,12 +10,12 @@ from pathlib import Path
 import pytest
 
 import src.config as config
-from src.memory.user_context import current_user_id, use_user
-from src.memory.session_store import SessionStore
-from src.memory.learning_plan_store import LearningPlanStore
-from src.memory.quiz_store import QuizStore
-from src.memory.srs_store import SRSStore
-from src.memory.user_memory import UserMemoryStore
+from src.stores.user_context import current_user_id, use_user
+from src.stores.session_store import SessionStore
+from src.stores.learning_plan_store import LearningPlanStore
+from src.stores.quiz_store import QuizStore
+from src.stores.srs_store import SRSStore
+from src.stores.user_memory import UserMemoryStore
 
 
 def test_use_user_context_switch() -> None:

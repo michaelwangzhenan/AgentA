@@ -21,16 +21,16 @@ from sse_starlette.sse import EventSourceResponse
 
 import src.config as _cfg
 from src.agent.agent_api import AgentAPI
-from src.memory.user_context import use_user
+from src.stores.user_context import use_user
 from src.api.deps import get_agent, get_session_store, get_current_user, get_user_store
 from src.api.routes.auth import effective_llm_prefs
 from src.api.schemas.chat import ChatRequest, ChatResponse
 from src.llm import model_router
 from src.llm.model_router import RouteDecision
-from src.memory import semantic_cache
-from src.memory.session_store import SessionStore
-from src.memory.trace_store import TraceCollector, record_trace_safe
-from src.memory.usage_store import (
+from src.stores import semantic_cache
+from src.stores.session_store import SessionStore
+from src.stores.trace_store import TraceCollector, record_trace_safe
+from src.stores.usage_store import (
     cost_of,
     get_shared_store,
     merged_pricing,
@@ -38,7 +38,7 @@ from src.memory.usage_store import (
     record_saving,
     record_usage,
 )
-from src.memory.user_store import UserStore
+from src.stores.user_store import UserStore
 from src.services.log_setup import set_session_id
 
 logger = logging.getLogger(__name__)

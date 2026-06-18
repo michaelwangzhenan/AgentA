@@ -25,7 +25,7 @@ from src.agent.autogpt_agent import AutoGPTAgent
 from src.agent.agent import ThinkingConfig, TokenUsage, SYSTEM_PROMPT
 from src.agent.tools import ToolResult
 from src.agent.core.event_bus import EVENT_PLAN_CREATED, EVENT_TOKEN_CHUNK
-from src.memory.session_store import SessionStore
+from src.stores.session_store import SessionStore
 
 # AutoGPT Agent 本期不验证（详见 iter_2_agent.md §4.4.3），整文件默认 deselect
 pytestmark = pytest.mark.autogpt

@@ -23,8 +23,8 @@ from unittest.mock import patch
 import pytest
 
 from src.agent.agent import build_active_study_plan_block
-from src.memory import learning_plan_store as lp_store_module
-from src.memory.learning_plan_store import LearningPlanStore
+from src.stores import learning_plan_store as lp_store_module
+from src.stores.learning_plan_store import LearningPlanStore
 
 
 @pytest.fixture

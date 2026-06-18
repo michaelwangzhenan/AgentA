@@ -1,5 +1,5 @@
 """
-测试 [LearningPlanStore](../src/memory/learning_plan_store.py)（Phase 2.2 G1 / D1 / D2 / D9）。
+测试 [LearningPlanStore](../src/stores/learning_plan_store.py)（Phase 2.2 G1 / D1 / D2 / D9）。
 
 覆盖：
     - 表结构幂等初始化、独立 db 文件
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from src.memory.learning_plan_store import LearningPlanStore
+from src.stores.learning_plan_store import LearningPlanStore
 
 
 # ── fixtures ──────────────────────────────────────────────────────────────────

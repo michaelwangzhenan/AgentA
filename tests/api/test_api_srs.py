@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from src.api.deps import get_srs_store
 from src.api.main import app
-from src.memory.srs_store import SRSStore
+from src.stores.srs_store import SRSStore
 
 
 @pytest.fixture

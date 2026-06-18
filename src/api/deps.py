@@ -21,28 +21,28 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
 
 import src.config as _cfg
-from src.memory.user_context import set_current_user
+from src.stores.user_context import set_current_user
 from src.agent.agent import Agent
 from src.agent.agent_api import AgentAPI
 from src.agent.core.mcp_manager import MCPManager, get_shared_manager
-from src.memory.session_store import SessionStore
-from src.memory.learning_plan_store import LearningPlanStore
-from src.memory.learning_plan_store import get_shared_store as _get_shared_plan_store
-from src.memory.quiz_store import QuizStore
-from src.memory.quiz_store import get_shared_store as _get_shared_quiz_store
-from src.memory.srs_store import SRSStore
-from src.memory.srs_store import get_shared_store as _get_shared_srs_store
-from src.memory.golden_store import GoldenStore
-from src.memory.golden_store import get_shared_store as _get_shared_golden_store
-from src.memory.security_event_store import SecurityEventStore
-from src.memory.security_event_store import get_shared_store as _get_shared_security_event_store
-from src.memory.trace_store import TraceStore
-from src.memory.trace_store import get_shared_store as _get_shared_trace_store
-from src.memory.user_memory import UserMemoryStore
-from src.memory.usage_store import UsageStore
-from src.memory.usage_store import get_shared_store as _get_shared_usage_store
-from src.memory.user_store import ROLE_ADMIN, UserStore
-from src.memory.user_store import get_shared_store as _get_shared_user_store
+from src.stores.session_store import SessionStore
+from src.stores.learning_plan_store import LearningPlanStore
+from src.stores.learning_plan_store import get_shared_store as _get_shared_plan_store
+from src.stores.quiz_store import QuizStore
+from src.stores.quiz_store import get_shared_store as _get_shared_quiz_store
+from src.stores.srs_store import SRSStore
+from src.stores.srs_store import get_shared_store as _get_shared_srs_store
+from src.stores.golden_store import GoldenStore
+from src.stores.golden_store import get_shared_store as _get_shared_golden_store
+from src.stores.security_event_store import SecurityEventStore
+from src.stores.security_event_store import get_shared_store as _get_shared_security_event_store
+from src.stores.trace_store import TraceStore
+from src.stores.trace_store import get_shared_store as _get_shared_trace_store
+from src.stores.user_memory import UserMemoryStore
+from src.stores.usage_store import UsageStore
+from src.stores.usage_store import get_shared_store as _get_shared_usage_store
+from src.stores.user_store import ROLE_ADMIN, UserStore
+from src.stores.user_store import get_shared_store as _get_shared_user_store
 
 logger = logging.getLogger(__name__)
 

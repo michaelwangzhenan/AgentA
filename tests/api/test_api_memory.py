@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from src.api.deps import get_user_memory_store
 from src.api.main import app
-from src.memory.user_memory import UserMemoryStore
+from src.stores.user_memory import UserMemoryStore
 
 
 @pytest.fixture

@@ -14,7 +14,7 @@ from src.api.schemas.srs import (
     SRSCard,
     SRSCardListResponse,
 )
-from src.memory.srs_store import SRSStore
+from src.stores.srs_store import SRSStore
 
 router = APIRouter(prefix="/srs", tags=["srs"])
 

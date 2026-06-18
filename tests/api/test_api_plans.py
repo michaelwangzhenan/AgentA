@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from src.api.deps import get_plan_store
 from src.api.main import app
-from src.memory.learning_plan_store import LearningPlanStore
+from src.stores.learning_plan_store import LearningPlanStore
 
 
 @pytest.fixture

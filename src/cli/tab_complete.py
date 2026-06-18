@@ -14,7 +14,7 @@ from collections.abc import Sequence
 
 from prompt_toolkit.completion import WordCompleter
 
-from src.memory.session_store import SessionStore
+from src.stores.session_store import SessionStore
 
 # 所有静态可补全命令（无需参数，或常用参数组合）
 CLI_COMMANDS: list[str] = [

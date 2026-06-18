@@ -14,9 +14,9 @@ import threading
 from typing import Any, Callable
 
 import src.config as _cfg
-from src.memory.user_context import current_user_id
-from src.memory.session_store import SessionStore
-from src.memory.user_memory import (
+from src.stores.user_context import current_user_id
+from src.stores.session_store import SessionStore
+from src.stores.user_memory import (
     UserMemoryStore,
     extract_memory_ops,
     should_extract_immediately,

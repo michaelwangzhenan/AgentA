@@ -1,5 +1,5 @@
 """
-测试 [QuizStore](../src/memory/quiz_store.py)（Phase 2.3 G1 / D1 / D9 / D10）。
+测试 [QuizStore](../src/stores/quiz_store.py)（Phase 2.3 G1 / D1 / D9 / D10）。
 
 覆盖：
     - 表结构幂等初始化、独立 db 文件
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from src.memory.quiz_store import QuizStore
+from src.stores.quiz_store import QuizStore
 
 
 # ── fixtures ──────────────────────────────────────────────────────────────────

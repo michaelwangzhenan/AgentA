@@ -83,7 +83,7 @@ def _on_golden_db_path_changed(_old: Any, new: Any) -> None:
     GoldenStore 是进程级缓存单例（构造时读 RAG_GOLDEN_DB_PATH），不重置则一直连旧库。
     """
     try:
-        from src.memory.golden_store import reset_shared_store
+        from src.stores.golden_store import reset_shared_store
         reset_shared_store()
         logger.info("[config] RAG_GOLDEN_DB_PATH → %s，golden 单例已重置", new)
     except Exception as e:

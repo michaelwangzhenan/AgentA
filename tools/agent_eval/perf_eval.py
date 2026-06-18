@@ -67,8 +67,8 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(override=True)
 
 from src.cli import handlers  # noqa: E402
-from src.memory.session_store import SessionStore  # noqa: E402
-from src.memory.user_memory import UserMemoryStore  # noqa: E402
+from src.stores.session_store import SessionStore  # noqa: E402
+from src.stores.user_memory import UserMemoryStore  # noqa: E402
 
 
 # ── 通用计时工具 ────────────────────────────────────────────────────────────

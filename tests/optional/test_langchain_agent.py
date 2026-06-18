@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 from langchain_core.messages import HumanMessage, AIMessage
-from src.memory.langchain_history import SQLiteChatMessageHistory
+from src.stores.langchain_history import SQLiteChatMessageHistory
 from src.agent.langchain_tools import (
     build_langchain_tools,
     SearchKnowledgeInput,

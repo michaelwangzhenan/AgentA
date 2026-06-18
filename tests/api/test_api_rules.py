@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 import src.config as cfg
 from src.api.main import app
-from src.memory.user_store import UserStore, reset_shared_store_for_testing
+from src.stores.user_store import UserStore, reset_shared_store_for_testing
 
 
 @pytest.fixture

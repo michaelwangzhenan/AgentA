@@ -9,7 +9,7 @@ from typing import NamedTuple
 import pytest
 
 import src.config as config
-from src.memory.usage_store import (
+from src.stores.usage_store import (
     UsageStore,
     cost_of,
     merged_pricing,

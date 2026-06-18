@@ -15,7 +15,7 @@ from src.api.schemas.memory import (
     MemoryPatchRequest,
     MemoryPatchResponse,
 )
-from src.memory.user_memory import UserMemoryStore
+from src.stores.user_memory import UserMemoryStore
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 

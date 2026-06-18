@@ -107,7 +107,7 @@ def run_generation_for_file(
         candidates = generate_candidates(text, max_q or config.EVAL_AUTO_GOLDEN_MAX_Q)
         if not candidates:
             return 0
-        from src.memory.golden_store import (
+        from src.stores.golden_store import (
             SOURCE_AI,
             STATUS_PENDING,
             get_shared_store,

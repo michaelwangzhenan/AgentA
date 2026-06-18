@@ -244,7 +244,7 @@ def _run_c7(case: dict[str, Any]) -> tuple[bool, str]:
 def _run_llm_e2e(case: dict[str, Any], manager: MCPManager) -> tuple[bool, str]:
     """真发 LLM，看 LLM 是否触发期望的 MCP tool。"""
     from src.agent.agent import Agent
-    from src.memory.session_store import SessionStore
+    from src.stores.session_store import SessionStore
 
     session_store = SessionStore(":memory:")
     agent = Agent(verbose=False)

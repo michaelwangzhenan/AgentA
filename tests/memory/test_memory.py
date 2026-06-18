@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.memory.session_store import SessionStore
+from src.stores.session_store import SessionStore
 from src.agent.agent import Agent
 
 

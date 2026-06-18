@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 import src.config as cfg
 from src.api.deps import get_current_user, get_user_store
 from src.api.schemas.rules import RulesReadResponse, RulesWriteRequest, RulesWriteResponse
-from src.memory.user_store import UserStore
+from src.stores.user_store import UserStore
 
 router = APIRouter(prefix="/rules", tags=["rules"])
 

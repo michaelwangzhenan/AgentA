@@ -4,7 +4,7 @@ SM-2 调度算法核心
 SuperMemo 2（Wozniak, 1987）是 Anki 默认调度器的算法祖先：每张卡按"答对/答错 +
 难度自评"动态调整 `ease_factor`（难度因子）、`interval_days`（下次回炉天数）、
 `repetitions`（累计答对次数）。本模块只做**纯函数式公式计算**，不感知 SQLite / 卡片
-来源 / UI；持久化由 [`src.memory.srs_store.SRSStore.update_review_state`]
+来源 / UI；持久化由 [`src.stores.srs_store.SRSStore.update_review_state`]
 (../../memory/srs_store.py) 负责。
 
 Anki 4 档自评 → SM-2 公式 mapping：

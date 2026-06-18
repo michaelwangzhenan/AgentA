@@ -23,8 +23,8 @@ from fastapi.testclient import TestClient
 import src.config as _cfg
 from src.api.deps import get_agent, get_user_store
 from src.api.main import app
-from src.memory.usage_store import UsageStore, reset_shared_store_for_testing
-from src.memory.user_store import UserStore
+from src.stores.usage_store import UsageStore, reset_shared_store_for_testing
+from src.stores.user_store import UserStore
 
 
 class _Usage(NamedTuple):
