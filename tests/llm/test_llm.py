@@ -243,7 +243,7 @@ class TestCallWithThinking:
         original = config.ACTIVE_MODEL
         config.ACTIVE_MODEL = "claude-sonnet-4-5"
         try:
-            with patch("src.llm.provider._chat_claude_thinking",
+            with patch("src.llm.claude_provider.chat_thinking",
                        return_value="claude_resp") as mock_ct:
                 result = call_with_thinking([{"role": "user", "content": "hi"}],
                                             budget_tokens=2000)
@@ -261,7 +261,7 @@ class TestCallWithThinking:
                     "MiniMax-Text-01", "deepseek-chat"):
             config.ACTIVE_MODEL = mid
             try:
-                with patch("src.llm.provider._chat_openai_reasoning",
+                with patch("src.llm.openai_provider.chat_reasoning",
                            return_value=f"{mid}_resp") as mock_r:
                     result = call_with_thinking([{"role": "user", "content": "hi"}],
                                                 budget_tokens=4000)

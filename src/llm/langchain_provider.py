@@ -34,20 +34,17 @@ def build_chat_model(temperature: float = 0.7, streaming: bool = False, thinking
 def _build_openai(prov, model, temperature: float, streaming: bool = False,
                   thinking_enabled: bool = False, budget: int = 8000):
     from langchain_openai import ChatOpenAI
+
+    from src.llm.thinking_params import openai_thinking_extra_body
     http_client = None
     if prov.proxied and config.LLM_PROXY:
         http_client = httpx.Client(proxy=config.LLM_PROXY)
-    extra_body = dict(model.extra_body or {})
     model_id = model.model_id
+    extra_body = dict(model.extra_body or {})
     spec = getattr(model, 'thinking', None)
     if thinking_enabled and spec is not None:
-        # 与 provider._chat_openai_reasoning 同源：enable_extra_body 翻 thinking 开关，
-        # budget_key 透传预算，thinking_model 切专用思考模型。
-        extra_body.update(getattr(spec, 'enable_extra_body', None) or {})
-        if getattr(spec, 'budget_key', None):
-            extra_body[spec.budget_key] = budget
-        if getattr(spec, 'thinking_model', None):
-            model_id = spec.thinking_model
+        # 与 provider 直连路径同源（enable_extra_body 翻开关 / budget_key 透传 / 切思考模型）
+        model_id, extra_body = openai_thinking_extra_body(model, spec, budget)
     # extra_body 作为显式参数传给 ChatOpenAI（放 model_kwargs 会触发 UserWarning）
     return ChatOpenAI(model=model_id, api_key=prov.api_key,
         base_url=prov.base_url or None, temperature=temperature,
@@ -59,6 +56,8 @@ def _build_openai(prov, model, temperature: float, streaming: bool = False,
 def _build_anthropic(prov, model, temperature: float, streaming: bool = False,
                      thinking_enabled: bool = False, budget: int = 8000):
     from langchain_anthropic import ChatAnthropic
+
+    from src.llm.thinking_params import claude_thinking_budget
     http_client = None
     if config.LLM_PROXY:
         http_client = httpx.Client(proxy=config.LLM_PROXY)
@@ -66,8 +65,10 @@ def _build_anthropic(prov, model, temperature: float, streaming: bool = False,
         max_tokens=config.CLAUDE_MAX_TOKENS,
         temperature=temperature, streaming=streaming, http_client=http_client)
     if thinking_enabled:
-        # max_tokens 必须 > budget_tokens（Anthropic 强制）；temperature 须为 1。
-        budget_eff = max(1024, min(budget, config.CLAUDE_MAX_TOKENS - 4096))
+        # 与 provider 直连路径同源：max_tokens 跟着 budget 走（budget+4096），保证严格
+        # 大于 budget_tokens（Anthropic 强制）；temperature 须为 1。
+        budget_eff, max_tokens = claude_thinking_budget(model, budget)
+        kwargs['max_tokens'] = max_tokens
         kwargs['thinking'] = {'type': 'enabled', 'budget_tokens': budget_eff}
         kwargs['temperature'] = 1
     return ChatAnthropic(**kwargs)

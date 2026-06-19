@@ -9,13 +9,13 @@ provider.py 的 function name sanitize / restore 适配层单测。
 
 from types import SimpleNamespace
 
-from src.llm.provider import (
+from src.llm.openai_provider import (
     _restore_function_name,
     _restore_tool_call_names,
     _sanitize_function_name,
-    _sanitize_messages_for_llm,
     _sanitize_tools_for_llm,
 )
+from src.llm.provider import _sanitize_messages_for_llm
 
 
 class TestSanitizeFunctionName:
