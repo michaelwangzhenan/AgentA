@@ -18,7 +18,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   'plan-eval': '学习计划',
   'quiz-eval': '测验生成',
   recall: 'RAG 召回',
-  'harness-eval': 'Harness',
+  'critic-eval': 'Critic',
   'skill-recall': 'Skill 召回',
   'srs-eval': 'SRS 复习',
   __rag: 'RAG 检索实验',
@@ -33,7 +33,7 @@ const CATEGORY_ORDER = [
   'run-all',
   'security-adversarial',
   'mcp',
-  'harness-eval',
+  'critic-eval',
   'skill-recall',
   // 性能
   'perf-memory',

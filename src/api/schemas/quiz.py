@@ -15,7 +15,7 @@ class QuizQuestion(BaseModel):
     user_answer: str | None = None
     score: float = 0.0
     feedback: str | None = None
-    harness_flagged: bool = False
+    critic_flagged: bool = False
 
 
 class QuizSetSummary(BaseModel):

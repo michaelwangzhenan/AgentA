@@ -54,7 +54,7 @@ export type QuizQuestion = {
   user_answer: string | null
   score: number
   feedback: string | null
-  harness_flagged: boolean
+  critic_flagged: boolean
 }
 
 export type QuizSetSummary = {

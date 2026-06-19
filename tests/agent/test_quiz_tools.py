@@ -26,14 +26,14 @@ from src.stores.quiz_store import QuizStore
 
 
 @pytest.fixture(autouse=True)
-def _disable_harness_quiz_critic(monkeypatch: pytest.MonkeyPatch) -> None:
+def _disable_quiz_critic(monkeypatch: pytest.MonkeyPatch) -> None:
     """全文件默认关掉 grade_quiz 的 critic 自检，避免现有 UT 真调 LLM。
 
-    Phase 2.5 自检的集成测试见 [`test_harness_integration.py`](test_harness_integration.py)
+    Phase 2.5 自检的集成测试见 [`test_critic_integration.py`](test_critic_integration.py)
     （那里显式打开 + mock manager）。本文件聚焦 Phase 2.3 三业务 tool 自身，无须涉及自检。
     """
     import src.config as _cfg
-    monkeypatch.setattr(_cfg, "HARNESS_QUIZ_ENABLED", False)
+    monkeypatch.setattr(_cfg, "CRITIC_QUIZ_ENABLED", False)
 
 
 @pytest.fixture

@@ -725,16 +725,16 @@ SRS_FIRST_INTERVAL_DAYS: int = int(os.getenv("SRS_FIRST_INTERVAL_DAYS", "1"))
 # SM-2 算法：repetitions=2 时的 interval（第二次复习答对的下次回炉天数）
 SRS_SECOND_INTERVAL_DAYS: int = int(os.getenv("SRS_SECOND_INTERVAL_DAYS", "6"))
 
-# ── Harness 自检配置 ────────────────────────────────────────────
+# ── Critic 自检配置 ────────────────────────────────────────────
 # 是否对 grade_quiz 批改结果做自检（可选值：true / false）
-HARNESS_QUIZ_ENABLED: bool = os.getenv("HARNESS_QUIZ_ENABLED", "true").lower() == "true"
+CRITIC_QUIZ_ENABLED: bool = os.getenv("CRITIC_QUIZ_ENABLED", "true").lower() == "true"
 # 是否对 search_knowledge 召回片段做相关性自检（可选值：true / false）；
-# 开启会多 1 次 LLM 调用（超时阈值见 HARNESS_LLM_TIMEOUT_SEC），默认关以降低召回延迟
-HARNESS_RAG_ENABLED: bool = os.getenv("HARNESS_RAG_ENABLED", "false").lower() == "true"
+# 开启会多 1 次 LLM 调用（超时阈值见 CRITIC_LLM_TIMEOUT_SEC），默认关以降低召回延迟
+CRITIC_RAG_ENABLED: bool = os.getenv("CRITIC_RAG_ENABLED", "false").lower() == "true"
 # critic 单次 LLM 调用超时（秒），超时静默降级
-HARNESS_LLM_TIMEOUT_SEC: float = float(os.getenv("HARNESS_LLM_TIMEOUT_SEC", "15"))
-# Q1 quiz 批改自检阈值（critic 总分 < 该值标 harness_flagged，0-5 分）
-HARNESS_GRADING_THRESHOLD: float = float(os.getenv("HARNESS_GRADING_THRESHOLD", "3.5"))
+CRITIC_LLM_TIMEOUT_SEC: float = float(os.getenv("CRITIC_LLM_TIMEOUT_SEC", "15"))
+# Q1 quiz 批改自检阈值（critic 总分 < 该值标 critic_flagged，0-5 分）
+CRITIC_GRADING_THRESHOLD: float = float(os.getenv("CRITIC_GRADING_THRESHOLD", "3.5"))
 # 自动提取到点后，最近窗口里需至少有一条 ≥此字符数的 user 消息才触发（整窗都是寒暄则跳过；设为 0 禁用此过滤）
 USER_MEMORY_EXTRACT_MIN_INPUT_LEN: int = int(os.getenv("USER_MEMORY_EXTRACT_MIN_INPUT_LEN", "20"))
 # 记忆总条数软上限（提示 LLM 合并时控制规模，超出时合并 / 删除最旧条目）

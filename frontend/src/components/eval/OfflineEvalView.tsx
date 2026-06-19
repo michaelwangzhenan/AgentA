@@ -277,15 +277,15 @@ const EVAL_TASKS: EvalTaskConfig[] = [
     },
   },
   {
-    key: 'harness',
-    label: 'Harness 自检',
+    key: 'critic',
+    label: 'Critic 自检',
     usesLlm: true, // critic 判定必须调 LLM（无 None）
-    reportMatch: 'harness/',
+    reportMatch: 'critic/',
     options: [],
     thresholds: [{ key: 'pass', label: '通过率阈值(≥)', default: 0.8 }],
     intro: {
       purpose:
-        '检验 harness 里的 critic（自动判分器）自身判得准不准：给定 (输入, 期望结论)，看 critic 的判定是否与期望一致。只评 critic 本身，不评主路径产出。',
+        '检验 critic（自动判分器）自身判得准不准：给定 (输入, 期望结论)，看 critic 的判定是否与期望一致。只评 critic 本身，不评主路径产出。',
       how: [
         '① 选「测试模型」（默认系统当前模型）；critic 判定必须调 LLM。',
         '② 可调「通过率阈值」（默认 0.8）。',
@@ -296,13 +296,13 @@ const EVAL_TASKS: EvalTaskConfig[] = [
         '无额外开关；判定阈值见下方「通过率阈值」。',
       ],
       principle: [
-        'quiz_critic case：调 HarnessManager.review_grading，比对 verdict.passed 与期望（pass / flag）。',
+        'quiz_critic case：调 CriticManager.review_grading，比对 verdict.passed 与期望（pass / flag）。',
         'rag_critic case：走底层 RAG 批判模板，比对解析出的分数列表与 dataset 的期望。',
         '只评 critic 自身判定准确率；主路径产出好坏由 quiz / RAG 评估覆盖。',
       ],
       metrics: ['通过率：critic 判对的 case 占比，达阈值判「通过」。'],
       cost: '每条 case 一次真实 critic LLM 调用，耗所选模型 token。',
-      dataset: 'golden 来自 tools/agent_eval/harness/dataset.json（quiz_critic / rag_critic 两类）。',
+      dataset: 'golden 来自 tools/agent_eval/critic/dataset.json（quiz_critic / rag_critic 两类）。',
     },
   },
   {

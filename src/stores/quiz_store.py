@@ -30,7 +30,7 @@ Quiz 出题持久化模块 —— SQLite 存储层
         user_answer     TEXT    NOT NULL DEFAULT '',       -- 用户作答（批改时填）
         score           REAL    NOT NULL DEFAULT 0.0,      -- 单题得分 0.0-1.0（MCQ 整对 1.0 / 否则 0；简答按 LLM-judge）
         feedback        TEXT    NOT NULL DEFAULT '',       -- 批改反馈（string-match 简评 / LLM 反馈）
-        harness_flagged INTEGER NOT NULL DEFAULT 0         -- critic 自检判定本题批改可能有偏（0/1）
+        critic_flagged INTEGER NOT NULL DEFAULT 0         -- critic 自检判定本题批改可能有偏（0/1）
     )
 
 跨 session 复盘场景：用户重启 agent → 新 session 问"上次 quiz 哪些错了 / 列出我做过的 quiz"
@@ -93,7 +93,7 @@ class QuizStore:
     def _create_tables(self) -> None:
         """创建 quiz_sets / quiz_questions 表（幂等）+ fail-fast 检测旧 schema。
 
-        quiz_questions 含 `harness_flagged` 列。沿用 [`UserMemoryStore`](user_memory.py)
+        quiz_questions 含 `critic_flagged` 列。沿用 [`UserMemoryStore`](user_memory.py)
         的 fail-fast 模式：旧 quiz.db 升级时不做 ALTER TABLE auto-migrate，PRAGMA 自检
         缺列直接抛 RuntimeError 提示删库重建（单用户 MVP 场景损失可接受，避免引入迁移代码）。
         """
@@ -127,7 +127,7 @@ class QuizStore:
                         user_answer     TEXT    NOT NULL DEFAULT '',
                         score           REAL    NOT NULL DEFAULT 0.0,
                         feedback        TEXT    NOT NULL DEFAULT '',
-                        harness_flagged INTEGER NOT NULL DEFAULT 0
+                        critic_flagged INTEGER NOT NULL DEFAULT 0
                     );
                 """)
 
@@ -135,9 +135,9 @@ class QuizStore:
             # （不走 ALTER TABLE auto-migrate）
             set_cols = {row[1] for row in self._conn.execute("PRAGMA table_info(quiz_sets)")}
             q_cols = {row[1] for row in self._conn.execute("PRAGMA table_info(quiz_questions)")}
-            if "user_id" not in set_cols or "harness_flagged" not in q_cols:
+            if "user_id" not in set_cols or "critic_flagged" not in q_cols:
                 raise RuntimeError(
-                    f"quiz.db schema 已过期（缺 user_id / harness_flagged 列）。\n"
+                    f"quiz.db schema 已过期（缺 user_id / critic_flagged 列）。\n"
                     f"请删除 {self._db_path} 后重启（单用户 MVP 不做向后兼容迁移）。"
                 )
 
@@ -193,7 +193,7 @@ class QuizStore:
             "user_answer": row["user_answer"],
             "score": float(row["score"] or 0.0),
             "feedback": row["feedback"],
-            "harness_flagged": bool(row["harness_flagged"]),
+            "critic_flagged": bool(row["critic_flagged"]),
         }
 
     # ── quiz_set CRUD ────────────────────────────────────────────────────────
@@ -428,20 +428,20 @@ class QuizStore:
 
     # ── 归档 / 删除 ──────────────────────────────────────────────────────────
 
-    def mark_question_harness_flagged(self, question_id: int) -> bool:
-        """把指定题号的 `harness_flagged` 置 1（critic 自检判定批改可能有偏）。
+    def mark_question_critic_flagged(self, question_id: int) -> bool:
+        """把指定题号的 `critic_flagged` 置 1（critic 自检判定批改可能有偏）。
 
         Returns:
             True 该题存在且更新成功；False 题不存在。
         """
         with self._lock, self._conn:
             cursor = self._conn.execute(
-                "UPDATE quiz_questions SET harness_flagged = 1 WHERE id = ?",
+                "UPDATE quiz_questions SET critic_flagged = 1 WHERE id = ?",
                 (question_id,),
             )
         flagged = cursor.rowcount > 0
         if flagged:
-            logger.info("mark_question_harness_flagged: question_id=%d", question_id)
+            logger.info("mark_question_critic_flagged: question_id=%d", question_id)
         return flagged
 
     # ── 归档 / 删除 ──────────────────────────────────────────────────────────

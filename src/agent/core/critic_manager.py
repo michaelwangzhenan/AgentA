@@ -1,4 +1,4 @@
-"""Harness 自检 manager
+"""Critic 自检 manager
 
 提供两路生产路径 critic：
 
@@ -26,8 +26,8 @@ from tools.eval_common import judge_with_llm
 
 logger = logging.getLogger(__name__)
 
-# critic prompt 文件目录：tools/agent_eval/harness/
-_CRITIC_PROMPTS_DIR = Path(__file__).resolve().parents[3] / "tools" / "agent_eval" / "harness"
+# critic prompt 文件目录：tools/agent_eval/critic/
+_CRITIC_PROMPTS_DIR = Path(__file__).resolve().parents[3] / "tools" / "agent_eval" / "critic"
 _DEFAULT_QUIZ_CRITIC = _CRITIC_PROMPTS_DIR / "quiz_critic.txt"
 _DEFAULT_RAG_CRITIC = _CRITIC_PROMPTS_DIR / "rag_critic.txt"
 
@@ -36,7 +36,7 @@ _RAG_CHUNK_TRUNCATE_CHARS: int = 800
 
 
 @dataclass(frozen=True)
-class HarnessVerdict:
+class CriticVerdict:
     """单条自检判决。
 
     Attributes:
@@ -61,7 +61,7 @@ def _load_prompt(path: Path) -> str:
     except FileNotFoundError as e:
         raise RuntimeError(
             f"critic prompt 文件缺失：{path}。\n"
-            f"请检查 tools/agent_eval/harness/ 目录是否完整"
+            f"请检查 tools/agent_eval/critic/ 目录是否完整"
             f"（应含 quiz_critic.txt + rag_critic.txt）。"
         ) from e
     except OSError as e:
@@ -86,8 +86,8 @@ _RAG_BATCH_USER_TEMPLATE = """## 用户问题
 {chunks}"""
 
 
-class HarnessManager:
-    """Harness critic 管理器。
+class CriticManager:
+    """Critic 自检管理器。
 
     构造一次后跨整个进程复用；线程安全（内部 ThreadPoolExecutor 自带锁）。
     """
@@ -100,16 +100,16 @@ class HarnessManager:
         quiz_critic_path: Path = _DEFAULT_QUIZ_CRITIC,
         rag_critic_path: Path = _DEFAULT_RAG_CRITIC,
     ) -> None:
-        self.threshold = threshold if threshold is not None else config.HARNESS_GRADING_THRESHOLD
-        self.timeout = timeout if timeout is not None else config.HARNESS_LLM_TIMEOUT_SEC
+        self.threshold = threshold if threshold is not None else config.CRITIC_GRADING_THRESHOLD
+        self.timeout = timeout if timeout is not None else config.CRITIC_LLM_TIMEOUT_SEC
         self._quiz_criteria = _load_prompt(quiz_critic_path)
         self._rag_criteria = _load_prompt(rag_critic_path)
         # max_workers=2 足够 — Q1 / R1 不会并发，但留 buffer 防万一
         self._executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=2, thread_name_prefix="harness"
+            max_workers=2, thread_name_prefix="critic"
         )
         logger.info(
-            "[Harness] manager 初始化：threshold=%.2f, timeout=%.1fs",
+            "[Critic] manager 初始化：threshold=%.2f, timeout=%.1fs",
             self.threshold, self.timeout,
         )
 
@@ -123,10 +123,10 @@ class HarnessManager:
         correct_answer: str,
         agent_score: float,
         agent_feedback: str,
-    ) -> HarnessVerdict:
+    ) -> CriticVerdict:
         """对单题批改结果做 critic 自检。
 
-        passed=False & failure=False  → critic 判定批改不达标，调用方应 mark harness_flagged。
+        passed=False & failure=False  → critic 判定批改不达标，调用方应 mark critic_flagged。
         passed=True  & failure=False  → critic 判定批改 OK，放行。
         passed=True  & failure=True   → critic 自身失败（超时 / 解析错），软放行（不 flag，避免误伤）。
         """
@@ -150,30 +150,30 @@ class HarnessManager:
             )
             res = future.result(timeout=self.timeout)
         except concurrent.futures.TimeoutError:
-            logger.warning("[Harness] quiz critic 超时 (%.1fs)，软放行", self.timeout)
-            return HarnessVerdict(
+            logger.warning("[Critic] quiz critic 超时 (%.1fs)，软放行", self.timeout)
+            return CriticVerdict(
                 passed=True, score=None,
                 reason=f"critic 超时 ({self.timeout}s)",
                 raw="", failure=True,
             )
         except Exception as e:  # noqa: BLE001 — critic 异常一律软返回，不阻塞主流程
-            logger.warning("[Harness] quiz critic 异常：%s", e)
-            return HarnessVerdict(
+            logger.warning("[Critic] quiz critic 异常：%s", e)
+            return CriticVerdict(
                 passed=True, score=None,
                 reason=f"critic 异常：{e}",
                 raw="", failure=True,
             )
 
         if not res.ok or res.score is None:
-            logger.warning("[Harness] quiz critic 解析失败：%s", res.reason)
-            return HarnessVerdict(
+            logger.warning("[Critic] quiz critic 解析失败：%s", res.reason)
+            return CriticVerdict(
                 passed=True, score=None,
                 reason=res.reason or "critic 解析失败",
                 raw=res.raw, failure=True,
             )
 
         passed = res.score >= self.threshold
-        return HarnessVerdict(
+        return CriticVerdict(
             passed=passed, score=res.score, reason=res.reason,
             raw=res.raw, failure=False,
         )
@@ -217,25 +217,25 @@ class HarnessManager:
             raw = future.result(timeout=self.timeout)
         except concurrent.futures.TimeoutError:
             logger.warning(
-                "[Harness] RAG critic 超时 (%.1fs, K=%d)，软放行原始 %d 条",
+                "[Critic] RAG critic 超时 (%.1fs, K=%d)，软放行原始 %d 条",
                 self.timeout, k, k,
             )
             return hits
         except Exception as e:  # noqa: BLE001 — critic 异常一律软返回
-            logger.warning("[Harness] RAG critic 异常 (K=%d)：%s", k, e)
+            logger.warning("[Critic] RAG critic 异常 (K=%d)：%s", k, e)
             return hits
 
         verdicts = self._parse_rag_verdicts(raw, k)
         if verdicts is None:
             logger.warning(
-                "[Harness] RAG critic 解析失败 (K=%d)，软放行：%r",
+                "[Critic] RAG critic 解析失败 (K=%d)，软放行：%r",
                 k, raw[:200],
             )
             return hits
 
         kept = [h for h, score in zip(hits, verdicts) if score >= 3.0]
         logger.info(
-            "[Harness] RAG critic: %d → %d (过滤 %d 条 not_relevant)",
+            "[Critic] RAG critic: %d → %d (过滤 %d 条 not_relevant)",
             k, len(kept), k - len(kept),
         )
         return kept
@@ -298,23 +298,23 @@ class HarnessManager:
 
 # ── 进程级单例 ────────────────────────────────────────────────────────────────
 
-_singleton: HarnessManager | None = None
+_singleton: CriticManager | None = None
 _singleton_lock = threading.Lock()
 
 
-def get_harness_manager() -> HarnessManager:
+def get_critic_manager() -> CriticManager:
     """进程级单例；首次调用懒加载（读 critic prompt 文件）。"""
     global _singleton
     if _singleton is not None:
         return _singleton
     with _singleton_lock:
         if _singleton is None:
-            _singleton = HarnessManager()
+            _singleton = CriticManager()
     return _singleton
 
 
 def reset_for_test() -> None:
-    """UT 用：清空单例（让下次 get_harness_manager 重新读 prompt 文件）。"""
+    """UT 用：清空单例（让下次 get_critic_manager 重新读 prompt 文件）。"""
     global _singleton
     with _singleton_lock:
         _singleton = None

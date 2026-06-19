@@ -1,9 +1,9 @@
-"""Phase 2.5 Harness 自检评估器（[§4.9.10 #8](../../../docs/iter_2_agent.md#4910-harness-自检-phase-25)）
+"""Phase 2.5 Critic 自检评估器（[§4.9.10 #8](../../../docs/iter_2_agent.md#4910-critic-自检-phase-25)）
 
 判定一件事（对应 Step 0 验收 ⑤）：
 
 - **critic 自身判得准不准** —— 给定 (case input, expected verdict)，跑 critic LLM 调用，看判得对不对
-  - `quiz_critic` case：调 [`HarnessManager.review_grading`](../../../src/agent/core/harness_manager.py)，
+  - `quiz_critic` case：调 [`CriticManager.review_grading`](../../../src/agent/core/critic_manager.py)，
     比对 `verdict.passed` vs `expected ∈ {"pass", "flag"}`
   - `rag_critic` case：直接走底层 `_RAG_BATCH_*_TEMPLATE` + `_call_chat_for_rag` + `_parse_rag_verdicts`，
     比对解析后的 list[float] vs dataset 的 `expected: list[int]`
@@ -13,9 +13,9 @@
 
 常用命令：
 
-    python -m tools.agent_eval.harness.eval_harness
-    python -m tools.agent_eval.harness.eval_harness --case Q01-correct-grading-passes
-    python -m tools.agent_eval.harness.eval_harness --no-report
+    python -m tools.agent_eval.critic.eval_critic
+    python -m tools.agent_eval.critic.eval_critic --case Q01-correct-grading-passes
+    python -m tools.agent_eval.critic.eval_critic --no-report
 """
 
 from __future__ import annotations
@@ -42,8 +42,8 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 import src.config as config  # noqa: E402
-from src.agent.core import harness_manager as hm  # noqa: E402
-from src.agent.core.harness_manager import HarnessManager  # noqa: E402
+from src.agent.core import critic_manager as hm  # noqa: E402
+from src.agent.core.critic_manager import CriticManager  # noqa: E402
 
 
 _DEFAULT_DATASET = Path(__file__).parent / "dataset.json"
@@ -64,7 +64,7 @@ def _load_dataset(path: Path) -> list[dict[str, Any]]:
 
 
 def _run_quiz_critic_case(
-    case: dict[str, Any], manager: HarnessManager,
+    case: dict[str, Any], manager: CriticManager,
 ) -> dict[str, Any]:
     """跑 quiz_critic case：调 review_grading，比对 verdict.passed vs expected。"""
     inp = case["input"]
@@ -102,7 +102,7 @@ def _run_quiz_critic_case(
 
 
 def _run_rag_critic_case(
-    case: dict[str, Any], manager: HarnessManager,
+    case: dict[str, Any], manager: CriticManager,
 ) -> dict[str, Any]:
     """跑 rag_critic case：构造 K 条 chunks → batch chat → parse → 比 expected。"""
     inp = case["input"]
@@ -147,7 +147,7 @@ def _run_rag_critic_case(
     }
 
 
-def _run_case(case: dict[str, Any], manager: HarnessManager) -> dict[str, Any]:
+def _run_case(case: dict[str, Any], manager: CriticManager) -> dict[str, Any]:
     cat = case.get("category", "")
     if cat == "quiz_critic":
         return _run_quiz_critic_case(case, manager)
@@ -183,8 +183,8 @@ def _collect_env() -> dict[str, str]:
         "git": git_part,
         "python": platform.python_version(),
         "provider": getattr(config, "ACTIVE_MODEL", "?"),
-        "threshold": f"{config.HARNESS_GRADING_THRESHOLD:.2f}",
-        "timeout": f"{config.HARNESS_LLM_TIMEOUT_SEC:.1f}s",
+        "threshold": f"{config.CRITIC_GRADING_THRESHOLD:.2f}",
+        "timeout": f"{config.CRITIC_LLM_TIMEOUT_SEC:.1f}s",
     }
 
 
@@ -212,14 +212,14 @@ def _render_markdown(
     rag_passed = sum(1 for r in rag_results if r["pass"])
 
     lines: list[str] = [
-        "# Harness 自检评估报告",
+        "# Critic 自检评估报告",
         "",
         f"- **时间**: {env['timestamp']}",
         f"- **Git**: {env['git']}",
         f"- **Python**: {env['python']}",
         f"- **Provider**: {env['provider']}",
-        f"- **HARNESS_GRADING_THRESHOLD**: {env['threshold']}",
-        f"- **HARNESS_LLM_TIMEOUT_SEC**: {env['timeout']}",
+        f"- **CRITIC_GRADING_THRESHOLD**: {env['threshold']}",
+        f"- **CRITIC_LLM_TIMEOUT_SEC**: {env['timeout']}",
         f"- **Dataset**: `{dataset_path}`",
         "",
         "## 核心指标",
@@ -293,9 +293,9 @@ def _dump_report(
     pass_threshold: float = _PASS_RATE,
 ) -> Path:
     from tools.eval_common.report_paths import reports_dir as eval_reports_dir
-    reports_dir = eval_reports_dir("harness")
+    reports_dir = eval_reports_dir("critic")
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    out = reports_dir / f"harness-eval-{ts}.md"
+    out = reports_dir / f"critic-eval-{ts}.md"
     out.write_text(
         _render_markdown(results, passed, total, dataset_path, env, pass_threshold),
         encoding="utf-8",
@@ -320,9 +320,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "\n常用命令：\n"
-            "  python -m tools.agent_eval.harness.eval_harness                  # 跑全部\n"
-            "  python -m tools.agent_eval.harness.eval_harness --case Q01-...   # 单 case\n"
-            "  python -m tools.agent_eval.harness.eval_harness --no-report      # 不落盘\n"
+            "  python -m tools.agent_eval.critic.eval_critic                  # 跑全部\n"
+            "  python -m tools.agent_eval.critic.eval_critic --case Q01-...   # 单 case\n"
+            "  python -m tools.agent_eval.critic.eval_critic --no-report      # 不落盘\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -344,14 +344,14 @@ def main() -> None:
         if not dataset:
             sys.exit(f"❌ 没有 id={args.case} 的 case")
 
-    print(f"\n🧪 Harness 自检评估（{len(dataset)} case）\n")
+    print(f"\n🧪 Critic 自检评估（{len(dataset)} case）\n")
     print(
-        f"   threshold={config.HARNESS_GRADING_THRESHOLD:.2f}, "
-        f"timeout={config.HARNESS_LLM_TIMEOUT_SEC:.1f}s, "
+        f"   threshold={config.CRITIC_GRADING_THRESHOLD:.2f}, "
+        f"timeout={config.CRITIC_LLM_TIMEOUT_SEC:.1f}s, "
         f"provider={config.ACTIVE_MODEL}\n"
     )
 
-    manager = HarnessManager()
+    manager = CriticManager()
     results: list[dict[str, Any]] = []
     for i, case in enumerate(dataset, 1):
         print(f"  [{i:>2}/{len(dataset)}] {case['id']:<40} ... ", end="", flush=True)

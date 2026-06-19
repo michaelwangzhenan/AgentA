@@ -409,7 +409,7 @@ def test_eval_run_skills_pass_threshold(
     assert "0.75" in seen["args"]
 
 
-def test_eval_run_harness_pass_threshold(
+def test_eval_run_critic_pass_threshold(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     seen: dict = {}
@@ -421,7 +421,7 @@ def test_eval_run_harness_pass_threshold(
     )
     r = client.post(
         "/api/eval/run",
-        json={"task": "harness", "model": "kimi-k2.5", "thresholds": {"pass": 0.85}},
+        json={"task": "critic", "model": "kimi-k2.5", "thresholds": {"pass": 0.85}},
     )
     assert r.status_code == 200
     assert "--pass-threshold" in seen["args"]

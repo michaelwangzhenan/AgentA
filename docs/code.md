@@ -2,16 +2,18 @@
 
 ## 1.1. 文件职责速查
 
-| 路                                                    径 | 角色                                                                                                | 主          要     入           口        |
-| ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| `src/rag/parser.py`                                                              | 多格式 → 纯文本（txt/md/html/pdf/docx/pptx/xlsx + OCR 兜底）                                       | `parse_file(path)`                                    |
-| `src/rag/splitter.py`                                                            | 结构化分块（识别 Markdown 标题与 PDF 页号作为锚点，<br />把父级标题路径作为前缀注入 chunk 文本）    | `split_structured(text, ...)`                         |
-| `src/rag/ingest.py`                                                              | 入库主流程（遍历目录 → parse → split → 双索引写盘 + 幂等增量）                                   | `ingest_all(...)` · CLI `python -m src.rag.ingest` |
-| `src/rag/bm25_index.py`                                                          | BM25 Okapi 自实现（倒排索引 + bigram 中文分词 + pickle 持久化）                                     | `get_index(coll)`                                     |
-| `src/rag/query_rewriter.py`                                                      | 三轴 query 改写（Multi-Query / HyDE / 翻译轴），LRU 缓存包装                                        | `expand_queries(query)`                               |
-| `src/rag/retriever.py`                                                           | 检索总枢纽：多 query × 多 collection × dense+bm25 →<br />RRF → 阈值 → rerank → dedupe(去重）) | `search(query, ..., rerank=None)`                     |
-| `src/rag/reranker.py`                                                            | Cross-Encoder 精排，输出统一 sigmoid 归一化到 [0,1]                                                 | `rerank(query, hits, top_k)`                          |
-| `tools/rag_eval/runner.py`                                                       | 端到端检索评估（黄金集 → 指标 → Markdown 报告 +`.log` 伴生文件）                                | `python -m tools.rag_eval.runner`                     |
+
+| 路 径                         | 角色                                                                          | 主 要 入 口                                            |
+| --------------------------- | --------------------------------------------------------------------------- | -------------------------------------------------- |
+| `src/rag/parser.py`         | 多格式 → 纯文本（txt/md/html/pdf/docx/pptx/xlsx + OCR 兜底）                          | `parse_file(path)`                                 |
+| `src/rag/splitter.py`       | 结构化分块（识别 Markdown 标题与 PDF 页号作为锚点， 把父级标题路径作为前缀注入 chunk 文本）                   | `split_structured(text, ...)`                      |
+| `src/rag/ingest.py`         | 入库主流程（遍历目录 → parse → split → 双索引写盘 + 幂等增量）                                  | `ingest_all(...)` · CLI `python -m src.rag.ingest` |
+| `src/rag/bm25_index.py`     | BM25 Okapi 自实现（倒排索引 + bigram 中文分词 + pickle 持久化）                             | `get_index(coll)`                                  |
+| `src/rag/query_rewriter.py` | 三轴 query 改写（Multi-Query / HyDE / 翻译轴），LRU 缓存包装                              | `expand_queries(query)`                            |
+| `src/rag/retriever.py`      | 检索总枢纽：多 query × 多 collection × dense+bm25 → RRF → 阈值 → rerank → dedupe(去重）) | `search(query, ..., rerank=None)`                  |
+| `src/rag/reranker.py`       | Cross-Encoder 精排，输出统一 sigmoid 归一化到 [0,1]                                    | `rerank(query, hits, top_k)`                       |
+| `tools/rag_eval/runner.py`  | 端到端检索评估（黄金集 → 指标 → Markdown 报告 +`.log` 伴生文件）                                | `python -m tools.rag_eval.runner`                  |
+
 
 ## 1.2. 两条主调用链
 
@@ -51,50 +53,54 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 **再按需要往下钻**：
 
 - 想优化召回质量 / 阈值 → `retriever.py` 的 dense 阈值过滤与 RRF 段
-- 想加新文档格式 → `parser.py` 的 `parse_file()` 与各 `_parse_*` 私有函数
+- 想加新文档格式 → `parser.py` 的 `parse_file()` 与各 `_parse_`* 私有函数
 - 想调分块策略 → `splitter.py · split_structured()`
 - 想加 / 改指标 → `tools/rag_eval/runner.py · evaluate()` 与 `_render_markdown()`
 - 想理解入库幂等性 → `ingest.py · ingest_all()` 的 `content_sha1` 比对逻辑
 
 ## 1.4. 常见改动落点
 
-| 需求                             | 改动文件                     | 关键函数 / 配置                                                                        |
-| -------------------------------- | ---------------------------- | -------------------------------------------------------------------------------------- |
-| 切换 embedding 模型 / 加新 alias | `src/config.py`            | `EMBEDDING_MODELS` 字典；ingest 后自动新建 collection                                |
-| 调 RRF / 阈值 / 去重             | `.env`                     | `RRF_K` / `RAG_DENSE_MIN_SCORE_*` / `RAG_K_PER_SOURCE`                           |
-| 切换 reranker 模型               | `.env`                     | `RERANKER_MODEL` + `RAG_RERANK_MIN_SCORE`（统一 sigmoid 后仍需按分布微调）         |
-| 关闭某个改写轴                   | `.env`                     | `RAG_QUERY_REWRITE_ENABLED` / `RAG_HYDE_ENABLED` / `RAG_TRANSLATE_QUERY_ENABLED` |
-| Agent / 评估临时关 rerank        | 调用方                       | `search(..., rerank=False)`，无需改全局 config                                       |
-| 加新指标                         | `tools/rag_eval/runner.py` | `EvalReport` 字段 + `evaluate()` 累加 + `_render_markdown()` 渲染                |
+
+| 需求                         | 改动文件                       | 关键函数 / 配置                                                                        |
+| -------------------------- | -------------------------- | -------------------------------------------------------------------------------- |
+| 切换 embedding 模型 / 加新 alias | `src/config.py`            | `EMBEDDING_MODELS` 字典；ingest 后自动新建 collection                                    |
+| 调 RRF / 阈值 / 去重            | `.env`                     | `RRF_K` / `RAG_DENSE_MIN_SCORE_`* / `RAG_K_PER_SOURCE`                           |
+| 切换 reranker 模型             | `.env`                     | `RERANKER_MODEL` + `RAG_RERANK_MIN_SCORE`（统一 sigmoid 后仍需按分布微调）                   |
+| 关闭某个改写轴                    | `.env`                     | `RAG_QUERY_REWRITE_ENABLED` / `RAG_HYDE_ENABLED` / `RAG_TRANSLATE_QUERY_ENABLED` |
+| Agent / 评估临时关 rerank       | 调用方                        | `search(..., rerank=False)`，无需改全局 config                                         |
+| 加新指标                       | `tools/rag_eval/runner.py` | `EvalReport` 字段 + `evaluate()` 累加 + `_render_markdown()` 渲染                      |
+
 
 # 2. Agent 代码
 
 ## 2.1. 文件职责速查
 
-| 路径                                   | 角色                                                                                                                         | 主要入口                                                                                                                              |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/agent/agent_api.py`             | `AgentAPI` Protocol：表现层 ↔ Agent core 契约（duck-typed，三种实现都满足，详 [§3.1](#31-agentapi)）                        | `AgentAPI`（Protocol）                                                                                                              |
-| `src/agent/agent.py`                 | Python ReAct Agent 主实现：拼 system → loop（LLM ↔ tool）→ final；含 `SYSTEM_PROMPT` 与模块级共享 store 单例            | `Agent(...).run(user_input)` · `SYSTEM_PROMPT`                                                                                   |
-| `src/agent/autogpt_agent.py`         | Auto-GPT 风格 Agent：Plan → Execute（子 ReAct）→ Review 三阶段                                                             | `AutoGPTAgent(...).run(user_input)`                                                                                                 |
-| `src/agent/langchain_agent.py`       | LangChain `AgentExecutor` 实现，公共层接口对齐，loop 由 LangChain 接管                                                     | `LangChainAgent(...).run(user_input)`                                                                                               |
-| `src/agent/langchain_tools.py`       | 把 `tools.py` 的 OpenAI 风格 schema 包装成 LangChain `StructuredTool`                                                    | `build_langchain_tools()`                                                                                                           |
-| `src/agent/tools.py`                 | 全部业务 tool 定义 +`execute_tool` 路由（RAG / web / fetch / plan / study / quiz / srs / skill / mcp）                     | `get_tools(skill_bodies)` · `execute_tool(name, args, ...)`                                                                      |
-| `src/agent/core/event_bus.py`        | 事件总线：10 类 `AgentEvent` 分发，多订阅扇出 + 异常隔离                                                                   | `EventBus` · `EVENT_*` 常量                                                                                                      |
-| `src/agent/core/tool_call_engine.py` | 工具调用一轮编排：执行 + 结果格式化 + 写历史 + 叠加发 `plan_*` 事件                                                        | `ToolCallEngine.process(message, messages)`                                                                                         |
-| `src/agent/core/history_manager.py`  | 历史按轮截断 + skill_pair 完整性保护 + system 拼接                                                                           | `HistoryManager.load_truncated()`                                                                                                   |
-| `src/agent/core/memory_manager.py`   | UserMemory 注入 `<user_context>` + 节流自动提取                                                                            | `MemoryManager.build_system_prompt()` · `try_extract()`                                                                          |
-| `src/agent/core/thinking_policy.py`  | Adaptive Extended Thinking budget 估算（LOW / MED / HIGH 三档）                                                              | `ThinkingPolicy.effective_budget(messages)`                                                                                         |
-| `src/agent/core/citation_builder.py` | RAG 引用编号管理：跨同轮多次 `search_knowledge` 累计编号 + 末尾 `— sources —` 块渲染（详 [§3.6](#36-引用管理)）          | `CitationBuilder.register()` · `render()`                                                                                        |
-| `src/agent/core/plan_manager.py`     | `PlanState` / `PlanStep` dataclass + 从 messages reconstruct plan 状态（详 [§3.8.1](#381-数据载体)）                       | `reconstruct_from_messages(messages)`                                                                                               |
-| `src/agent/core/srs_scheduler.py`    | SM-2 公式纯函数（4 档 → ease / interval / repetitions / lapses，详[§3.11.2](#3112-sm-2-算法核心)）                            | `schedule_review(card, rating)`                                                                                                     |
-| `src/agent/core/harness_manager.py`  | Q1 测验批改自检 + R1 RAG 召回过滤；复用 `judge_with_llm`（详 [§3.12](#312-harness-自检)）                                    | `HarnessManager.review_grading()` · `filter_chunks()`                                                                            |
-| `src/agent/core/rules_loader.py`     | 把用户 rules 文本拼成 `<user_rules>` block（rules 文本由 Agent 按当前用户从 `user_rules` 读，详 [§3.5](#35-prompt-管理)）  | `build_rules_block()`                                                                                                               |
+
+| 路径                                   | 角色                                                                                                       | 主要入口                                                                                                                 |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `src/agent/agent_api.py`             | `AgentAPI` Protocol：表现层 ↔ Agent core 契约（duck-typed，三种实现都满足，详 [§3.1](#31-agentapi)）                       | `AgentAPI`（Protocol）                                                                                                 |
+| `src/agent/agent.py`                 | Python ReAct Agent 主实现：拼 system → loop（LLM ↔ tool）→ final；含 `SYSTEM_PROMPT` 与模块级共享 store 单例              | `Agent(...).run(user_input)` · `SYSTEM_PROMPT`                                                                       |
+| `src/agent/autogpt_agent.py`         | Auto-GPT 风格 Agent：Plan → Execute（子 ReAct）→ Review 三阶段                                                    | `AutoGPTAgent(...).run(user_input)`                                                                                  |
+| `src/agent/langchain_agent.py`       | LangChain `AgentExecutor` 实现，公共层接口对齐，loop 由 LangChain 接管                                                 | `LangChainAgent(...).run(user_input)`                                                                                |
+| `src/agent/langchain_tools.py`       | 把 `tools.py` 的 OpenAI 风格 schema 包装成 LangChain `StructuredTool`                                           | `build_langchain_tools()`                                                                                            |
+| `src/agent/tools.py`                 | 全部业务 tool 定义 +`execute_tool` 路由（RAG / web / fetch / plan / study / quiz / srs / skill / mcp）             | `get_tools(skill_bodies)` · `execute_tool(name, args, ...)`                                                          |
+| `src/agent/core/event_bus.py`        | 事件总线：10 类 `AgentEvent` 分发，多订阅扇出 + 异常隔离                                                                   | `EventBus` · `EVENT_`* 常量                                                                                            |
+| `src/agent/core/tool_call_engine.py` | 工具调用一轮编排：执行 + 结果格式化 + 写历史 + 叠加发 `plan_`* 事件                                                              | `ToolCallEngine.process(message, messages)`                                                                          |
+| `src/agent/core/history_manager.py`  | 历史按轮截断 + skill_pair 完整性保护 + system 拼接                                                                    | `HistoryManager.load_truncated()`                                                                                    |
+| `src/agent/core/memory_manager.py`   | UserMemory 注入 `<user_context>` + 节流自动提取                                                                  | `MemoryManager.build_system_prompt()` · `try_extract()`                                                              |
+| `src/agent/core/thinking_policy.py`  | Adaptive Extended Thinking budget 估算（LOW / MED / HIGH 三档）                                                | `ThinkingPolicy.effective_budget(messages)`                                                                          |
+| `src/agent/core/citation_builder.py` | RAG 引用编号管理：跨同轮多次 `search_knowledge` 累计编号 + 末尾 `— sources —` 块渲染（详 [§3.6](#36-引用管理)）                      | `CitationBuilder.register()` · `render()`                                                                            |
+| `src/agent/core/plan_manager.py`     | `PlanState` / `PlanStep` dataclass + 从 messages reconstruct plan 状态（详 [§3.8.1](#381-数据载体)）               | `reconstruct_from_messages(messages)`                                                                                |
+| `src/agent/core/srs_scheduler.py`    | SM-2 公式纯函数（4 档 → ease / interval / repetitions / lapses，详[§3.11.2](#3112-sm-2-算法核心)）                     | `schedule_review(card, rating)`                                                                                      |
+| `src/agent/core/critic_manager.py`  | Q1 测验批改自检 + R1 RAG 召回过滤；复用 `judge_with_llm`（详 [§3.12](#312-critic-自检)）                                  | `CriticManager.review_grading()` · `filter_chunks()`                                                                |
+| `src/agent/core/rules_loader.py`     | 把用户 rules 文本拼成 `<user_rules>` block（rules 文本由 Agent 按当前用户从 `user_rules` 读，详 [§3.5](#35-prompt-管理)）       | `build_rules_block()`                                                                                                |
 | `src/agent/core/mcp_config.py`       | MCP servers 配置解析 + UI 编辑路径的 CRUD 辅助 + disabled 列表管理（详[§3.14.3](#3143-配置文件) / [§3.14.4](#3144-web-ui-管理)） | `load_mcp_config()` · `add_server()` · `update_server()` · `delete_server()` · `rename_server()` · `toggle_server()` |
-| `src/agent/core/mcp_manager.py`      | MCP server 子进程生命周期 + tool 发现 / 调用（asyncio loop 跑在后台线程）                                                    | `MCPManager.start_all()` · `start_one()` · `stop_one()` · `reload()` · `list_tools()` · `call_tool()`                |
-| `src/agent/core/url_guard.py`        | SSRF 防护：私网 / 链路本地 / 保留段 IP 拦截                                                                                  | `is_url_safe(url)`                                                                                                                  |
-| `src/agent/core/security_filter.py`  | Prompt-injection 启发式清洗 + tool 白名单 +`<untrusted_*>` 包装                                                            | `wrap_untrusted()` · `scrub_injection()` · `is_tool_allowed()`                                                                |
-| `tools/agent_eval/`                  | Agent 端到端评估（plan / quiz / srs / memory / harness / security / mcp / perf）                                             | 各子目录 `eval_*.py`（详 [§3.13](#313-评估方法)）                                                                                     |
-| `tests/test_agent*.py`               | 单元 + 集成测试（protocol / events / active_plan / autogpt / langchain）                                                     | `pytest tests/test_agent*.py`                                                                                                       |
+| `src/agent/core/mcp_manager.py`      | MCP server 子进程生命周期 + tool 发现 / 调用（asyncio loop 跑在后台线程）                                                   | `MCPManager.start_all()` · `start_one()` · `stop_one()` · `reload()` · `list_tools()` · `call_tool()`                |
+| `src/agent/core/url_guard.py`        | SSRF 防护：私网 / 链路本地 / 保留段 IP 拦截                                                                            | `is_url_safe(url)`                                                                                                   |
+| `src/agent/core/security_filter.py`  | Prompt-injection 启发式清洗 + tool 白名单 +`<untrusted_*>` 包装                                                    | `wrap_untrusted()` · `scrub_injection()` · `is_tool_allowed()`                                                       |
+| `tools/agent_eval/`                  | Agent 端到端评估（plan / quiz / srs / memory / critic / security / mcp / perf）                                | 各子目录 `eval_*.py`（详 [§3.13](#313-评估方法)）                                                                               |
+| `tests/test_agent*.py`               | 单元 + 集成测试（protocol / events / active_plan / autogpt / langchain）                                         | `pytest tests/test_agent*.py`                                                                                        |
+
 
 ## 2.2. 三条主调用链
 
@@ -114,7 +120,7 @@ src/agent/agent.py · Agent.run(user_input)
                  ├─ src/agent/tools.py · execute_tool(name, args, ...)
                  │    ├─ _tool_search_knowledge → src/rag/retriever.py · search(...)
                  │    ├─ _tool_make_plan / _tool_update_step / _tool_abort_plan
-                 │    ├─ _tool_create_quiz → harness_manager · review_grading(...)
+                 │    ├─ _tool_create_quiz → critic_manager · review_grading(...)
                  │    └─ ... (study / srs / skill / mcp / web / fetch)
                  ├─ security_filter · wrap_untrusted + scrub_injection
                  ├─ EventBus.publish(tool_call_start / tool_call_end)
@@ -163,27 +169,29 @@ python -m tools.agent_eval.<feature>.eval_*
 - 想理解 RAG 引用编号 → `core/citation_builder.py · register()` 与 `render()`
 - 想接 MCP server → `core/mcp_config.py`（配置 schema） + `core/mcp_manager.py`（subprocess + asyncio）
 - 想加 prompt-injection 防护 → `core/security_filter.py · scrub_injection()` 的 `_PATTERNS` 表
-- 想加 Harness critic 题型 → `core/harness_manager.py` + 对应 prompt 模板文件
+- 想加 Critic critic 题型 → `core/critic_manager.py` + 对应 prompt 模板文件
 
 ## 2.4. 常见改动落点
 
-| 需求                                                | 改动文件                              | 关键函数 / 配置                                                                                  |
-| --------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| 切换默认 Agent 实现（Python / LangChain / AutoGPT） | `.env`                              | `IMP_METHOD`                                                                                   |
+
+| 需求                                          | 改动文件                                | 关键函数 / 配置                                                                                |
+| ------------------------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------- |
+| 切换默认 Agent 实现（Python / LangChain / AutoGPT） | `.env`                              | `IMP_METHOD`                                                                             |
 | 调推理上限 / plan 步预算                            | `src/agent/agent.py`                | `MAX_TOOL_ROUNDS` / `MAX_TOTAL_ROUNDS` / `MAX_HARD_CAP_ROUNDS` / `_PLAN_ROUNDS_PER_STEP` |
-| 改 SYSTEM_PROMPT（必查场景 / 工具策略 / 引用规范）  | `src/agent/agent.py`                | `SYSTEM_PROMPT`                                                                                |
-| 加新业务 tool                                       | `src/agent/tools.py`                | `get_tools()` 加 schema + `execute_tool()` 加 dispatch + 新 `_tool_*` 实现                 |
-| 改 Extended Thinking 阈值                           | `.env`                              | `THINKING_ENABLED` / `THINKING_BUDGET_MODE` / `THINKING_BUDGET_*`                          |
-| 改用户记忆自动提取节流                              | `.env`                              | `USER_MEMORY_EXTRACT_EVERY_N` / `USER_MEMORY_EXTRACT_MIN_INPUT_LEN`                          |
-| 开 / 关 plan 用户审批                               | `.env`                              | `PLAN_PERMISSION_MODE`                                                                         |
-| 调 SM-2 调度参数                                    | `src/agent/core/srs_scheduler.py`   | `_clip_ease()` / `_update_ease()` / `_interval_from_repetitions()`                         |
-| 加 Harness critic 题型                              | `src/agent/core/harness_manager.py` | `review_grading()` / `filter_chunks()` + 对应 prompt 模板                                    |
-| 加 prompt-injection 模板拦截                        | `src/agent/core/security_filter.py` | `_PATTERNS` 列表 + `scrub_injection()`                                                       |
-| 调 SSRF 拦截范围                                    | `src/agent/core/url_guard.py`       | `is_url_safe()`                                                                                |
-| 改 tool 白 / 黑名单（禁用某个 tool）                | `.env`                              | `TOOL_ALLOWLIST` / `TOOL_BLOCKLIST`                                                          |
-| 接入 MCP server                                     | `.agenta/mcp/config.json`           | `servers.<name>`；启动时 `mcp_manager.py · start_all()` 自动接入                            |
-| 加新事件类型                                        | `src/agent/core/event_bus.py`       | 新 `EVENT_*` 常量 → `ALL_EVENT_TYPES` + 表现层 `_event_router` 加 case                    |
-| 加 Agent 评估 task                                  | `tools/agent_eval/<feature>/`       | 新建子目录，参考已有 `plan/` `quiz/` `srs/` 等 feature                                     |
+| 改 SYSTEM_PROMPT（必查场景 / 工具策略 / 引用规范）         | `src/agent/agent.py`                | `SYSTEM_PROMPT`                                                                          |
+| 加新业务 tool                                   | `src/agent/tools.py`                | `get_tools()` 加 schema + `execute_tool()` 加 dispatch + 新 `_tool_*` 实现                    |
+| 改 Extended Thinking 阈值                      | `.env`                              | `THINKING_ENABLED` / `THINKING_BUDGET_MODE` / `THINKING_BUDGET_*`                        |
+| 改用户记忆自动提取节流                                 | `.env`                              | `USER_MEMORY_EXTRACT_EVERY_N` / `USER_MEMORY_EXTRACT_MIN_INPUT_LEN`                      |
+| 开 / 关 plan 用户审批                             | `.env`                              | `PLAN_PERMISSION_MODE`                                                                   |
+| 调 SM-2 调度参数                                 | `src/agent/core/srs_scheduler.py`   | `_clip_ease()` / `_update_ease()` / `_interval_from_repetitions()`                       |
+| 加 Critic critic 题型                         | `src/agent/core/critic_manager.py` | `review_grading()` / `filter_chunks()` + 对应 prompt 模板                                    |
+| 加 prompt-injection 模板拦截                     | `src/agent/core/security_filter.py` | `_PATTERNS` 列表 + `scrub_injection()`                                                     |
+| 调 SSRF 拦截范围                                 | `src/agent/core/url_guard.py`       | `is_url_safe()`                                                                          |
+| 改 tool 白 / 黑名单（禁用某个 tool）                   | `.env`                              | `TOOL_ALLOWLIST` / `TOOL_BLOCKLIST`                                                      |
+| 接入 MCP server                               | `.agenta/mcp/config.json`           | `servers.<name>`；启动时 `mcp_manager.py · start_all()` 自动接入                                 |
+| 加新事件类型                                      | `src/agent/core/event_bus.py`       | 新 `EVENT_*` 常量 → `ALL_EVENT_TYPES` + 表现层 `_event_router` 加 case                          |
+| 加 Agent 评估 task                             | `tools/agent_eval/<feature>/`       | 新建子目录，参考已有 `plan/` `quiz/` `srs/` 等 feature                                              |
+
 
 ## 2.5. 精华理解
 
@@ -373,6 +381,93 @@ prompt 之外：
 - 普通对话装配 : `agent/agent.py · Agent.run()`（每轮 new builder，正文后拼 sources）
 - 深度研究共享引用 : `agent/core/research_engine.py`（子代理共用一个 builder，KB + web 统一 `[n]`）
 
+### 2.5.13. 学习计划
+
+**学习计划（学而时习功能之一）基于 plan-excute 实现，通过 study-planner skill 指导 LLM 制定学习相关的计划**
+
+- plan-execute 的 plan 是 LLM 执行的，当场跑完即弃（靠 messages 重建）
+- 学习计划的 plan 是存 DB、给用户线下执行的，agent 只管生成 / 更新状态 / 查询。
+- 新建流程（study-planner skill 指导）：先 `make_plan` 把"建计划"拆 4 步（查领域 → 列阶段 → 列任务 → 落库）→ 最后 `create_study_plan` 一次性写库。
+- 三个业务 tool：`create_study_plan`（存DB）/ `update_study_progress`（按用户指令更新任务状态）/ `query_study_status`（查）。
+- 多计划并存，同时仅 1 个 active(默认操作的plan)；切换走 CLI `/study switch`（无 switch tool）。
+- 跨 session：`/study load` 注入第 4 层 `<active_study_plan>`（CLI-only，见 backlog §4.13）。
+
+代码：
+
+- 触发入口 : `.agenta/skills/study-planner/SKILL.md`（catalog 进 prompt → LLM `load_skill` 激活 → 按 skill 调 tool）
+- tool 注册 + 分发 : `agent/tools.py · _STUDY_PLAN_TOOLS`（schema，经 `get_tools()` 暴露）+ `execute_tool()` 的 `case "create_study_plan"` 等
+- 三个 tool 实现 : `agent/tools.py · _tool_create_study_plan()` / `_tool_update_study_progress()` / `_tool_query_study_status()`
+- 存储 + prompt 渲染 : `stores/learning_plan_store.py · LearningPlanStore`（`render_plan_for_prompt()` / `mark_loaded()` / `get_loaded()`）
+- Web CRUD : `api/routes/plans.py`
+
+### 2.5.14. 测验（quiz）
+
+**测验（学而时习功能之二）针对学习主题 / 计划 stage，在 quiz-maker skill 指导下基于 RAG 召回出题；题目与答题结果存 DB。**
+
+- 出题复用 plan-execute：先 `make_plan` 拆 4 步（解析意图 → 查 KB → 出题 → 落库）→ `create_quiz` 存DB（带答案 + 考点）。
+- 题型固定配比：60% MCQ（单选/多选各半） + 40% 简答。
+- 批改：MCQ 走确定性字符串比对（不调 LLM）；简答走 LLM-judge + critic 自检。
+- **错题钩子**：批改后每题 `score<0.6` 的错题，引导用户 `add_to_srs` 进复习队列（衔接 SRS 业务）。
+- 三个 tool：`create_quiz`（出题+存DB）/ `grade_quiz`（批改+存DB）/ `query_quiz_history`（列表 / 按 plan / 单 quiz 错题详情）。
+
+代码：
+
+- 触发入口 : `.agenta/skills/quiz-maker/SKILL.md`（catalog → `load_skill` → 按 skill 调 tool）
+- tool 注册 + 分发 : `agent/tools.py · _QUIZ_TOOLS`（schema，经 `get_tools()` 暴露）+ `execute_tool()` 的 `case "create_quiz"` 等
+- 三个 tool 实现 : `agent/tools.py · _tool_create_quiz()` / `_tool_grade_quiz()` / `_tool_query_quiz_history()`
+- 简答批改 : `agent/tools.py · _grade_one_short_answer()`（`_SHORT_ANSWER_JUDGE_SYS`）+ critic critic 自检
+- 存储 : `stores/quiz_store.py · QuizStore`
+
+### 2.5.15. SRS 复习
+
+**SRS 复习（学而时习功能之三）提供跨 session 持久化的知识卡片队列，按 SM-2 间隔重复算法调度"下次该复习的时刻"，帮助用户巩固知识。**
+
+- 卡片来源：LLM根据答错的题生成（srs-reveiw skill 指导）+ 用户手动添加。
+- 卡片包含：正面（问题），反面（答案）和复习时间等
+- 复习流程：`query_srs_due` 列出到期卡片（`next_review_at<=now`）→ **一张一张的**回忆 → 用户自评（4挡：again/hard/good/easy）→ `review_srs_card` 更新下次复习时间（SM-2算法）。
+- 手动建的新卡立即到期；自评分数越高复习间隔越长，`again` 重置。
+- 四个 tool：add_to_srs（新增卡片）/ query_srs_due（查询到期卡片）/ review_srs_card（复习后，根据用户自评更新卡片）/ query_srs_stats（卡片统计信息）
+
+代码：
+
+- 触发入口 : `.agenta/skills/srs-review/SKILL.md`（catalog → `load_skill` → 按 skill 调 tool）
+- tool 注册 + 分发 : `agent/tools.py · _SRS_TOOLS`（schema，经 `get_tools()` 暴露）+ `execute_tool()` 的 `case "add_to_srs"` 等
+- 四个 tool 实现 : `agent/tools.py · _tool_add_to_srs()` / `_tool_query_srs_due()` / `_tool_review_srs_card()` / `_tool_query_srs_stats()`
+- SM-2 调度 : `agent/core/srs_scheduler.py`（`_update_ease()` / `_interval_from_repetitions()`）；存储 : `stores/srs_store.py · SRSStore`
+
+### 2.5.16. Critic 自检
+
+**很"窄"的 Critic 功能，用于 测验简答批改自检 和 RAG 召回过滤，两个功能都有独立开关，critic 失败软降级不阻塞主流程。**
+
+- 功能是 Critic / LLM-as-Judge，不是 Reflection——独立评判某输出，**不是自我纠正**。
+- 场景 1 quiz 简答批改自检（`CRITIC_QUIZ_ENABLED`）：打 0-5 分，< 阈值 `CRITIC_GRADING_THRESHOLD`（默认 3.5）→ 置 `critic_flagged`，**仅给人看、无业务影响**；只作用于简答题。
+- 场景 2 RAG 召回相关性过滤（`CRITIC_RAG_ENABLED`）：0/5 二分类，**0 分删掉、5 分保留**。
+- 软失败：critic 超时/异常/解析失败 → quiz 不 flag、RAG 不过滤（返回原始召回），不阻塞 grade_quiz / search_knowledge。
+
+代码：
+
+- manager : `agent/core/critic_manager.py · CriticManager`（`review_grading()` / `filter_chunks()`）
+- 挂点 : `agent/tools.py`（`_tool_grade_quiz` 内 `CRITIC_QUIZ_ENABLED` 分支 / `search_knowledge` 内 `CRITIC_RAG_ENABLED` 分支）
+- critic prompt : `tools/agent_eval/critic/quiz_critic.txt` / `rag_critic.txt`；开关 : `.env · CRITIC_QUIZ_ENABLED` / `CRITIC_RAG_ENABLED`
+
+### 2.5.17. Deep Research
+
+**四阶段流水线（对标主流厂商）：拆子问题 → 并行 sub-agent 检索 → 反思补查 → 综述带引用。**
+
+- 触发：chat 请求 `mode=="deep_research"`（前端 deep research 按钮），直接跑 `ResearchEngine.run()`，**不走 agent 循环 / tools / skills**；跳过语义缓存 + 模型降级路由（重质量）。
+- ① 规划：主 agent 一次 LLM 拆子问题（上限 `MAX_SUBQUESTIONS`）。
+- ② 并行子代理：线程池并行，每个**独立 context、不写 DB**，跑**受限 ReAct（仅 3 检索 tool，无 plan-execute）**；规划只在主 agent 那层，子代理只埋头查。
+- ③ 反思补查：`REFLECT_ENABLED` 开关，主 agent 评估缺口 → **最多再一轮**子代理（reflection，无循环）。
+- ④ 综述：流式成稿，共享 `CitationBuilder` 把 KB + web 统一编号、末尾拼 sources。
+- 预算约束：单子代理来源/轮次上限 + 全局总来源上限 + 并行度，全可配。
+
+代码：
+
+- 主流程 : `agent/core/research_engine.py · ResearchEngine.run()`（`_plan` / `_run_subagents` / `_reflect` / `_synthesize` / `_finalize`）
+- 子代理受限工具集 : `agent/tools.py · get_research_tools()`（仅 search_knowledge / web_search / fetch_url）
+- 触发路由 : `api/routes/chat.py`（`mode=="deep_research"` 分支）
+- 开关 + 配置 : `.env · DEEP_RESEARCH_ENABLED` / `_MAX_SUBQUESTIONS` / `_MAX_PARALLEL_SUBAGENTS` / `_SUBAGENT_MAX_ROUNDS` / `_MAX_SOURCES_PER_SUBAGENT` / `_MAX_TOTAL_SOURCES` / `_REFLECT_ENABLED`
+
 # 3. UI 代码指南
 
 面向「没做过前端、但想看懂本项目前端并能改一些小地方」的读者。读完能定位到某块界面对应哪个文件、看懂代码大致结构、自己动手改字号 / 间距 / 颜色这类样式。
@@ -381,13 +476,15 @@ prompt 之外：
 
 前端是一个 React 单页应用，技术栈一句话：**React + TypeScript 写界面逻辑，Tailwind CSS 写样式，Vite 负责本地开发和打包**。
 
-| 名词                           | 一句话解释                                                       |
-| ------------------------------ | ---------------------------------------------------------------- |
-| React                          | 把界面拆成一个个「组件」（可复用的界面块）的框架                 |
-| TypeScript                     | 带类型标注的 JavaScript，编辑器能提前帮你查错                    |
+
+| 名词                             | 一句话解释                                      |
+| ------------------------------ | ------------------------------------------ |
+| React                          | 把界面拆成一个个「组件」（可复用的界面块）的框架                   |
+| TypeScript                     | 带类型标注的 JavaScript，编辑器能提前帮你查错               |
 | Tailwind CSS                   | 用一串短 class 名（如 `text-lg`）直接写样式，不单独写 CSS 文件 |
-| Vite                           | 开发时启动本地服务器、改完代码自动刷新（热更新）；上线时打包     |
-| shadcn / lucide-react / sonner | 现成的基础控件库 / 图标库 / 弹窗提示库                           |
+| Vite                           | 开发时启动本地服务器、改完代码自动刷新（热更新）；上线时打包             |
+| shadcn / lucide-react / sonner | 现成的基础控件库 / 图标库 / 弹窗提示库                     |
+
 
 代码都在 `frontend/src/` 下，按职责分目录：
 
@@ -418,19 +515,23 @@ graph TD
     hooks -.调用.-> api
 ```
 
+
+
 目录速记：
 
-| 目录 / 文件          | 放什么                                                                    |
-| -------------------- | ------------------------------------------------------------------------- |
+
+| 目录 / 文件            | 放什么                                         |
+| ------------------ | ------------------------------------------- |
 | `components/chat/` | 聊天界面的所有块：消息列表、气泡、输入框、思考块、工具调用块              |
-| `components/auth/` | 登录 / 注册页；没登录时整个应用只显示这一页                               |
-| `components/ui/`   | 最底层通用控件（按钮、下拉菜单等），别的组件拼装它们                      |
+| `components/auth/` | 登录 / 注册页；没登录时整个应用只显示这一页                     |
+| `components/ui/`   | 最底层通用控件（按钮、下拉菜单等），别的组件拼装它们                  |
 | `hooks/`           | 抽出来复用的逻辑，函数名以 `use` 开头（核心是 `useChat`，管消息收发） |
-| `api/client.ts`    | 所有「请求后端」的函数都在这（含登录 / 注册 / 退出）                      |
-| `lib/auth.tsx`     | 管「当前登录的是谁」：登录 / 注册 / 退出、是否管理员，都从这取            |
-| `types/`           | 描述数据长什么样（如一条消息有哪些字段）                                  |
-| `lib/`             | 零碎工具函数（`cn` 合并样式、主题切换）                                 |
-| `index.css`        | 全局主题色、字体、圆角等变量                                              |
+| `api/client.ts`    | 所有「请求后端」的函数都在这（含登录 / 注册 / 退出）               |
+| `lib/auth.tsx`     | 管「当前登录的是谁」：登录 / 注册 / 退出、是否管理员，都从这取          |
+| `types/`           | 描述数据长什么样（如一条消息有哪些字段）                        |
+| `lib/`             | 零碎工具函数（`cn` 合并样式、主题切换）                      |
+| `index.css`        | 全局主题色、字体、圆角等变量                              |
+
 
 ## 3.2. 流程图
 
@@ -454,6 +555,8 @@ sequenceDiagram
     H-->>B: messages 变了，React 自动重画气泡
     B-->>U: 屏幕上逐字出现回答
 ```
+
+
 
 要点：
 
@@ -504,11 +607,13 @@ const [count, setCount] = useState(0)   // count 当前值；setCount 改它
 
 **6. 条件 / 列表渲染**（代码里到处是这两种写法）：
 
-| 写法                                       | 含义                       |
-| ------------------------------------------ | -------------------------- |
-| `{ok && <X/>}`                           | `ok` 为真才显示 `X`    |
+
+| 写法                                       | 含义              |
+| ---------------------------------------- | --------------- |
+| `{ok && <X/>}`                           | `ok` 为真才显示 `X`  |
 | `{ok ? <A/> : <B/>}`                     | 真显示 `A`，假显示 `B` |
-| `{list.map((x) => <X key={x.id} .../>)}` | 把数组每一项渲染成一个组件 |
+| `{list.map((x) => <X key={x.id} .../>)}` | 把数组每一项渲染成一个组件   |
+
 
 **7. TypeScript 类型**：冒号后面是类型标注（`text: string` 表示 text 是字符串），只是给编辑器查错用，不影响运行逻辑。看不懂类型时可先跳过，专注 `return` 里的界面部分。
 
@@ -523,33 +628,37 @@ const [count, setCount] = useState(0)   // count 当前值；setCount 改它
 
 界面区域 → 文件对照：
 
-| 界面区域                                                                   | 文件                                     |
-| -------------------------------------------------------------------------- | ---------------------------------------- |
-| 登录 / 注册页（含左上 logo + 标题）                                        | `components/auth/LoginView.tsx`        |
+
+| 界面区域                                        | 文件                                     |
+| ------------------------------------------- | -------------------------------------- |
+| 登录 / 注册页（含左上 logo + 标题）                     | `components/auth/LoginView.tsx`        |
 | 左侧导航栏（底部当前用户名 / 退出按钮；管理员才显示技能 / MCP / 设置入口） | `components/sidebar/Sidebar.tsx`       |
-| 聊天输入框 / 模型选择 / 工具条                                             | `components/chat/Composer.tsx`         |
-| 消息气泡（用户 / AI、附件卡片、操作按钮）                                  | `components/chat/MessageBubble.tsx`    |
-| 工具调用块（如 `update_step`）                                           | `components/chat/ToolBlock.tsx`        |
-| 思考过程块                                                                 | `components/chat/ThinkingBlock.tsx`    |
-| 学习计划块                                                                 | `components/chat/PlanBlock.tsx`        |
-| 设置页                                                                     | `components/settings/SettingsView.tsx` |
-| 记忆 / 规则 / 技能 / MCP 页                                                | `components/resources/` 下对应文件     |
-| 全局主题色 / 字体 / 圆角                                                   | `index.css`                            |
+| 聊天输入框 / 模型选择 / 工具条                          | `components/chat/Composer.tsx`         |
+| 消息气泡（用户 / AI、附件卡片、操作按钮）                     | `components/chat/MessageBubble.tsx`    |
+| 工具调用块（如 `update_step`）                      | `components/chat/ToolBlock.tsx`        |
+| 思考过程块                                       | `components/chat/ThinkingBlock.tsx`    |
+| 学习计划块                                       | `components/chat/PlanBlock.tsx`        |
+| 设置页                                         | `components/settings/SettingsView.tsx` |
+| 记忆 / 规则 / 技能 / MCP 页                        | `components/resources/` 下对应文件          |
+| 全局主题色 / 字体 / 圆角                             | `index.css`                            |
+
 
 常用 Tailwind 工具类速查：
 
-| 想改     | 类名示例                                                         | 说明                             |
-| -------- | ---------------------------------------------------------------- | -------------------------------- |
-| 字号     | `text-xs` `text-sm` `text-base` `text-lg` `text-xl`    | 从小到大                         |
-| 字重     | `font-normal` `font-medium` `font-bold`                    | 常规 / 中等 / 加粗               |
-| 文字颜色 | `text-foreground` `text-muted-foreground` `text-green-600` | 主色 / 次要色 / 具体色           |
+
+| 想改    | 类名示例                                                       | 说明                  |
+| ----- | ---------------------------------------------------------- | ------------------- |
+| 字号    | `text-xs` `text-sm` `text-base` `text-lg` `text-xl`        | 从小到大                |
+| 字重    | `font-normal` `font-medium` `font-bold`                    | 常规 / 中等 / 加粗        |
+| 文字颜色  | `text-foreground` `text-muted-foreground` `text-green-600` | 主色 / 次要色 / 具体色      |
 | 背景色   | `bg-background` `bg-muted` `bg-primary`                    | 用主题变量，自动适配深浅色       |
-| 内边距   | `p-2`（四周）`px-2`（左右）`py-1`（上下）                  | 数字越大越宽                     |
-| 外边距   | `m-2` `mt-1` `mb-2`                                        | 同上，t/b/l/r 指方向             |
-| 元素间距 | `gap-2`                                                        | 配合 `flex` 用，控制子元素间隔 |
-| 宽 / 高  | `w-8` `h-8` `w-full` `max-w-3xl`                         | 固定值 / 占满 / 最大宽度         |
-| 横向排列 | `flex items-center justify-between`                            | 一行排列、垂直居中、两端对齐     |
-| 圆角     | `rounded-md` `rounded-full`                                  | 中等圆角 / 全圆                  |
+| 内边距   | `p-2`（四周）`px-2`（左右）`py-1`（上下）                              | 数字越大越宽              |
+| 外边距   | `m-2` `mt-1` `mb-2`                                        | 同上，t/b/l/r 指方向      |
+| 元素间距  | `gap-2`                                                    | 配合 `flex` 用，控制子元素间隔 |
+| 宽 / 高 | `w-8` `h-8` `w-full` `max-w-3xl`                           | 固定值 / 占满 / 最大宽度     |
+| 横向排列  | `flex items-center justify-between`                        | 一行排列、垂直居中、两端对齐      |
+| 圆角    | `rounded-md` `rounded-full`                                | 中等圆角 / 全圆           |
+
 
 实战例子（就是上一轮改过的）：把工具条上当前模型名的字号从大调小，在 `Composer.tsx` 找到模型选择按钮，把 `text-lg` 改成 `text-sm` 即可：
 
@@ -565,3 +674,4 @@ className="... px-2 text-sm text-muted-foreground ..."
 - **颜色优先用主题变量**（`text-muted-foreground` / `bg-muted` 等），它们在深色 / 浅色模式下会自动切换；直接写 `text-gray-500` 这种会在另一种模式下不协调。
 - 一个 `className` 里可以堆很多类，**顺序不影响效果**，按「布局 → 间距 → 字体 → 颜色」分组写更好读。
 - 改坏了不要慌，Tailwind 类是纯样式，删掉多写的类就回到原样，不会影响功能。
+

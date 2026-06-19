@@ -300,7 +300,7 @@ REGISTRY: list[ConfigItem] = [
     ),
     # —— 召回自检（LLM 相关性把关）——
     ConfigItem(
-        key="HARNESS_RAG_ENABLED",
+        key="CRITIC_RAG_ENABLED",
         group="rag",
         section="召回自检",
         type=ItemType.BOOL,
@@ -308,7 +308,7 @@ REGISTRY: list[ConfigItem] = [
         detail="每次检索后用 LLM 自检召回片段相关性；多 1 次 LLM 调用，超时放行。",
     ),
     ConfigItem(
-        key="HARNESS_LLM_TIMEOUT_SEC",
+        key="CRITIC_LLM_TIMEOUT_SEC",
         group="rag",
         section="召回自检",
         type=ItemType.FLOAT,

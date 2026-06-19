@@ -651,13 +651,13 @@ def _tool_search_knowledge(
     hits = search(query, top_k=top_k, where=where, queries=expanded_queries)
 
     # —— critic 相关性过滤（过滤 not_relevant，0 条返 empty 不重召回） ——
-    if hits and _cfg.HARNESS_RAG_ENABLED:
+    if hits and _cfg.CRITIC_RAG_ENABLED:
         try:
-            from src.agent.core.harness_manager import get_harness_manager
+            from src.agent.core.critic_manager import get_critic_manager
             publish_tool_progress("checking", "校验中")
-            hits = get_harness_manager().filter_chunks(query=query, hits=hits)
+            hits = get_critic_manager().filter_chunks(query=query, hits=hits)
         except Exception as e:  # noqa: BLE001 — critic 异常一律软放行原始 hits
-            logger.warning("[tool] search_knowledge: harness 过滤失败，保留原始 hits：%s", e)
+            logger.warning("[tool] search_knowledge: critic 过滤失败，保留原始 hits：%s", e)
 
     if hits:
         # 若上层传入 CitationBuilder，把 hits 注册进去拿到全局
@@ -1597,9 +1597,9 @@ def _tool_grade_quiz(
         return ToolResult(status="error", content=f"持久化批改结果失败（quiz_set_id={quiz_set_id}）")
 
     # —— critic 自检（仅 short_answer，MCQ 字符串比对是确定性的，跳过省 token） ——
-    harness_block = ""
-    if _cfg.HARNESS_QUIZ_ENABLED:
-        harness_block = _run_quiz_critic(quiz_set_id, questions, gradings, store)
+    critic_block = ""
+    if _cfg.CRITIC_QUIZ_ENABLED:
+        critic_block = _run_quiz_critic(quiz_set_id, questions, gradings, store)
 
     head = (
         f"📝 已批改 quiz_set_id={quiz_set_id}『{quiz['topic']}』：\n"
@@ -1613,7 +1613,7 @@ def _tool_grade_quiz(
         "\n\n→ 可向用户展示总分 + 错题点评（含标答 + 简短考点），"
         "再问是否要『再考一次 / 换主题 / 看错题详情』。"
     )
-    return ToolResult(status="ok", content=head + body + harness_block + tail)
+    return ToolResult(status="ok", content=head + body + critic_block + tail)
 
 
 def _run_quiz_critic(
@@ -1624,15 +1624,15 @@ def _run_quiz_critic(
 ) -> str:
     """对简答题批改结果做 critic 自检；不达标的题落库 mark + 拼成 warning 块。
 
-    返回值：插入 grade_quiz 输出 head + body 后、tail 前的 harness_warning 段（含前导 `\\n\\n`）；
+    返回值：插入 grade_quiz 输出 head + body 后、tail 前的 critic_warning 段（含前导 `\\n\\n`）；
     无 flagged 题 / 全部 critic 失败 → 返回空串（不在输出里制造噪音）。
     Critic 自身异常一律软返回，不影响主输出。
     """
     try:
-        from src.agent.core.harness_manager import get_harness_manager
-        manager = get_harness_manager()
+        from src.agent.core.critic_manager import get_critic_manager
+        manager = get_critic_manager()
     except Exception as e:  # noqa: BLE001 — manager 初始化失败不阻塞 grade_quiz
-        logger.warning("[tool] grade_quiz: HarnessManager 加载失败，跳过自检：%s", e)
+        logger.warning("[tool] grade_quiz: CriticManager 加载失败，跳过自检：%s", e)
         return ""
 
     qmap = {q["id"]: q for q in questions}
@@ -1653,7 +1653,7 @@ def _run_quiz_critic(
         )
         if verdict.failure or verdict.passed:
             continue
-        store.mark_question_harness_flagged(qid)
+        store.mark_question_critic_flagged(qid)
         score_str = f"{verdict.score:.1f}" if verdict.score is not None else "—"
         flagged_lines.append(
             f"  第 {q['order_idx']} 题 — critic {score_str}/5：{verdict.reason}"

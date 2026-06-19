@@ -499,7 +499,7 @@ def _build_eval_args(req: EvalRunRequest) -> list[str]:
         ts = _time.strftime("%Y%m%d-%H%M%S")
         out = _Path("tools") / "reports" / "rag" / f"rag-{ts}.md"
         args += ["-o", out.as_posix()]
-    elif req.task in ("memory", "skills", "harness", "srs"):
+    elif req.task in ("memory", "skills", "critic", "srs"):
         pt = _threshold(req, "pass")
         if pt is not None:
             args += ["--pass-threshold", str(pt)]
@@ -892,7 +892,7 @@ _SUMMARY_BUILDERS = {
     "mcp": _mcp_summary,
     "perf": _perf_summary,
     "plan": _plan_summary,
-    "harness": _passrate_summary("harness", "harness", "通过率"),
+    "critic": _passrate_summary("critic", "critic", "通过率"),
     "learning_plan": _recall_quality_summary("learning_plan", "learning_plan", "plan 质量均分"),
     "quiz": _recall_quality_summary("quiz", "quiz", "plan 质量均分"),
     "srs": _passrate_summary("srs", "srs", "识别通过率"),

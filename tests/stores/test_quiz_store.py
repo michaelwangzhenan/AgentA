@@ -307,43 +307,43 @@ class TestListQuizSets:
         assert len(store.list_quiz_sets(limit=3)) == 3
 
 
-# ── Phase 2.5 Harness：harness_flagged 列 + mark + fail-fast ─────────────────
+# ── Phase 2.5 Critic：critic_flagged 列 + mark + fail-fast ─────────────────
 
-class TestHarnessSchema:
+class TestCriticSchema:
 
-    def test_new_question_default_harness_flagged_false(
+    def test_new_question_default_critic_flagged_false(
         self, store: QuizStore,
     ) -> None:
         qid = store.create_quiz_set(topic="x", num_questions=1)
         store.add_questions(qid, [_sample_questions()[3]])
         q = store.get_quiz_with_questions(qid)["questions"][0]
-        assert q["harness_flagged"] is False
+        assert q["critic_flagged"] is False
 
-    def test_mark_question_harness_flagged(self, store: QuizStore) -> None:
+    def test_mark_question_critic_flagged(self, store: QuizStore) -> None:
         qid = store.create_quiz_set(topic="x", num_questions=1)
         store.add_questions(qid, [_sample_questions()[3]])
         q_id = store.get_quiz_with_questions(qid)["questions"][0]["id"]
-        assert store.mark_question_harness_flagged(q_id) is True
+        assert store.mark_question_critic_flagged(q_id) is True
         q = store.get_quiz_with_questions(qid)["questions"][0]
-        assert q["harness_flagged"] is True
+        assert q["critic_flagged"] is True
 
     def test_mark_unknown_question_returns_false(self, store: QuizStore) -> None:
-        assert store.mark_question_harness_flagged(99999) is False
+        assert store.mark_question_critic_flagged(99999) is False
 
     def test_mark_idempotent(self, store: QuizStore) -> None:
         """重复 mark 同题多次都返 True 且字段保持 1。"""
         qid = store.create_quiz_set(topic="x", num_questions=1)
         store.add_questions(qid, [_sample_questions()[3]])
         q_id = store.get_quiz_with_questions(qid)["questions"][0]["id"]
-        assert store.mark_question_harness_flagged(q_id) is True
-        assert store.mark_question_harness_flagged(q_id) is True
+        assert store.mark_question_critic_flagged(q_id) is True
+        assert store.mark_question_critic_flagged(q_id) is True
         q = store.get_quiz_with_questions(qid)["questions"][0]
-        assert q["harness_flagged"] is True
+        assert q["critic_flagged"] is True
 
     def test_fail_fast_when_old_schema_missing_column(self, tmp_path: Path) -> None:
-        """模拟旧 quiz.db（quiz_questions 缺 harness_flagged 列）→ QuizStore 初始化 raise。
+        """模拟旧 quiz.db（quiz_questions 缺 critic_flagged 列）→ QuizStore 初始化 raise。
 
-        建表 schema 必须跟 Phase 2.3 现状一致（quiz_sets 完整 + quiz_questions 缺 harness_flagged）
+        建表 schema 必须跟 Phase 2.3 现状一致（quiz_sets 完整 + quiz_questions 缺 critic_flagged）
         否则 CREATE TABLE IF NOT EXISTS 会跳过建表、然后业务 SQL 撞别的列错。
         """
         import sqlite3

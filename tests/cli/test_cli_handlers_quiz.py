@@ -49,9 +49,9 @@ def _seed_quizzes(store: QuizStore) -> tuple[int, int]:
     return q1, q2
 
 
-# ── Phase 2.5 Harness：⚠️ 渲染 ──────────────────────────────────────────────
+# ── Phase 2.5 Critic：⚠️ 渲染 ──────────────────────────────────────────────
 
-class TestHarnessFlagRender:
+class TestCriticFlagRender:
 
     def test_unflagged_quiz_no_warning(self, store: QuizStore) -> None:
         q1, _ = _seed_quizzes(store)
@@ -65,7 +65,7 @@ class TestHarnessFlagRender:
         q1, _ = _seed_quizzes(store)
         # 拉第 3 题（short_answer）的 question_id 后 mark
         q_id = store.get_quiz_with_questions(q1)["questions"][2]["id"]
-        store.mark_question_harness_flagged(q_id)
+        store.mark_question_critic_flagged(q_id)
         lines, out = _make_collector()
         handle_quiz(store, ["/quiz", f"show {q1}"], out=out)
         joined = "\n".join(lines)
@@ -76,7 +76,7 @@ class TestHarnessFlagRender:
         """3 题中只 mark 第 3 题 → 输出只在第 3 题位置出现 ⚠️。"""
         q1, _ = _seed_quizzes(store)
         q_id = store.get_quiz_with_questions(q1)["questions"][2]["id"]
-        store.mark_question_harness_flagged(q_id)
+        store.mark_question_critic_flagged(q_id)
         lines, out = _make_collector()
         handle_quiz(store, ["/quiz", f"show {q1}"], out=out)
         # 整体只有 1 个 ⚠️

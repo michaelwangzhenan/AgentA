@@ -795,7 +795,7 @@ sequenceDiagram
 | `user_answer`     | TEXT                         | 用户作答（批改前为空串）                                    |
 | `score`           | REAL                         | 单题得分 0.0-1.0（MCQ 整对 1.0 / 否则 0；简答按 LLM-judge） |
 | `feedback`        | TEXT                         | 批改反馈，写入时截断到 500 字                               |
-| `harness_flagged` | INTEGER                      | critic 自检标记位（详[§3.11](#311-harness-自检)）             |
+| `critic_flagged` | INTEGER                      | critic 自检标记位（详[§3.11](#311-critic-自检)）             |
 
 索引：`(quiz_set_id, order_idx)` 复合索引，用于按测验取题并按题号渲染。
 
@@ -980,7 +980,7 @@ sequenceDiagram
     A-->>U: 揭晓答案 + 进入下一张
 ```
 
-## 3.11. Harness 自检
+## 3.11. Critic 自检
 
 让 Agent 在产出"主观打分 / 检索召回"等**半客观结果**后多走一步 LLM-as-Judge 复审，提高LLM输出的质量。
 
@@ -993,21 +993,21 @@ sequenceDiagram
 
 ### 3.11.1. 自检实现
 
-`HarnessManager`以进程级单例承载两路 critic，由主路径 tool 直接调用（不走 skill）：
+`CriticManager`以进程级单例承载两路 critic，由主路径 tool 直接调用（不走 skill）：
 
 | 路径         | 入口                                                                          | critic 调用                                                                                                           | 失败软返回                                                               |
 | ------------ | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| **Q1** | `_tool_grade_quiz` → `_run_quiz_critic`（仅 `short_answer`，MCQ 跳过） | 单题逐次调 `review_grading()`，内部复用 `judge_with_llm` helper；critic 0-5 分，< 阈值即 flag `harness_flagged` | 超时 / 解析失败 →`HarnessVerdict(passed=True, failure=True)`，不 flag |
+| **Q1** | `_tool_grade_quiz` → `_run_quiz_critic`（仅 `short_answer`，MCQ 跳过） | 单题逐次调 `review_grading()`，内部复用 `judge_with_llm` helper；critic 0-5 分，< 阈值即 flag `critic_flagged` | 超时 / 解析失败 →`CriticVerdict(passed=True, failure=True)`，不 flag |
 | **R1** | `_tool_search_knowledge`（hits 之后、格式化之前）                           | 一次 LLM 调用批量评 K 条，prompt 内附编号 1..K 要求返回 `{"verdicts": [...]}` JSON；单条 score ≥ 3.0 保留          | 超时 / 解析失败 → 返回原始 hits 不过滤                                  |
 
 **配置项**
 
 | 配置项                        | 用途                            | 默认     |
 | ----------------------------- | ------------------------------- | -------- |
-| `HARNESS_QUIZ_ENABLED`      | Q1 全局开关                     | `true` |
-| `HARNESS_RAG_ENABLED`       | R1 全局开关                     | `true` |
-| `HARNESS_LLM_TIMEOUT_SEC`   | critic 单次调用超时（秒）       | `15`   |
-| `HARNESS_GRADING_THRESHOLD` | Q1 critic 阈值（< 该值即 flag） | `3.5`  |
+| `CRITIC_QUIZ_ENABLED`      | Q1 全局开关                     | `true` |
+| `CRITIC_RAG_ENABLED`       | R1 全局开关                     | `true` |
+| `CRITIC_LLM_TIMEOUT_SEC`   | critic 单次调用超时（秒）       | `15`   |
+| `CRITIC_GRADING_THRESHOLD` | Q1 critic 阈值（< 该值即 flag） | `3.5`  |
 
 ### 3.11.2. 完整流程
 
@@ -1020,7 +1020,7 @@ sequenceDiagram
     participant T as _tool_grade_quiz
     participant SS as _grade_one_short_answer
     participant QS as QuizStore
-    participant HM as HarnessManager
+    participant HM as CriticManager
     participant J as judge_with_llm
 
     LLM->>T: grade_quiz(quiz_set_id, user_answers)
@@ -1035,12 +1035,12 @@ sequenceDiagram
         T->>HM: review_grading(stem, user_answer, correct, agent_score, agent_feedback)
         HM->>J: judge_with_llm(prompt, output, criteria=quiz_critic.txt)
         J-->>HM: JudgeResult(score, reason)
-        HM-->>T: HarnessVerdict(passed, score, reason)
+        HM-->>T: CriticVerdict(passed, score, reason)
         alt verdict.passed=False
-            T->>QS: mark_question_harness_flagged(qid)
+            T->>QS: mark_question_critic_flagged(qid)
         end
     end
-    T-->>LLM: 总分 + 错题清单 + ⚠️ harness_warning 段
+    T-->>LLM: 总分 + 错题清单 + ⚠️ critic_warning 段
 ```
 
 R1 RAG 召回 + 过滤：
@@ -1051,7 +1051,7 @@ sequenceDiagram
     participant LLM as LLM
     participant T as _tool_search_knowledge
     participant R as retriever.search
-    participant HM as HarnessManager
+    participant HM as CriticManager
     participant Chat as chat()
     participant FMT as format_search_results
 
@@ -1387,7 +1387,7 @@ flowchart LR
 | `ThinkingPolicy`       | Helper | adaptive thinking budget 估算（LOW / MED / HIGH 三档）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | ✓     | ✓                         | △（子任务不启用）    |
 | `plan_manager`         | Helper | `PlanStep` / `PlanState` dataclass + `reconstruct_from_messages()`；plan 状态从 messages 历史 reconstruct（详 [§3.7.1](#371-数据载体)）                                                                                                                                                                                                                                                                                                                                                                                                                                                          | ✓     | ✓                         | ✓                    |
 | `srs_scheduler`        | Helper | SM-2 公式纯函数（4 档 → ease/interval/repetitions/lapses 调度计算，详[§3.10](#310-主动复习srs)）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | ✓     | ✓                         | ✓                    |
-| `HarnessManager`       | Helper | Q1 测验批改自检 + R1 RAG 召回过滤；复用 `judge_with_llm` + 自管 batch prompt + ThreadPoolExecutor timeout（详 [§3.11](#311-harness-自检)）                                                                                                                                                                                                                                                                                                                                                                                                                                                           | ✓     | ✓                         | ✓                    |
+| `CriticManager`       | Helper | Q1 测验批改自检 + R1 RAG 召回过滤；复用 `judge_with_llm` + 自管 batch prompt + ThreadPoolExecutor timeout（详 [§3.11](#311-critic-自检)）                                                                                                                                                                                                                                                                                                                                                                                                                                                           | ✓     | ✓                         | ✓                    |
 
 > **类型说明**
 >
@@ -1409,7 +1409,7 @@ src/agent/core/
 ├── citation_builder.py       # CitationBuilder（详 §3.6）
 ├── plan_manager.py           # PlanState / PlanStep + reconstruct_from_messages（详 §3.8）
 ├── srs_scheduler.py          # SM-2 公式纯函数 + Rating / CardState / ScheduleResult（详 §3.11.2）
-└── harness_manager.py        # HarnessManager + HarnessVerdict（Q1/R1 critic，详 §3.12）
+└── critic_manager.py        # CriticManager + CriticVerdict（Q1/R1 critic，详 §3.12）
 ```
 
 依赖层（`src/stores/session_store.py` 的 `SessionStore` / `src/stores/user_memory.py` 的 `UserMemoryStore` / `src/stores/learning_plan_store.py` 的 `LearningPlanStore` / `src/stores/quiz_store.py` 的 `QuizStore` / `src/stores/srs_store.py` 的 `SRSStore` / `src/llm/provider.py`）位置不动，被 helper 调用。
@@ -1428,7 +1428,7 @@ LangChain 实现把 loop 交给 `AgentExecutor`，只在适配层把公共层接
 
 | 维度        | 落点                                                    | 说明                                                                                                                                                                                 |
 | ----------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 工具        | `src/agent/langchain_tools.py`                        | 遍历 `get_tools()` 的 JSON schema 动态包装为 `StructuredTool`，路由 `execute_tool`——全 17+ 工具与 Python / AutoGPT 单一真相源一致（含 MCP 合流、名单门、security / harness） |
+| 工具        | `src/agent/langchain_tools.py`                        | 遍历 `get_tools()` 的 JSON schema 动态包装为 `StructuredTool`，路由 `execute_tool`——全 17+ 工具与 Python / AutoGPT 单一真相源一致（含 MCP 合流、名单门、security / critic） |
 | 四层 prompt | `src/agent/langchain_agent.py · run()`               | base(+skill catalog) →`<user_rules>` → `<user_context>` → `<active_study_plan>`，每轮重建 executor                                                                          |
 | 事件流      | `_EventBridgeHandler`(BaseCallbackHandler)            | token_chunk / tool_call_start / tool_call_end / plan_*（plan 为 best-effort，详 iter_a §4）                                                                                         |
 | 引用        | per-run `CitationBuilder` 经 `citation_getter` 透传 | RAG 回答带 `[n]` 与末尾 `— sources —` 块                                                                                                                                       |

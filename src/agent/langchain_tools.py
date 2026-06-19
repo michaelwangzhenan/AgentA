@@ -6,7 +6,7 @@ LangChain 工具适配 —— 把 `tools.py` 的全部 OpenAI 风格工具动态
   动态生成：`parameters` → pydantic 模型，`func` → 统一闭包路由到 `execute_tool`。
 - 单一真相源：工具集合（含 plan/study/quiz/srs + MCP 合流 + 名单门过滤 + fetch_url
   屏蔽逻辑）与 Python / AutoGPT 完全一致。
-- security_filter / harness 已在 `execute_tool` 内部，自动获得。
+- security_filter / critic 已在 `execute_tool` 内部，自动获得。
 - `citation_getter`：per-run `CitationBuilder` 的取值闭包，仅 search_knowledge 路径用到
   （LangChainAgent 每轮 run() 重置；详 §4 引用对齐）。
 """

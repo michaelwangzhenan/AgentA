@@ -118,7 +118,7 @@ flowchart TB
 
 | 能力 | 说明 |
 |---|---|
-| **推理循环** | • 简单任务用 ReAct<br>• 复杂任务自动升级为 **Plan-Execute** 多步执行<br>• 测验批改 / RAG 召回用 **Harness 自检 + LLM-as-Judge** 双重复核 |
+| **推理循环** | • 简单任务用 ReAct<br>• 复杂任务自动升级为 **Plan-Execute** 多步执行<br>• 测验批改 / RAG 召回用 **Critic 自检 + LLM-as-Judge** 双重复核 |
 | **Context 管理** | 四层注入：<br>• SYSTEM_PROMPT + Skill catalog<br>• 个人偏好 Rules（每用户一份，存 `auth.db`）<br>• 跨 session 用户记忆<br>• 临时上下文（学习计划 / 工具结果 / 用户输入） |
 | **安全防注入** | • `<untrusted_tool>` 包装隔离<br>• 启发式清洗<br>• plan 执行审批<br>• URL/SSRF 防护<br>• tool 名单门 |
 | **Thinking 模式** | • Extended Thinking 总开关<br>• Budget / Adaptive 两种预算策略可配<br>• 适配 Claude / Qwen3 |
@@ -176,7 +176,7 @@ flowchart TB
 | **Skills 激活** | `tools/agent_eval/skills/` | LLM 看到 catalog 能否主动调对 `load_skill(name=…)` |
 | **Plan-Execute 识别** | `tools/agent_eval/plan/` | 复杂任务调 `make_plan` / 简单任务不调；plan 结构由 LLM-judge 打分 |
 | **学习计划 / Quiz / SRS 业务** | `tools/agent_eval/plan_business/`, `quiz/`, `srs/` | 业务工具调用正确性 + 结构质量 |
-| **Harness 自检准确率** | `tools/agent_eval/harness/` | critic 自身判得准不准（quiz_critic / rag_critic） |
+| **Critic 自检准确率** | `tools/agent_eval/critic/` | critic 自身判得准不准（quiz_critic / rag_critic） |
 | **MCP 接入** | `tools/agent_eval/mcp/` | 配置 → server 启动 → tool 合流 → SSRF 拦截全链路 |
 | **对抗安全** | `tools/agent_eval/security/` | 直接越狱 / RAG 间接 / Web 间接 / tool 名单门，拦截率 ≥ 90% / 误拦率 ≤ 10% |
 | **性能基准** | `tools/agent_eval/perf_eval.py` | session / memory 在 10/100/1000/5000 数据档位下的延迟基准（中位数 ms） |
@@ -275,8 +275,8 @@ USER_MEMORY_ENABLED=true          # 跨 session 用户记忆
 USER_RULES_ENABLED=true           # 每用户偏好 Rules 注入（存数据库）
 USER_RULES_MAX_CHARS=4000         # 单用户 rules 文本上限，超出写入时返 400
 PLAN_PERMISSION_MODE=false        # plan 执行前是否需要用户审批
-HARNESS_QUIZ_ENABLED=true         # 测验批改 LLM-as-Judge 复审
-HARNESS_RAG_ENABLED=true          # RAG 召回 chunks 相关性过滤
+CRITIC_QUIZ_ENABLED=true         # 测验批改 LLM-as-Judge 复审
+CRITIC_RAG_ENABLED=true          # RAG 召回 chunks 相关性过滤
 MCP_ENABLED=true                  # 启用 MCP 接入（.agenta/mcp/config.json）
 ```
 
@@ -333,7 +333,7 @@ python -m tools.download_models 3    # 下载指定模型（编号详见 -l 输�
 | 4 | 学习计划业务 | `tools.agent_eval.plan_business.eval_learning_plan` | `L01-create-ml-8w` |
 | 5 | Quiz 出题 / 批改 | `tools.agent_eval.quiz.eval_quiz` | `Q01-create-rag` |
 | 6 | SRS 调度触发 | `tools.agent_eval.srs.eval_srs` | `S01-due-today` |
-| 7 | Harness 自检准确率 | `tools.agent_eval.harness.eval_harness` | `Q01-correct-grading-passes` |
+| 7 | Critic 自检准确率 | `tools.agent_eval.critic.eval_critic` | `Q01-correct-grading-passes` |
 | 8 | MCP 接入全链路 | `tools.agent_eval.mcp.eval_mcp` | `C6-ssrf-defense-blocks-internal` |
 | 9 | 安全 / 防注入对抗 | `tools.agent_eval.security.adversarial` | `--kind direct` |
 | 10 | 性能基准（延迟中位数） | `tools.agent_eval.perf_eval` | `--target memory --sizes 100,1000,5000` |
@@ -349,7 +349,7 @@ python -m tools.agent_eval.plan.eval_plan
 python -m tools.agent_eval.plan_business.eval_learning_plan
 python -m tools.agent_eval.quiz.eval_quiz
 python -m tools.agent_eval.srs.eval_srs
-python -m tools.agent_eval.harness.eval_harness
+python -m tools.agent_eval.critic.eval_critic
 python -m tools.agent_eval.mcp.eval_mcp
 python -m tools.agent_eval.security.adversarial
 python -m tools.agent_eval.perf_eval --target all
