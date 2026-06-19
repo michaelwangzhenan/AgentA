@@ -84,22 +84,22 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 | `src/agent/langchain_agent.py`       | LangChain `AgentExecutor` 实现，公共层接口对齐，loop 由 LangChain 接管                                                 | `LangChainAgent(...).run(user_input)`                                                                                |
 | `src/agent/langchain_tools.py`       | 把 `tools.py` 的 OpenAI 风格 schema 包装成 LangChain `StructuredTool`                                           | `build_langchain_tools()`                                                                                            |
 | `src/agent/tools.py`                 | 全部业务 tool 定义 +`execute_tool` 路由（RAG / web / fetch / plan / study / quiz / srs / skill / mcp）             | `get_tools(skill_bodies)` · `execute_tool(name, args, ...)`                                                          |
-| `src/agent/core/event_bus.py`        | 事件总线：10 类 `AgentEvent` 分发，多订阅扇出 + 异常隔离                                                                   | `EventBus` · `EVENT_`* 常量                                                                                            |
+| `src/agent/core/event_bus.py`        | 事件总线：18 类 `AgentEvent` 分发（含 tool / plan / research 等），多订阅扇出 + 异常隔离                                       | `EventBus` · `EVENT_`* 常量                                                                                            |
 | `src/agent/core/tool_call_engine.py` | 工具调用一轮编排：执行 + 结果格式化 + 写历史 + 叠加发 `plan_`* 事件                                                              | `ToolCallEngine.process(message, messages)`                                                                          |
 | `src/agent/core/history_manager.py`  | 历史按轮截断 + skill_pair 完整性保护 + system 拼接                                                                    | `HistoryManager.load_truncated()`                                                                                    |
 | `src/agent/core/memory_manager.py`   | UserMemory 注入 `<user_context>` + 节流自动提取                                                                  | `MemoryManager.build_system_prompt()` · `try_extract()`                                                              |
-| `src/agent/core/thinking_policy.py`  | Adaptive Extended Thinking budget 估算（LOW / MED / HIGH 三档）                                                | `ThinkingPolicy.effective_budget(messages)`                                                                          |
-| `src/agent/core/citation_builder.py` | RAG 引用编号管理：跨同轮多次 `search_knowledge` 累计编号 + 末尾 `— sources —` 块渲染（详 [§3.6](#36-引用管理)）                      | `CitationBuilder.register()` · `render()`                                                                            |
-| `src/agent/core/plan_manager.py`     | `PlanState` / `PlanStep` dataclass + 从 messages reconstruct plan 状态（详 [§3.8.1](#381-数据载体)）               | `reconstruct_from_messages(messages)`                                                                                |
-| `src/agent/core/srs_scheduler.py`    | SM-2 公式纯函数（4 档 → ease / interval / repetitions / lapses，详[§3.11.2](#3112-sm-2-算法核心)）                     | `schedule_review(card, rating)`                                                                                      |
-| `src/agent/core/critic_manager.py`  | Q1 测验批改自检 + R1 RAG 召回过滤；复用 `judge_with_llm`（详 [§3.12](#312-critic-自检)）                                  | `CriticManager.review_grading()` · `filter_chunks()`                                                                |
+| `src/agent/core/thinking_policy.py`  | Adaptive Extended Thinking budget 估算（LOW / MED / HIGH 三档）                                                | `ThinkingPolicy.effective_budget()`                                                                                  |
+| `src/agent/core/citation_builder.py` | RAG 引用编号管理：跨同轮多次 `search_knowledge` 累计编号 + 末尾 `— sources —` 块渲染（详 [§2.5.12](#2512-citation-引用展示)）          | `CitationBuilder.register()` · `render()`                                                                            |
+| `src/agent/core/plan_manager.py`     | `PlanState` / `PlanStep` dataclass + 从 messages reconstruct plan 状态（详 [§2.5.5](#255-plan-execute)）        | `reconstruct_from_messages(messages)`                                                                                |
+| `src/agent/core/srs_scheduler.py`    | SM-2 公式纯函数（4 档 → ease / interval / repetitions / lapses，详 [§2.5.15](#2515-srs-复习)）                       | `schedule_review(card, rating)`                                                                                      |
+| `src/agent/core/critic_manager.py`  | Q1 测验批改自检 + R1 RAG 召回过滤；复用 `judge_with_llm`（详 [§2.5.16](#2516-critic-自检)）                               | `CriticManager.review_grading()` · `filter_chunks()`                                                                |
 | `src/agent/core/rules_loader.py`     | 把用户 rules 文本拼成 `<user_rules>` block（rules 文本由 Agent 按当前用户从 `user_rules` 读，详 [§3.5](#35-prompt-管理)）       | `build_rules_block()`                                                                                                |
 | `src/agent/core/mcp_config.py`       | MCP servers 配置解析 + UI 编辑路径的 CRUD 辅助 + disabled 列表管理（详[§3.14.3](#3143-配置文件) / [§3.14.4](#3144-web-ui-管理)） | `load_mcp_config()` · `add_server()` · `update_server()` · `delete_server()` · `rename_server()` · `toggle_server()` |
 | `src/agent/core/mcp_manager.py`      | MCP server 子进程生命周期 + tool 发现 / 调用（asyncio loop 跑在后台线程）                                                   | `MCPManager.start_all()` · `start_one()` · `stop_one()` · `reload()` · `list_tools()` · `call_tool()`                |
 | `src/agent/core/url_guard.py`        | SSRF 防护：私网 / 链路本地 / 保留段 IP 拦截                                                                            | `is_url_safe(url)`                                                                                                   |
 | `src/agent/core/security_filter.py`  | Prompt-injection 启发式清洗 + tool 白名单 +`<untrusted_*>` 包装                                                    | `wrap_untrusted()` · `scrub_injection()` · `is_tool_allowed()`                                                       |
-| `tools/agent_eval/`                  | Agent 端到端评估（plan / quiz / srs / memory / critic / security / mcp / perf）                                | 各子目录 `eval_*.py`（详 [§3.13](#313-评估方法)）                                                                               |
-| `tests/test_agent*.py`               | 单元 + 集成测试（protocol / events / active_plan / autogpt / langchain）                                         | `pytest tests/test_agent*.py`                                                                                        |
+| `tools/agent_eval/`                  | Agent 端到端评估（plan / quiz / srs / memory / critic / security / mcp / perf）                                | 各子目录 `eval_*.py`                                                                                                     |
+| `tests/agent/test_*.py`              | 单元 + 集成测试（protocol / events / active_plan / autogpt / langchain / critic 等）                              | `pytest tests/agent/`                                                                                               |
 
 
 ## 2.2. 三条主调用链
@@ -120,7 +120,7 @@ src/agent/agent.py · Agent.run(user_input)
                  ├─ src/agent/tools.py · execute_tool(name, args, ...)
                  │    ├─ _tool_search_knowledge → src/rag/retriever.py · search(...)
                  │    ├─ _tool_make_plan / _tool_update_step / _tool_abort_plan
-                 │    ├─ _tool_create_quiz → critic_manager · review_grading(...)
+                 │    ├─ _tool_grade_quiz → critic_manager · review_grading(...)
                  │    └─ ... (study / srs / skill / mcp / web / fetch)
                  ├─ security_filter · wrap_untrusted + scrub_injection
                  ├─ EventBus.publish(tool_call_start / tool_call_end)
@@ -168,8 +168,8 @@ python -m tools.agent_eval.<feature>.eval_*
 - 想换 / 加 Agent 实现 → 对照 `agent_api.py · AgentAPI` Protocol 三件套：`run` / `activate_skill` / `set_event_callback`
 - 想理解 RAG 引用编号 → `core/citation_builder.py · register()` 与 `render()`
 - 想接 MCP server → `core/mcp_config.py`（配置 schema） + `core/mcp_manager.py`（subprocess + asyncio）
-- 想加 prompt-injection 防护 → `core/security_filter.py · scrub_injection()` 的 `_PATTERNS` 表
-- 想加 Critic critic 题型 → `core/critic_manager.py` + 对应 prompt 模板文件
+- 想加 prompt-injection 防护 → `core/security_filter.py · scrub_injection()` 的 `_INJECTION_PATTERNS` 表
+- 想加 / 改 critic 自检规则 → `core/critic_manager.py` + `tools/agent_eval/critic/` 下的 prompt 模板
 
 ## 2.4. 常见改动落点
 
@@ -184,8 +184,8 @@ python -m tools.agent_eval.<feature>.eval_*
 | 改用户记忆自动提取节流                                 | `.env`                              | `USER_MEMORY_EXTRACT_EVERY_N` / `USER_MEMORY_EXTRACT_MIN_INPUT_LEN`                      |
 | 开 / 关 plan 用户审批                             | `.env`                              | `PLAN_PERMISSION_MODE`                                                                   |
 | 调 SM-2 调度参数                                 | `src/agent/core/srs_scheduler.py`   | `_clip_ease()` / `_update_ease()` / `_interval_from_repetitions()`                       |
-| 加 Critic critic 题型                         | `src/agent/core/critic_manager.py` | `review_grading()` / `filter_chunks()` + 对应 prompt 模板                                    |
-| 加 prompt-injection 模板拦截                     | `src/agent/core/security_filter.py` | `_PATTERNS` 列表 + `scrub_injection()`                                                     |
+| 加 / 改 critic 自检规则                        | `src/agent/core/critic_manager.py` | `review_grading()` / `filter_chunks()` + `tools/agent_eval/critic/` prompt 模板             |
+| 加 prompt-injection 模板拦截                     | `src/agent/core/security_filter.py` | `_INJECTION_PATTERNS` 列表 + `scrub_injection()`                                           |
 | 调 SSRF 拦截范围                                 | `src/agent/core/url_guard.py`       | `is_url_safe()`                                                                          |
 | 改 tool 白 / 黑名单（禁用某个 tool）                   | `.env`                              | `TOOL_ALLOWLIST` / `TOOL_BLOCKLIST`                                                      |
 | 接入 MCP server                               | `.agenta/mcp/config.json`           | `servers.<name>`；启动时 `mcp_manager.py · start_all()` 自动接入                                 |
@@ -415,7 +415,7 @@ prompt 之外：
 - 触发入口 : `.agenta/skills/quiz-maker/SKILL.md`（catalog → `load_skill` → 按 skill 调 tool）
 - tool 注册 + 分发 : `agent/tools.py · _QUIZ_TOOLS`（schema，经 `get_tools()` 暴露）+ `execute_tool()` 的 `case "create_quiz"` 等
 - 三个 tool 实现 : `agent/tools.py · _tool_create_quiz()` / `_tool_grade_quiz()` / `_tool_query_quiz_history()`
-- 简答批改 : `agent/tools.py · _grade_one_short_answer()`（`_SHORT_ANSWER_JUDGE_SYS`）+ critic critic 自检
+- 简答批改 : `agent/tools.py · _grade_one_short_answer()`（`_SHORT_ANSWER_JUDGE_SYS`）+ critic 自检
 - 存储 : `stores/quiz_store.py · QuizStore`
 
 ### 2.5.15. SRS 复习
