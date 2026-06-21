@@ -71,15 +71,15 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 | 加新指标                       | `tools/rag_eval/runner.py` | `EvalReport` 字段 + `evaluate()` 累加 + `_render_markdown()` 渲染                      |
 
 
-# 2. Agent 代码
+# 2. Agent
 
 ## 2.1. 文件职责速查
 
 
 | 路径                                   | 角色                                                                                                       | 主要入口                                                                                                                 |
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `src/agent/agent_api.py`             | `AgentAPI` Protocol：表现层 ↔ Agent core 契约（duck-typed，三种实现都满足，详 [§3.1](#31-agentapi)）                       | `AgentAPI`（Protocol）                                                                                                 |
-| `src/agent/agent.py`                 | Python ReAct Agent 主实现：拼 system → loop（LLM ↔ tool）→ final；含 `SYSTEM_PROMPT` 与模块级共享 store 单例              | `Agent(...).run(user_input)` · `SYSTEM_PROMPT`                                                                       |
+| `src/agent/agent_api.py`             | `AgentAPI` Protocol：表现层 ↔ Agent core 接口）                       | `AgentAPI`（Protocol）                                                                                                 |
+| `src/agent/agent.py`                 | Python ReAct Agent 主实现，含 `SYSTEM_PROMPT` 与模块级共享 store 单例              | `Agent(...).run(user_input)` · `SYSTEM_PROMPT`                                                                       |
 | `src/agent/autogpt_agent.py`         | Auto-GPT 风格 Agent：Plan → Execute（子 ReAct）→ Review 三阶段                                                    | `AutoGPTAgent(...).run(user_input)`                                                                                  |
 | `src/agent/langchain_agent.py`       | LangChain `AgentExecutor` 实现，公共层接口对齐，loop 由 LangChain 接管                                                 | `LangChainAgent(...).run(user_input)`                                                                                |
 | `src/agent/langchain_tools.py`       | 把 `tools.py` 的 OpenAI 风格 schema 包装成 LangChain `StructuredTool`                                           | `build_langchain_tools()`                                                                                            |
@@ -89,11 +89,11 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 | `src/agent/core/history_manager.py`  | 历史按轮截断 + skill_pair 完整性保护 + system 拼接                                                                    | `HistoryManager.load_truncated()`                                                                                    |
 | `src/agent/core/memory_manager.py`   | UserMemory 注入 `<user_context>` + 节流自动提取                                                                  | `MemoryManager.build_system_prompt()` · `try_extract()`                                                              |
 | `src/agent/core/thinking_policy.py`  | Adaptive Extended Thinking budget 估算（LOW / MED / HIGH 三档）                                                | `ThinkingPolicy.effective_budget()`                                                                                  |
-| `src/agent/core/citation_builder.py` | RAG 引用编号管理：跨同轮多次 `search_knowledge` 累计编号 + 末尾 `— sources —` 块渲染（详 [§2.5.12](#2512-citation-引用展示)）          | `CitationBuilder.register()` · `render()`                                                                            |
-| `src/agent/core/plan_manager.py`     | `PlanState` / `PlanStep` dataclass + 从 messages reconstruct plan 状态（详 [§2.5.5](#255-plan-execute)）        | `reconstruct_from_messages(messages)`                                                                                |
-| `src/agent/core/srs_scheduler.py`    | SM-2 公式纯函数（4 档 → ease / interval / repetitions / lapses，详 [§2.5.15](#2515-srs-复习)）                       | `schedule_review(card, rating)`                                                                                      |
-| `src/agent/core/critic_manager.py`  | Q1 测验批改自检 + R1 RAG 召回过滤；复用 `judge_with_llm`（详 [§2.5.16](#2516-critic-自检)）                               | `CriticManager.review_grading()` · `filter_chunks()`                                                                |
-| `src/agent/core/rules_loader.py`     | 把用户 rules 文本拼成 `<user_rules>` block（rules 文本由 Agent 按当前用户从 `user_rules` 读，详 [§3.5](#35-prompt-管理)）       | `build_rules_block()`                                                                                                |
+| `src/agent/core/citation_builder.py` | RAG 引用编号管理：跨同轮多次 `search_knowledge` 累计编号 + 末尾 `— sources —` 块渲染（详 [引用展示](#2512-citation-引用展示)）          | `CitationBuilder.register()` · `render()`                                                                            |
+| `src/agent/core/plan_manager.py`     | `PlanState` / `PlanStep` dataclass + 从 messages reconstruct plan 状态（详 [plan-execute](#255-plan-execute)）        | `reconstruct_from_messages(messages)`                                                                                |
+| `src/agent/core/srs_scheduler.py`    | SM-2 公式纯函数（4 档 → ease / interval / repetitions / lapses，详 [SRS](#2515-srs-复习)）                       | `schedule_review(card, rating)`                                                                                      |
+| `src/agent/core/critic_manager.py`  | Q1 测验批改自检 + R1 RAG 召回过滤；复用 `judge_with_llm`（详 [Critic](#2516-critic-自检)）                               | `CriticManager.review_grading()` · `filter_chunks()`                                                                |
+| `src/agent/core/rules_loader.py`     | 把用户 rules 文本拼成 `<user_rules>` block（rules 文本由 Agent 按当前用户从 `user_rules` 读，详 [Rules](#35-prompt-管理)）       | `build_rules_block()`                                                                                                |
 | `src/agent/core/mcp_config.py`       | MCP servers 配置解析 + UI 编辑路径的 CRUD 辅助 + disabled 列表管理（详[§3.14.3](#3143-配置文件) / [§3.14.4](#3144-web-ui-管理)） | `load_mcp_config()` · `add_server()` · `update_server()` · `delete_server()` · `rename_server()` · `toggle_server()` |
 | `src/agent/core/mcp_manager.py`      | MCP server 子进程生命周期 + tool 发现 / 调用（asyncio loop 跑在后台线程）                                                   | `MCPManager.start_all()` · `start_one()` · `stop_one()` · `reload()` · `list_tools()` · `call_tool()`                |
 | `src/agent/core/url_guard.py`        | SSRF 防护：私网 / 链路本地 / 保留段 IP 拦截                                                                            | `is_url_safe(url)`                                                                                                   |
@@ -468,9 +468,11 @@ prompt 之外：
 - 触发路由 : `api/routes/chat.py`（`mode=="deep_research"` 分支）
 - 开关 + 配置 : `.env · DEEP_RESEARCH_ENABLED` / `_MAX_SUBQUESTIONS` / `_MAX_PARALLEL_SUBAGENTS` / `_SUBAGENT_MAX_ROUNDS` / `_MAX_SOURCES_PER_SUBAGENT` / `_MAX_TOTAL_SOURCES` / `_REFLECT_ENABLED`
 
-# 3. UI 代码指南
+# 3. Web UI
 
 面向「没做过前端、但想看懂本项目前端并能改一些小地方」的读者。读完能定位到某块界面对应哪个文件、看懂代码大致结构、自己动手改字号 / 间距 / 颜色这类样式。
+
+
 
 ## 3.1. 代码框架
 
@@ -483,36 +485,48 @@ prompt 之外：
 | TypeScript                     | 带类型标注的 JavaScript，编辑器能提前帮你查错               |
 | Tailwind CSS                   | 用一串短 class 名（如 `text-lg`）直接写样式，不单独写 CSS 文件 |
 | Vite                           | 开发时启动本地服务器、改完代码自动刷新（热更新）；上线时打包             |
-| shadcn / lucide-react / sonner | 现成的基础控件库 / 图标库 / 弹窗提示库                     |
+| Base UI / shadcn               | 无样式但带交互逻辑的基础控件底座（按钮、弹窗等）；按 shadcn 风格把源码复制进 `components/ui/` 后自行配样式 |
+| lucide-react / sonner          | 图标库 / 右下角弹窗提示（toast）库                       |
+| react-markdown                 | 把 AI 回答里的 Markdown 渲染成排版好的界面                 |
 
 
 代码都在 `frontend/src/` 下，按职责分目录：
 
 ```mermaid
 graph TD
-    main["main.tsx<br/>程序入口，挂载到网页"] --> App["App.tsx<br/>整体布局：左侧导航 + 右侧当前页面"]
-    App --> auth["components/auth/<br/>登录 / 注册页（未登录时只显示这页）"]
-    App --> Sidebar["components/sidebar/<br/>左侧导航栏（底部显示当前用户 + 退出）"]
+    main["main.tsx<br/>程序入口，挂载到网页"] --> App["App.tsx<br/>整体布局：左侧导航<br/> + 右侧当前页面"]
+    App --> auth["components/auth/<br/>登录页(未登录只显示这页)"]
+    App --> Sidebar["components/sidebar/<br/>左侧导航栏<br/> 底部当前用户+设置/退出"]
     App --> Views["右侧各页面（按导航切换）"]
 
     Views --> chat["components/chat/<br/>聊天页（最核心）"]
-    Views --> settings["components/settings/<br/>设置页"]
-    Views --> resources["components/resources/<br/>记忆 / 规则 / 技能 / MCP"]
-    Views --> business["components/business/<br/>学习计划 / 测验 / 复习"]
     Views --> kb["components/kb/<br/>知识库"]
+    Views --> resources["components/resources/<br/>记忆 / Rules / Skills / MCP"]
+    Views --> business["components/business/<br/>学而时习：学习计划 / 测验 / 复习"]
+    Views --> usage["components/usage/<br/>用量看板（花了多少 token / 钱）"]
+    Views --> evalv["components/eval/<br/>质量看板：会话监控 / 评估 / Golden"]
+    Views --> admin["components/admin/<br/>数据库查看 / 备份恢复"]
+    Views --> settings["components/settings/<br/>账户/系统配置/用户管理"]
 
-    subgraph 公共底座
-      ui["components/ui/<br/>通用控件：按钮 / 输入框 / 下拉菜单"]
-      hooks["hooks/<br/>可复用逻辑：useChat 收发消息等"]
-      api["api/client.ts<br/>跟后端通信"]
-      types["types/<br/>数据类型定义"]
-      lib["lib/<br/>小工具：主题 / 样式合并"]
-      css["index.css<br/>主题色变量 + Tailwind 引入"]
+    chat -.-> base
+    kb -.-> base
+    resources -.-> base
+    business -.-> base
+    usage -.-> base
+    evalv -.-> base
+    admin -.-> base
+    settings -.-> base
+
+    subgraph base["公共底座（各页面共用）"]
+      direction TB
+      ui["components/ui/ 通用控件：按钮/输入框/弹窗/下拉菜单"]
+      hooks["hooks/ 可复用逻辑：useChat 收发消息等"]
+      api["api/client.ts 跟后端通信"]
+      types["types/ 数据类型定义"]
+      lib["lib 小工具：登录态/主题/样式合并"]
+      css["index.css 主题色变量 + Tailwind 引入"]
+      hooks -.调用.-> api
     end
-
-    chat -.用到.-> ui
-    chat -.用到.-> hooks
-    hooks -.调用.-> api
 ```
 
 
@@ -520,20 +534,62 @@ graph TD
 目录速记：
 
 
-| 目录 / 文件            | 放什么                                         |
-| ------------------ | ------------------------------------------- |
-| `components/chat/` | 聊天界面的所有块：消息列表、气泡、输入框、思考块、工具调用块              |
-| `components/auth/` | 登录 / 注册页；没登录时整个应用只显示这一页                     |
-| `components/ui/`   | 最底层通用控件（按钮、下拉菜单等），别的组件拼装它们                  |
-| `hooks/`           | 抽出来复用的逻辑，函数名以 `use` 开头（核心是 `useChat`，管消息收发） |
-| `api/client.ts`    | 所有「请求后端」的函数都在这（含登录 / 注册 / 退出）               |
-| `lib/auth.tsx`     | 管「当前登录的是谁」：登录 / 注册 / 退出、是否管理员，都从这取          |
-| `types/`           | 描述数据长什么样（如一条消息有哪些字段）                        |
-| `lib/`             | 零碎工具函数（`cn` 合并样式、主题切换）                      |
-| `index.css`        | 全局主题色、字体、圆角等变量                              |
+| 目录 / 文件               | 放什么                                                |
+| --------------------- | -------------------------------------------------- |
+| `components/chat/`    | 聊天界面的所有块：消息列表、气泡、输入框、思考块、工具块、计划块、代码块、来源面板    |
+| `components/kb/`      | 知识库：文档列表、上传入库、拖拽区                          |
+| `components/resources/` | 记忆 / Rules / Skills / MCP 四个页面（Skills、MCP 仅管理员） |
+| `components/business/`  | 学而时习：学习计划 / 测验 / 复习三个 tab，右侧可开聊天             |
+| `components/usage/`   | 用量看板：用量趋势、计费配置、省钱面板                        |
+| `components/eval/`    | 质量看板：会话监控、离线评估、Golden 管理、实时安全监控           |
+| `components/admin/`   | 管理员专属：数据库查看、备份与恢复                          |
+| `components/settings/`  | 设置页：个人信息 / 密码 / 系统配置 / API 密钥 / 用户管理 / 注销   |
+| `components/auth/`    | 登录 / 注册页；没登录时整个应用只显示这一页                     |
+| `components/sidebar/` | 左侧导航栏（页面切换 + 会话列表 + 底部用户菜单 / 主题切换）         |
+| `components/ui/`      | 最底层通用控件（按钮、输入框、弹窗、下拉等），别的组件拼装它们          |
+| `hooks/`              | 抽出来复用的逻辑，`use` 开头（核心 `useChat` 管消息收发；另有语音输入、草稿、输入框设置） |
+| `api/client.ts`       | 所有「请求后端」的函数都在这（含登录 / 注册 / 退出）               |
+| `lib/auth.tsx`        | 管「当前登录的是谁」：登录 / 注册 / 退出、是否管理员，都从这取          |
+| `types/`              | 描述数据长什么样（每个 feature 一个文件，如 `chat.ts` / `usage.ts`） |
+| `lib/`                | 零碎工具（`cn` 合并样式、主题切换、toast 提示、附件处理）           |
+| `index.css`           | 全局主题色、字体、圆角等变量                              |
 
 
-## 3.2. 流程图
+## 3.2. 前端启动
+
+前端从浏览器打开网页到渲染出界面，也有一条启动链（跟后端 §3.7.2「启动 → 收 HTTP → 路由」对称）：
+
+1. **浏览器加载 `index.html`**：里面有个空容器 `<div id="root">`，以及一行 `<script src="/src/main.tsx">`（开发期由 Vite 提供，见 §3.1 的 Vite）。
+2. **`main.tsx` 是入口**：它不画界面，只做「挂载」——找到 `#root`，把 React 组件树渲染进去：
+
+```tsx
+// frontend/src/main.tsx
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <ThemeProvider>        {/* 全局主题 / 深浅色 */}
+      <AuthProvider>       {/* 全局登录态：当前是谁、是否管理员 */}
+        <App />            {/* 根组件 */}
+      </AuthProvider>
+    </ThemeProvider>
+  </StrictMode>,
+)
+```
+
+3. **外层 Provider 提供全局能力**：`ThemeProvider`（主题）、`AuthProvider`（登录态）包在最外，里面所有组件都能取用。
+4. **`App.tsx` 是根组件**：先看 `AuthProvider` 给的登录态——没登录只显示登录页（`components/auth/`），登录了才渲染左侧导航 + 当前页面，并按导航在各页面间切换。
+5. **进入具体页面组件**（`ChatView` 等），用户开始交互；要数据时经 `api/client.ts` 向后端请求（接上 §3.6）。
+
+```mermaid
+graph LR
+    HTML["index.html<br/>(#root 容器)"] -->|浏览器加载| MAIN["main.tsx<br/>createRoot + render（入口）"]
+    MAIN --> PROV["ThemeProvider / AuthProvider<br/>全局能力包裹"]
+    PROV --> APP["App.tsx<br/>根组件：登录判断 + 页面切换"]
+    APP --> VIEW["各页面组件<br/>(ChatView 等)"]
+```
+
+对照记忆：**前后端入口都叫 `main`**——后端 `main.py` 建 `app`、挂路由；前端 `main.tsx` 建 root、挂 `App`。`App.tsx` 之于前端，约等于「路由汇总 + 总布局」。
+
+## 3.3. 流程图
 
 以「用户发一条消息，看到 AI 流式回答」为例，看数据怎么流动：
 
@@ -564,60 +620,207 @@ sequenceDiagram
 - **后端是流式（SSE）**：回答不是一次性返回，而是一段段推过来，所以能看到「逐字蹦」和中间的思考 / 工具调用过程。
 - **组件只负责「把数据画出来」**：`MessageBubble` 拿到一条消息，按它的字段决定显示文字、思考块还是工具块（见 §3.1 的 `components/chat/`）。
 
-## 3.3. 语法基础
+## 3.4. 语法基础
 
-看懂前端代码只需先掌握这几个概念，够改样式用了。
+本节把读懂、改动前端代码要用的概念，按「**画界面 → 传数据 → 加交互 → 控制显示 → 副作用 → 类型**」六组系统过一遍。只改样式 / 文案掌握前三组即可；想动逻辑再往后看。
 
-**1. 组件 = 返回界面的函数**。函数名大写开头，`return` 里那段「像 HTML」的就是界面：
+### 3.4.1. 画界面：组件 + JSX + 样式
+
+**1. 组件 = 返回界面的函数**。函数名**大写开头**，`return` 里那段「像 HTML」的就是界面；定义好后就能当标签用（`<ChatView ... />`）。下面是 `components/chat/ChatView.tsx` 的骨架：
 
 ```tsx
-function Hello() {
-  return <div className="text-lg">你好</div>
+// frontend/src/components/chat/ChatView.tsx（节选）
+
+// 这就是一个组件：大写开头的函数 ChatView。
+// 入参 { messages, onSend } 是 props（父组件传进来的数据 / 回调），见下方 §3.3.2。
+export function ChatView({ messages, onSend /* ... */ }: ChatViewProps) {
+  // return 里这段「像 HTML」的就是这个组件要显示的界面（JSX）。
+  return (
+    // 最外层一个 div：className 里全是 Tailwind 样式类（弹性纵向布局、占满高度）。
+    <div className="flex h-full flex-1 flex-col">
+      {/* 顶部标题栏：一条下边框 + 左右上下内边距 */}
+      <header className="border-b border-border px-6 py-3">
+        {/* h1 标题：基础字号、半粗、字间距收紧 */}
+        <h1 className="text-base font-semibold tracking-tight">AgentA</h1>
+        {/* 副标题：更小字号 + 次要文字色 */}
+        <p className="text-xs text-muted-foreground">基于 RAG + Agent 的学习助手</p>
+      </header>
+    </div>
+  )
 }
 ```
 
-**2. JSX = 在 JS 里写界面标签**。标签里用 `{}` 插入变量或表达式：
+**2. JSX = 在 JS 里写界面标签**。几条必须知道的规则：
+
+
+| 规则                | 说明                  | 项目里的真实写法                       |
+| ----------------- | ------------------- | ------------------------------ |
+| 用 `{}` 插值         | 标签里插变量 / 表达式        | `<span>{timeLabel(m.createdAt!)}</span>`（`MessageList.tsx`） |
+| `className` 不是 `class` | JSX 里类名属性叫 `className` | `<h1 className="text-base font-semibold">`（`ChatView.tsx`） |
+| 只能有一个根节点          | 多个并列用 `<>…</>` 包起来   | `<><MessageList … />{composer}</>`（`ChatView.tsx`） |
+| 标签必须闭合            | 无内容标签自闭合            | `<MessageBubble message={m} cb={cb} />`（`MessageList.tsx`） |
+
+
+**3. className + Tailwind = 控制样式**（最常改的就在这，详见 §3.4）。`MessageList.tsx` 里「回到最新」按钮的样式：
+
+> 注意：`//` 注释不能写进 `className` 的引号里，否则会变成样式字符串的一部分。所以下面把每个类的含义放在代码块外解释。
 
 ```tsx
-const name = '小明'
-return <div>你好，{name}</div>   // 显示：你好，小明
+// frontend/src/components/chat/MessageList.tsx（节选）
+<button
+  className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1
+             rounded-full border border-border bg-popover px-3 py-1.5 text-xs"
+>
+  {/* ArrowDown 是 lucide 图标组件，className 的 h/w 控制图标大小 */}
+  <ArrowDown className="h-3.5 w-3.5" /> 回到最新
+</button>
 ```
 
-**3. props = 父组件传给子组件的参数**（就是函数入参）：
+上面 `className` 里每个类的作用：`absolute bottom-4 left-1/2`（绝对定位、贴底、水平方向放到 50%）→ `flex -translate-x-1/2`（弹性布局，再左移自身一半实现真正水平居中）→ `items-center gap-1`（子元素垂直居中、间距 0.25rem）→ `rounded-full border border-border`（全圆角 + 一圈边框）→ `bg-popover px-3 py-1.5 text-xs`（背景色 + 内边距 + 小字号）。
+
+多个类、或要按条件加类时用 `cn(...)`（见 §3.1「目录速记」`lib/`），它还会自动解决两个类改同一样式时的冲突。`CodeBlock.tsx` 的复制按钮：
 
 ```tsx
-function Badge({ text }: { text: string }) {
-  return <span>{text}</span>
+// frontend/src/components/chat/CodeBlock.tsx（节选）
+className={cn(
+  // 第一串：基础样式（弹性布局、小圆角、内边距、11px 字号、次要文字色）
+  'flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground',
+  // 第二串：交互态（颜色过渡 + 鼠标悬停时加深背景和文字）
+  'transition-colors hover:bg-foreground/10 hover:text-foreground',
+)} // cn(...) 把多串类拼成一个字符串，并自动去掉互相冲突的类
+```
+
+### 3.4.2. 传数据：props + state
+
+**4. props = 父组件传给子组件的参数**（就是函数入参，数据**从上往下**流）。`ChatView` 通过 props 接收消息和各种回调，`?` 表示可选、`= false` 是默认值：
+
+```tsx
+// frontend/src/components/chat/ChatView.tsx（节选）
+
+// 先用 type 描述「这个组件接受哪些 props」（每个 prop 的名字 + 类型）
+export type ChatViewProps = {
+  messages: Message[]                              // 消息数组，由父组件传入
+  onSend: (text: string, mode?: ChatMode) => void  // 回调函数：用户发消息时调它
+  hideHeader?: boolean                             // 名字带 ? = 可选，父组件可以不传
+  // ...
 }
-// 用：<Badge text="free" />
+
+// 函数入参用 { } 把 props 一个个解构出来；hideHeader = false 表示不传时默认为 false
+export function ChatView({ messages, onSend, hideHeader = false }: ChatViewProps) {
+  /* ...这里用 messages 渲染列表、把 onSend 传给输入框... */
+}
 ```
 
-**4. state = 组件自己的可变数据**，用 `useState`，变了界面自动重画：
+特殊 prop `children` 指「标签中间包起来的内容」。`CodeBlock` 就靠它接收要展示的代码：
 
 ```tsx
-const [count, setCount] = useState(0)   // count 当前值；setCount 改它
+// frontend/src/components/chat/CodeBlock.tsx（节选）
+// children 的类型是 ReactNode（可以是文字、标签、组件等任意可渲染内容）
+type Props = { language: string; raw: string; children: ReactNode }
+
+// 使用时，写在 <CodeBlock> … </CodeBlock> 标签【中间】的内容，就会作为 children 传进去
+// 用：<CodeBlock language="ts" raw={code}>{高亮后的代码}</CodeBlock>
+//                                        └──── 这部分就是 children ────┘
 ```
 
-**5. className + Tailwind = 用短 class 名控制样式**（最常改的就是这里）：
+**5. state = 组件自己的可变数据**，用 `useState`；**改它必须用配套的 set 函数，不能直接赋值**，一改 React 就自动重画。`CodeBlock` 用一个 `copied` 状态控制按钮显示「复制 / 已复制」：
 
 ```tsx
-<button className="px-2 text-sm text-muted-foreground">按钮</button>
-//                  左右内边距  字号小   文字用「次要」色
+// frontend/src/components/chat/CodeBlock.tsx（节选）
+
+// useState(false) 声明一个状态：初始值 false。
+// 返回一个数组，习惯用解构取两个东西：[当前值, 改它的函数]
+const [copied, setCopied] = useState(false)  // copied=当前是否已复制；setCopied=改它
+
+const copy = async () => {
+  await navigator.clipboard.writeText(raw)   // 把代码写进系统剪贴板（异步，所以 await）
+  setCopied(true)                            // ✅ 用 set 函数改成 true → 触发界面重画
+  // 直接写 copied = true 不行：React 不知道数据变了，界面不会更新
+  setTimeout(() => setCopied(false), 1500)   // 1.5 秒后再改回 false，按钮恢复「复制」
+}
 ```
 
-**6. 条件 / 列表渲染**（代码里到处是这两种写法）：
+记住 React 的核心思想：**改数据，不直接改界面**——界面是数据「算出来」的结果，数据一变界面自动跟着变（这里 `copied` 一变，按钮文字 / 图标就自动切换）。
+
+### 3.4.3. 加交互：事件 + 回调往上传
+
+**6. 事件处理**：`onClick` / `onChange` 等接一个函数；输入框常配 `value` + `onChange` 做成「受控」（值存在 state 里）：
+
+```tsx
+// MessageList.tsx：onClick 接一个函数，点按钮时就执行 scrollToBottom
+<button onClick={scrollToBottom}> 回到最新 </button>
+
+// Sidebar.tsx：重命名会话的「受控」输入框
+//  - value={renameValue}：输入框显示的内容由 state 决定（不是用户随便敲）
+//  - onChange：每次敲键盘触发，e.target.value 是最新文本，写回 state →
+//    state 变 → value 跟着变 → 这样输入框才显示出你敲的字
+<Input value={renameValue} onChange={(e) => setRenameValue(e.target.value)} />
+```
+
+**7. 子组件通知父组件 = 把一个回调函数传下去**（数据往下、事件往上）。本项目大量这样用：`App` 把 `send` 一路传给 `ChatView` 的 `onSend`，再传给输入框 `Composer`：
+
+```tsx
+// frontend/src/components/chat/ChatView.tsx（节选）
+// ChatView 自己不发请求，只是把从父组件 App 收到的 onSend 继续往下传给输入框 Composer。
+<Composer
+  onSend={onSend}   // 数据往下传：把回调交给子组件
+  onStop={onStop}
+/>
+// 事件往上走：用户在 Composer 里点「发送」→ Composer 调用 onSend(文本)
+//   → 实际执行的是 App 传下来的函数 → App 据此发起后端请求
+//   这就是 React 的约定：数据往下（props），事件往上（回调函数）
+```
+
+### 3.4.4. 控制显示：条件 / 列表渲染
+
+代码里到处是这两种写法：
 
 
-| 写法                                       | 含义              |
-| ---------------------------------------- | --------------- |
-| `{ok && <X/>}`                           | `ok` 为真才显示 `X`  |
-| `{ok ? <A/> : <B/>}`                     | 真显示 `A`，假显示 `B` |
-| `{list.map((x) => <X key={x.id} .../>)}` | 把数组每一项渲染成一个组件   |
+| 写法                                       | 含义              | 项目里的真实写法 |
+| ---------------------------------------- | --------------- | --- |
+| `{ok && <X/>}`                           | `ok` 为真才显示 `X`  | `{!hideHeader && (<header>…</header>)}`（`ChatView.tsx`） |
+| `{ok ? <A/> : <B/>}`                     | 真显示 `A`，假显示 `B` | `{messages.length === 0 ? (<空状态/>) : (<消息列表/>)}`（`ChatView.tsx`） |
+| `{list.map((x) => <X key={x.id} .../>)}` | 把数组每一项渲染成一个组件   | `{messages.map((m) => <MessageBubble key={m.id} … />)}`（`MessageList.tsx`） |
 
 
-**7. TypeScript 类型**：冒号后面是类型标注（`text: string` 表示 text 是字符串），只是给编辑器查错用，不影响运行逻辑。看不懂类型时可先跳过，专注 `return` 里的界面部分。
+列表渲染必须给每项一个**唯一 `key`**（如 `key={m.id}`）：React 靠它分辨哪项变了，漏写会告警并可能出 bug。
 
-## 3.4. 页面调整指南
+### 3.4.5. 副作用：useEffect
+
+改样式 / 文案用不到，动逻辑才需要。`useEffect` 用来做「渲染之外的事」——如订阅事件、取数据、操作 DOM。`MessageList` 用它在消息更新后自动滚到底部：
+
+```tsx
+// frontend/src/components/chat/MessageList.tsx（节选）
+useEffect(() => {
+  // 第一个参数是「要做的事」：这里在每次渲染完后把滚动条挪到底部
+  if (!stick) return                       // 用户手动往上翻了就不打扰（提前返回）
+  const el = containerRef.current          // 取到列表容器的真实 DOM 元素
+  if (el) el.scrollTop = el.scrollHeight   // 把滚动位置设到最底 → 看到最新消息
+}, [messages, stick])
+// 第二个参数是「依赖数组」：里面任一值变化，上面的函数就重新执行一次。
+//   [messages, stick] → 来新消息、或 stick 变了就滚动
+//   []                → 只在组件首次出现时跑一次（常用于进页面拉数据）
+//   不写              → 每次渲染都跑（一般要避免）
+```
+
+形如 `useXxx` 的都叫 **Hook**（`useState` / `useEffect` / `useRef` / 项目自定义的 `useChat` 等）。两条铁律：**只在组件函数顶层调用**（别放进 if / 循环里），**名字以 `use` 开头**。
+
+### 3.4.6. TypeScript 类型
+
+冒号后面是类型标注，只给编辑器查错用，**不影响运行**：
+
+
+| 写法                | 含义                  | 项目里的真实写法 |
+| ----------------- | ------------------- | --- |
+| `text: string`    | 字符串                 | `sessionId: string \| null`（`ChatView.tsx`） |
+| `count?: number`  | 可选，可以不传            | `hideHeader?: boolean`（`ChatView.tsx`） |
+| `'a' \| 'b'`      | 只能是这几个值之一（联合类型）     | `type ViewKind = 'chat' \| 'kb' \| … \| 'settings'`（`Sidebar.tsx`） |
+| `type Props = {…}` | 给一组字段起个类型名，方便复用     | `type ChatViewProps = { … }`（`ChatView.tsx`） |
+
+
+`ViewKind` 这种联合类型很实用：`App` 里 `activeView` 只能取这几个值，写错一个名字编辑器立刻报红。看不懂类型时可先跳过，专注 `return` 里的界面部分。
+
+## 3.5. 页面调整指南
 
 改字号 / 间距 / 颜色 / 对齐这类样式，**只改 `className` 里的 Tailwind 工具类即可**，不用碰逻辑。步骤：
 
@@ -629,18 +832,23 @@ const [count, setCount] = useState(0)   // count 当前值；setCount 改它
 界面区域 → 文件对照：
 
 
-| 界面区域                                        | 文件                                     |
-| ------------------------------------------- | -------------------------------------- |
-| 登录 / 注册页（含左上 logo + 标题）                     | `components/auth/LoginView.tsx`        |
-| 左侧导航栏（底部当前用户名 / 退出按钮；管理员才显示技能 / MCP / 设置入口） | `components/sidebar/Sidebar.tsx`       |
-| 聊天输入框 / 模型选择 / 工具条                          | `components/chat/Composer.tsx`         |
-| 消息气泡（用户 / AI、附件卡片、操作按钮）                     | `components/chat/MessageBubble.tsx`    |
-| 工具调用块（如 `update_step`）                      | `components/chat/ToolBlock.tsx`        |
-| 思考过程块                                       | `components/chat/ThinkingBlock.tsx`    |
-| 学习计划块                                       | `components/chat/PlanBlock.tsx`        |
-| 设置页                                         | `components/settings/SettingsView.tsx` |
-| 记忆 / 规则 / 技能 / MCP 页                        | `components/resources/` 下对应文件          |
-| 全局主题色 / 字体 / 圆角                             | `index.css`                            |
+| 界面区域                                        | 文件                                  |
+| ------------------------------------------- | ----------------------------------- |
+| 登录 / 注册页（含左上 logo + 标题）                     | `components/auth/LoginView.tsx`     |
+| 左侧导航栏（页面入口 + 会话列表；底部用户名 / 设置 / 退出；Skills / MCP / 数据库 / 备份仅管理员） | `components/sidebar/Sidebar.tsx` |
+| 聊天输入框 / 模型选择 / 工具条                          | `components/chat/Composer.tsx`      |
+| 消息气泡（用户 / AI、附件卡片、操作按钮）                     | `components/chat/MessageBubble.tsx` |
+| 工具调用块（如 `update_step`）                      | `components/chat/ToolBlock.tsx`     |
+| 思考过程块                                       | `components/chat/ThinkingBlock.tsx` |
+| 学习计划块                                       | `components/chat/PlanBlock.tsx`     |
+| 学而时习页（学习计划 / 测验 / 复习）                       | `components/business/` 下对应文件        |
+| 用量看板                                        | `components/usage/` 下对应文件           |
+| 质量看板（会话监控 / 评估 / Golden）                    | `components/eval/` 下对应文件            |
+| 记忆 / Rules / Skills / MCP 页                  | `components/resources/` 下对应文件       |
+| 知识库页                                        | `components/kb/` 下对应文件              |
+| 设置页（账户 / 系统配置 / API 密钥 / 用户管理）              | `components/settings/SettingsPage.tsx` |
+| 数据库查看 / 备份恢复（管理员）                           | `components/admin/` 下对应文件           |
+| 全局主题色 / 字体 / 圆角                             | `index.css`                         |
 
 
 常用 Tailwind 工具类速查：
@@ -660,7 +868,7 @@ const [count, setCount] = useState(0)   // count 当前值；setCount 改它
 | 圆角    | `rounded-md` `rounded-full`                                | 中等圆角 / 全圆           |
 
 
-实战例子（就是上一轮改过的）：把工具条上当前模型名的字号从大调小，在 `Composer.tsx` 找到模型选择按钮，把 `text-lg` 改成 `text-sm` 即可：
+实战例子：把工具条上当前模型名的字号从大调小，在 `Composer.tsx` 找到模型选择按钮，把 `text-lg` 改成 `text-sm` 即可：
 
 ```tsx
 // 改前
@@ -675,3 +883,332 @@ className="... px-2 text-sm text-muted-foreground ..."
 - 一个 `className` 里可以堆很多类，**顺序不影响效果**，按「布局 → 间距 → 字体 → 颜色」分组写更好读。
 - 改坏了不要慌，Tailwind 类是纯样式，删掉多写的类就回到原样，不会影响功能。
 
+
+## 3.6. 前后端通信
+
+前端（React，跑在浏览器里）不直接碰数据库和大模型，所有数据都靠 HTTP 请求向后端（`src/api`，即 FastAPI 服务，入口 `src/api/main.py`）要；后端再去调 §1 RAG、§2 Agent 这些核心能力。本节讲：请求都从哪发、有哪两种请求方式、聊天那种「逐字蹦」的流式是怎么实现的。
+
+### 3.6.1. 统一出口：`api/client.ts`
+
+前端**所有**请求后端的函数都集中在 `frontend/src/api/client.ts`，组件不自己写 `fetch`，而是调这里导出的函数（如 `listSessions()` / `login()`）。好处是：地址、登录凭证、错误处理只在一处统一管。
+
+里面有两个贯穿全文件的 helper：
+
+```ts
+// frontend/src/api/client.ts（节选）
+// 1) 所有请求都经过它：自动带上 cookie 凭证（登录态），这样后端才知道「你是谁」
+function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  return fetch(input, { credentials: 'include', ...init })
+}
+
+// 2) 统一校验响应：出错就抛带后端 detail 的异常；遇 401（未登录）触发全局跳回登录页
+async function _ensureOk(res: Response): Promise<void> {
+  if (res.ok) return
+  if (res.status === 401) _onUnauthorized?.()
+  // ... 取后端的 detail 文案，抛 Error ...
+}
+```
+
+一个典型的「普通请求」函数长这样——发请求、校验、把 JSON 转成带类型的对象返回：
+
+```ts
+// frontend/src/api/client.ts（节选）
+export async function createSession(title?: string): Promise<Session> {
+  const res = await apiFetch('/api/sessions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(title ? { title } : {}),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as Session
+}
+```
+
+### 3.6.2. 两种请求方式
+
+| 方式 | 用在哪 | 特点 | 例子 |
+| --- | --- | --- | --- |
+| **普通 HTTP（一问一答）** | 绝大多数操作：登录、增删改查会话 / 记忆 / 知识库 / 配置等 | 发一次、等后端算完、一次性拿到完整 JSON 结果 | `login()` / `listSessions()` / `createMemory()` |
+| **SSE 流式（持续推送）** | 聊天回答、上传入库进度 | 一次请求，后端**分很多段**陆续把内容推回来，前端边收边显示 | `streamChat()` / `ingestKBFileStream()` |
+
+> SSE（Server-Sent Events, 服务器推送事件）：一种「请求一次、服务器持续往回推数据」的 HTTP 机制。聊天回答「逐字蹦」就是靠它——后端每生成一点就推一帧，前端收到就追加显示，不用等整段答完。
+
+### 3.6.3. 聊天流式全链路
+
+以「用户发一条消息 → 看到 AI 逐字回答」为例，串起前面 §3.2 的流程：
+
+```mermaid
+sequenceDiagram
+    participant U as 用户
+    box rgb(219,234,254) 前端（浏览器 / React）
+    participant H as useChat（状态）
+    participant C as streamChat<br/>(api/client.ts)
+    end
+    box rgb(220,252,231) 后端（FastAPI 服务）
+    participant API as chat_stream<br/>(api/routes/chat.py)
+    participant AG as Agent<br/>(agent.run)
+    participant RAG as 工具 / RAG<br/>(search_knowledge)
+    end
+
+    U->>H: 点发送，调 send(text)
+    H->>H: 先插入一条空 assistant 消息（streaming=true）
+    H->>C: streamChat(text, { onEvent })
+    C->>API: POST /api/chat/stream（message / session_id）
+    API->>API: model_router.route() 选模型<br/>+ semantic_cache 查缓存
+
+    alt 缓存命中
+        API-->>C: token_chunk + final_answer（cached=true）
+    else 未命中：跑 Agent（扔线程池）
+        API->>AG: agent.run(..., event_callback)
+        loop ReAct 循环：边想边查边答
+            AG->>RAG: 调 search_knowledge 检索知识库
+            RAG-->>AG: 返回相关片段
+            AG-->>API: 回调 AgentEvent（思考 / 文字 / 工具 / plan）
+            API-->>C: 转成一帧 SSE 推回
+            C->>H: onEvent → 累积进消息 → 界面自动重画
+        end
+        AG-->>API: final_answer
+        API-->>C: final_answer 帧
+    end
+    C->>H: onClose → streaming=false
+```
+
+要点：
+
+- **后端 `chat_stream`（`src/api/routes/chat.py`）负责编排**：先 `model_router.route()` 按难度选模型、`semantic_cache` 查缓存（命中就直接两帧返回不跑 Agent）；未命中则把同步的 `agent.run()` 用 `run_in_executor` 扔到线程池跑，Agent 每产生一个事件就经回调转成 SSE 帧、放进 `asyncio.Queue`，再由 `EventSourceResponse` 逐帧 yield 给前端。Agent 在 ReAct 循环里调 `search_knowledge` 等工具，这一步就接上了 §1 的 RAG 检索。
+- **`streamChat`（`api/client.ts`）负责连接**：用 `@microsoft/fetch-event-source` 发 POST，每收到一帧就 `JSON.parse` 成事件对象，回调 `onEvent`；还处理「用户中途点停止」（`AbortSignal`）和 401。
+- **`useChat`（`hooks/useChat.ts`）负责累积**：先放一条空的 assistant 消息占位，然后在 `onEvent` 里按事件类型把内容**一点点拼进这条消息**。比如正文就是不断追加文本：
+
+```ts
+// frontend/src/hooks/useChat.ts（节选）：token_chunk 来一段就接到正文后面
+case 'token_chunk':
+  update((m) => ({ ...m, content: m.content + ev.payload.text }))
+  break
+```
+
+- 消息一变，React 自动重画气泡（§3.3.2 的「改数据不改界面」），于是屏幕上就出现「逐字蹦」的效果。
+
+### 3.6.4. SSE 事件类型一览
+
+后端推的每一帧都是 `{ type, payload }`，前端在 `useChat` 里按 `type` 分别处理。完整类型定义见 `types/chat.ts` 的 `AgentStreamEvent`，与后端 `src/agent/core/event_bus.py` 对齐。常见的几类：
+
+| 事件 type | 含义 | 前端表现 |
+| --- | --- | --- |
+| `thinking_chunk` | 一段推理（思考）文本 | 思考块逐字增长（`ThinkingBlock`） |
+| `token_chunk` | 一段正文回答 | 气泡正文逐字增长 |
+| `tool_call_start` / `tool_call_end` | 工具调用开始 / 结束 | 工具块出现、转圈、出结果（`ToolBlock`） |
+| `tool_progress` | 工具运行中的阶段 | 工具块上的「检索中…」之类标签 |
+| `plan_created` / `plan_step_start` / `plan_step_end` | 学习计划生成 / 某步开始 / 结束 | 计划块及每步勾选状态（`PlanBlock`） |
+| `final_answer` | 本次回答结束 | 收尾：带上用量、实际模型、是否命中缓存 |
+| `error` | 出错 | 气泡上显示错误，`recoverable` 决定能否续 |
+| `research_*` | 深度研究四阶段进度 | 研究面板（`ResearchPanel`） |
+
+### 3.6.5. 命名约定：前端 `camelCase` ↔ 后端 `snake_case`
+
+跨语言的一个常见细节：**HTTP 请求体 / 响应体里的字段名用后端 Python 的 `snake_case`**（如 `session_id` / `skip_cache` / `model_ids`），而**前端代码内部的变量用 `camelCase`**。所以 `client.ts` 里经常能看到「组装请求时手动转成下划线」：
+
+```ts
+// frontend/src/api/client.ts（节选）：前端 sessionId → 请求体 session_id
+body: JSON.stringify({
+  message,
+  ...(sessionId ? { session_id: sessionId } : {}),
+  ...(skipCache ? { skip_cache: true } : {}),
+})
+```
+
+看到 `client.ts` 里 `body` 字段是下划线、函数入参是小驼峰，就是这个原因。
+
+## 3.7. 后端处理
+
+前端发出的请求，到了后端是怎么被处理的？后端是一个 **FastAPI 服务**（`src/api/`），入口 `src/api/main.py`。本节讲它的结构，以及「一个请求进来 → 鉴权 → 路由处理 → 调 §1 RAG / §2 Agent / 数据库 → 返回」的过程。
+
+### 3.7.1. API 层结构
+
+`src/api/` 按职责分目录，每个 feature 一个路由文件：
+
+| 目录 / 文件 | 放什么 |
+| --- | --- |
+| `main.py` | app 入口：创建 FastAPI、挂全部路由、配 CORS、给每个请求注入 request_id、启动时拉起 MCP |
+| `routes/<feature>.py` | 每个功能一个 `router`（如 `chat.py` / `sessions.py` / `kb.py` / `auth.py`），在 `main.py` 统一注册到 `/api` 前缀下 |
+| `schemas/<feature>.py` | 该路由的请求 / 响应模型（Pydantic），负责**自动校验**前端传来的字段并转成对象 |
+| `deps.py` | 依赖注入：路由从这里拿 Agent、各数据库 store、当前登录用户等（见 §3.6.3） |
+| `runtime/` | 非 HTTP 的运行期配置：`config_overrides`（UI 改的配置）/ `api_keys`（UI 配的密钥），启动时加载 |
+
+它和后端其他部分的关系：API 层只做「收请求、校验、鉴权、编排」，真正干活的是下层——`src/agent`（§2 Agent）、`src/rag`（§1 RAG）、`src/stores`（SQLite 持久化）：
+
+```mermaid
+graph LR
+    FE["前端<br/>(浏览器)"] -->|HTTP / SSE| API
+    subgraph BE["后端（FastAPI 服务）"]
+      API["api/<br/>路由 + 鉴权 + 校验"]
+      API --> AG["agent/<br/>§2 Agent"]
+      API --> ST["stores/<br/>SQLite 持久化"]
+      AG --> RAG["rag/<br/>§1 RAG 检索"]
+      AG --> ST
+    end
+```
+
+### 3.7.2. 启动 → 收 HTTP → 路由
+
+后端从「敲启动命令」到「请求被分发给 chat」，经历三步：启动建 app、uvicorn 收 HTTP、按路径匹配到处理函数。
+
+**1）启动：`run.py` 用 uvicorn 加载 `main:app`**
+
+`main.py` 自己不会「跑起来」——它只**定义**了一个 `app` 对象，真正启动它的是 ASGI 服务器 uvicorn。启动命令 `python -m src.api.run` 里核心就一句：
+
+```python
+# src/api/run.py（节选）
+uvicorn.run("src.api.main:app", host="127.0.0.1", port=8000, reload=True, ...)
+```
+
+`"src.api.main:app"` 的意思是「导入 `main.py`，取里面那个叫 `app` 的对象」。uvicorn 一 import 这个模块，`main.py` 顶层代码就**从上到下执行一遍**：读 `.env` → 套 UI 配置 → `app = FastAPI(...)` → 一串 `app.include_router(...)` 挂路由。执行完，`app` 就是一个「挂好全部路由、配好中间件」的应用。（`lifespan` 里的 `_bootstrap_mcp()` 在开始监听前跑一次，拉起 MCP。）
+
+> ASGI（Asynchronous Server Gateway Interface，异步服务器网关接口）：Python 异步 Web 里「服务器 ↔ 应用」的对接约定。uvicorn 是服务器、FastAPI app 是应用，两者按 ASGI 对接。
+
+**2）收 HTTP：uvicorn 负责，FastAPI 不碰 socket**
+
+- uvicorn 在 `127.0.0.1:8000` **监听端口**：accept 连接、解析 HTTP 报文这些脏活都归它。
+- 每来一个请求，uvicorn 把它转成 ASGI `scope`（含 method / path / headers），再**调用 `app`**（FastAPI app 本质是个 ASGI 可调用对象）。
+- 进入 app 先过**中间件**，再到路由函数。
+
+分工记住：**uvicorn = 收发 HTTP 的服务器；FastAPI app = 拿到请求后做路由 / 鉴权 / 业务的应用。**
+
+**中间件（middleware）** 是夹在「收到请求」和「路由函数」之间的一层，每个请求进、每个响应出都会**穿过**它，适合做「所有请求都要做一遍」的通用事（日志、鉴权、CORS 等）。它是洋葱式包裹：请求进去时一层层穿进、响应出来时再一层层穿出，所以调用路由前后都能动手。本项目有两个（都在 `main.py`）：
+
+| 中间件 | 干什么 |
+| --- | --- |
+| request_id | 给每个请求生成一个 8 位短编号塞进日志上下文，使该请求处理期间的日志都带 `r:<id>`，并发时好区分 |
+| CORS | 开发期前端在 `:5173`、后端在 `:8000`，浏览器视为跨源会拦截；这个中间件加 `Access-Control-Allow-*` 响应头放行（生产期同源反代则不需要） |
+
+> CORS（Cross-Origin Resource Sharing, 跨域资源共享）：浏览器安全规则——网页默认只能访问「同源」（协议 + 域名 + 端口都相同）的后端；跨源要后端用 CORS 头明确放行。
+
+**3）路由：注册（启动时）+ 匹配（请求时）**
+
+注册——`main.py` 启动时把 chat 路由挂上、加 `/api` 前缀：
+
+```python
+# src/api/main.py（节选）
+app.include_router(chat.router, prefix="/api", tags=["chat"])
+```
+
+`chat.router` 里用装饰器声明自己负责的子路径：
+
+```python
+# src/api/routes/chat.py（节选）
+@router.post("/chat/stream")
+async def chat_stream(...): ...
+```
+
+两者拼起来 → 最终路由 **`POST /api/chat/stream` → `chat_stream`**（另有非流式 `POST /api/chat` → `chat`）。启动后 FastAPI 内部就有一张「method + 路径 → 处理函数」的对照表。
+
+匹配——前端发来 `POST /api/chat/stream` 时，FastAPI 拿 method + path 去表里查，命中 `chat_stream`，解析完它的依赖（§3.6.4）后才调用函数体。
+
+整条链路：
+
+```mermaid
+graph LR
+    cmd["python -m src.api.run"] -->|uvicorn.run| UV["uvicorn<br/>(ASGI 服务器)"]
+    UV -->|import 执行 main.py| M["建 app<br/>include_router 挂路由"]
+    M -.返回 app.-> UV
+    Browser["前端<br/>POST /api/chat/stream"] -->|TCP :8000| UV
+    UV -->|调用 app + 过中间件| APP["FastAPI app"]
+    APP -->|按 method+path 匹配| R["chat_stream 函数"]
+```
+
+### 3.7.3. 进入路由函数后：一个请求的处理流程
+
+承接上节——请求匹配到 `chat_stream`（`api/routes/chat.py`）后，从校验到返回都做了什么：
+
+```mermaid
+graph TD
+    A["① 路由匹配<br/>POST /api/chat/stream"] --> B["② 校验请求体<br/>ChatRequest（Pydantic）"]
+    B --> C["③ 鉴权<br/>Depends(get_current_user) 读 cookie → 认人"]
+    C --> D["④ 注入依赖<br/>Depends(get_agent) 等拿到单例"]
+    D --> E["⑤ 业务编排<br/>选模型 / 查缓存 / 跑 Agent（见 §3.5.3）"]
+    E --> F["⑥ 调下层<br/>agent.run → 工具 search_knowledge → §1 RAG"]
+    F --> G["⑦ 返回<br/>SSE 逐帧推回前端"]
+```
+
+前四步是 FastAPI 框架按**路由函数的签名**自动完成的——看 `chat_stream` 的函数定义就一目了然：
+
+```python
+# src/api/routes/chat.py（节选）
+@router.post("/chat/stream")                       # ① 这个函数处理哪个 URL
+async def chat_stream(
+    req: ChatRequest,                              # ② 自动把请求体校验成 ChatRequest
+    agent: AgentAPI = Depends(get_agent),          # ④ 注入进程级 Agent 单例
+    user: dict = Depends(get_current_user),        # ③ 注入当前登录用户（未登录→401）
+    history: SessionStore = Depends(get_session_store),
+    users: UserStore = Depends(get_user_store),
+) -> EventSourceResponse:
+    ...                                            # ⑤⑥⑦ 函数体里编排 + 调 Agent + 返回
+```
+
+`Depends(...)` 是 FastAPI 的**依赖注入**：你在参数上声明「我需要什么」，框架就在调用前帮你准备好。鉴权、拿数据库连接、拿 Agent 都靠它，路由函数体里不用自己 new。
+
+### 3.7.4. 依赖注入与单例：`deps.py`
+
+`deps.py` 集中提供这些「依赖」，关键是**进程级单例**——Agent、各数据库 store 全程只建一份，被所有请求复用：
+
+```python
+# src/api/deps.py（节选）
+@lru_cache(maxsize=1)              # 首次调用时构造、之后复用同一个
+def get_agent() -> AgentAPI:
+    ...                            # 按 IMP_METHOD 选实现，扫一遍 skills 注入
+    return Agent(verbose=False, skills=skills_map)
+```
+
+鉴权也在这里。`get_current_user` 读 cookie 里的 token、查出是哪个用户；`require_admin` 在它之上再要求管理员角色（普通用户访问管理员接口会被挡）：
+
+```python
+# src/api/deps.py（节选）
+def require_admin(user: dict = Depends(get_current_user)) -> dict:
+    if user.get("role") != ROLE_ADMIN:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    return user
+```
+
+这也呼应了 §3.1：前端那些「仅管理员可见」的页面（Skills / MCP / 数据库 / 备份），后端对应的接口都用 `require_admin` 兜底——**前端隐藏只是体验，后端鉴权才是真正的安全边界**。
+
+### 3.7.5. 请求处理小结
+
+| 步骤 | 谁负责 | 对应代码 |
+| --- | --- | --- |
+| 启动、加载 app | uvicorn（ASGI 服务器） | `uvicorn.run("src.api.main:app")` |
+| 监听端口、收 HTTP | uvicorn | `host=127.0.0.1, port=8000` |
+| 注册路由（启动时） | `main.py` | `app.include_router(chat.router, prefix="/api")` |
+| 收请求、匹配 URL | FastAPI + `router` | `@router.post(...)` |
+| 校验请求字段 | Pydantic schema | `req: ChatRequest` |
+| 认人 / 权限 | `deps.py` 依赖 | `Depends(get_current_user)` / `require_admin` |
+| 拿 Agent / DB 连接 | `deps.py` 单例 | `Depends(get_agent)` 等 |
+| 业务编排 | 路由函数体 | 选模型 / 查缓存 / 跑 Agent |
+| 真正干活 | 下层子系统 | §2 `agent/`、§1 `rag/`、`stores/` |
+| 返回 | FastAPI 响应 | `ChatResponse` / `EventSourceResponse` |
+
+## 3.8. more
+以下为后续可补充的内容：
+
+**入门 / 环境**
+
+- 本地怎么跑起来：`npm install` / `npm run dev` / 访问地址、前后端怎么连
+- 目录命名约定：组件文件 `PascalCase`、hooks 以 `use` 开头、`ui/` 与业务组件的边界
+- 开发工具：浏览器开发者工具（看元素 / 控制台报错）、VSCode 常用插件
+
+**进阶看懂代码**
+
+- `useChat` 详解：messages 结构、版本切换 / 编辑重发 / 重新生成逻辑（流式如何累积成消息见 §3.5.3）
+- 一条消息的数据结构（`types/chat.ts`）：思考 / 工具 / plan / 附件各字段含义
+- 主题与深浅色：`index.css` 里的色彩变量体系、`color-scheme` 的作用
+
+**常见改动食谱（按场景给步骤）**
+
+- 加 / 改一个设置项在设置页怎么显示
+- 给消息气泡加一个操作按钮（复制 / 重发那一排）
+- 改空状态欢迎页的文案和快捷提示
+- 新增一个左侧导航入口 + 对应页面
+
+**规范 / 排错**
+
+- 改完怎么自检：`npm run lint`、TypeScript 类型报错怎么读
+- 常见报错对照表（白屏 / key 警告 / 类型不匹配）
+- 提交前检查清单

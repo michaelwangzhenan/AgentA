@@ -161,4 +161,21 @@ LLM 可用性工具：扫描并返回可用的 LLM 列表。包括 agenta 未列
 1. Review 配置是否合理，有用
 2. .env VS UI 同步
 
-## 4.19. 
+## 4.19. 备份还原添加详细进度
+
+## 4.20. 运行中还原备份不安全
+
+**还原时直接覆盖被占用的 DB 文件，运行中操作会失败或埋下数据损坏隐患**
+
+**起因**：还原（`runtime_backup.restore_backup`）对每个目标直接 `target.write_bytes(data)` 覆盖文件。但各 Store 在进程启动时就建了常驻 SQLite 连接并全程持有（`self._conn = sqlite3.connect(path, check_same_thread=False)`），还原时这些 DB 文件都被本进程的活跃句柄占用着。
+
+**现状**：
+
+- 不会卡死/死锁——`write_bytes` 是一次性 open+write+close，无等待锁的循环；SQLite 也只在事务期间持字节范围建议锁，不长期独占文件。结果只会是"立即成功"或"立即抛异常"。
+- 但运行中还原有两个真实问题：
+  - Windows 下覆盖被占用文件可能触发共享冲突 `PermissionError`，立刻抛异常 → API 返回 500；且还原非事务性，循环到一半失败会留下"部分还原"的半截状态，无法回滚。
+  - 即使写成功，运行中的连接仍缓存旧 DB 页，且 `-wal`/`-shm` 边车文件没被还原；进程后续把旧缓存页 / WAL 刷回会盖掉刚还原的数据，或报 `database disk image is malformed`。
+- 当前只在还原成功的返回消息里提示"建议重启后端"（`api/routes/backup.py`），属事后补救，没有在还原前真正停掉 DB 使用。
+
+**目标**：让运行中还原变安全。常见思路：还原前关闭所有 Store 连接、还原到 staging 目录后原子替换并要求重启、或还原期间加全局维护锁拒绝请求。需定具体方案后再做。
+
