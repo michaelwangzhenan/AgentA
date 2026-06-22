@@ -4,14 +4,14 @@
 
 .DESCRIPTION
   命令：
-    ui.ps1 start                   两个 server 一起后台启动
-    ui.ps1 stop                    两个一起停
-    ui.ps1 stop uvicorn|vite       只停其中一个
-    ui.ps1 restart                 两个一起重启（先停再起）
-    ui.ps1 restart uvicorn|vite    只重启其中一个
-    ui.ps1 logs uvicorn|vite       tail -f 对应日志（Ctrl+C 只退出"看日志"，服务继续跑）
-    ui.ps1 status                  显示两个服务的 PID / 端口 / URL
-    ui.ps1 help                    显示帮助（不带参数时也显示）
+    dev_server.ps1 start                   两个 server 一起后台启动
+    dev_server.ps1 stop                    两个一起停
+    dev_server.ps1 stop uvicorn|vite       只停其中一个
+    dev_server.ps1 restart                 两个一起重启（先停再起）
+    dev_server.ps1 restart uvicorn|vite    只重启其中一个
+    dev_server.ps1 logs uvicorn|vite       tail -f 对应日志（Ctrl+C 只退出"看日志"，服务继续跑）
+    dev_server.ps1 status                  显示两个服务的 PID / 端口 / URL
+    dev_server.ps1 help                    显示帮助（不带参数时也显示）
 
   约定：
     .run/<name>.pid                后台进程 PID（cmd.exe 包装器）
@@ -137,7 +137,7 @@ function Start-One {
     if ($state.Running) {
         Write-Host "[$Name] already running (PID $($state.ProcId), via $($state.Source)). Skipped." -ForegroundColor Yellow
         Write-Host "  URL : $($Svc.Url)"
-        Write-Host "  Hint: run ``ui.ps1 stop $Name`` first if you want to restart."
+        Write-Host "  Hint: run ``dev_server.ps1 stop $Name`` first if you want to restart."
         return
     }
 
@@ -235,15 +235,15 @@ function Show-Status {
 
 function Show-Help {
     Write-Host ""
-    Write-Host "ui.ps1 — 管理 AgentA UI 的两个 dev server"
+    Write-Host "dev_server.ps1 — 管理 AgentA UI 的两个 dev server"
     Write-Host ""
     Write-Host "Usage:"
-    Write-Host "  ui.ps1 start                  启动 uvicorn (:8000) + vite (:5173)，后台运行"
-    Write-Host "  ui.ps1 stop    [uvicorn|vite]  停止（不带参数 = 都停）"
-    Write-Host "  ui.ps1 restart [uvicorn|vite]  重启（先停再起，不带参数 = 都重启）"
-    Write-Host "  ui.ps1 logs     uvicorn|vite   tail -f 日志（Ctrl+C 退出查看，服务继续跑）"
-    Write-Host "  ui.ps1 status                 显示 PID / 端口 / URL"
-    Write-Host "  ui.ps1 help                   显示本帮助（不带参数时默认显示）"
+    Write-Host "  dev_server.ps1 start                  启动 uvicorn (:8000) + vite (:5173)，后台运行"
+    Write-Host "  dev_server.ps1 stop    [uvicorn|vite]  停止（不带参数 = 都停）"
+    Write-Host "  dev_server.ps1 restart [uvicorn|vite]  重启（先停再起，不带参数 = 都重启）"
+    Write-Host "  dev_server.ps1 logs     uvicorn|vite   tail -f 日志（Ctrl+C 退出查看，服务继续跑）"
+    Write-Host "  dev_server.ps1 status                 显示 PID / 端口 / URL"
+    Write-Host "  dev_server.ps1 help                   显示本帮助（不带参数时默认显示）"
     Write-Host ""
     Write-Host "Files:"
     Write-Host "  .run/<name>.pid               后台进程 PID（脚本自管）"
@@ -293,7 +293,7 @@ switch ($Action) {
     }
     'logs' {
         if (-not $Target) {
-            Write-Host "Usage: ui.ps1 logs uvicorn|vite" -ForegroundColor Red
+            Write-Host "Usage: dev_server.ps1 logs uvicorn|vite" -ForegroundColor Red
             exit 1
         }
         Tail-Log $Target $Services[$Target]

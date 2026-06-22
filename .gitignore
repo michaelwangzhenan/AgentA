@@ -36,7 +36,7 @@ backups/
 # 日志文件目录
 logs/
 
-# UI dev server 后台 PID + .cmd 包装器（tools/ui.ps1 自动生成）
+# UI dev server 后台 PID + .cmd 包装器（tools/dev_server.ps1 自动生成）
 .run/
 
 # ── Skills/MCP disabled 列表 ───────────────────────────────────

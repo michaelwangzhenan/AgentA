@@ -1,6 +1,6 @@
 """UI 后端启动入口：用 `uvicorn.run` + 统一 log_config 拉起 FastAPI app。
 
-`ui.ps1` 调 `python -m src.api.run` 启动。相比直接 `uvicorn src.api.main:app`，好处是
+`tools/dev_server.ps1` 调 `python -m src.api.run` 启动。相比直接 `uvicorn src.api.main:app`，好处是
 日志由 RotatingFileHandler 直接写 `logs/uvicorn.log`（带 `[APP]`/`[ACCESS]` 前缀、按大小
 滚动、保留备份），不再依赖 shell 重定向，也让 uvicorn 自身日志和业务日志格式一致。
 """
@@ -20,7 +20,7 @@ import uvicorn  # noqa: E402
 import src.config as config  # noqa: E402
 from src.services.log_setup import build_uvicorn_log_config  # noqa: E402
 
-# 与原 ui.ps1 行为对齐：监听 127.0.0.1:8000，--reload 监视 src/
+# 与原 dev_server.ps1 行为对齐：监听 127.0.0.1:8000，--reload 监视 src/
 _HOST = "127.0.0.1"
 _PORT = 8000
 _LOG_FILE = "./logs/uvicorn.log"
