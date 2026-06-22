@@ -132,7 +132,7 @@
 | API 公共依赖 | `src/api/deps.py` | 鉴权等 `Depends`（如 `get_current_user` / `require_admin`） |
 | 配置项 | `src/config.py` | `os.getenv("XXX", ...)`；多处同步见 [§1.3.4 新增配置规范](#134-新增配置规范) |
 | CLI 命令处理 | `src/cli/handlers.py` | `handle_<command>` 函数 |
-| 评估脚本 | `tools/agent_eval/<feature>/` | `<task>.py`（如 `recall_golden.py` / `perf_eval.py`） |
+| 评估脚本 | `tools/agent_eval/<feature>/` | `eval_<feature>.py`（目录与脚本同名，如 `security/eval_security.py` / `memory/eval_memory.py`） |
 | 单元测试 | `tests/test_<module>.py` | Test 类名 `Test<Behavior>`，方法 `test_<scenario>` |
 
 前端（React / TypeScript）：

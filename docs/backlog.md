@@ -3,10 +3,8 @@
 ## 1.1. 文档更新
 design -> 简化，重建
 README -> 重新设计
-代码指南 -> 重建
 
-项目介绍材料
-PPT
+项目介绍 PPT
 
 ## 1.2. RAG
 
@@ -53,7 +51,6 @@ logo?
 agenta 的 harness 功能就是Critic，并不是自我反思/自我纠正（Relection）。 只是harnness 概念里的一个很“窄”的子集。
 
 **已经改名为 Critic**
-
 
 
 ## 4.4. hardcode prompt to file
@@ -179,3 +176,8 @@ LLM 可用性工具：扫描并返回可用的 LLM 列表。包括 agenta 未列
 
 **目标**：让运行中还原变安全。常见思路：还原前关闭所有 Store 连接、还原到 staging 目录后原子替换并要求重启、或还原期间加全局维护锁拒绝请求。需定具体方案后再做。
 
+## 4.21. LLM 生成 golden 可选 LLM
+知识库 L2 点“生成评估”按钮时，增加可以选生成 Golden 的 LLM
+
+## 4.22. EVAL_MODULES task key 命名统一
+评估目录 / 脚本已统一为 `<feature>/eval_<feature>.py`，但 `eval_runner.EVAL_MODULES` 的 task key（如 `plan` 对应 `plan_execute`、`learning_plan`）与目录名仍不完全一致。待评估是否把 key 也对齐目录名——会牵连前端 task 选择、报告路径，改动较大，故暂记 backlog。

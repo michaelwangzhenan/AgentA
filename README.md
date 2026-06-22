@@ -174,12 +174,12 @@ flowchart TB
 | **RAG 召回** | `tools/rag_eval/golden.json` | `hit@1` / `hit@3` / `hit@k` / `MRR`，Miss 用例自动诊断 |
 | **Memory 召回** | `tools/agent_eval/memory/` | 项目 rules / 用户偏好是否被遵循 |
 | **Skills 激活** | `tools/agent_eval/skills/` | LLM 看到 catalog 能否主动调对 `load_skill(name=…)` |
-| **Plan-Execute 识别** | `tools/agent_eval/plan/` | 复杂任务调 `make_plan` / 简单任务不调；plan 结构由 LLM-judge 打分 |
-| **学习计划 / Quiz / SRS 业务** | `tools/agent_eval/plan_business/`, `quiz/`, `srs/` | 业务工具调用正确性 + 结构质量 |
+| **Plan-Execute 识别** | `tools/agent_eval/plan_execute/` | 复杂任务调 `make_plan` / 简单任务不调；plan 结构由 LLM-judge 打分 |
+| **学习计划 / Quiz / SRS 业务** | `tools/agent_eval/learning_plan/`, `quiz/`, `srs/` | 业务工具调用正确性 + 结构质量 |
 | **Critic 自检准确率** | `tools/agent_eval/critic/` | critic 自身判得准不准（quiz_critic / rag_critic） |
 | **MCP 接入** | `tools/agent_eval/mcp/` | 配置 → server 启动 → tool 合流 → SSRF 拦截全链路 |
 | **对抗安全** | `tools/agent_eval/security/` | 直接越狱 / RAG 间接 / Web 间接 / tool 名单门，拦截率 ≥ 90% / 误拦率 ≤ 10% |
-| **性能基准** | `tools/agent_eval/perf_eval.py` | session / memory 在 10/100/1000/5000 数据档位下的延迟基准（中位数 ms） |
+| **性能基准** | `tools/agent_eval/perf/eval_perf.py` | session / memory 在 10/100/1000/5000 数据档位下的延迟基准（中位数 ms） |
 
 所有评估结果统一保存到 `tools/{rag,agent}_eval/reports/` 下的 **Markdown 报告**（强制不用 JSON / CSV），方便跨轮对比与人工 review。
 
@@ -188,7 +188,7 @@ flowchart TB
 GitHub Actions（`.github/workflows/AgentA_CI.yml`）每次 push / PR 自动执行：
 
 1. **Fast UT**：默认单测集，平均 ~1 分钟跑完
-2. **性能回归门禁**：跑 `perf_eval` 100 / 1000 数据档位，若中位数延迟回归则 CI 红，并上传报告 artifact
+2. **性能回归门禁**：跑 `eval_perf` 100 / 1000 数据档位，若中位数延迟回归则 CI 红，并上传报告 artifact
 
 ---
 
@@ -327,32 +327,32 @@ python -m tools.cli.download_models 3    # 下载指定模型（编号详见 -l 
 
 | # | 评估对象 | 脚本 | 默认 case 示例 |
 |---|---|---|---|
-| 1 | Memory 召回（偏好遵循） | `tools.agent_eval.memory.recall_golden` | `M01-lang-zh` |
-| 2 | Skills 激活识别 | `tools.agent_eval.skills.recall_skill` | `S01-positive-planner` |
-| 3 | Plan-Execute 识别 + 结构 | `tools.agent_eval.plan.eval_plan` | `P01-positive-*` |
-| 4 | 学习计划业务 | `tools.agent_eval.plan_business.eval_learning_plan` | `L01-create-ml-8w` |
+| 1 | Memory 召回（偏好遵循） | `tools.agent_eval.memory.eval_memory` | `M01-lang-zh` |
+| 2 | Skills 激活识别 | `tools.agent_eval.skills.eval_skills` | `S01-positive-planner` |
+| 3 | Plan-Execute 识别 + 结构 | `tools.agent_eval.plan_execute.eval_plan_execute` | `P01-positive-*` |
+| 4 | 学习计划业务 | `tools.agent_eval.learning_plan.eval_learning_plan` | `L01-create-ml-8w` |
 | 5 | Quiz 出题 / 批改 | `tools.agent_eval.quiz.eval_quiz` | `Q01-create-rag` |
 | 6 | SRS 调度触发 | `tools.agent_eval.srs.eval_srs` | `S01-due-today` |
 | 7 | Critic 自检准确率 | `tools.agent_eval.critic.eval_critic` | `Q01-correct-grading-passes` |
 | 8 | MCP 接入全链路 | `tools.agent_eval.mcp.eval_mcp` | `C6-ssrf-defense-blocks-internal` |
-| 9 | 安全 / 防注入对抗 | `tools.agent_eval.security.adversarial` | `--kind direct` |
-| 10 | 性能基准（延迟中位数） | `tools.agent_eval.perf_eval` | `--target memory --sizes 100,1000,5000` |
+| 9 | 安全 / 防注入对抗 | `tools.agent_eval.security.eval_security` | `--kind direct` |
+| 10 | 性能基准（延迟中位数） | `tools.agent_eval.perf.eval_perf` | `--target memory --sizes 100,1000,5000` |
 
 <details>
 <summary><b>常用运行方式</b>（点开展开）</summary>
 
 ```bash
 # 跑全部（默认调真实 LLM）
-python -m tools.agent_eval.memory.recall_golden
-python -m tools.agent_eval.skills.recall_skill
-python -m tools.agent_eval.plan.eval_plan
-python -m tools.agent_eval.plan_business.eval_learning_plan
+python -m tools.agent_eval.memory.eval_memory
+python -m tools.agent_eval.skills.eval_skills
+python -m tools.agent_eval.plan_execute.eval_plan_execute
+python -m tools.agent_eval.learning_plan.eval_learning_plan
 python -m tools.agent_eval.quiz.eval_quiz
 python -m tools.agent_eval.srs.eval_srs
 python -m tools.agent_eval.critic.eval_critic
 python -m tools.agent_eval.mcp.eval_mcp
-python -m tools.agent_eval.security.adversarial
-python -m tools.agent_eval.perf_eval --target all
+python -m tools.agent_eval.security.eval_security
+python -m tools.agent_eval.perf.eval_perf --target all
 
 # 通用开关
 --case <ID>     # 单 case 调试

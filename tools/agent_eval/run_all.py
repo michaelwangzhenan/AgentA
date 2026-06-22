@@ -43,15 +43,15 @@ class EvalTask:
 # 评估任务清单。ci_safe 项不调真实 LLM（不耗 token），可在 CI 跑；其余为耗 token 的
 # LLM 评估，仅本地 / 手动全量跑。
 TASKS: list[EvalTask] = [
-    EvalTask("安全拦截", "tools.agent_eval.security.adversarial", ["--no-llm"],
+    EvalTask("安全拦截", "tools.agent_eval.security.eval_security", ["--no-llm"],
              ci_safe=True, note="prompt injection / tool 名单门（regex + 名单门，不耗 token）"),
     EvalTask("RAG 检索", "tools.rag_eval.runner", [],
              ci_safe=False, note="recall@k / MRR（需已 ingest 知识库）"),
-    EvalTask("记忆召回", "tools.agent_eval.memory.recall_golden", [],
+    EvalTask("记忆召回", "tools.agent_eval.memory.eval_memory", [],
              ci_safe=False, note="记忆 / rules / RAG 引用注入端到端（耗 token）"),
-    EvalTask("Skill 路由", "tools.agent_eval.skills.recall_skill", [],
+    EvalTask("Skill 路由", "tools.agent_eval.skills.eval_skills", [],
              ci_safe=False, note="SKILL.md 识别（耗 token）"),
-    EvalTask("Plan", "tools.agent_eval.plan.eval_plan", [],
+    EvalTask("Plan", "tools.agent_eval.plan_execute.eval_plan_execute", [],
              ci_safe=False, note="make_plan 识别 + 结构 judge（耗 token）"),
     EvalTask("Quiz", "tools.agent_eval.quiz.eval_quiz", [],
              ci_safe=False, note="quiz 创建识别 + 质量 judge（耗 token）"),

@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-import tools.agent_eval.security.adversarial as adv
+import tools.agent_eval.security.eval_security as adv
 from src.api.main import app
 
 

@@ -24,15 +24,15 @@ _IS_WIN = os.name == "nt"
 
 # task_key -> 模块路径。后续 eval 逐个加。
 EVAL_MODULES: dict[str, str] = {
-    "security": "tools.agent_eval.security.adversarial",
+    "security": "tools.agent_eval.security.eval_security",
     "rag": "tools.rag_eval.runner",
-    "memory": "tools.agent_eval.memory.recall_golden",
-    "skills": "tools.agent_eval.skills.recall_skill",
+    "memory": "tools.agent_eval.memory.eval_memory",
+    "skills": "tools.agent_eval.skills.eval_skills",
     "mcp": "tools.agent_eval.mcp.eval_mcp",
-    "perf": "tools.agent_eval.perf_eval",
-    "plan": "tools.agent_eval.plan.eval_plan",
+    "perf": "tools.agent_eval.perf.eval_perf",
+    "plan": "tools.agent_eval.plan_execute.eval_plan_execute",
     "critic": "tools.agent_eval.critic.eval_critic",
-    "learning_plan": "tools.agent_eval.plan_business.eval_learning_plan",
+    "learning_plan": "tools.agent_eval.learning_plan.eval_learning_plan",
     "quiz": "tools.agent_eval.quiz.eval_quiz",
     "srs": "tools.agent_eval.srs.eval_srs",
 }

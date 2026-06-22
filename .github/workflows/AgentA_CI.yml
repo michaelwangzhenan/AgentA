@@ -69,7 +69,7 @@ jobs:
 
       - name: Run perf_eval + grep gate
         run: |
-          python -m tools.agent_eval.perf_eval --target all --sizes 100,1000
+          python -m tools.agent_eval.perf.eval_perf --target all --sizes 100,1000
           if grep -l 'FAIL' tools/reports/perf/perf-*.md; then
             echo "::error::Perf judge failed; download 'perf-reports' artifact for details"
             exit 1
