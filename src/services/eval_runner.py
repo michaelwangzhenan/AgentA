@@ -4,6 +4,8 @@
 - **单任务全局锁**：同时只允许一个 eval 在跑（多数耗 CPU / token，重）。
 - **后台子进程**：`python -m tools.<module> <args>`，stdout/stderr 落 `logs/eval_runs/`；
   与请求解耦——前端轮询 status 看进度，跨页面存活、重连即恢复。
+- **日志只留最近一次**：日志仅供运行中轮询进度，启动新任务时清掉旧日志（最终结论沉淀在
+  `tools/agent_eval/reports/`，不依赖这些日志），避免长期堆积。
 - **模型注入**：选中的测试模型经子进程 `AGENTA_EVAL_ACTIVE_MODEL` env 传入（该键不在 `.env`，
   扛得住各 eval 入口的 `load_dotenv(override=True)`；`config.ACTIVE_MODEL` 会优先读它）。不写任何持久配置。
 """
@@ -86,6 +88,19 @@ def start(task: str, args: list[str], model: str | None = None) -> dict:
             raise RuntimeError("已有评估在运行，请等它结束或先取消")
 
         _LOG_DIR.mkdir(parents=True, exist_ok=True)
+        # 只保留最近一次运行的日志：开跑前清掉旧的（走到这里已确保无任务在跑）。
+        # 日志仅服务"运行中轮询进度 / 跨页面看当前任务"，跑完的历史无需留存。
+        # 先关上一次可能仍持有的文件句柄，否则 Windows 下删不掉。
+        if _job is not None and not _job["logf"].closed:
+            try:
+                _job["logf"].close()
+            except Exception:
+                pass
+        for _old in _LOG_DIR.glob("*.log"):
+            try:
+                _old.unlink()
+            except OSError:
+                pass
         ts = time.strftime("%Y%m%d-%H%M%S")
         log_path = _LOG_DIR / f"{task}-{ts}.log"
 

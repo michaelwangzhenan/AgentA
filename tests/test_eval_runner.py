@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -12,14 +13,22 @@ import src.services.eval_runner as eval_runner
 
 
 @pytest.fixture(autouse=True)
-def _reset_runner():
-    """每个用例后杀掉残留进程并清空全局状态。"""
+def _reset_runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """把 eval 日志目录重定向到临时目录（不污染真实 logs/）；用例后杀残留进程、
+    清空全局状态，并删掉本用例产生的临时日志（先关文件句柄，否则 Windows 删不掉）。"""
+    log_dir = tmp_path / "eval_runs"
+    monkeypatch.setattr(eval_runner, "_LOG_DIR", log_dir)
     yield
     try:
         eval_runner.cancel()
     except Exception:
         pass
+    # 关掉子进程日志文件句柄（status() 仅在进程已结束时关，提前 teardown 可能还开着）
+    job = eval_runner._job  # noqa: SLF001
+    if job and not job["logf"].closed:
+        job["logf"].close()
     eval_runner._job = None  # noqa: SLF001 — 测试复位
+    shutil.rmtree(log_dir, ignore_errors=True)
 
 
 @pytest.fixture
@@ -58,6 +67,16 @@ def test_run_completes(sleeper: str):
     done = _wait(lambda s: s["state"] == "done")
     assert done["returncode"] == 0
     assert "agenta_eval_sleeper" in done["tail"]  # 日志记了命令行
+
+
+def test_only_latest_log_kept(sleeper: str):
+    """启动新任务会清掉上一次的日志，目录里始终最多保留 1 个。"""
+    eval_runner.start(sleeper, ["0"])
+    _wait(lambda s: s["state"] == "done")
+    eval_runner.start(sleeper, ["0"])
+    _wait(lambda s: s["state"] == "done")
+    logs = list(eval_runner._LOG_DIR.glob("*.log"))  # noqa: SLF001
+    assert len(logs) == 1
 
 
 def test_busy_returns_error(sleeper: str):
