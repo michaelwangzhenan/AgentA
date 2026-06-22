@@ -124,6 +124,7 @@ export function DocumentList({
   showGolden,
 }: DocumentListProps) {
   const [deleteTarget, setDeleteTarget] = useState<KBDocument | null>(null)
+  const [genTarget, setGenTarget] = useState<KBDocument | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [batchOpen, setBatchOpen] = useState(false)
   // 默认按"入库时间"倒序，跟后端 list_kb_documents 默认排序一致
@@ -240,6 +241,13 @@ export function DocumentList({
     if (!deleteTarget) return
     await onDelete(deleteTarget.doc_id)
     setDeleteTarget(null)
+  }
+
+  const confirmGenerate = async () => {
+    if (!genTarget) return
+    const target = genTarget
+    setGenTarget(null)
+    await onGenerateGolden?.(target)
   }
 
   if (loading) {
@@ -477,7 +485,7 @@ export function DocumentList({
                       size="icon"
                       className="h-7 w-7 text-muted-foreground hover:text-primary"
                       disabled={generatingDocId === d.doc_id}
-                      onClick={() => void onGenerateGolden(d)}
+                      onClick={() => setGenTarget(d)}
                       aria-label={`为 ${d.filename} 生成评估题`}
                       title="生成评估题候选（LLM）"
                     >
@@ -550,6 +558,39 @@ export function DocumentList({
               autoFocus
             >
               删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={genTarget !== null}
+        onOpenChange={(o: boolean) => !o && setGenTarget(null)}
+      >
+        <AlertDialogContent
+          onKeyDown={(e) => {
+            if (
+              e.key === 'Enter' &&
+              !e.shiftKey &&
+              !e.ctrlKey &&
+              !e.metaKey &&
+              !e.altKey
+            ) {
+              e.preventDefault()
+              confirmGenerate()
+            }
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>生成评估题候选？</AlertDialogTitle>
+            <AlertDialogDescription>
+              将调用 LLM 为 "{genTarget?.filename}" 生成 golden 评估题候选，会消耗 token 并耗时若干秒。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmGenerate} autoFocus>
+              生成
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
