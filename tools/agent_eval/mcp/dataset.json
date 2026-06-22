@@ -25,7 +25,7 @@
     "category": "structural",
     "description": "get_tools() 合流 MCP tool，每条带 <server>.<tool> 前缀；D8 fallback：fetch 接入时内置 fetch_url 不再可见（验收 ③ LLM 自动看到）",
     "expect": {
-      "mcp_tool_present": ["filesystem.read_file", "fetch.fetch"],
+      "mcp_tool_present": ["filesystem.read_text_file", "fetch.fetch"],
       "builtin_fetch_url_hidden": true
     }
   },
@@ -80,10 +80,10 @@
     "id": "E1-llm-uses-filesystem-read-file",
     "verify": 3,
     "category": "llm-e2e",
-    "description": "真发 LLM：query='用 MCP 读项目根的 README.md 前 20 行' → 期望 LLM 调用 filesystem.read_file tool（验收 ③ LLM 自动看到并能调用）",
+    "description": "真发 LLM：query='用 MCP 读项目根的 README.md 前 20 行' → 期望 LLM 调用 filesystem.read_text_file tool（验收 ③ LLM 自动看到并能调用）",
     "query": "用 MCP 读项目根的 README.md 文件，告诉我前 3 行写了什么。",
     "expect": {
-      "tool_called": "filesystem.read_file"
+      "tool_called": "filesystem.read_text_file"
     }
   },
   {

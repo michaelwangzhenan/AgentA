@@ -251,12 +251,13 @@ def _run_llm_e2e(case: dict[str, Any], manager: MCPManager) -> tuple[bool, str]:
 
     tool_calls_observed: list[str] = []
 
-    def _track(event: str, payload: dict) -> None:
-        if event == "tool_call_start":
-            tool_calls_observed.append(payload.get("tool_name", ""))
+    # 用 set_event_callback 接整套 AgentEvent（ev.type / ev.payload）；
+    # tool_call_start 的 payload 字段是 name（带 <server>.<tool> 前缀）。
+    def _track(ev: Any) -> None:
+        if getattr(ev, "type", None) == "tool_call_start":
+            tool_calls_observed.append((ev.payload or {}).get("name", ""))
 
-    if hasattr(agent, "event_bus") and agent.event_bus is not None:
-        agent.event_bus.subscribe(_track)
+    agent.set_event_callback(_track)
 
     try:
         agent.run(case["query"])
@@ -350,6 +351,11 @@ def main() -> None:
         cases = [c for c in cases if c["id"] == args.case]
         if not cases:
             sys.exit(f"❌ 找不到 case id={args.case!r}")
+
+    # C7 会 reset 共享 MCP manager（测「MCP 关闭」），故强制排到最后跑：
+    # 否则它一拆，后续 llm-e2e 就拿不到 MCP 工具（曾导致 LLM 调到内置 fetch_url）。
+    # 稳定排序：非 C7 保持 dataset 原序，C7 置底。
+    cases.sort(key=lambda c: 1 if c["id"] == "C7-zero-impact-when-not-configured" else 0)
 
     # 启 manager（structural + llm-e2e 都需要）
     needs_real_server = any(c["category"] in ("structural", "llm-e2e") and c["id"] != "C7-zero-impact-when-not-configured" for c in cases)
