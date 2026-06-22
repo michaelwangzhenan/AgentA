@@ -203,6 +203,13 @@ class SecurityRuntimeSummary(BaseModel):
     recent: list[SecurityEventRow]        # 最近若干条（时间倒序）
 
 
+class SecurityEventPage(BaseModel):
+    items: list[SecurityEventRow]
+    total: int
+    limit: int
+    offset: int
+
+
 # ── 离线评估：触发 / 状态 / 通用摘要卡片 ─────────────────────────────────────
 
 class EvalRunRequest(BaseModel):

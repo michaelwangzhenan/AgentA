@@ -37,6 +37,7 @@ from src.api.schemas.eval import (
     ReportContent,
     ReportItem,
     ReportList,
+    SecurityEventPage,
     SecurityEventRow,
     SecurityKindRow,
     SecurityRuntimeSummary,
@@ -439,6 +440,39 @@ def security_runtime_summary(
         total=s["total"],
         by_type=s["by_type"],
         recent=[SecurityEventRow(**r) for r in recent],
+    )
+
+
+@router.get("/security/runtime/events", response_model=SecurityEventPage)
+def security_runtime_events(
+    range: str = Query("30d"),
+    ts_from: int | None = Query(None, description="覆盖起始（epoch 秒）；不传用 range"),
+    ts_to: int | None = Query(None, description="覆盖结束（epoch 秒）；不传用 range"),
+    event_type: str | None = Query(None, description="scrub / tool / ssrf；不传=全部"),
+    user_id: int | None = Query(None, description="按用户筛选；不传=全员"),
+    sort_by: str = Query("created_at", description="created_at / event_type / user_id"),
+    desc: bool = Query(True),
+    limit: int = Query(10, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    _: dict = Depends(require_admin),
+    store: SecurityEventStore = Depends(get_security_event_store),
+) -> SecurityEventPage:
+    """线上拦截事件分页查询：按时间 / 类型 / 用户筛选 + 排序 + 分页（全员视角，admin）。"""
+    start, end = _resolve_range(range)
+    if ts_from is not None:
+        start = ts_from
+    if ts_to is not None:
+        end = ts_to
+    page = store.list_events(
+        start, end,
+        event_type=event_type, user_id=user_id,
+        sort_by=sort_by, desc=desc, limit=limit, offset=offset,
+    )
+    return SecurityEventPage(
+        items=[SecurityEventRow(**r) for r in page["items"]],
+        total=page["total"],
+        limit=limit,
+        offset=offset,
     )
 
 

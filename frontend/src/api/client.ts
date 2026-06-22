@@ -104,6 +104,8 @@ import type {
   GoldenUpdateInput,
   ReportContent,
   ReportList,
+  SecurityEventPage,
+  SecurityEventsQuery,
   SecurityRuntimeSummary,
   SecuritySummary,
   SecurityTrend,
@@ -1204,6 +1206,26 @@ export async function getSecurityRuntimeSummary(
   const res = await apiFetch(`/api/eval/security/runtime/summary?range=${range}&limit=${limit}`)
   await _ensureOk(res)
   return (await res.json()) as SecurityRuntimeSummary
+}
+
+export async function getSecurityRuntimeEvents(
+  opts: SecurityEventsQuery = {},
+): Promise<SecurityEventPage> {
+  const {
+    range = '30d', tsFrom, tsTo, eventType, userId,
+    sortBy = 'created_at', desc = true, limit = 10, offset = 0,
+  } = opts
+  const p = new URLSearchParams({
+    range, sort_by: sortBy, desc: String(desc),
+    limit: String(limit), offset: String(offset),
+  })
+  if (tsFrom != null) p.set('ts_from', String(tsFrom))
+  if (tsTo != null) p.set('ts_to', String(tsTo))
+  if (eventType) p.set('event_type', eventType)
+  if (userId != null) p.set('user_id', String(userId))
+  const res = await apiFetch(`/api/eval/security/runtime/events?${p.toString()}`)
+  await _ensureOk(res)
+  return (await res.json()) as SecurityEventPage
 }
 
 // ─── 离线评估：触发 / 状态 / 取消 / 通用摘要 ──────────────────────────────

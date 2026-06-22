@@ -62,6 +62,32 @@ class TestStore:
         assert s["total"] == 0
         assert set(s["by_type"].keys()) == {"scrub", "tool", "ssrf"}
 
+    def test_list_events_filter_sort_paginate(self, store: SecurityEventStore) -> None:
+        for i in range(6):
+            store.record(EVENT_TOOL, f"t{i}", user_id=1)
+        store.record(EVENT_SSRF, "s0", user_id=2)
+        end = int(time.time()) + 10
+
+        # 按类型筛选
+        r = store.list_events(0, end, event_type=EVENT_SSRF)
+        assert r["total"] == 1 and r["items"][0]["detail"] == "s0"
+
+        # 按用户筛选
+        r = store.list_events(0, end, user_id=1)
+        assert r["total"] == 6
+
+        # 分页：total 不变，单页只取 limit 条
+        r = store.list_events(0, end, user_id=1, limit=2, offset=0)
+        assert r["total"] == 6 and len(r["items"]) == 2
+
+        # 排序：按 user_id 升序，第一条应是 user_id 最小的
+        r = store.list_events(0, end, sort_by="user_id", desc=False, limit=1)
+        assert r["items"][0]["user_id"] == 1
+
+        # 非法 sort_by 回落 created_at（不报错）
+        r = store.list_events(0, end, sort_by="detail; DROP TABLE")
+        assert r["total"] == 7
+
     def test_delete_all_for_user(self, store: SecurityEventStore) -> None:
         store.record(EVENT_TOOL, "a", user_id=1)
         store.record(EVENT_TOOL, "b", user_id=1)

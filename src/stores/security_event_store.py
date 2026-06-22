@@ -124,6 +124,52 @@ class SecurityEventStore:
             for r in rows
         ]
 
+    def list_events(
+        self,
+        start_ts: int,
+        end_ts: int,
+        *,
+        event_type: str | None = None,
+        user_id: int | None = None,
+        sort_by: str = "created_at",
+        desc: bool = True,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """区间内拦截事件分页查询：返回 {items, total}。支持按类型 / 用户筛选 + 排序。"""
+        where = "created_at >= ? AND created_at < ?"
+        params: list[Any] = [int(start_ts), int(end_ts)]
+        if event_type:
+            where += " AND event_type = ?"
+            params.append(str(event_type))
+        if user_id is not None:
+            where += " AND user_id = ?"
+            params.append(int(user_id))
+        # 白名单列名（拼进 SQL），非法值回落 created_at，杜绝注入
+        col = sort_by if sort_by in ("created_at", "event_type", "user_id") else "created_at"
+        direction = "DESC" if desc else "ASC"
+        with self._lock:
+            total = int(
+                self._conn.execute(
+                    f"SELECT COUNT(*) FROM security_events WHERE {where}", params
+                ).fetchone()[0]
+            )
+            rows = self._conn.execute(
+                f"SELECT event_type, detail, user_id, created_at FROM security_events "
+                f"WHERE {where} ORDER BY {col} {direction}, id {direction} LIMIT ? OFFSET ?",
+                [*params, max(1, int(limit)), max(0, int(offset))],
+            ).fetchall()
+        items = [
+            {
+                "event_type": r["event_type"],
+                "detail": r["detail"],
+                "user_id": int(r["user_id"]),
+                "created_at": int(r["created_at"]),
+            }
+            for r in rows
+        ]
+        return {"items": items, "total": total}
+
     def delete_all_for_user(self, user_id: int) -> int:
         """删除某用户全部拦截事件（注销 / admin 删号级联）。返回删除条数。"""
         with self._lock, self._conn:

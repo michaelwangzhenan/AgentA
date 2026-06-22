@@ -176,6 +176,26 @@ export type SecurityEventRow = {
   created_at: number
 }
 
+export type SecurityEventPage = {
+  items: SecurityEventRow[]
+  total: number
+  limit: number
+  offset: number
+}
+
+// 实时安全事件分页查询参数（前端 camelCase，client 组装时转 snake_case）
+export type SecurityEventsQuery = {
+  range?: string
+  tsFrom?: number
+  tsTo?: number
+  eventType?: string
+  userId?: number
+  sortBy?: string
+  desc?: boolean
+  limit?: number
+  offset?: number
+}
+
 export type SecurityRuntimeSummary = {
   range: string
   total: number
