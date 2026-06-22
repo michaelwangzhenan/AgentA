@@ -59,7 +59,7 @@ const DEFAULT_PAGE_SIZE = 10
 // 与后端 db_inspect.CHROMA_SCAN_CAP 对齐，仅用于 truncated 提示文案
 const CHROMA_SCAN_CAP_HINT = 20000
 
-export function DBShowView() {
+export function DatabaseView() {
   const [tab, setTab] = useState<Tab>('chroma')
   const tabs: { value: Tab; label: string; icon: LucideIcon }[] = [
     { value: 'chroma', label: 'Chroma', icon: Boxes },

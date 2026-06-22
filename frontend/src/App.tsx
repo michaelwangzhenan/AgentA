@@ -9,7 +9,7 @@ import { SkillsView } from '@/components/resources/SkillsView'
 import { MasteryView } from '@/components/business/MasteryView'
 import { UsageView } from '@/components/usage/UsageView'
 import { QualityView } from '@/components/eval/QualityView'
-import { DBShowView } from '@/components/admin/DBShowView'
+import { DatabaseView } from '@/components/admin/DatabaseView'
 import { BackupView } from '@/components/admin/BackupView'
 import { SettingsPage } from '@/components/settings/SettingsPage'
 import { LoginView } from '@/components/auth/LoginView'
@@ -208,7 +208,7 @@ function App() {
           }}
         />
       )}
-      {activeView === 'dbshow' && isAdmin && <DBShowView />}
+      {activeView === 'dbshow' && isAdmin && <DatabaseView />}
       {activeView === 'backup' && isAdmin && <BackupView />}
       {activeView === 'settings' && <SettingsPage />}
       <Toaster
