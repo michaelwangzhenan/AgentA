@@ -7,11 +7,11 @@
     A 敏感配置  B 运行期 DB  C 向量库 / 索引  E 黄金集  F 评估报告  K 编辑器配置
 
 用法：
-    python tools/backup.py backup  --out <dir> [--exclude C,F]
-    python tools/backup.py restore --zip <path> [--force]
-    python tools/backup.py list    --out <dir>
+    python tools/cli/backup_cli.py backup  --out <dir> [--exclude C,F]
+    python tools/cli/backup_cli.py restore --zip <path> [--force]
+    python tools/cli/backup_cli.py list    --out <dir>
 
-读写逻辑统一在 src/runtime_backup.py（CLI 与 /admin/backup API 共用），本文件只负责
+读写逻辑统一在 src/services/runtime_backup.py（CLI 与 /admin/backup API 共用），本文件只负责
 CLI 接线与终端排版。说明见 docs/v_1_0/interation/iter_18_runtime.md。
 """
 from __future__ import annotations
@@ -20,7 +20,7 @@ import argparse
 import sys
 from pathlib import Path
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent  # tools/cli/x.py → 仓库根（兼作还原目标根）
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 

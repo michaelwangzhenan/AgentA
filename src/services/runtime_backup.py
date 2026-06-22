@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """运行时数据备份 / 还原的公共逻辑。
 
-CLI（`tools/backup.py`）与 API（`/admin/backup/*`）共用本模块，保证两边口径一致。
+CLI（`tools/cli/backup_cli.py`）与 API（`/admin/backup/*`）共用本模块，保证两边口径一致。
 
 备份范围见 docs/v_1_0/interation/iter_18_runtime.md §3.3（A B C E F K）：
     A 敏感配置  B 运行期 DB  C 向量库 / 索引  E 黄金集  F 评估报告  K 编辑器配置

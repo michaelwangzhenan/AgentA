@@ -231,7 +231,7 @@ cp .env.example .env
 首次使用先入库（详见 [5.1 RAG 入库](#51-rag-入库)）：
 
 ```bash
-python -m tools.rag_cli ingest -m m3
+python -m tools.cli.rag_cli ingest -m m3
 ```
 
 WebUI 模式（Chainlit，推荐）：
@@ -286,14 +286,14 @@ MCP_ENABLED=true                  # 启用 MCP 接入（.agenta/mcp/config.json�
 
 ### 1.8.1. 5.1 RAG 入库
 
-`tools/rag_cli.py` 把 `./datasets/` 下文档灌入向量库 + BM25 索引，并提供清库与状态查询：
+`tools/cli/rag_cli.py` 把 `./datasets/` 下文档灌入向量库 + BM25 索引，并提供清库与状态查询：
 
 ```bash
-python -m tools.rag_cli status                                 # 查看每个 collection 的当前状态
-python -m tools.rag_cli ingest                                 # 幂等增量入库（默认 datasets/data_en + 默认模型）
-python -m tools.rag_cli ingest -d ./datasets/data_zh -m zh     # 指定目录 / 模型别名（en / zh / m3）
-python -m tools.rag_cli clear                                  # 清空全部 collection + BM25（需 yes 确认）
-python -m tools.rag_cli clear -m m3                            # 只清空指定 alias
+python -m tools.cli.rag_cli status                                 # 查看每个 collection 的当前状态
+python -m tools.cli.rag_cli ingest                                 # 幂等增量入库（默认 datasets/data_en + 默认模型）
+python -m tools.cli.rag_cli ingest -d ./datasets/data_zh -m zh     # 指定目录 / 模型别名（en / zh / m3）
+python -m tools.cli.rag_cli clear                                  # 清空全部 collection + BM25（需 yes 确认）
+python -m tools.cli.rag_cli clear -m m3                            # 只清空指定 alias
 ```
 
 ### 1.8.2. 5.2 RAG 评估
@@ -311,12 +311,12 @@ python -m tools.rag_eval.runner -o tools/rag_eval/reports/x.md # 保存 Markdown
 
 ### 1.8.3. 5.3 模型下载
 
-`tools/download_models.py` 按编号下载所需 Embedding / Reranker，自带多镜像 fallback：
+`tools/cli/download_models.py` 按编号下载所需 Embedding / Reranker，自带多镜像 fallback：
 
 ```bash
-python -m tools.download_models      # 默认下载全部 5 个（已缓存自动跳过）
-python -m tools.download_models -l   # 仅查看清单与缓存状态
-python -m tools.download_models 3    # 下载指定模型（编号详见 -l 输出）
+python -m tools.cli.download_models      # 默认下载全部 5 个（已缓存自动跳过）
+python -m tools.cli.download_models -l   # 仅查看清单与缓存状态
+python -m tools.cli.download_models 3    # 下载指定模型（编号详见 -l 输出）
 ```
 
 > Windows 用户也可直接 `python -m pytest tests/`，效果等同 `-fast`（pytest.ini 已配 marker 过滤）。

@@ -147,7 +147,7 @@ def test_validate_restore_targets_rejects_traversal(tmp_path):
 
 def test_cli_help_exits_zero():
     r = subprocess.run(
-        [sys.executable, str(ROOT / "tools" / "backup.py"), "-h"],
+        [sys.executable, str(ROOT / "tools" / "cli" / "backup_cli.py"), "-h"],
         cwd=str(ROOT),
         capture_output=True,
         text=True,

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """运行时数据备份 / 还原的管理员 API。
 
-备份 / 还原逻辑全部委托 src.services.runtime_backup（与 tools/backup.py CLI 共用）；本文件只负责
+备份 / 还原逻辑全部委托 src.services.runtime_backup（与 tools/cli/backup_cli.py CLI 共用）；本文件只负责
 HTTP 封装、文件名校验与上传还原的安全把关。全部依赖 require_admin。
 
 安全要点：

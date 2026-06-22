@@ -576,7 +576,7 @@ WEB_UPLOAD_DIR: str = os.getenv("WEB_UPLOAD_DIR", "./datasets/web_uploads")
 # Web UI 单次上传文件大小上限（MB），超限返回 413
 WEB_MAX_UPLOAD_MB: int = int(os.getenv("WEB_MAX_UPLOAD_MB", "10"))
 
-# 运行时数据备份目录（tools/backup.py 与 /admin/backup 生成的 zip 落此；含明文密钥，已 gitignore）
+# 运行时数据备份目录（tools/cli/backup_cli.py 与 /admin/backup 生成的 zip 落此；含明文密钥，已 gitignore）
 BACKUP_DIR: str = os.getenv("BACKUP_DIR", "./backups")
 
 # RAG 检索返回的最大文档片段数

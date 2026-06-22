@@ -5,13 +5,13 @@ HuggingFace 模型下载工具（多镜像自动 fallback）
 解决场景：新机器初始化、HF 镜像被墙、`TRANSFORMERS_OFFLINE=1` 下提示模型缺失时的补齐。
 
 CLI 用法：
-    python scripts/download_models.py           # 下载全部 5 个（已缓存自动跳过）
-    python scripts/download_models.py 3 4       # 仅下载编号 3 和 4
-    python scripts/download_models.py -l        # 列出清单 + 本地缓存状态，不下载
-    python scripts/download_models.py 4 --force # 强制重新下载（即使已缓存）
-    python scripts/download_models.py 4 \\
+    python tools/cli/download_models.py           # 下载全部 5 个（已缓存自动跳过）
+    python tools/cli/download_models.py 3 4       # 仅下载编号 3 和 4
+    python tools/cli/download_models.py -l        # 列出清单 + 本地缓存状态，不下载
+    python tools/cli/download_models.py 4 --force # 强制重新下载（即使已缓存）
+    python tools/cli/download_models.py 4 \\
         --mirror https://hf-mirror.com https://huggingface.co   # 自定义镜像顺序
-    python scripts/download_models.py -h        # 查看帮助
+    python tools/cli/download_models.py -h        # 查看帮助
 
 模型编号：
     1  Embedding-en  sentence-transformers/all-MiniLM-L6-v2  ~90  MB

@@ -139,6 +139,7 @@ alwaysApply: true
 | 共享服务 / 运维 | `src/services/` | CLI 脚本(`tools/`)与 API 共用的后端逻辑（如 `db_inspect.py` / `db_maintain.py` / `runtime_backup.py` / `eval_runner.py` / `log_setup.py`），不属于 agent / memory / rag / llm 任一子系统 |
 | 配置项 | `src/config.py` | `os.getenv("XXX", ...)`；多处同步见 [§1.3.4 新增配置规范](#134-新增配置规范) |
 | CLI 命令处理 | `src/cli/handlers.py` | `handle_<command>` 函数 |
+| 运维 CLI 脚本 | `tools/cli/` | `*_cli.py`（运维操作脚本，如 `db_cli.py` / `backup_cli.py` / `rag_cli.py` / `download_models.py`）；与 API 共用的核心逻辑下沉 `src/services/`，本脚本只做 CLI 接线 + 终端排版 |
 | 评估脚本 | `tools/agent_eval/<feature>/` | `<task>.py`（如 `recall_golden.py` / `perf_eval.py`） |
 | 单元测试 | `tests/<包>/test_<模块>.py`；`tests/api` 建议 `test_api_*.py`，`tests/rag` 建议 `test_rag_*.py`，`tests/llm` 建议 `test_llm_*.py`，`tests/skills` 建议 `test_skills_*.py`，与同目录其余文件一致 | Test 类名 `Test<Behavior>`，方法 `test_<scenario>` |
 

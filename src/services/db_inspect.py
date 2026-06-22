@@ -1,6 +1,6 @@
 """只读巡检 Chroma / SQLite / BM25 的公共读逻辑。
 
-CLI（`tools/db_show.py`）与 API（`/admin/db/*`）共用本模块，保证两边口径一致。
+CLI（`tools/cli/db_cli.py`）与 API（`/admin/db/*`）共用本模块，保证两边口径一致。
 原则：**只读、绝不写库**；遇坏库 / 坏向量段降级为返回 `error` 字段，不向上抛断，
 让调用方仍能看到其余正常数据。
 """

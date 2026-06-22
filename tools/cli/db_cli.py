@@ -4,13 +4,13 @@
 只读巡检：Chroma / SQLite / BM25 落盘位置与规模统计。
 
 用法：
-    python tools/db_show.py -h
-    python tools/db_show.py summary
-    python tools/db_show.py chroma [--sample N] [--collection NAME]
-    python tools/db_show.py sqlite
-    python tools/db_show.py bm25
+    python tools/cli/db_cli.py -h
+    python tools/cli/db_cli.py summary
+    python tools/cli/db_cli.py chroma [--sample N] [--collection NAME]
+    python tools/cli/db_cli.py sqlite
+    python tools/cli/db_cli.py bm25
 
-读逻辑统一在 src/db_inspect.py（CLI 与 /admin/db API 共用），本文件只负责终端排版。
+读逻辑统一在 src/services/db_inspect.py（CLI 与 /admin/db API 共用），本文件只负责终端排版。
 说明见 docs/v_1_0/interation/iter_17_db_tool.md。
 """
 from __future__ import annotations
@@ -21,7 +21,7 @@ import sys
 import textwrap
 from pathlib import Path
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent  # tools/cli/x.py → 仓库根
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
@@ -160,7 +160,7 @@ def _configure_stdio_utf8() -> None:
 def main(argv: list[str] | None = None) -> None:
     _configure_stdio_utf8()
     parser = argparse.ArgumentParser(
-        prog="db_show",
+        prog="db_cli",
         description="只读查看 Chroma / SQLite / BM25 落盘与规模。",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
