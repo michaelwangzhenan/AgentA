@@ -19,7 +19,7 @@ from src.llm.provider import chat
 # 各厂商代表模型（设 ACTIVE_MODEL 用）
 _PROVIDER_MODEL = {
     "kimi": "kimi-k2.5",
-    "qwen": "qwen3.5-flash",
+    "qwen": "qwen3.6-flash",
     "deepseek": "deepseek-chat",
     "minimax": "MiniMax-Text-01",
     "glm": "glm-4-flash",
@@ -192,9 +192,9 @@ class TestModelConfigExtraBody:
     """测试 ModelConfig.extra_body 字段及 THINKING 相关配置"""
 
     def test_qwen_model_has_enable_thinking_false(self) -> None:
-        """qwen3.5-flash 必须配置 extra_body={'enable_thinking': False}，
+        """qwen3.6-flash 必须配置 extra_body={'enable_thinking': False}，
         避免非流式调用返回 400 错误。"""
-        m = config.MODEL_CONFIGS["qwen3.5-flash"]
+        m = config.MODEL_CONFIGS["qwen3.6-flash"]
         assert m.extra_body == {"enable_thinking": False}
 
     def test_kimi_extra_body_disables_thinking(self) -> None:
@@ -257,7 +257,7 @@ class TestCallWithThinking:
         from src.llm.provider import call_with_thinking
 
         original = config.ACTIVE_MODEL
-        for mid in ("qwen3.5-flash", "kimi-k2.5", "glm-4-flash",
+        for mid in ("qwen3.6-flash", "kimi-k2.5", "glm-4-flash",
                     "MiniMax-Text-01", "deepseek-chat"):
             config.ACTIVE_MODEL = mid
             try:

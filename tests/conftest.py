@@ -43,7 +43,7 @@ def _neutralize_runtime_overrides():
     """中和运行时 override 对全局 config 的污染。
 
     `src.api.main` 在 import 时就调 `apply_overrides()`，把 `.agenta/config_overrides.json`
-    （开发者用 UI 存的运行时配置，如 `THINKING_ENABLED=true` / `ACTIVE_MODEL=qwen3.5-flash`）灌进
+    （开发者用 UI 存的运行时配置，如 `THINKING_ENABLED=true` / `ACTIVE_MODEL=qwen3.6-flash`）灌进
     全局 `_cfg`。全量 pytest 收集阶段一旦 import 到 main，这些 override 会泄漏到不 mock LLM 的
     测试里（agent 误走 thinking 分支发起真·LLM 调用，导致挂起 / 断言失败）。
 

@@ -165,37 +165,38 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
         tier="high",
     ),
     # ── 通义千问（DashScope，全系列共用 _QWEN_EXTRA / _QWEN_THINKING）────────
-    "qwen3.5-flash": ModelConfig(
-        provider="qwen", model_id="qwen3.5-flash", label="Qwen3.5 Flash",
+    "qwen3.6-flash": ModelConfig(
+        provider="qwen", model_id="qwen3.6-flash", label="Qwen3.6 Flash",
         extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="low",
     ),
-    "qwen3.5-flash-2026-02-23": ModelConfig(
-        provider="qwen", model_id="qwen3.5-flash-2026-02-23", label="Qwen3.5 Flash (2026-02-23)",
+    "qwen3.6-flash-2026-04-16": ModelConfig(
+        provider="qwen", model_id="qwen3.6-flash-2026-04-16", label="Qwen3.6 Flash (2026-04-16)",
         extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="low",
     ),
+    "qwen3.6-27b": ModelConfig(
+        provider="qwen", model_id="qwen3.6-27b", label="Qwen3.6 27B",
+        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="low",
+    ),
+    "qwen3.6-35b-a3b": ModelConfig(
+        provider="qwen", model_id="qwen3.6-35b-a3b", label="Qwen3.6 35B-A3B",
+        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="low",
+    ),
+    "qwen3.6-plus": ModelConfig(
+        provider="qwen", model_id="qwen3.6-plus", label="Qwen3.6 Plus",
+        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="medium",
+    ),
+    "qwen3.6-plus-2026-04-02": ModelConfig(
+        provider="qwen", model_id="qwen3.6-plus-2026-04-02", label="Qwen3.6 Plus (2026-04-02)",
+        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="medium",
+    ),
+    "qwen3.6-max-preview": ModelConfig(
+        provider="qwen", model_id="qwen3.6-max-preview", label="Qwen3.6 Max (preview)",
+        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="high",
+    ),
+    # 保留的旧版（其余 qwen3.5 已下线）
     "qwen3.5-plus-2026-04-20": ModelConfig(
         provider="qwen", model_id="qwen3.5-plus-2026-04-20", label="Qwen3.5 Plus (2026-04-20)",
         extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="medium",
-    ),
-    "qwen3.5-plus-2026-02-15": ModelConfig(
-        provider="qwen", model_id="qwen3.5-plus-2026-02-15", label="Qwen3.5 Plus (2026-02-15)",
-        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="medium",
-    ),
-    "qwen3.5-27b": ModelConfig(
-        provider="qwen", model_id="qwen3.5-27b", label="Qwen3.5 27B",
-        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="low",
-    ),
-    "qwen3.5-35b-a3b": ModelConfig(
-        provider="qwen", model_id="qwen3.5-35b-a3b", label="Qwen3.5 35B-A3B",
-        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="low",
-    ),
-    "qwen3.5-122b-a10b": ModelConfig(
-        provider="qwen", model_id="qwen3.5-122b-a10b", label="Qwen3.5 122B-A10B",
-        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="medium",
-    ),
-    "qwen3.5-397b-a17b": ModelConfig(
-        provider="qwen", model_id="qwen3.5-397b-a17b", label="Qwen3.5 397B-A17B",
-        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="high",
     ),
     # ── DeepSeek ───────────────────────────────────────────────────────────
     "deepseek-v4-flash": ModelConfig(
@@ -394,15 +395,15 @@ MODEL_PRICING_DEFAULTS: dict[str, tuple[float, float]] = {
     # Moonshot Kimi
     "kimi-k2.5": (3.91, 20.95),
     "kimi-k2.6": (6.75, 28.40),
-    # 通义千问（阶梯价取低档；部分为估算）
-    "qwen3.5-flash": (0.36, 2.84),
-    "qwen3.5-flash-2026-02-23": (0.36, 2.84),
+    # 通义千问（阶梯价取低档；qwen3.6 价格暂沿用 3.5 同档估算，待确认真实单价）
+    "qwen3.6-flash": (0.36, 2.84),
+    "qwen3.6-flash-2026-04-16": (0.36, 2.84),
+    "qwen3.6-27b": (0.71, 2.84),
+    "qwen3.6-35b-a3b": (0.71, 2.84),
+    "qwen3.6-plus": (0.85, 4.90),
+    "qwen3.6-plus-2026-04-02": (0.85, 4.90),
+    "qwen3.6-max-preview": (2.84, 8.52),
     "qwen3.5-plus-2026-04-20": (0.85, 4.90),
-    "qwen3.5-plus-2026-02-15": (0.85, 4.90),
-    "qwen3.5-27b": (0.71, 2.84),
-    "qwen3.5-35b-a3b": (0.71, 2.84),
-    "qwen3.5-122b-a10b": (1.42, 5.68),
-    "qwen3.5-397b-a17b": (2.84, 8.52),
     # DeepSeek（v4-pro 为促销价；deepseek-chat 现映射 V4 Flash）
     "deepseek-v4-flash": (0.99, 1.99),
     "deepseek-chat": (0.99, 1.99),
