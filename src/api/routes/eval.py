@@ -11,6 +11,7 @@ trace 数据来自 chat 链路旁路采集（见 src/stores/trace_store.py）；
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -314,9 +315,29 @@ def _reports_root() -> Path:
     return Path(__file__).resolve().parents[3] / "tools" / "reports"
 
 
+# 报告名里嵌的生成时间戳（YYYYMMDD-HHMMSS）。git 检出不保留文件 mtime，
+# 跨机器只能靠文件名里的时间戳稳定还原"报告生成时刻"。
+_REPORT_TS_RE = re.compile(r"(\d{8}-\d{6})")
+
+
+def _report_time(name: str, mtime: float) -> int:
+    """报告有效时间（epoch 秒）：优先用文件名里的 YYYYMMDD-HHMMSS（机器无关），无则回落 mtime。"""
+    m = _REPORT_TS_RE.search(name)
+    if m:
+        try:
+            return int(datetime.strptime(m.group(1), "%Y%m%d-%H%M%S").timestamp())
+        except ValueError:
+            pass
+    return int(mtime)
+
+
 @router.get("/reports", response_model=ReportList)
 def list_reports(_: dict = Depends(require_admin)) -> ReportList:
-    """递归列出 tools/reports/ 下全部 Markdown 报告（按修改时间倒序）。name = 相对路径。"""
+    """递归列出 tools/reports/ 下全部 Markdown 报告（按生成时间倒序）。name = 相对路径。
+
+    时间取文件名里的 YYYYMMDD-HHMMSS（无则回落 mtime），避免 git 检出后 mtime
+    被重置成检出时刻、导致跨机器排序错乱（详见排序键 `_report_time`）。
+    """
     root = _reports_root()
     items: list[ReportItem] = []
     if root.is_dir():
@@ -328,7 +349,7 @@ def list_reports(_: dict = Depends(require_admin)) -> ReportList:
             items.append(ReportItem(
                 name=fp.relative_to(root).as_posix(),
                 size=st.st_size,
-                modified_at=int(st.st_mtime),
+                modified_at=_report_time(fp.name, st.st_mtime),
             ))
     items.sort(key=lambda x: x.modified_at, reverse=True)
     return ReportList(reports=items)
