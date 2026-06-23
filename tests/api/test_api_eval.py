@@ -717,10 +717,10 @@ def test_eval_summary_perf_by_report(
         "passed": False,
         "targets": {
             "session": {"size": 1000, "ok": True, "checks": [
-                {"name": "查询类 4 列 < 50 ms", "ok": True, "note": "实测最大 3.2 ms"},
+                {"name": "查询类 4 列", "threshold": "< 50 ms", "ok": True, "note": "实测最大 3.2 ms"},
             ]},
             "memory": {"size": 1000, "ok": False, "checks": [
-                {"name": "load_all < 20 ms", "ok": False, "note": "实测 33.0 ms"},
+                {"name": "load_all", "threshold": "< 20 ms", "ok": False, "note": "实测 33.0 ms"},
             ]},
         },
     }
@@ -737,6 +737,9 @@ def test_eval_summary_perf_by_report(
     assert body["partial"] is False  # 性能始终跑全量
     assert len(body["metrics"]) == 2
     assert body["metrics"][0]["label"].startswith("会话·")
+    # 阈值进独立列、不再塞进 label
+    assert body["metrics"][0]["label"] == "会话·查询类 4 列"
+    assert body["metrics"][0]["threshold"] == "< 50 ms"
 
 
 def test_eval_run_status_ok(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -125,23 +125,23 @@ def _session_checks(last: dict) -> list[dict]:
     renders = [last["render_full_ms"], last["render_filtered_ms"]]
     ratio = (last["query_keyword_ms"] / last["query_none_ms"]) if last["query_none_ms"] else 0.0
     raw = [
-        ("查询类 4 列 < 50 ms",      max(queries) < 50,   f"实测最大 {max(queries):.2f} ms"),
-        ("渲染类 2 列 < 200 ms",     max(renders) < 200,  f"实测最大 {max(renders):.2f} ms"),
-        ("keyword / no-filter < 2x", ratio < 2.0,         f"实测 {ratio:.2f}x"),
+        ("查询类 4 列",          "< 50 ms",  max(queries) < 50,   f"实测最大 {max(queries):.2f} ms"),
+        ("渲染类 2 列",          "< 200 ms", max(renders) < 200,  f"实测最大 {max(renders):.2f} ms"),
+        ("keyword / no-filter", "< 2x",     ratio < 2.0,         f"实测 {ratio:.2f}x"),
     ]
-    return [{"name": n, "ok": ok, "note": note} for n, ok, note in raw]
+    return [{"name": n, "threshold": th, "ok": ok, "note": note} for n, th, ok, note in raw]
 
 
 def _memory_checks(last: dict) -> list[dict]:
     """memory 判据：以最大 size 行对照。"""
     raw = [
-        ("load_all < 20 ms",     last["load_all_ms"] < 20,     f"实测 {last['load_all_ms']:.2f} ms"),
-        ("load_ctx < 30 ms",     last["load_ctx_ms"] < 30,     f"实测 {last['load_ctx_ms']:.2f} ms"),
-        ("add < 10 ms",          last["add_ms"] < 10,          f"实测 {last['add_ms']:.2f} ms"),
-        ("update_text < 10 ms",  last["update_text_ms"] < 10,  f"实测 {last['update_text_ms']:.2f} ms"),
-        ("render-list < 100 ms", last["render_list_ms"] < 100, f"实测 {last['render_list_ms']:.2f} ms"),
+        ("load_all",    "< 20 ms",  last["load_all_ms"] < 20,     f"实测 {last['load_all_ms']:.2f} ms"),
+        ("load_ctx",    "< 30 ms",  last["load_ctx_ms"] < 30,     f"实测 {last['load_ctx_ms']:.2f} ms"),
+        ("add",         "< 10 ms",  last["add_ms"] < 10,          f"实测 {last['add_ms']:.2f} ms"),
+        ("update_text", "< 10 ms",  last["update_text_ms"] < 10,  f"实测 {last['update_text_ms']:.2f} ms"),
+        ("render-list", "< 100 ms", last["render_list_ms"] < 100, f"实测 {last['render_list_ms']:.2f} ms"),
     ]
-    return [{"name": n, "ok": ok, "note": note} for n, ok, note in raw]
+    return [{"name": n, "threshold": th, "ok": ok, "note": note} for n, th, ok, note in raw]
 
 
 _CHECKS_FN = {"session": _session_checks, "memory": _memory_checks}
@@ -207,7 +207,9 @@ def _render_report(results: dict[str, list[dict]], env: dict[str, str]) -> str:
         lines.append("| 判据 | 结果 | 说明 |")
         lines.append("|---|:-:|---|")
         for c in _CHECKS_FN[t](last):
-            lines.append(f"| {c['name']} | {'PASS' if c['ok'] else 'FAIL'} | {c['note']} |")
+            lines.append(
+                f"| {c['name']} {c['threshold']} | {'PASS' if c['ok'] else 'FAIL'} | {c['note']} |"
+            )
         lines.append("")
     return "\n".join(lines)
 

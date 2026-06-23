@@ -29,7 +29,7 @@ const EVAL_TASKS: EvalTaskConfig[] = [
       params: [
         '测试模型：默认 None＝只评检索（不耗 token）；选具体模型＝额外评答案质量、回答用该模型。',
         'query 改写 / 精排：检索的两个增强环节，默认开启；取消勾选即关闭，用于对比它们对指标的贡献。',
-        '评委模型：评答案质量时给 faithfulness / 相关度打分的模型，默认跟随系统 EVAL_JUDGE_MODEL。',
+        '评委模型：评答案质量时给忠诚度/相关度打分的模型，默认跟随系统 EVAL_JUDGE_MODEL。',
         '评委评测样本数：选了模型时，评测前 N 条 golden 的答案质量（0=全部）。',
       ],
       principle: [
@@ -42,7 +42,7 @@ const EVAL_TASKS: EvalTaskConfig[] = [
         '答案质量（选模型时）：忠实度/相关度平均分（0~5）。',
       ],
       cost: [
-        '默认 None：只检索，不耗 token，秒级~分钟级（看 golden 规模）。',
+        '默认 None：只检索，不耗 token。',
         '选模型：额外按"答案质量条数"逐条生成 + 评委打分，耗 token、更慢。',
       ],
       dataset:
@@ -117,14 +117,14 @@ const EVAL_TASKS: EvalTaskConfig[] = [
     options: [],
     intro: {
       purpose:
-        '检验 MCP（Model Context Protocol，模型上下文协议）工具接入是否可用且安全：能真启外部 MCP server、能被 LLM 正确选用、并守住 SSRF（服务端请求伪造）等防线。',
+        '检验 MCP（Model Context Protocol，模型上下文协议）工具接入是否可用且安全：能启 MCP server、能被 LLM 正确选用、并守住 SSRF（服务端请求伪造）等防线。',
       how: [
         '① 选「测试模型」：默认 None = 只跑 structural（真启 npx / mcp_server_fetch 子进程，不调 LLM、不耗 token）；选具体模型 = 额外跑 llm-e2e（真发 LLM 选 tool）。',
         '② 点「开始评估」，看运行日志。',
         '③ 跑完看上方摘要卡片，下方历史报告按验收编号①-⑦看明细。',
       ],
       params: [
-        '测试模型：默认 None＝只跑 structural（真启 server、不调 LLM）；选具体模型＝额外跑 llm-e2e（真发 LLM 选 tool）。',
+        '测试模型：默认 None＝只跑 structural（启 server、不调 LLM）；选具体模型＝额外跑 llm-e2e（发 LLM 选 tool）。',
         '无额外开关；是否含 llm-e2e 由「测试模型」是否选 None 决定。',
       ],
       principle: [
@@ -234,7 +234,8 @@ const EVAL_TASKS: EvalTaskConfig[] = [
     label: 'Plan 规划',
     usesLlm: true, // 识别层必须调 LLM（无 None）
     judgeModel: true, // 评 plan 结构时可配独立评委模型（同 RAG）
-    reportMatch: 'plan/',
+    // 不能用 'plan/'：会子串命中 'learning_plan/...' 把学习计划报告串进来；锚到本目录文件前缀
+    reportMatch: 'plan/plan-eval-',
     options: [
       { kind: 'checkbox', key: 'judge', label: '评 plan 结构（LLM-judge）', default: true },
     ],
@@ -285,20 +286,18 @@ const EVAL_TASKS: EvalTaskConfig[] = [
     thresholds: [{ key: 'pass', label: '通过率阈值(≥)', default: 0.8 }],
     intro: {
       purpose:
-        '检验 critic（自动判分器）自身判得准不准：给定 (输入, 期望结论)，看 critic 的判定是否与期望一致。只评 critic 本身，不评主路径产出。',
+        '检验 critic 自身判得准不准：给定 (mock LLM 输出/RAG召回结果 + 期望结论)，看 critic 的判定是否与期望一致。',
       how: [
-        '① 选「测试模型」（默认系统当前模型）；critic 判定必须调 LLM。',
+        '① 选「测试模型」（默认系统当前模型）。',
         '② 可调「通过率阈值」（默认 0.8）。',
         '③ 点「开始评估」，跑完看卡片与历史报告。',
       ],
       params: [
-        '测试模型：默认系统当前模型（ACTIVE_MODEL）；critic 判定必须调 LLM，无 None。',
-        '无额外开关；判定阈值见下方「通过率阈值」。',
+        '测试模型：默认系统当前模型（ACTIVE_MODEL）。'
       ],
       principle: [
-        'quiz_critic case：调 CriticManager.review_grading，比对 verdict.passed 与期望（pass / flag）。',
-        'rag_critic case：走底层 RAG 批判模板，比对解析出的分数列表与 dataset 的期望。',
-        '只评 critic 自身判定准确率；主路径产出好坏由 quiz / RAG 评估覆盖。',
+        'quiz_critic case：根据 mock LLM 输出，让 LLM 进行critic, 拿 critic 结果对照 \'expected\'进行评估',
+        'rag_critic case：根据 mock RAG 召回结果， LLM 进行critic, 拿 critic 结果对照 \'expected\'进行评估',
       ],
       metrics: ['通过率：critic 判对的 case 占比，达阈值判「通过」。'],
       cost: '每条 case 一次真实 critic LLM 调用，耗所选模型 token。',

@@ -781,6 +781,7 @@ def _perf_summary_from_data(data: dict) -> EvalSummary:
             metrics.append(EvalMetric(
                 label=f"{zh}·{c.get('name', '')}",
                 value=str(c.get("note", "")),
+                threshold=str(c.get("threshold", "")),
                 ok=bool(c.get("ok", False)),
             ))
     passed = bool(data.get("passed", False))

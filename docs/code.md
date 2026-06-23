@@ -197,7 +197,7 @@ python -m tools.agent_eval.<feature>.eval_*
 
 面向「没做过前端、但想看懂本项目前端并能改一些小地方」的读者。读完能定位到某块界面对应哪个文件、看懂代码大致结构、自己动手改字号 / 间距 / 颜色这类样式。
 
-## 3.1. 代码框架
+## 3.1. 前端框架
 
 前端是一个 React 单页应用，技术栈一句话：**React + TypeScript 写界面逻辑，Tailwind CSS 写样式，Vite 负责本地开发和打包**。
 
@@ -734,6 +734,7 @@ case 'token_chunk':
 
 
 ### 3.6.5. 命名约定
+
 前端 `camelCase` ↔ 后端 `snake_case`
 跨语言的一个常见细节：**HTTP 请求体 / 响应体里的字段名用后端 Python 的 `snake_case`**（如 `session_id` / `skip_cache` / `model_ids`），而**前端代码内部的变量用 `camelCase`**。所以 `client.ts` 里经常能看到「组装请求时手动转成下划线」：
 
@@ -853,7 +854,7 @@ graph LR
 
 
 
-### 3.7.3.一个请求的处理流程
+### 3.7.3. 3.7.3.一个请求的处理流程
 
 承接上节——请求匹配到 `chat_stream`（`api/routes/chat.py`）后，从校验到返回都做了什么：
 
@@ -1319,7 +1320,7 @@ prompt 之外：
 - 后端路由 : `api/routes/db_admin.py`（`prefix=/admin/db`，整文件挂 `require_admin`；只读 `chroma` / `bm25` / `sqlite` + `/maintenance/*`）
 - 只读检视 : `services/db_inspect.py`（chroma / bm25 / sqlite 列表 + 分页 + 脱敏）
 - 破坏性维护 : `services/db_maintain.py`（`prune` / `purge_user` / `vacuum` / `orphan-segments`）
-- 前端 : `components/admin/DBShowView.tsx`
+- 前端 : `components/admin/DatabaseView.tsx`
 - CLI 工具: `tools/cli/db_cli.py`（与 UI 共用 `db_inspect` 读逻辑）
 
 ### 4.2.6. 备份与恢复
@@ -1383,6 +1384,7 @@ prompt 之外：
 - **跨页联动**：知识库文档 → 跳「质量看板 → Golden 管理」并按该文档筛选（`App` 的 `goldenJump` 信号）。
 
 代码：
+
 - 前端 : `components/eval/GoldenManager.tsx`（嵌在「质量看板」内）
 - 后端 : `api/routes/eval.py`（golden CRUD / `generate` / `import` / `export`）· `stores/golden_store.py`
 
@@ -1468,4 +1470,51 @@ prompt 之外：
 - 运行器 : `services/eval_runner.py`（`EVAL_MODULES` / `start` / `status` / `cancel`；单任务锁 + 子进程 + 日志只留最近一次）
 - 路由 : `api/routes/eval.py`（`run` / `run/status` / `run/cancel` / `summary` / `reports`）
 - 前端 : `components/eval/OfflineEvalView.tsx` · `EvalRunner.tsx` · `ReportsViewer.tsx`（嵌「质量看板」）
-- 评估脚本 : `tools/agent_eval/**` · `tools/rag_eval/**`
+- 评估脚本 : `tools/agent_eval/`** · `tools/rag_eval/**`
+
+## 4.3. Engineering
+
+### 4.3.1. UT
+
+`**pytest` 跑 `tests/`，默认只收快速 UT 集（deselect 掉真实 API / 慢用例 / 备用实现），外部依赖全 mock、不真发 LLM。**
+
+- 默认集：`pytest -q` 按 `addopts` 排除 integration / slow / langchain / autogpt，并 `--ignore tests/optional`，跑得快、不触网。
+- markers：`integration`（真 API / 网络 / ChromaDB）、`slow`（真入库 / Office 解析）、`langchain` / `autogpt`（备用实现，在 `tests/optional`）——按需单独跑。
+- 约定：LLM / DB / 文件 IO 一律 `MagicMock`，UT 内不发真实 LLM 调用；用例按 `tests/<包>/test_<模块>.py` 分包组织（api / agent / stores / rag / llm / cli / skills）。
+
+代码：
+
+- 配置 : `pytest.ini`（`testpaths` / `addopts` / `markers`）· `tests/conftest.py`
+- 用例 : `tests/**`（按子系统分包）
+
+### 4.3.2. CI
+
+**GitHub Actions 在 push / PR 到 `main` 跑三道门——快速 UT、性能回归、非 LLM 评估，任一失败即红；全程离线、API key 用 dummy，不真调外部。**
+
+- `UT` job：装依赖后 `pytest -q` 跑快速集。
+- `PERF` job：`eval_perf --sizes 100,1000`，报告里出现 `FAIL` 即 gate 失败；报告上传 artifact 备查。
+- `EVAL` job：`run_all --ci` 只跑不耗 token 的确定性子集（安全拦截等），有 FAIL 非零退出；报告上传 artifact。
+- 隔离：`TRANSFORMERS_OFFLINE` / `HF_DATASETS_OFFLINE` 等强制离线，`*_API_KEY=ci-dummy`，确保门禁不依赖真实模型 / 网络。
+
+代码：
+
+- workflow : `.github/workflows/AgentA_CI.yml`（`UT` / `PERF` / `EVAL` 三 job）
+- 门禁脚本 : `tools/agent_eval/run_all.py`（`--ci`）· `tools/agent_eval/perf/eval_perf.py`
+
+### 4.3.3. Logs
+
+**CLI 与 UI 两入口共用一套日志基建（格式 / 级别 / 上下文 / 滚动）：都带 session / request 上下文、按大小滚动保留备份。CLI 是单一业务流（`**agenta.log`**）；UI 侧把业务日志与 uvicorn 访问日志合写同一文件（**`uvicorn.log`**）。**
+
+- 统一格式：业务日志加 `[APP]`、uvicorn 访问日志加 `[ACCESS]`，都带时间与 `s:session r:request` 上下文（contextvar 注入，缺省 `-`）。
+- 两入口各自出口：UI 后端经 `build_uvicorn_log_config` 把 uvicorn / 业务 / root 全挂一个 `RotatingFileHandler` 写 `logs/uvicorn.log`；CLI 经 `_Tee` 把 stdout / stderr 同时写 `logs/agenta.log`（NONE / SINGLE / MULTI 三模式）。
+- 启动脚本旁路日志：UI 开发启动脚本（`tools/dev_server.ps1`）另用 shell 重定向存两份**不经 `log_setup`** 的进程裸输出——`uvicorn.boot.log`（后端裸 stdout/stderr：MCP 子进程提示、logging 配置生效前的早期崩溃 traceback）、`vite.log`（前端 dev server banner / HMR / proxy 错误）；启动时清空，只兜底排查。
+- 降噪：httpx / httpcore / openai / chromadb / sentence_transformers 等第三方 logger 压到 `WARNING`，不淹没业务日志。
+- 配置：`.env · LOG_LEVEL / LOG_MAX_BYTES / LOG_BACKUP_COUNT`；`LOG_LEVEL` 改后经 config hook 立即生效。
+
+代码：
+
+- 共用配置 : `services/log_setup.py`（`TaggedFormatter` / `ContextFilter` / `setup_cli_logging` / `build_uvicorn_log_config`）
+- UI 入口 : `api/run.py`（写 `logs/uvicorn.log`）
+- CLI 入口 : `cli/main.py`（`_Tee` + `_LogFile` 按大小滚动）
+- 启动脚本 : `tools/dev_server.ps1`（shell 重定向 `uvicorn.boot.log` / `vite.log`）
+
