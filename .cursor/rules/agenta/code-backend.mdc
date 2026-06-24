@@ -1,0 +1,40 @@
+---
+description: AgentA 后端 Python 代码规范 — 文件/模块命名、docstring、注释。
+globs: src/**/*.py, tools/**/*.py, tests/**/*.py
+alwaysApply: false
+---
+
+# 后端（Python）代码规范
+
+## 文件 / 模块命名
+
+| 类型 | 位置 | 命名 |
+|---|---|---|
+| Agent 核心组件 | `src/agent/core/` | `*_manager.py` / `*_engine.py` / `*_policy.py` / `*_bus.py` / `*_loader.py` |
+| 数据持久化 | `src/stores/` | `<name>.py`，含 `<Name>Store` 类（如 `UserMemoryStore`）；多用户隔离的请求级用户上下文见 `user_context.py` |
+| RAG 流程 | `src/rag/` | `<task>.py`（如 `ingest.py` / `golden_gen.py`） |
+| LLM 调用入口 | `src/llm/` | `provider.py` 里一个 `chat(...)` 为主出口；模型相关另放（如 `model_router.py`） |
+| API 路由 | `src/api/routes/<feature>.py` | 每文件一个 `router = APIRouter(prefix="/<feature>")`，在 `src/api/main.py` 注册 |
+| API 运行时配置 | `src/api/runtime/` | `config_meta` / `config_overrides` / `config_hooks` / `api_keys`（非 HTTP，启动与设置页用） |
+| API 请求 / 响应模型 | `src/api/schemas/<feature>.py` | Pydantic 模型，文件名与对应路由同名 |
+| API 公共依赖 | `src/api/deps.py` | 鉴权等 `Depends`（如 `get_current_user` / `require_admin`） |
+| 共享服务 / 运维 | `src/services/` | CLI 脚本(`tools/`)与 API 共用的后端逻辑（如 `db_inspect.py` / `db_maintain.py` / `runtime_backup.py` / `eval_runner.py` / `log_setup.py`），不属于 agent / memory / rag / llm 任一子系统 |
+| 配置项 | `src/config.py` | `os.getenv("XXX", ...)`；多处同步见 `config-change` 规则 |
+| CLI 命令处理 | `src/cli/handlers.py` | `handle_<command>` 函数 |
+| 运维 CLI 脚本 | `tools/cli/` | `*_cli.py`（运维操作脚本，如 `db_cli.py` / `backup_cli.py` / `rag_cli.py` / `download_models.py`）；与 API 共用的核心逻辑下沉 `src/services/`，本脚本只做 CLI 接线 + 终端排版 |
+| 评估脚本 | `tools/agent_eval/<feature>/` | `eval_<feature>.py`（目录与脚本同名，如 `security/eval_security.py` / `memory/eval_memory.py`） |
+| 单元测试 | `tests/<包>/test_<模块>.py`；`tests/api` 建议 `test_api_*.py`，`tests/rag` 建议 `test_rag_*.py`，`tests/llm` 建议 `test_llm_*.py`，`tests/skills` 建议 `test_skills_*.py`，与同目录其余文件一致 | Test 类名 `Test<Behavior>`，方法 `test_<scenario>` |
+
+开新文件前先确认归属：能在已有文件里加就别另起新文件；确需新增上表没有的类型，先在本表补一行约定再落地。
+
+## 函数 / 类 docstring
+
+- **函数**：1 句话讲做什么；参数 / 返回 / 异常需要时再列，不需要时不要硬凑
+- **类**：1-2 句话讲职责边界；不复述模块 docstring
+- 避免"逐行复述代码"的 docstring，例如 `def upsert(...)` 写成 "Upserts a record"
+
+## 代码注释规范
+
+- 解释**为什么**这么写，不解释**什么代码做了什么**
+- ❌ `# 自增计数器` `# 调用 LLM` `# 返回结果`
+- ✅ `# 显式触发不消耗也不重置 auto 计数器 —— 两条流水线独立`
