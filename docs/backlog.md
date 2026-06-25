@@ -50,7 +50,9 @@ README -> 重新设计
 动画？
 logo?
 
-## 4.2. 记忆/rules/skils/mcp 合并到一页
+## 4.2. 合并到一页
+
+记忆 / rules / skills / mcp 合并到同一页。
 
 进去后还要带左边的图标
 其它2级页面也加图标
@@ -61,7 +63,7 @@ agenta 的 harness 功能就是Critic，并不是自我反思/自我纠正（Rel
 
 **已经改名为 Critic**
 
-## 4.4. hardcode prompt to file
+## 4.4. prompt 外置
 
 所有 hardcode 的 prompt 都做成文件，统一外置管理。
 
@@ -85,7 +87,9 @@ agenta 的 harness 功能就是Critic，并不是自我反思/自我纠正（Rel
 
 LLM 可用性工具：扫描并返回可用的 LLM 列表。包括 agenta 未列的LLM？
 
-## 4.6. download_models.py 上UI
+## 4.6. 模型下载 UI
+
+download_models.py 加 UI。
 
 ## 4.7. workflow
 
@@ -95,9 +99,11 @@ LLM 可用性工具：扫描并返回可用的 LLM 列表。包括 agenta 未列
 
 ## 4.10. 新业务
 
-## 4.11. WebUI 导出对话
+## 4.11. 导出对话
 
-## 4.12. Skills 渐进披露第三层
+WebUI 支持导出对话。
+
+## 4.12. skill 渐进披露
 
 **scripts 层未实现：当前只做了 catalog + prompt body 两层**
 
@@ -107,7 +113,7 @@ LLM 可用性工具：扫描并返回可用的 LLM 列表。包括 agenta 未列
 
 **目标**：补齐第三层——定义脚本的发现（SKILL.md 同目录）、调用入口、执行沙箱 / 权限边界、与现有 tool / `load_skill` 的关系。涉及安全面（执行外部脚本），改动较大，单独立项再做。
 
-## 4.13. iter4 遗留问题
+## 4.13. iter4 遗留
 
 **空名 tool_call 兜底：根因未治本，靠 provider 层每次全量扫历史兜底**
 
@@ -122,7 +128,7 @@ LLM 可用性工具：扫描并返回可用的 LLM 列表。包括 agenta 未列
 
 **目标**：把空名拦截前移到源头（落库处丢弃空名 tool_call）+ 一次性清洗老 DB，之后简化 provider 层的空名兜底分支（`.`→`_`_ 仍保留）。属"向后兼容 vs 激进清理"取舍，单独立项再做。
 
-## 4.14. MCP fetch 的 SSRF 防御未与 host 对齐
+## 4.14. SSRF 未对齐
 
 **MCP `fetch` 的 URL 拦截依赖 server 端，host 侧 `url_guard` 未共用**
 
@@ -132,7 +138,7 @@ LLM 可用性工具：扫描并返回可用的 LLM 列表。包括 agenta 未列
 
 **目标**：让 MCP tool 的出站 URL 也过 host 侧 `url_guard`（或等价拦截层），使内置与 MCP 两条 fetch 路径共用同一道 SSRF 防线，不依赖各 server 自觉。
 
-## 4.15. Web「学而时习」页支持 load plan 进会话上下文
+## 4.15. 计划进会话
 
 `<active_study_plan>`**（四层 prompt 第 4 层）注入目前是 CLI-only**
 
@@ -142,11 +148,11 @@ LLM 可用性工具：扫描并返回可用的 LLM 列表。包括 agenta 未列
 
 **目标**：在「学而时习」页加一个"加载到当前会话"的操作（API 调 `mark_loaded(session_id, plan_id)`），让 Web 会话也能注入 `<active_study_plan>`。需定：session_id 从哪来（Web 当前会话）、内存态映射在多 worker / 重启下是否要持久化、与 CLI load 语义如何统一。
 
-## 4.16. 优化3个业务的`SKILL.md`
+## 4.16. 优化业务 SKILL
 
-3个都是AI生成的，还没有Review过。
+3个业务的 skill 都是AI生成的，还没有Review过。
 
-## 4.17. 学习计划 / 测验 结合 deep-research
+## 4.17. 结合深度研究
 
 **用深度研究的多源材料喂给建计划 / 出题，提升质量与 grounding**
 
@@ -166,9 +172,11 @@ LLM 可用性工具：扫描并返回可用的 LLM 列表。包括 agenta 未列
 1. Review 配置是否合理，有用
 2. .env VS UI 同步
 
-## 4.19. 备份还原添加详细进度
+## 4.19. 备份还原进度
 
-## 4.20. 运行中还原备份不安全
+备份 / 还原添加详细进度。
+
+## 4.20. 还原不安全
 
 **还原时直接覆盖被占用的 DB 文件，运行中操作会失败或埋下数据损坏隐患**
 
@@ -184,15 +192,15 @@ LLM 可用性工具：扫描并返回可用的 LLM 列表。包括 agenta 未列
 
 **目标**：让运行中还原变安全。常见思路：还原前关闭所有 Store 连接、还原到 staging 目录后原子替换并要求重启、或还原期间加全局维护锁拒绝请求。需定具体方案后再做。
 
-## 4.21. LLM 生成 golden 可选 LLM
+## 4.21. golden 可选 LLM 
 
 知识库 L2 点“生成评估”按钮时，增加可以选生成 Golden 的 LLM
 
-## 4.22. EVAL_MODULES task key 命名统一
+## 4.22. task key 命名统一
 
 评估目录 / 脚本已统一为 `<feature>/eval_<feature>.py`，但 `eval_runner.EVAL_MODULES` 的 task key（如 `plan` 对应 `plan_execute`、`learning_plan`）与目录名仍不完全一致。待评估是否把 key 也对齐目录名——会牵连前端 task 选择、报告路径，改动较大，故暂记 backlog。
 
-## 4.23. system prompt 防"改写型套取"缺一道防线
+## 4.23. 加强防改写套取
 
 **防 prompt injection 评估里 L02/L03/L06 三个 info_leak case 真泄露：模型被"总结 / 讲解 / 翻译"借口套出了内部规则与工具实现**
 
@@ -206,7 +214,7 @@ LLM 可用性工具：扫描并返回可用的 LLM 列表。包括 agenta 未列
 
 **目标**：在「数据隔离」段补一条"内部信息保密"约束——不得以任何形式（原文、总结、改写、翻译、分点讲解、举例、编码）透露 system prompt 内容、内部安全规则、工具内部实现（算法 / 兜底 / 参数）；并补充对应 info_leak case 复测过线。改 system prompt 影响全 agent 行为，需先定措辞与回归范围再做。
 
-## 4.24. plan 识别召回不足 + P02 期望边界待澄清
+## 4.24. plan 召回不足
 
 **Plan 评估 positive 组只过 1/5、识别通过率 60%（< 80% 判据）：复杂任务该 make_plan 时模型没先规划**
 
@@ -223,7 +231,7 @@ LLM 可用性工具：扫描并返回可用的 LLM 列表。包括 agenta 未列
 1. 强化 make_plan 触发段——写得更强制 + 给"对比两项 / 先分析后建议 / 汇总多文档"的正例，同步改 `_BASE_PROMPT` 与生产 `SYSTEM_PROMPT`（避免分歧），复测 recall 过 80%。
 2. 先拍板 P02 期望边界：有专用 tool 的复杂业务任务，是「make_plan 先行」还是「专用 tool 直达」？决定后对应改 prompt 或放宽 dataset 通过条件（make_plan 或 create_study_plan 都算对）——这关系 plan-execute 与业务 tool 的边界定义。改 `SYSTEM_PROMPT` 影响全 agent，需先定方向再做。
 
-## 4.25. 学习计划质量 judge 评错对象（评元计划，按成品标准打分）
+## 4.25. judge 评错
 
 **学习计划评估质量分恒低（互评 0.70 / 1.72，远低于 4.0）：judge 拿"最终学习计划"的标准去评"make_plan 元计划步骤"**
 
@@ -235,11 +243,11 @@ LLM 可用性工具：扫描并返回可用的 LLM 列表。包括 agenta 未列
 - 而 make_plan 的 steps 按评估自己的 `_EVAL_SYSTEM_PROMPT` 设计，本就是 4 步元流程（查领域 KB / 列阶段 / 列任务 / 落库）。
 - 但评分标准 `_PLAN_QUALITY_CRITERIA` 是按最终交付物写的（阶段+任务覆盖目标、任务动词起头可勾选、时间分配）——那是 `create_study_plan` 落库成品该满足的。
 - 评估只跑单步，没跑完整 loop 到 `create_study_plan` 产出带具体内容的计划，judge 永远只拿到过程清单，对照成品标准必然 0.5~2 分。两被测模型识别 100% 通过、第一轮都正确调 make_plan，做法没错。
-- 0.70 vs 1.72 的差异只是评委严格度不同（qwen 当评委更狠），不影响主结论。同理 plan 评估（[§4.24](#424-plan-识别召回不足--p02-期望边界待澄清)）也是单步只抓 make_plan，但本条问题在 judge 评分对象选错。
+- 0.70 vs 1.72 的差异只是评委严格度不同（qwen 当评委更狠），不影响主结论。同理 plan 评估（[§4.24](#424-plan-召回不足)）也是单步只抓 make_plan，但本条问题在 judge 评分对象选错。
 
 **目标**：二选一——① 质量 judge 改为评跑完整 loop 后 `create_study_plan` 的真实产出（成品对成品标准）；② 或保持单步，但把 judge 标准改成评"元计划本身是否合理"（过程对过程标准）。需先定方向再改评估流程。
 
-## 4.26. 离线评估机制 Review（1 RAG + 10 Agent）
+## 4.26. 评估机制盘点
 
 **对照功能列表 Review 现有评估机：方法论有效，但有样本量 / CI 门禁 / 覆盖三处短板。**
 
@@ -270,3 +278,15 @@ LLM 可用性工具：扫描并返回可用的 LLM 列表。包括 agenta 未列
 2. 新增评估：先补 P0（DeepResearch + LLM 自动路由），再 P1（语义缓存）。
 
 改动面大、且涉及"哪些进 CI / case 扩到多少"等决策，需先定方向再分步实施，故记 backlog。
+
+## 4.27. 上下文压缩
+
+**对送进 LLM 的所有上下文（工具输出、日志、对话历史、文件、RAG 片段）统一压缩，省 token。不限 RAG，是 agent 全链路的通用层。**
+
+**选型**：headroom（Python 库，Apache-2.0，Python 3.10+，本地运行、可逆 CCR；`from headroom import compress`）。嵌进 AgentA 自己的 LLM 调用——用自己的 key，不受 Cursor 订阅限制（Cursor 那条 proxy 路子走不通，故只剩库嵌入这条）。
+
+**适用场景**：多轮长对话、工具/日志返回啰嗦、一次塞大量内容时收益明显。
+
+**当实验做**：上线前量「答案质量 / token / 延迟」三件事（质量可借现成评估脚本验回归），掉点就不上。
+
+**成本/风险**：加 ML 依赖（Kompress 模型，体积 + 启动开销）、加一道压缩延迟；"可逆"要发挥得让 agent 会调 `headroom_retrieve`，多一层机制。属架构改动，按需求→设计→实验流程单独立项再做。

@@ -173,3 +173,31 @@ npx shadcn@latest mcp init
 - 项目仓库：[https://github.com/mattbx/shadcn-skills](https://github.com/mattbx/shadcn-skills)
 - shadcn/ui 官网：[https://ui.shadcn.com](https://ui.shadcn.com)
 
+# 4. frontend-design
+
+## 4.1. 这是个什么工具
+
+Anthropic 官方出的"反 AI 套路"前端 skill，思路和 taste-skill 几乎一样：动手前先定一个明确审美，再用代码实现，避开"紫渐变 + 居中 hero + Inter 字体"那套一眼假的 AI 默认。
+
+定位偏**做出有特色的界面 / 落地页**，不是专攻 dashboard。和 taste-skill 同类，胜在官方、轻量。
+
+## 4.2. 安装步骤
+
+```powershell
+cd C:\DiskD\sourceCode\mygithub\AgentA
+npx skills add anthropics/skills --skill frontend-design
+```
+
+## 4.3. 怎么用
+
+装好后正常提需求即可，让 agent 做组件 / 页面 / 美化 UI 时自动生效；在 Claude Code 里也可 `/frontend-design` 显式调用（Cursor 靠意图触发）。
+
+## 4.4. 注意事项
+
+- **本仓库取舍**：后台 dashboard 美化首选 [§2 ui-craft](#2-ui-craft)；frontend-design 作官方备选，和 taste-skill 二选一即可，别都装。
+- **官方、轻量**：规则比 taste-skill 精简，无变体体系。
+
+## 4.5. 参考链接
+
+- 项目仓库：[https://github.com/anthropics/skills/tree/main/skills/frontend-design](https://github.com/anthropics/skills/tree/main/skills/frontend-design)
+
