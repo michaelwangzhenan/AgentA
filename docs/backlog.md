@@ -27,6 +27,10 @@ README -> 重新设计
 
 各种文档 转 markdown.
 
+- 离线工具，输入目录 → 输出 .md（保留目录结构）
+- 用 microsoft/markitdown（Python 库）：PDF/Word/Excel/PPT/HTML/图片/音频/EPUB 等，表格转 Markdown 表格
+- 扫描版 PDF markitdown 转不出文字 → 复用现有 rapidocr 思路做 OCR 兜底
+- 范围/形态待定：独立脚本 vs 接 UI、是否进仓库长期维护
 
 
 # 2. iter_1 Review

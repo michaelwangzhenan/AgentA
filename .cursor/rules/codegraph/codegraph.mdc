@@ -1,6 +1,6 @@
 ---
 description: 用 CodeGraph 工具理解代码结构，优先于 grep / 逐文件阅读。
-alwaysApply: flase
+alwaysApply: false
 ---
 
 # CodeGraph 优先

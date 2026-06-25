@@ -1,9 +1,5 @@
 # 1. CodeGraph
 
-面向 AI 编程 agent 的本地代码知识图谱工具。本文介绍它是什么、怎么装、怎么用，照着操作即可在 AgentA 仓库里接入。
-
-> 适用环境：Windows + PowerShell + Cursor（本仓库当前开发环境）。
-
 ## 1.1. 这是个什么工具
 
 CodeGraph 是一个**本地运行的 MCP（Model Context Protocol）服务**。它提前把整个代码库解析成一张"知识图谱"——函数、类、调用关系、import、继承等都存进本地 SQLite 数据库（带全文搜索）。
@@ -12,29 +8,29 @@ CodeGraph 是一个**本地运行的 MCP（Model Context Protocol）服务**。�
 
 带来的好处：
 
-| 好处 | 说明 |
-|---|---|
-| 更省钱、更快 | 官方在 7 个真实项目实测：平均成本省 16%、token 少 47%、工具调用少 58% |
-| 100% 本地 | 数据不出本机，无需 API key，只用 SQLite |
-| 索引不过期 | 监听文件改动，约 2 秒后自动增量更新，不用手动维护 |
-| 零配置 | 没有配置文件，自动跳过 `node_modules` / `.venv` / `dist` 和 `.gitignore` 内容 |
-| 多语言 | 支持 20+ 语言（含 Python、TypeScript、JavaScript），并能识别常见 Web 框架路由 |
 
-> 本仓库是 Python 后端 + React/TS 前端，全部落在 CodeGraph 的支持范围内。
+| 好处      | 说明                                                              |
+| ------- | --------------------------------------------------------------- |
+| 更省钱、更快  | 官方在 7 个真实项目实测：平均成本省 16%、token 少 47%、工具调用少 58%                   |
+| 100% 本地 | 数据不出本机，无需 API key，只用 SQLite                                     |
+| 索引不过期   | 监听文件改动，约 2 秒后自动增量更新，不用手动维护                                      |
+| 零配置     | 没有配置文件，自动跳过 `node_modules` / `.venv` / `dist` 和 `.gitignore` 内容 |
+| 多语言     | 支持 20+ 语言（含 Python、TypeScript、JavaScript），并能识别常见 Web 框架路由       |
+
 
 ## 1.2. 安装步骤
 
-### 1.2.1. 装 CodeGraph 命令行工具
+### 1.2.1. 安装 CodeGraph
 
 打开 PowerShell，二选一：
 
-方式 A（推荐，自带运行时，不依赖 Node）：
+方式 A：
 
 ```powershell
 irm https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.ps1 | iex
 ```
 
-方式 B（已装 Node，任意版本都行）：
+方式 B（已装 Node）：
 
 ```powershell
 npm i -g @colbymchenry/codegraph
@@ -48,7 +44,7 @@ npm i -g @colbymchenry/codegraph
 codegraph version
 ```
 
-### 1.2.2. 把 CodeGraph 接到 Cursor
+### 1.2.2. 接入 Cursor
 
 在**新终端**里运行安装器，它会把 CodeGraph 的 MCP 服务写进 Cursor 的配置：
 
@@ -58,7 +54,7 @@ codegraph install
 
 交互过程中会问三件事：
 
-- 配置哪些 agent —— 选 `Cursor`（也可同时勾选别的）
+- 配置哪些 agent —— 时勾需要的 agent
 - 是否把 `codegraph` 装到 PATH —— 选是
 - 作用于所有项目还是仅当前项目 —— 想全局复用选 global，只给本仓库用选 local
 
@@ -68,7 +64,7 @@ codegraph install
 codegraph install --target=cursor --yes
 ```
 
-### 1.2.3. 在 AgentA 仓库里建索引
+### 1.2.3. 创建索引
 
 ```powershell
 cd C:\DiskD\sourceCode\mygithub\AgentA
@@ -89,42 +85,46 @@ codegraph status
 
 ## 1.3. 怎么用
 
-### 1.3.1. 日常使用（主要场景）
+### 1.3.1. 日常使用
 
 装好后**基本无感**：在 Cursor 里正常向 agent 提问，agent 会自动用 CodeGraph 的工具替代大量 grep 和读文件。比如问"登录请求是怎么走到数据库的""改这个函数会影响哪些地方"，它会直接查图谱给答案。
 
-索引也**无需手动维护**：你或 agent 改了文件，CodeGraph 监听到后约 2 秒自动增量更新。
+索引也**无需手动维护**：你或 gent 改了文件，CodeGraph 监听到后约 2 秒自动增量更新。
 
-### 1.3.2. 命令行工具（可选，手动排查时用）
+### 1.3.2. 命令行工具
 
 agent 用的能力，命令行也能直接调，方便自己确认：
 
-| 命令 | 作用 |
-|---|---|
+
+| 命令                       | 作用                             |
+| ------------------------ | ------------------------------ |
 | `codegraph explore <问题>` | 主力命令。一次返回相关符号的源码 + 调用关系 + 影响范围 |
-| `codegraph node <符号或文件>` | 看单个符号的完整源码 + 调用链，或按文件读取 |
-| `codegraph query <关键词>` | 按名字搜索符号 |
-| `codegraph callers <符号>` | 找一个函数的所有调用点 |
-| `codegraph impact <符号>` | 分析改动一个符号会波及哪些代码 |
-| `codegraph status` | 查看索引统计、是否有待同步文件 |
-| `codegraph sync` | 手动增量更新（一般不用，自动同步已覆盖） |
+| `codegraph node <符号或文件>` | 看单个符号的完整源码 + 调用链，或按文件读取        |
+| `codegraph query <关键词>`  | 按名字搜索符号                        |
+| `codegraph callers <符号>` | 找一个函数的所有调用点                    |
+| `codegraph impact <符号>`  | 分析改动一个符号会波及哪些代码                |
+| `codegraph status`       | 查看索引统计、是否有待同步文件                |
+| `codegraph sync`         | 手动增量更新（一般不用，自动同步已覆盖）           |
+
 
 ### 1.3.3. 常用维护命令
 
-| 命令 | 作用 |
-|---|---|
-| `codegraph upgrade` | 升级到最新版（加 `--check` 只看有没有更新） |
-| `codegraph uninit` | 移除本项目的 `.codegraph\` 索引 |
+
+| 命令                    | 作用                                |
+| --------------------- | --------------------------------- |
+| `codegraph upgrade`   | 升级到最新版（加 `--check` 只看有没有更新）       |
+| `codegraph uninit`    | 移除本项目的 `.codegraph\` 索引           |
 | `codegraph uninstall` | 从所有 agent 配置中卸载 CodeGraph（不删项目索引） |
+
 
 ## 1.4. 注意事项
 
 - **`.codegraph\` 不要提交 git**：这是本地索引，建议加进 `.gitignore`。
-- **自动忽略范围**：默认跳过 `node_modules` / `.venv` / `dist` / `build`、`.gitignore` 里的内容，以及大于 1MB 的文件——第三方代码和虚拟环境不会被索引进来。
+- **索引自动忽略范围**：默认跳过 `node_modules` / `.venv` / `dist` / `build`、`.gitignore` 里的内容，以及大于 1MB 的文件。
 - **索引慢或缺符号**：先确认大目录已被排除；改完文件等一两秒让它自动同步，必要时手动 `codegraph sync`。
 
 ## 1.5. 参考链接
 
-- 项目仓库：<https://github.com/colbymchenry/codegraph>
-- 官方文档：<https://colbymchenry.github.io/codegraph/>
+- 项目仓库：[https://github.com/colbymchenry/codegraph](https://github.com/colbymchenry/codegraph)
+- 官方文档：[https://colbymchenry.github.io/codegraph/](https://colbymchenry.github.io/codegraph/)
 
