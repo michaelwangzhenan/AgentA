@@ -128,3 +128,74 @@ agent 用的能力，命令行也能直接调，方便自己确认：
 - 项目仓库：[https://github.com/colbymchenry/codegraph](https://github.com/colbymchenry/codegraph)
 - 官方文档：[https://colbymchenry.github.io/codegraph/](https://colbymchenry.github.io/codegraph/)
 
+# 2. Superpowers
+
+## 2.1. 这是个什么工具
+
+Superpowers 是一套面向 coding agent 的 **skills 框架 + 软件开发方法论**（作者 Jesse Vincent / obra）。它不提升模型智能，而是把"需求澄清 → 设计 → TDD → 审查 → 收尾"焊成**强制流程**，让 agent 从"会写代码"变成"按工程流程交付"。
+
+核心机制：只要有一点点可能某个 skill 适用，agent 就必须先调用它（强制触发）。
+
+跨平台：Claude Code、Codex、Cursor、OpenCode、Gemini CLI、GitHub Copilot CLI。
+
+## 2.2. 14 个 Skill
+
+| 类 | Skill | 作用 |
+| --- | --- | --- |
+| 协作 | `brainstorming` | 先澄清需求和边界，禁止直接写代码 |
+| 协作 | `writing-plans` | 把方案拆成 2-5 分钟可做完的小任务 |
+| 协作 | `subagent-driven-development` | 每个任务派给全新子 agent，先查规格合规再查代码质量 |
+| 协作 | `executing-plans` | 不开子 agent 时，当前会话按计划串行执行，带检查点 |
+| 协作 | `dispatching-parallel-agents` | 多个独立故障域时开并行子 agent 各管一块 |
+| 协作 | `requesting-code-review` | 一批改动完成、合并前发起审查，按严重程度报问题 |
+| 协作 | `receiving-code-review` | 收到审查意见后如何处理修复 |
+| 协作 | `using-git-worktrees` | 用 git worktree 开隔离工作区，保护主分支 |
+| 协作 | `finishing-a-development-branch` | 收尾：验证测试、选合并方式、清理环境 |
+| 测试 | `test-driven-development` | 铁律 RED-GREEN-REFACTOR，没失败测试不准写生产代码 |
+| 调试 | `systematic-debugging` | 测试失败 / 异常 / 构建问题时系统化排查，不靠瞎猜 |
+| 调试 | `verification-before-completion` | 必须在终端跑出真实通过结果才能算完 |
+| 元 | `using-superpowers` | 入口纪律：强制优先调用适用的 skill |
+| 元 | `writing-skills` | 怎么写 skill 本身，方法论等同"对文档做 TDD" |
+
+## 2.3. 安装（Windows + Cursor）
+
+两种装法，按需二选一。
+
+**方式 A：`npx skills`**
+
+把 14 个 `SKILL.md` 同步进 `.agents/skills/`，纯指令、按 description 触发：
+
+```powershell
+npx skills add obra/superpowers --target cursor
+```
+
+**方式 B：Cursor 插件市场（Superpowers 官方主推，功能最全）**
+
+装完整 plugin（skills + 子 agent + 命令 + hook，hook 在会话开始自动注入）：
+
+1. 按 `Ctrl+L` 打开 Agent 聊天面板（用 Agent，不是 Composer）。
+2. 输入命令并回车，Cursor 自动下载激活：
+
+```text
+/add-plugin superpowers
+```
+
+3. 重启 Cursor 或新建会话生效。
+
+验证（两种通用）：新会话里问 `do you have superpowers?`，正常会列出 brainstorming、TDD 等 skill。
+
+> 取舍：方式 A 纯 skill 指令、和项目 skill 管理方式统一；方式 B 多了 hook 强制触发和子 agent 编排，是 Superpowers 的完整体验。`/add-plugin` 在部分版本写作 `/plugin-add`。
+
+## 2.4. 怎么用
+
+装好后正常对话即可，agent 会在对应阶段自动触发 skill；也可显式点名，例如"用 brainstorming 拆这个需求""用 TDD 实现这个功能"。
+
+## 2.5. 本项目结论
+
+不安装。原因：流程骨架与现有 rules 高度重合、英文 skill 与"默认中文"规范冲突、子 agent / 强制 TDD 等重型机制对 RAG/Agent 项目 ROI 低。已借鉴三条纪律并入 `workflow.mdc`：**完成前验证**、**调试规范**、**评估驱动**（TDD 思路翻译成跑 `tools.agent_eval`）。
+
+## 2.6. 参考链接
+
+- 项目仓库：[https://github.com/obra/superpowers](https://github.com/obra/superpowers)
+- 官方指南：[https://superpowers-guide.com](https://superpowers-guide.com)
+

@@ -42,7 +42,7 @@ ToDo List：
     本项目 skills 目录： advanced/skills/
 
 
-6. 支持 MCP
+6. 支持 MCP => Done
   目标： 
     支持MCP最新版标准： https://modelcontextprotocol.io/specification/2025-11-25
     支持接入 local mcp server 来访问本地文件系统和工具 : https://modelcontextprotocol.io/docs/develop/connect-local-servers
@@ -142,41 +142,40 @@ ToDo List：
     · 多步骤任务规划：支持 LLM 在单次 run() 中拆解复杂任务并按步骤执行
     · 工具结果质量判断：LLM 能识别工具返回内容为空/无关时主动切换策略，而非直接生成回答
 
-9. 多Agent协作
+9. 多Agent协作(deep research) => Done
   目标： 支持多个 Agent 协同工作，共享知识和任务，提高整体效率
-
 
 10. Web UI => Done
   目标： 使用chainlit，提供图形界面
 
-11. 支持企业级向量数据库
+11. 支持企业级向量数据库 => backlog
   目标： 支持接入企业级向量数据库，如 Pinecone、Weaviate 等，提高数据存储和检索能力
 
 
-12. Ollama
+12. Ollama => backlog
   目标： 支持本地 Ollama 模型，完全离线运行
 
-[x]13. URL 批量导入
+[x]13. URL 批量导入 => OB
   目标： 支持通过配置文件批量爬取指定网页并入库
 
 
-[x]14. 文档自动同步
+[x]14. 文档自动同步 => backlog
   目标： 用 `watchdog` 监听 `datasets/` 变化，自动增量入库
 
 
-[x]15. API/SDK接口
+[x]15. API/SDK接口 => OB
   目标： 方便第三方系统集成
 
 
-16. 安全与权限管理
+16. 安全与权限管理 => Done
   目标： 适合企业/团队场景
 
 
-[x]17. 多语言支持
+[x]17. 多语言支持 => OB 
   目标： 适应国际化需求
 
 
-18. 本地工具扩展
+18. 本地工具扩展 => OB
   目标： 开发更多工具，扩充 Agent 工具集，增强处理复杂任务的能力
   --> 工具扩展后，使用工具的 prompt, skills, reAct 等要对应优化
   候选工具清单：
@@ -288,13 +287,13 @@ ToDo List：
     · CLI：/thinking adaptive 开启；/thinking 状态显示自适应档位
     · .env.example 新增 THINKING_ADAPTIVE=false
 
-29. 跨 session 记忆 enhancement 
+29. 跨 session 记忆 enhancement => Done
     记忆提取: 对话中出现重要事实时实时触发
     用户隔离：多用户场景下记忆必须按 user_id 严格隔离 --> depends on 16. 
     隐身模式：用户可以关闭记忆功能（类似 Incognito 模式）， 从而不会读取、也不会写入任何记忆的对话
     记忆压缩：当context超过总预算85% 时，压缩记忆。15% 预留给response ?
 
-30. 支持 GraphRAG / Knowledge Graph
+30. 支持 GraphRAG / Knowledge Graph => backlog
   不再存储原始文本，而是把文档转化为实体-关系图谱：
   文档 → 抽取实体和关系 → 知识图谱
   问题 → 图上路径搜索 → 精确答案
@@ -303,9 +302,9 @@ ToDo List：
 
 31. Harness 中可以实现的部分 => Done, iter_2: phase 2.5
   LLM 直接返回文本 → 输出最终回答，评价回答，决定是否继续提问 => 建立反馈机制，让 AI 能自我检查和修正。
-32. 支持sandbox
-33. Sub Agent
-34. 结合 systemInsight/walle
+32. 支持sandbox => OB
+33. Sub Agent => Done
+34. 结合 systemInsight/walle => OB
 35. 支持SYSTEM_PROMPT 从文件读入 => Done, iter_2: phase 1.3
   目标：允许用户通过环境变量指定文件路径，让 Agent 默认 System Prompt 从文件读取，无需修改源代码。
 
@@ -363,7 +362,7 @@ ToDo List：
     4. .env.example 新增注释配置项
     5. 新建 advanced/system_prompt.md
     6. 新增 tests/test_system_prompt_loader.py
-36. CnP Refine
+36. CnP Refine => OB
   一个企业级 RAG 系统，数据量100万文档，如何设计索引和检索架构？
   Agent系统如何保证可靠性？工具调用失败怎么处理？
   多Agent协作的数据流如何设计，避免上下文爆炸？
@@ -426,8 +425,8 @@ ToDo List：
   【RAG/外部数据隔离】在 RAG 场景中，检索到的文档内容与模型指令用不同角色（role）或明确的 context 标签分开传递，避免文档内容被模型当作指令执行；必要时对文档内容做 sanitization。
   【日志与监控】记录所有模型输入输出与工具调用，设置异常检测规则（如单次调用触发超过 N 个工具、调用了从未在正常流程中出现的工具），发现异常时告警或熔断。
   【多层防御（Defense in Depth）】单一防线不可靠，将以上方法组合使用；同时在系统层面限制 Agent 进程的 OS 权限（沙箱、网络隔离），即使注入成功也限制实际危害范围。
-40. 实践：加入3GPP文档场景，遇到真实规模问题
-41. A2A 协议？
+40. 实践：加入3GPP文档场景，遇到真实规模问题  => OB
+41. A2A 协议 => backlog
 42. RAG 命中优化 => Done
   ── 现状（src/rag/ ingest.py · retriever.py · reranker.py · parser.py + config.py + agent/tools.py）
     召回链路：用户问题 → search_knowledge 工具 → 对所有 collection（en/zh）按内部距离取
@@ -819,17 +818,9 @@ ToDo List：
   重新考虑如何成为一个真正的Agent, 而不是闹着玩
 48. 增加入库工具 => Done
   tools.rag_cli
-49. 显式查看当前prompt 内容
-
+49. 显式查看当前prompt 内容 => backlog
 -
-
--
-99. 画出完整的 AI 系统架构图并解释每个决策
-100. todo
-  47
-  44
-
-
+99. 画出完整的 AI 系统架构图并解释每个决策 => backlog
 -
 a. Agent S
   一个 GUI/Computer-Use Agent, an open agentic framework that uses computers like a human

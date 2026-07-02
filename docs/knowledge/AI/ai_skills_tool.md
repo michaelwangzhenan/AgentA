@@ -75,3 +75,48 @@ Claude Code 走 plugin marketplace：
 - 项目仓库：[https://github.com/anthropics/skills/tree/main/skills](https://github.com/anthropics/skills/tree/main/skills)
 - 文档说明：[https://anthropics-skills.mintlify.app/skills/document-skills](https://anthropics-skills.mintlify.app/skills/document-skills)
 
+# 3. Humanizer（去 AI 味）
+
+## 3.1. 这是个什么工具
+
+一组「去 AI 味」的 skill（`SKILL.md`，开源），把 AI 写出来的文字改得更像人写的。同一思路有中英两条线：
+
+- **中文版**：`humanizer-zh-plus`，专治中文里的 AI 痕迹——翻译腔、空泛大词、机械排比、口号式收尾，以及中文引号 / 破折号 / 日期等标点排版。共 38 个模式（含 5 个中文特有），并带**误判保护**：单个破折号、正式词汇、干净语法不单独判成 AI 味。
+- **英文版**：`blader/humanizer`，上述中文版的上游原版，针对英文散文去 AI 味。
+
+判据来源是维基百科的 *Signs of AI writing*（AI 写作特征）指南。典型用法是**文档 / 博客 / README / 文案写完后过最后一遍**。
+
+> 中英两版**各管各的语言**：英文文本用中文版没意义，反之亦然。
+
+## 3.2. 安装步骤
+
+`npx skills add` 原生支持 Cursor，直接指定 `-a cursor` 即可，无需手动搬目录：
+
+```powershell
+# 中文版（个人全局，落到 ~/.cursor/skills/）
+npx skills add RobinZorro86/humanizer-zh-plus -a cursor -g -y
+
+# 英文版（写英文内容时再装）
+npx skills add blader/humanizer -a cursor -g -y
+```
+
+只给本仓库用就去掉 `-g`（落到 `.agents/skills/`）。需要 Node.js。
+
+> 同类只装一个，别叠多个去 AI 味 skill，否则 agent 选择会混乱。
+
+## 3.3. 怎么用
+
+装好后提需求时点名即可，如"用 humanizer 把这段改得更像人写的，减少翻译腔和空泛大词"，也可直接处理文件："请人性化 xxx.md 里的内容"。
+
+## 3.4. 注意事项
+
+- **不是反检测工具**：目标是读起来更自然，不保证绕过 AI 检测器，别这么用。
+- **适合成段散文**：博客 / cover letter / 个人简介这类整段文字效果好；简历的逐条 bullet（动词 + 量化 + 结果）不是它的菜，硬用反而改啰嗦。
+- **会改写原文**：以"先改写再核对信息有没有丢"的方式用，重要文本改完自己复核一遍。
+
+## 3.5. 参考链接
+
+- 中文版（推荐）：[https://github.com/RobinZorro86/humanizer-zh-plus](https://github.com/RobinZorro86/humanizer-zh-plus)
+- 英文原版：[https://github.com/blader/humanizer](https://github.com/blader/humanizer)
+- 其他中文版：[op7418/Humanizer-zh](https://github.com/op7418/humanizer-zh)、[idao-cube/humanizer-zh](https://github.com/idao-cube/humanizer-zh)
+

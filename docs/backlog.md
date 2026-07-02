@@ -6,6 +6,7 @@ design -> 简化，重建
 README -> 重新设计
 
 项目介绍 PPT
+-> 画出完整的 AI 系统架构图并解释每个决策
 
 ## 1.2. RAG
 
@@ -33,13 +34,121 @@ README -> 重新设计
 - 范围/形态待定：独立脚本 vs 接 UI、是否进仓库长期维护
 
 
-# 2. iter_1 Review
+# 2. iter_1
 
-# 3. iter_2 backlog Review
+## 2.1. 企业级向量数据库
 
-[iter2 Backlog](v_1_0/iteration/iter_2_agent.md#413-backlog)
+## 2.2. Ollama
+本地模型
 
-# 4. iter_99 and more
+## 2.3. 文档自动同步
+用 `watchdog` 监听 `datasets/` 变化，自动增量入库
+
+## 2.4. GraphRAG / Knowledge Graph
+
+## 2.5. A2A
+
+# 3. iter_2 backlog
+
+## 3.1. Skill 激活后 catalog 同步移除该 skill 的 description 块（H1）
+
+- 来源 phase：Phase 1.5
+- 计划阶段：实测有 LLM 因为重复信息走偏 / context 紧张时再修
+- 推迟原因：已激活的 skill body 已注入 system_prompt，catalog 里的 description 块成了重复信息；当前 LLM 实测未受影响 — 过度设计（MVP 阶段不必要）
+
+## 3.2. SRS 算法升级（SM-2 → FSRS / Half-life regression / NN-based）
+
+- 来源 phase：Phase 2.4
+- 计划阶段：待用户 review 量 > 1000 张 / 实测 SM-2 精度明显不足
+- 推迟原因：[§4.9.9 D1](#499-srs-主动复习调度-phase-24) 决策：MVP 体量下 SM-2 精度足够；FSRS 17 参数调参成本高且需训练数据；review 量未上来不冒进
+
+## 3.3. Harness P1 — Plan 执行后 retrospective（Reflexion 风格：plan-execute 跑完写反思塞回 long-term memory，下次同类任务作为 hint 注入 prompt）
+
+- 来源 phase：Phase 2.5
+- 计划阶段：Reflexion 长期记忆任务 / `trajectory` 录制框架抽出后
+- 推迟原因：[§4.9.10 D1](#4910-harness-自检-phase-25) 决策：要做 [§4.8.2 trajectory 框架](#482-评估工具列表)（已规划但未抽）+ memory 持久化 + retrospect prompt + 跨次注入逻辑，单 phase 范围爆炸；本期 Q1+R1 是 single-shot 输出级，P1 是 trajectory 级 + 跨次累积，性质上是另一个 phase 量级的任务
+
+## 3.4. thinking 进度条 / token 速率指示器（思考多久 / 多少 token 实时显示）
+
+- 来源 phase：Phase 3.1
+- 计划阶段：用户实际表达"看不出还在思考还是卡死"诉求时再做
+- 推迟原因：[§4.9.11 Q4-c](#4911-thinking-cli-渲染-phase-31) 决策：流式分块（验收 ②）已能让用户看到 LLM "正在写"，进度条非 P0；token 速率信息可见性可在 Step 6 token usage 行同步显示
+
+## 3.5. Plan 用户审批 mode `edit` 选项（plan 出来后用户 yes/edit/no 三选一，edit 让用户改 plan steps）
+
+- 来源 phase：Phase 3.2
+- 计划阶段：用户实际表达"想改 LLM 给的 plan"诉求时再做
+- 推迟原因：[§4.9.12 D8](#4912-防-prompt-injection-phase-32) 决策：本期 yes/no 二选一已覆盖"挡住跑偏 plan"主诉求；edit 涉及 plan re-edit + 重发 make_plan + messages 重写，复杂度爆炸；用户想 edit 直接发新 query 即可
+
+## 3.6. MCP `resources` / `prompts` primitive
+
+- 来源 phase：Phase 3.3
+- 计划阶段：用户实际有"应用代码主动塞 context"或"用 MCP 暴露 slash command"诉求时再做
+- 推迟原因：[§4.9.13 D2](#4913-mcp-接入-phase-33) 决策：求职演示价值集中在 tools；resources 与本项目内置 RAG 路径重叠（应用代码塞 context）；prompts 与 CLI `/cmd` 命令重叠；本期 P0 不必三件套全做
+
+## 3.7.  MCP 高级能力 `sampling` / `roots` / `elicitation`
+
+- 来源 phase：Phase 3.3
+- 计划阶段：实际场景出现需求再做（如想让 server 反向借 LLM 推理 / server 反向问用户）
+- 推迟原因：[§4.9.13 D2](#4913-mcp-接入-phase-33) 决策：这三项都是 server → client 反向能力，需要 host 端实现额外回调；本期 P0 主线是 client 调 server tool，反向能力 YAGNI
+
+## 3.8.  MCP Streamable HTTP transport（远程 / 云端 server）
+
+- 来源 phase：Phase 3.3
+- 计划阶段：用户有跨网 / 团队共享 server 诉求时再做
+- 推迟原因：[§4.9.13 D1](#4913-mcp-接入-phase-33) 决策：个人本机场景 stdio 够；HTTP 涉及 OAuth 2.1 鉴权 / token 管理 / 部署，超 MVP；99% 官方 reference server 默认 stdio
+
+## 3.9. AgentA 自建 MCP server 把内部能力（`search_knowledge` / `list_memory` 等）暴露给其他 host
+
+- 来源 phase：Phase 3.3
+- 计划阶段：用户想"在 Cursor / Claude Desktop 里查 AgentA KB"等跨 host 复用诉求出现时再做
+- 推迟原因：[§4.9.13 Scope](#4913-mcp-接入-phase-33) 决策：本期主线是 **AgentA 作为 client 接入业界 server**；反过来"AgentA 当 server"是另一方向工程量（FastMCP server 框架 + 鉴权 + 多 host 适配）
+
+## 3.10. 多文件 `.agenta/rules/*.md`
+
+- 来源 phase：Phase 1.3
+- 判定原因：单用户 CLI 场景单文件够；真有需求再扩
+
+## 3.11.  rules frontmatter（`alwaysApply` / `globs`）
+
+- 来源 phase：Phase 1.3
+- 判定原因：单文件不需要选择性应用
+
+
+## 3.12.  Memory / project_rules / web_search 等非 RAG 来源的引用
+
+- 来源 phase：Phase 1.4
+- 判定原因：scope 失控；本期只针对 `rag_search` tool 一种来源
+
+## 3.13.  sources 块 token 预算控制
+
+- 来源 phase：Phase 1.4
+- 判定原因：每条引用 ~80 字符，10 条 ~800 字，远低于 ctx；超阈值再优化
+
+## 3.14. skill 间显式调用链（skill A 内调用 skill B）
+
+- 来源 phase：Phase 1.5
+- 判定原因：LLM 自主激活已能复用 skill；显式调用引入依赖管理负担
+
+
+## 3.15. Plan 模板预制（按任务类型 hard-code"代码任务 X 步 / 学习任务 Y 步"等模板）
+
+- 来源 phase：Phase 2.1
+- 判定原因：让 LLM 自由生成 plan 更 agent-y；模板沦为 hard-code 限制；如未来 LLM 自由 plan 太散乱再加（类比 #6 多文件 rules）
+
+## 3.16. 计划自动调度提醒（push notification / email / 系统 toast）
+
+- 来源 phase：Phase 2.2
+- 判定原因：Phase 2.4 SRS 才做时间触发；通知机制涉及 OS 集成 / 邮件服务 / 跨平台适配，超 AgentA scope；如需要由用户外部工具（Cron / Reminders）触发 agent 查询即可
+
+
+## 3.17. MCP server marketplace / 分发管理（自建 server 包注册中心 / `.agenta/mcp_servers/` 仓库式分发）
+
+- 来源 phase：Phase 3.3
+- 判定原因：[§4.9.13 Scope](#4913-mcp-接入-phase-33) 决策：业界 Anthropic `modelcontextprotocol/servers` repo + npm / pip 已覆盖 server 分发；个人项目自建 marketplace 永久 punt（类比 [§4.13.2 #21](#4132-dropped永久不做) 跨 catalog skill 思路 / [§4.13.2 #28 #30 #33](#4132-dropped永久不做) 多用户场景）
+
+
+# 4. more
 
 ## 4.1. UI 改进
 
@@ -109,7 +218,7 @@ WebUI 支持导出对话。
 
 **起因**：Skills 规范（agentskills.io）的渐进披露有三层——catalog（目录）/ prompt body（正文）/ scripts（脚本）。AgentA 目前只实现前两层：catalog 启动时进 base system_prompt，body 在 LLM 调 `load_skill` 时进 messages 历史。
 
-**现状**：scripts 层缺失。即 SKILL.md 目录下随附的可执行脚本（按规范由 agent 在需要时调用，进一步省 context、把确定性逻辑交给代码）尚无加载 / 执行机制。
+**现状**：scripts/references 层缺失。即 SKILL.md 目录下随附的可执行脚本（按规范由 agent 在需要时调用，进一步省 context、把确定性逻辑交给代码）尚无加载 / 执行机制。
 
 **目标**：补齐第三层——定义脚本的发现（SKILL.md 同目录）、调用入口、执行沙箱 / 权限边界、与现有 tool / `load_skill` 的关系。涉及安全面（执行外部脚本），改动较大，单独立项再做。
 
@@ -290,3 +399,62 @@ WebUI 支持导出对话。
 **当实验做**：上线前量「答案质量 / token / 延迟」三件事（质量可借现成评估脚本验回归），掉点就不上。
 
 **成本/风险**：加 ML 依赖（Kompress 模型，体积 + 启动开销）、加一道压缩延迟；"可逆"要发挥得让 agent 会调 `headroom_retrieve`，多一层机制。属架构改动，按需求→设计→实验流程单独立项再做。
+
+
+## 4.28. 定时任务 + 触发式任务双模式
+SRS or some other funcitons ->
+支持 cron 定时调度、文件更新触发、消息指令触发
+
+## 4.29. LangGraph
+真正复杂的企业流程，不是一个 Agent 能解决的，也不是简单多 Agent 能解决的。
+它需要状态机、checkpoint、人工审批、恢复、回放。
+流程里有多阶段、有审批、有状态、有恢复、有责任归属，就该考虑 Workflow Graph。
+
+LangGraph是LangChain团队开发的开源多智能体工作流编排框架，专门用于构建基于大语言模型的有状态、复杂交互式AI应用。它通过有向图结构将任务分解为节点（执行步骤）和边（控制流），支持循环逻辑、状态持久化和人机协作，适用于需要多轮交互、动态调整或长时执行的场景（如智能客服、代码辅助开发等）。
+
+其核心优势在于天然支持循环流程和状态管理，相比传统线性框架能处理更复杂的任务编排。
+
+
+## 4.30. deep research 优化
+如何拆分任务给每个agent
+
+## 4.31. Context engineering
+每一轮交互，模型看到的不只是你的systemprompt，还有历史消息、工具返回、reasoningtrace、子任务结果......
+什么时候该压缩历史?什么时候该清空?什么时候做摘要?工具返回的100K日志怎么处理才不爆context?
+记忆 + rules 不大于 15% ？
+
+## 4.32. trace 优化- 可观测/LLMOps
+你需要完整的执行trace(每一步思考、每一次工具调用、每一个返回)，中间状态可观测可回放，失败case能复现。LangSmith、Langfuse、Phoenix这类工具，比你写一堆print有用一百倍。
+
+显式查看当前prompt 内容
+
+## 4.33. LLM 权限控制
+
+## 4.34. json 输出
+
+**评估 AgentA 是否要把结构化 JSON 从"prompt 约定 + 宽松解析"升级到 provider 原生 structured output。**
+
+**目的**：让 LLM 输出能被程序直接用（存库、调下一步）。注意是为了"能用"，不是"更准"——约束解码反而可能轻微伤推理质量，语义对不对仍要靠 eval / rubric 兜。纯聊天回复不需要 JSON。
+
+**现状**：除工具调用外，plan / research / 记忆抽取 / golden 出题都走"prompt 要求吐 JSON + 正则抠 `{...}` + `json.loads` 容错"（`_parse_plan_json` / `_parse_json` 等），失败降级不抛。好处是跨 provider 通用，代价是要写一堆事后兜底、模型不听话只能降级。
+
+**四档手段**（可靠性弱→强）：
+
+| 档 | 手段 | 保证 | 跨 provider | 现状 |
+|---|---|---|---|---|
+| 1 | Prompt 约定 + 自己解析 | 无硬保证 | 通用 | ✅ 主力 |
+| 2 | JSON Mode（`json_object`） | 合法 JSON，不保证字段 | 部分 | ❌ |
+| 3 | JSON Schema strict / structured output | 严格符合 schema | 不通用 | ❌ |
+| 3′ | Function Calling | 参数符合 schema | 较通用 | ✅ 工具调用 |
+| 4 | Grammar / 约束解码（本地推理） | 任意格式 | 需自控推理栈 | ❌ |
+
+**原理**：第 3/4 档靠约束解码（decode 时把不合法 token 的 logit 掩成 -∞），是推理服务端特性、不改权重；微调是另一条正交路（改权重、只提高"倾向"、无硬保证）。
+
+**关键卡点**：OpenAI 有 `json_object` / `json_schema` strict；Anthropic 无对等 `response_format`，官方姿势是用 tool use 拿结构化。两家不统一，正是 AgentA 现在走第 1 档的原因（简洁 > 兼容负担）。
+
+**建议方向（待定）**：混合打法——能用原生 structured output 就用、不能就退回 prompt + 宽松解析，最后用 eval / rubric 判语义。改动涉及跨 provider 抽象，需先定方向再分步，故记 backlog。
+
+
+## 4.35. 简化
+只留 python 实现
+只留 openai API 分支
