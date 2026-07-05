@@ -1,49 +1,43 @@
-# 1. AgentA
+# AgentA
 
 [![CI](https://github.com/michaelwangzhenan/AgentA/actions/workflows/AgentA_CI.yml/badge.svg)](https://github.com/michaelwangzhenan/AgentA/actions/workflows/AgentA_CI.yml)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB)
-![LLM Providers](https://img.shields.io/badge/LLM%20Providers-9-orange)
-![Agent Loops](https://img.shields.io/badge/Agent%20Loops-3-blueviolet)
-![Tests](https://img.shields.io/badge/Tests-46%20files-brightgreen)
-![Code](https://img.shields.io/badge/Python-27K%2B%20LOC-1f6feb)
+![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688)
+![React](https://img.shields.io/badge/React-19-61DAFB)
+![TypeScript](https://img.shields.io/badge/TypeScript-frontend-3178C6)
 
-一个从零实现的 **本地化私有知识库 Agent**：上接 CLI / WebUI / SDK 三种交互方式，下接 ChromaDB + BM25 向量库与 9 个国内外主流 LLM；
-集成进阶 **RAG**（混合检索 + RRF + Cross-Encoder 精排 + Query 改写）与 **ReAct / Plan-Execute** 推理循环，内置防 prompt 注入、MCP（Model Context Protocol）接入、Skills 框架与跨 session 用户记忆。
+一个本地化私有知识库 Agent，提供 CLI、Web UI、SDK 三种交互方式，底层用 ChromaDB + BM25 向量库，接入 10 个国内外主流 LLM。自主实现 ReAct / Plan-Execute 推理循环，集成进阶 RAG（混合检索、RRF、Cross-Encoder 精排、Query 改写），内置防 prompt 注入、MCP（Model Context Protocol）接入、Skills 框架和跨 session 用户记忆。
 
-围绕"学习/研究助理"业务跑通完整链路：**入库 → 检索 → 出题 → 批改 → 间隔复习（SRS）**。
+面向学习 / 研究助理场景，覆盖入库、检索、出题、批改、间隔复习（SRS）的完整流程。
 
 ---
 
-## 1.1. 演示
+## 演示
 
 <!-- TODO: 把下方占位图替换为实际截图 / GIF，建议存放路径 docs/assets/ -->
 
-| CLI 流式输出 | WebUI 聊天界面 |
+| CLI 流式输出 | Web UI 聊天界面 |
 |:---:|:---:|
-| ![CLI 流式输出 demo](https://placehold.co/600x350/1f2328/cbd5e1?text=CLI+streaming+demo%0A%28GIF+TODO%29) | ![WebUI 主界面](https://placehold.co/600x350/1f2328/cbd5e1?text=WebUI+screenshot%0A%28PNG+TODO%29) |
+| ![CLI 流式输出 demo](https://placehold.co/600x350/1f2328/cbd5e1?text=CLI+streaming+demo%0A%28GIF+TODO%29) | ![Web UI 主界面](https://placehold.co/600x350/1f2328/cbd5e1?text=Web+UI+screenshot%0A%28PNG+TODO%29) |
 
 > **Live Demo 视频**：_待补充_<br>
-> 计划录制 60 秒端到端 demo（入库 → 检索 → 出题 → 批改 → SRS），上传 B 站 / YouTube 后在此处贴出链接。
+> 计划录制 60 秒完整流程 demo（入库、检索、出题、批改、SRS），上传 B 站 / YouTube 后在此处贴出链接。
 
 ---
 
-## 1.2. 项目数据一览
+## 核心特性
 
-| 维度 | 规模 |
-|---|---|
-| **代码量** | ~27.8K 行 Python（`src/` 47 文件 + `tools/` + `tests/`） |
-| **设计文档** | ~16.5K 行 Markdown，8 轮迭代设计文档（`docs/iter_*.md`） |
-| **单元测试** | 46 个测试文件，覆盖 RAG / Agent core / Memory / CLI / Tools |
-| **评估体系** | 1 套 RAG 黄金集 + 9 套 Agent 能力评估（含对抗安全 / 性能基准） |
-| **LLM Provider** | 9 个（Kimi · Qwen · DeepSeek · GLM · 豆包 · OpenAI · Claude · Grok · Ollama 本地） |
-| **Embedding 模型** | 3 个（英文 / 中文 / 多语言）+ Cross-Encoder Reranker |
-| **支持文档格式** | 7 种（PDF · DOCX · PPTX · XLSX · MD · HTML · TXT）+ PDF 扫描件 OCR 兜底 |
-| **Agent 实现** | 3 套可切换（Python 原生 · LangChain · AutoGPT 风格） |
-| **CI** | GitHub Actions 全自动：快速单测 + 性能回归门禁 |
+- 三套可切换的 Agent 实现：Python 原生实现 / LangChain / AutoGPT 风格，同接口配置即可切换，便于横向对比框架取舍
+- 进阶 RAG：混合检索（Dense + BM25）、RRF 融合、Cross-Encoder 精排、Query 改写；多语言分库，扫描件 OCR 降级处理；回答附 `[n]` 溯源标注
+- 评估体系：全模块 pytest 覆盖，10 套 Agent 能力评估（含对抗安全、性能基准），GitHub Actions CI 门禁
+- 十个 LLM Provider，配置即切换：涵盖国内外主流与 Ollama 本地，兼容 OpenAI 与 Anthropic 原生两种协议
+- 内置安全防注入：隔离包装、启发式清洗、plan 执行审批、SSRF 防护、工具白名单等多层防护
+- 业务闭环：面向学习 / 研究助理，覆盖入库、检索、出题、批改至 SRS 间隔复习
+- 配套 Web 管理后台：用量统计、备份恢复、质量看板、模型路由池、用户与权限管理
 
 ---
 
-## 1.3. 整体架构
+## 整体架构
 
 - 三层职责：表现层 / Agent Core / RAG
 - 两套接口：`AgentAPI` / `RetrieverAPI`
@@ -100,56 +94,59 @@ flowchart TB
 
 ---
 
-## 1.4. 核心能力
+## 核心能力
 
-### 1.4.1. 1.1 进阶 RAG 检索
+### 进阶 RAG 检索
 
 | 能力 | 说明 |
 |---|---|
-| **多模型 Embedding** | • `all-MiniLM-L6-v2`（英文）/ `bge-small-zh`（中文）/ `bge-m3`（多语言）三套<br>• 分库存储，自动按语种路由 |
-| **混合检索** | • Dense 向量召回 + BM25 关键词召回<br>• 通过 **RRF（Reciprocal Rank Fusion，倒数排名融合）** 融合排名<br>• 对术语 / 缩写 / 版本号场景显著优于纯向量 |
-| **二阶段精排** | • `bge-reranker-base` Cross-Encoder 精排<br>• 按 per-model 阈值过滤低质 chunk |
+| **多模型 Embedding** | • `all-MiniLM-L6-v2`（英文）/ `bge-small-zh`（中文）/ `bge-m3`（多语言）三套<br>• 按模型别名（en / zh / m3）分库存储；检索按 `RAG_ACTIVE_EMBEDDINGS` 多库并行召回再融合 |
+| **混合检索** | • Dense 向量召回 + BM25 关键词召回<br>• 通过 **RRF（Reciprocal Rank Fusion，倒数排名融合）** 融合排名<br>• 对术语 / 缩写 / 版本号场景比纯向量更准 |
+| **二阶段精排** | • `bge-reranker-base` Cross-Encoder 精排<br>• Dense 召回按 per-model 阈值过滤，精排后可选全局阈值再筛 |
 | **Query 改写** | • Multi-Query 同义改写<br>• HyDE（假设性答案生成）<br>• 跨语言翻译轴<br>• 三档可独立开关 |
-| **多格式解析** | • PDF · DOCX · PPTX · XLSX · Markdown · HTML · TXT 七种格式<br>• PDF 扫描件自动调 `rapidocr-onnxruntime` OCR 兜底 |
+| **多格式解析** | • PDF · DOCX · PPTX · XLSX · Markdown · HTML · TXT 七种格式<br>• PDF 扫描件自动调用 `rapidocr-onnxruntime` OCR 降级处理 |
 | **召回可溯源** | • 回答正文带 `[n]` 标号<br>• 末尾 `— sources —` 块写明文件 / 章节 / 页号<br>• 同源 chunk 自动合并，编号受控防幻觉 |
 | **评估方法** | • 内置黄金集 + `hit@1 / hit@3 / hit@k` / `MRR`（Mean Reciprocal Rank，平均倒数排名）<br>• 每次调优产物保存为 Markdown 报告（含 Miss 用例诊断），便于跨轮 diff |
 
-### 1.4.2. 1.2 Agent 能力
+### Agent 能力
 
 | 能力 | 说明 |
 |---|---|
-| **推理循环** | • 简单任务用 ReAct<br>• 复杂任务自动升级为 **Plan-Execute** 多步执行<br>• 测验批改 / RAG 召回用 **Critic 自检 + LLM-as-Judge** 双重复核 |
-| **Context 管理** | 四层注入：<br>• SYSTEM_PROMPT + Skill catalog<br>• 个人偏好 Rules（每用户一份，存 `auth.db`）<br>• 跨 session 用户记忆<br>• 临时上下文（学习计划 / 工具结果 / 用户输入） |
+| **推理循环** | • 简单任务用 ReAct<br>• 复杂任务转入 **Plan-Execute** 多步执行<br>• 测验批改用 Critic 自检 + LLM-as-Judge 双重复核；RAG 召回用 Critic 过滤低相关 chunk |
+| **Context 管理** | 四层 system prompt 注入：<br>• SYSTEM_PROMPT + Skill catalog<br>• 个人偏好 Rules（每用户一份，存 `auth.db`）<br>• 跨 session 用户记忆<br>• 当前激活的学习计划（`<active_study_plan>`） |
 | **安全防注入** | • `<untrusted_tool>` 包装隔离<br>• 启发式清洗<br>• plan 执行审批<br>• URL/SSRF 防护<br>• tool 名单门 |
-| **Thinking 模式** | • Extended Thinking 总开关<br>• Budget / Adaptive 两种预算策略可配<br>• 适配 Claude / Qwen3 |
-| **多模型切换** | • 内置 9 个国内外 LLM provider，`.env` 一行切换<br>• OpenAI 兼容 + Anthropic + Ollama 本地 |
+| **Thinking 模式** | • Extended Thinking 总开关<br>• 可配 thinking 预算 tokens<br>• 适配 Claude 原生思考与 Qwen 系 reasoning |
+| **多模型切换** | • 内置 10 个国内外 LLM provider，`.env` 一处配置即可切换<br>• OpenAI 兼容 + Anthropic 原生 + Ollama 本地 |
+| **模型路由** | • `auto` 档按问题难度在候选池内向更便宜的模型降级<br>• 手选具体模型即精确锁定；判定 / 调用出错软回落基准模型，不阻断主链路 |
+| **语义缓存** | • 相近 query 命中历史答案，跳过整次检索 + 生成<br>• 独立向量库匹配、按用户隔离、可失效；读写出错回落正常流程 |
 | **用户记忆** | • 跨 session 自动提取与节流的用户偏好 / 事实库（`UserMemoryStore`） |
 | **Skills 框架** | • 兼容 `agentskills.io` 规范<br>• LLM 按 description 自动激活，或 `/<name>` 手动调起 |
-| **MCP 接入** | • 作为 [Model Context Protocol](https://modelcontextprotocol.io) Host<br>• 配置文件挂载第三方 server，零代码扩 tool |
+| **MCP 接入** | • 作为 [Model Context Protocol](https://modelcontextprotocol.io) Host<br>• 配置文件挂载第三方 server，零代码扩展工具 |
+| **深度研究** | • 独立于普通 chat 的四阶段流水线：规划 → 并行子代理检索 → 反思补查 → 带 `[n]` 引用综述<br>• 子代理独立上下文，中间过程不污染会话历史 |
 
-**业务能力**（学习/研究助理端到端跑通）：
-- **创建学习计划**：根据用户目标制定多步计划，可跨 session 注入 prompt
-- **出题练习**：基于知识库自动出 MCQ（多选题）+ 简答题
+**业务能力**（学习/研究助理）：
+- **创建学习计划**：根据用户目标制定多步计划并跨 session 持久化，激活后注入当前会话上下文
+- **出题练习**：基于知识库自动出单选 / 多选 / 简答三类题
 - **测试批改**：作答后自动批改 + 留档复盘
 - **主动复习**：基于 SM-2 算法的 SRS（Spaced Repetition System，间隔重复）卡片调度
 
-### 1.4.3. 1.3 多形态交互
+### 多形态交互
 
 | 形态 | 入口 | 适用场景 |
 |---|---|---|
 | **CLI** | `python -m src.cli.main` | 开发调试 / 无 GUI 环境；支持斜杠命令 + Tab 补全 + 流式输出 |
-| **Web UI** | `chainlit run chainlit_app.py` | 日常使用，浏览器内聊天界面，支持上传 / 思考过程展示 |
-| **SDK**(TBD) | `from src.agent.agent_api import AgentAPI` | 二次集成 / 脚本调用；事件回调可订阅 Agent 内部步骤 |
+| **Web UI** | 后端 `python -m src.api.run`（:8000）+ 前端 `npm run dev`（:5173）<br>Windows 一键：`tools/dev_server.ps1 start` | 日常使用；React 前端 + FastAPI 后端，多用户登录、上传、思考过程 SSE 流式展示，含管理后台 |
+| **SDK / 脚本** | `from src.agent.agent_api import AgentAPI` | 二次集成 / 脚本调用；事件回调可订阅 Agent 内部步骤 |
 
-三种形态共用同一个 `AgentAPI`，通过 `EventBus` 推送统一的 Agent Event（thinking / tool_call / tool_result / message / error），表现层只关心渲染。
+三种形态共用同一个 `AgentAPI`，通过 `EventBus` 推送统一的 Agent Event（思考过程 / 正文 token / 工具调用 / plan 进度 / 最终答案 / 错误等），表现层只关心渲染。
 
-### 1.4.4. 1.4 三套 Agent 实现（同接口可切换）
+### 三套 Agent 实现
 
-`IMP_METHOD` 一行配置即可切换底层实现，方便横向对比与学习不同框架的设计取舍：
+通过 `IMP_METHOD` 配置即可切换底层实现，便于横向对比不同框架的设计取舍：
 
 | 实现 | 入口 | 特点 |
 |---|---|---|
-| **PYTHON** | `src/agent/agent.py` | 从零手写的 ReAct + Plan-Execute 循环，无第三方依赖，便于理解 Agent 内部机制 |
+| **PYTHON** | `src/agent/agent.py` | 自主实现的 ReAct + Plan-Execute 循环，无第三方依赖，便于理解 Agent 内部机制 |
 | **LANGCHAIN** | `src/agent/langchain_agent.py` | 基于 LangChain `AgentExecutor`，使用社区生态的 tool / memory 抽象 |
 | **AUTOGPT** | `src/agent/autogpt_agent.py` | 自主目标分解 + 长周期任务循环风格实现 |
 
@@ -157,44 +154,45 @@ flowchart TB
 
 ---
 
-## 1.5. 工程化质量
+## 工程化质量
 
-为保证个人项目也维持生产级工程素养，从一开始就建立了**测试 / 评估 / CI** 三道质量门：
+作为个人项目，仍按工程标准建立了测试、评估、CI 三道质量门：
 
-### 1.5.1. 2.1 测试体系
+### 测试体系
 
-- **46 个 pytest 测试文件**覆盖 Agent core / RAG / Memory / CLI / Tools 全模块
-- 用 `MagicMock` 隔离外部依赖（LLM / DB / 文件 IO），默认快速集 1-2 分钟跑完
-- 通过 `pytest.ini` marker 分档：`fast`（默认） / `ext`（含 7 个 LLM provider） / `int`（需真实 API key 的集成测试）
+- **87 个 pytest 测试文件**覆盖 Agent core / RAG / Memory / CLI / API / Tools 全模块
+- 用 `MagicMock` 隔离外部依赖（LLM / DB / 文件 IO），默认快速集约 1-2 分钟完成
+- 通过 `pytest.ini` marker 分档：默认仅运行快速集（自动排除 `integration` / `slow` / `langchain` / `autogpt`）；集成测试（真实 API / 网络 / ChromaDB）、慢用例、可选实现（LangChain / AutoGPT）测试按需单独运行
 
-### 1.5.2. 2.2 评估方法（不是只跑通）
+### 评估方法
 
 | 评估对象 | 黄金集位置 | 指标 |
 |---|---|---|
-| **RAG 召回** | `tools/rag_eval/golden.json` | `hit@1` / `hit@3` / `hit@k` / `MRR`，Miss 用例自动诊断 |
+| **RAG 召回** | `rag_golden.db`（质量看板维护） | `hit@1` / `hit@3` / `hit@k` / `MRR`，Miss 用例自动诊断 |
 | **Memory 召回** | `tools/agent_eval/memory/` | 项目 rules / 用户偏好是否被遵循 |
-| **Skills 激活** | `tools/agent_eval/skills/` | LLM 看到 catalog 能否主动调对 `load_skill(name=…)` |
-| **Plan-Execute 识别** | `tools/agent_eval/plan_execute/` | 复杂任务调 `make_plan` / 简单任务不调；plan 结构由 LLM-judge 打分 |
-| **学习计划 / Quiz / SRS 业务** | `tools/agent_eval/learning_plan/`, `quiz/`, `srs/` | 业务工具调用正确性 + 结构质量 |
-| **Critic 自检准确率** | `tools/agent_eval/critic/` | critic 自身判得准不准（quiz_critic / rag_critic） |
-| **MCP 接入** | `tools/agent_eval/mcp/` | 配置 → server 启动 → tool 合流 → SSRF 拦截全链路 |
+| **Skills 激活** | `tools/agent_eval/skills/` | LLM 能否依据 catalog 正确调用 `load_skill(name=…)` |
+| **Plan-Execute 识别** | `tools/agent_eval/plan_execute/` | 复杂任务调用 `make_plan`、简单任务不调用；plan 结构由 LLM-judge 打分 |
+| **学习计划 / Quiz / SRS 业务** | `tools/agent_eval/learning_plan/`, `quiz/`, `srs/` | 业务工具调用正确性与结构质量 |
+| **Critic 自检准确率** | `tools/agent_eval/critic/` | critic 自身判定的准确率（quiz_critic / rag_critic） |
+| **MCP 接入** | `tools/agent_eval/mcp/` | 配置、server 启动、tool 合流、SSRF 拦截全链路 |
 | **对抗安全** | `tools/agent_eval/security/` | 直接越狱 / RAG 间接 / Web 间接 / tool 名单门，拦截率 ≥ 90% / 误拦率 ≤ 10% |
 | **性能基准** | `tools/agent_eval/perf/eval_perf.py` | session / memory 在 10/100/1000/5000 数据档位下的延迟基准（中位数 ms） |
 
-所有评估结果统一保存到 `tools/{rag,agent}_eval/reports/` 下的 **Markdown 报告**（强制不用 JSON / CSV），方便跨轮对比与人工 review。
+所有评估结果统一保存到 `tools/reports/<eval>/` 下的 **Markdown 报告**（强制不用 JSON / CSV），便于跨轮对比与人工复核。
 
-### 1.5.3. 2.3 CI / CD
+### CI / CD
 
-GitHub Actions（`.github/workflows/AgentA_CI.yml`）每次 push / PR 自动执行：
+GitHub Actions（`.github/workflows/AgentA_CI.yml`）每次 push / PR 自动执行三个并行 job：
 
-1. **Fast UT**：默认单测集，平均 ~1 分钟跑完
-2. **性能回归门禁**：跑 `eval_perf` 100 / 1000 数据档位，若中位数延迟回归则 CI 红，并上传报告 artifact
+1. **Fast UT**：默认单测集（`pytest -q`），平均约 1 分钟完成
+2. **性能回归门禁**：运行 `eval_perf` 100 / 1000 数据档位，中位数延迟回归则判定失败，并上传报告 artifact
+3. **评估门禁（非 LLM）**：运行 `run_all --ci` 的确定性子集（安全拦截等不消耗 token 的用例），任一 FAIL 即判定失败，并上传报告 artifact
 
 ---
 
-## 1.6. 快速开始
+## 快速开始
 
-### 1.6.1. 3.1 环境准备
+### 环境准备
 
 ```bash
 python -m venv .venv
@@ -206,39 +204,46 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 1.6.2. 3.2 配置环境变量
+### 配置环境变量
 
 ```bash
 cp .env.example .env
 # 填入：LLM_PROVIDER 以及对应的 *_API_KEY
 ```
 
-### 1.6.3. 3.3 下载 Embedding / Reranker 模型
+完整配置项（RAG / Agent / 安全 / Thinking 等开关）逐条说明见 **`.env.example`**。
 
-参考 [5.3 模型下载](#53-模型下载)。
+### 下载 Embedding / Reranker 模型
 
-### 1.6.4. 3.4 准备 MCP server（可选）
+参考 [模型下载](#53-模型下载)。
 
-如开启 MCP（`MCP_ENABLED=true`），挂载两个默认 server: fetch和 filesystem，需准备好运行环境。否则启动时这两个 server 会连接失败（agent 仍能正常跑）。
+### 准备 MCP server（可选）
+
+如开启 MCP（`MCP_ENABLED=true`），会挂载 fetch 与 filesystem 两个默认 server，需提前准备好运行环境；否则启动时二者连接失败（agent 仍可正常运行）。
 
 | server | 类型 | 能力 | 准备方式 |
 |---|---|---|---|
-| **fetch** | Python | 抓网页 → markdown | `pip install -r requirements.txt` 已含 `mcp-server-fetch`，无需额外操作 |
-| **filesystem** | Node | 读 / 写 / 列工作区文件 | 需先装 [Node.js](https://nodejs.org)（含 `npx`）；装好后**手动先跑一次，**预下载该包（`npx -y @modelcontextprotocol/server-filesystem`） |
+| **fetch** | Python | 抓网页转 markdown | `pip install -r requirements.txt` 已含 `mcp-server-fetch`，无需额外操作 |
+| **filesystem** | Node | 读 / 写 / 列工作区文件 | 需先安装 [Node.js](https://nodejs.org)（含 `npx`）；安装后**先手动运行一次**以预下载该包（`npx -y @modelcontextprotocol/server-filesystem`） |
 
-### 1.6.5. 3.5 启动 AgentA
+### 启动 AgentA
 
-首次使用先入库（详见 [5.1 RAG 入库](#51-rag-入库)）：
+首次使用先入库（详见 [RAG 入库](#rag-入库)）：
 
 ```bash
 python -m tools.cli.rag_cli ingest -m m3
 ```
 
-WebUI 模式（Chainlit，推荐）：
+Web UI 模式（React 前端 + FastAPI 后端，推荐）：
 
 ```bash
-chainlit run chainlit_app.py --port 8000
-# 浏览器打开 http://localhost:8000
+# Windows 一键拉起前后端（后台运行）
+tools/dev_server.ps1 start
+# 浏览器打开 http://localhost:5173
+
+# 或手动分别启动：
+python -m src.api.run                 # 后端 :8000
+cd frontend && npm install && npm run dev   # 前端 :5173（首次需 npm install）
 ```
 
 CLI 模式（开发调试 / 无 GUI 场景）：
@@ -250,43 +255,16 @@ python -m src.cli.main
 
 ---
 
-## 1.7. 主要配置
+## 实用工具
 
-`.env` 中常用的关键项（完整说明见 `.env.example`）：
+<details>
+<summary><b>RAG 入库 / RAG 评估 / 模型下载 / Agent 能力评估</b>（展开查看命令）</summary>
 
-```ini
-# —— LLM ——
-LLM_PROVIDER=qwen                 # kimi / qwen / deepseek / glm / openai / claude ...
-QWEN_API_KEY=sk-xxxxxxxx
-LLM_PROXY=http://127.0.0.1:7890   # 仅 openai / grok / claude 需要
+<a id="rag-入库"></a>
 
-# —— RAG ——
-EMBEDDING_MODEL=m3                # en / zh / m3
-RAG_ACTIVE_EMBEDDINGS=m3          # 实际启用的 collection 列表
-RAG_TOP_K=8                       # 送给 LLM 的最终片段数
-RERANKER_ENABLED=true             # 二阶段 Cross-Encoder 精排
-BM25_ENABLED=true                 # BM25 + RRF 混合检索
-RAG_QUERY_REWRITE_ENABLED=true    # Multi-Query 同义改写
+### RAG 入库
 
-# —— Agent ——
-IMP_METHOD=PYTHON                 # PYTHON / LANGCHAIN / AUTOGPT
-THINKING_ENABLED=true             # Extended Thinking（Claude / Qwen3）
-USER_MEMORY_ENABLED=true          # 跨 session 用户记忆
-USER_RULES_ENABLED=true           # 每用户偏好 Rules 注入（存数据库）
-USER_RULES_MAX_CHARS=4000         # 单用户 rules 文本上限，超出写入时返 400
-PLAN_PERMISSION_MODE=false        # plan 执行前是否需要用户审批
-CRITIC_QUIZ_ENABLED=true         # 测验批改 LLM-as-Judge 复审
-CRITIC_RAG_ENABLED=true          # RAG 召回 chunks 相关性过滤
-MCP_ENABLED=true                  # 启用 MCP 接入（.agenta/mcp/config.json）
-```
-
----
-
-## 1.8. 实用工具
-
-### 1.8.1. 5.1 RAG 入库
-
-`tools/cli/rag_cli.py` 把 `./datasets/` 下文档灌入向量库 + BM25 索引，并提供清库与状态查询：
+`tools/cli/rag_cli.py` 将 `./datasets/` 下文档写入向量库与 BM25 索引，并提供清库与状态查询：
 
 ```bash
 python -m tools.cli.rag_cli status                                 # 查看每个 collection 的当前状态
@@ -296,20 +274,20 @@ python -m tools.cli.rag_cli clear                                  # 清空全�
 python -m tools.cli.rag_cli clear -m m3                            # 只清空指定 alias
 ```
 
-### 1.8.2. 5.2 RAG 评估
+### RAG 评估
 
-基于 `tools/rag_eval/golden.json` 黄金集计算 `hit@1 / hit@3 / hit@k` / `MRR`，结果默认保存到 `tools/rag_eval/reports/`：
+黄金集从 `rag_golden.db` 读取（增删改查走「质量看板」的「Golden 管理」页），计算 `hit@1 / hit@3 / hit@k` / `MRR`：
 
 ```bash
-python -m tools.rag_eval.runner                                # 当前配置基线
-python -m tools.rag_eval.runner --no-rewriter                  # 关闭 Query 改写做消融对比
-python -m tools.rag_eval.runner --no-rerank                    # 关闭精排做消融对比
-python -m tools.rag_eval.runner -o tools/rag_eval/reports/x.md # 保存 Markdown 报告 + 同名 .log trace
+python -m tools.rag_eval.runner                              # 当前配置基线（仅终端汇总）
+python -m tools.rag_eval.runner --no-rewriter                # 关闭 Query 改写进行消融对比
+python -m tools.rag_eval.runner --no-rerank                  # 关闭精排进行消融对比
+python -m tools.rag_eval.runner -o tools/reports/rag/x.md    # 保存 Markdown 报告 + 同名 .log trace
 ```
 
 <a id="53-模型下载"></a>
 
-### 1.8.3. 5.3 模型下载
+### 模型下载
 
 `tools/cli/download_models.py` 按编号下载所需 Embedding / Reranker，自带多镜像 fallback：
 
@@ -319,11 +297,9 @@ python -m tools.cli.download_models -l   # 仅查看清单与缓存状态
 python -m tools.cli.download_models 3    # 下载指定模型（编号详见 -l 输出）
 ```
 
-> Windows 用户也可直接 `python -m pytest tests/`，效果等同 `-fast`（pytest.ini 已配 marker 过滤）。
+### Agent 能力评估
 
-### 1.8.4. 5.6 Agent 能力评估
-
-10 套独立评估脚本，全部报告统一保存到 `tools/agent_eval/reports/`，命名 `<feature>-<YYYYMMDD-HHMMSS>.md`：
+10 套独立评估脚本，报告统一保存到 `tools/reports/<eval>/`，命名 `<feature>-<YYYYMMDD-HHMMSS>.md`：
 
 | # | 评估对象 | 脚本 | 默认 case 示例 |
 |---|---|---|---|
@@ -338,11 +314,8 @@ python -m tools.cli.download_models 3    # 下载指定模型（编号详见 -l 
 | 9 | 安全 / 防注入对抗 | `tools.agent_eval.security.eval_security` | `--kind direct` |
 | 10 | 性能基准（延迟中位数） | `tools.agent_eval.perf.eval_perf` | `--target memory --sizes 100,1000,5000` |
 
-<details>
-<summary><b>常用运行方式</b>（点开展开）</summary>
-
 ```bash
-# 跑全部（默认调真实 LLM）
+# 逐项运行（默认调用真实 LLM）
 python -m tools.agent_eval.memory.eval_memory
 python -m tools.agent_eval.skills.eval_skills
 python -m tools.agent_eval.plan_execute.eval_plan_execute
@@ -353,28 +326,28 @@ python -m tools.agent_eval.critic.eval_critic
 python -m tools.agent_eval.mcp.eval_mcp
 python -m tools.agent_eval.security.eval_security
 python -m tools.agent_eval.perf.eval_perf --target all
+# 或一次运行全部：python -m tools.agent_eval.run_all（CI 子集加 --ci）
 
 # 通用开关
 --case <ID>     # 单 case 调试
---no-report     # 不写报告（quick check）
---no-judge      # 跳过 LLM-judge 评分（仅结构对比，省 LLM 配额）
---no-llm        # 跳过 LLM 调用，仅跑可静态判定的 case
+--no-report     # 不写报告（快速检查）
+--no-judge      # 跳过 LLM-judge 评分（仅结构对比，节省 LLM 配额）
+--no-llm        # 跳过 LLM 调用，仅运行可静态判定的 case
 ```
 
 </details>
 
 ---
 
-## 1.9. 文档导读
+## 文档导读
 
-| 文档 | 类型 | 内容 |
-|---|---|---|
-| **[`docs/design.md`](docs/design.md)** | **当前态设计** | **整体架构 / RAG（Ingest + Retrieval + Eval + 代码导读）/ Agent（API · 会话 · 记忆 · Prompt · Citation · Plan · Skills · MCP · 防注入）—— 项目的 single source of truth** |
-| `docs/iter_0_init.md` | 迭代记录 | 项目初版规划：目标 / 架构 / 技术选型 |
-| `docs/iter_2_agent.md` | 迭代记录 | Agent core 设计：四层 context / Memory / Plan-Execute / Skills / 防注入 |
-| `docs/iter_3_CI.md` | 迭代记录 | GitHub Actions CI 接入：免费额度 / 性能门禁 / artifact |
-| `docs/iter_4_UI.md` | 迭代记录 | UI 形态反思 |
-| `docs/iter_5_LangChain.md` | 迭代记录 | LangChain 实现路径 |
-| `docs/iter_6_AutoGPT.md` | 迭代记录 | AutoGPT 风格实现 |
-| `docs/iter_7_CnP.md` | 迭代记录 | 模型上下文协议（MCP）接入设计 |
-| `docs/iter_8_debugging.md` | 迭代记录 | 线上调试 / 远端联调 |
+本项目保留了完整的设计与迭代文档，从需求到设计取舍再到逐项验证都有记录：
+
+| 文档 | 内容 |
+|---|---|
+| **[`docs/design.md`](docs/design.md)** | **当前态设计（single source of truth）**：整体架构 / RAG（Ingest · Retrieval · Eval）/ Agent（API · 会话 · 记忆 · Prompt · Citation · Plan · Skills · MCP · 防注入） |
+| [`docs/v_1_0/iteration/`](docs/v_1_0/iteration) | **20+ 篇迭代设计文档**（V1.0，iter_0 至 iter_19，另有 LangChain / AutoGPT 专篇）：完整记录需求、设计、取舍的思考过程 |
+| [`docs/v_1_0/verification/`](docs/v_1_0/verification) | 迭代验证记录：评估体系 / 路由缓存 / 深度研究 / 安全红队等验收 |
+| [`docs/v_1_1/`](docs/v_1_1) | 当前版本（V1.1）迭代文档与 Review |
+| [`docs/knowledge/`](docs/knowledge) | 知识库：AI / UI / Git / Pytest 等学习沉淀 |
+| [`docs/code.md`](docs/code.md) | 代码导读：模块职责与关键实现索引 |
