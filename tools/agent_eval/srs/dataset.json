@@ -79,7 +79,7 @@
   {
     "id": "S12-negative-study-plan",
     "category": "negative",
-    "question": "我想 4 周准备 Python 面试，帮我做学习计划",
+    "question": "我想 4 周系统学习 Python，帮我做学习计划",
     "expected_first_tool_not": ["add_to_srs", "query_srs_due", "review_srs_card", "query_srs_stats"],
     "note": "学习计划需求 → 应 create_study_plan / make_plan，不应触发 SRS"
   }

@@ -115,7 +115,7 @@ add_to_srs(
     source_type="manual",
     front="Python 装饰器原理",
     back="闭包+__call__",
-    note="可选标签如『面试重点』"
+    note="可选标签如『复习重点』"
 )
 ```
 

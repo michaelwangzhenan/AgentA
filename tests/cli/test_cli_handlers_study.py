@@ -40,7 +40,7 @@ def _make_collector() -> tuple[list[str], "callable"]:
 def _seed_plans(store: LearningPlanStore) -> tuple[int, int]:
     """种 2 个 plan（p2 active）+ 给 p2 加 3 task。"""
     p1 = store.create_plan(goal="第一个计划", weeks=2)
-    p2 = store.create_plan(goal="第二个计划 ML 面试", weeks=8)
+    p2 = store.create_plan(goal="第二个计划 机器学习", weeks=8)
     store.add_tasks(p2, [
         {"stage_idx": 1, "order_idx": 1, "title": "T1"},
         {"stage_idx": 1, "order_idx": 2, "title": "T2"},

@@ -82,7 +82,7 @@
   {
     "id": "Q11-negative-study-plan-create",
     "category": "negative",
-    "question": "我想 8 周准备 ML 面试，帮我系统规划一下",
+    "question": "我想 8 周系统学习机器学习，帮我系统规划一下",
     "expected_first_tool_not": ["create_quiz", "grade_quiz", "query_quiz_history"],
     "judge_after": false,
     "note": "学习计划创建 → 应触发 create_study_plan / make_plan，**不应**触发 quiz（边界 case：学习计划 vs quiz 区分）"

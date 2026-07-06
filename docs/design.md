@@ -652,7 +652,7 @@ Plan 步数多了需要更大预算，所以 tool 轮次上限需按 plan 步数
 | 字段                            | 类型         | 说明                                       |
 | ------------------------------- | ------------ | ------------------------------------------ |
 | `id`                          | INTEGER (PK) | plan 唯一 ID                               |
-| `goal`                        | TEXT         | 学习目标描述（如 "8 周准备 ML 面试"）      |
+| `goal`                        | TEXT         | 学习目标描述（如 "8 周系统学习机器学习"）      |
 | `weeks`                       | INTEGER      | 总周数，0 表示未指定                       |
 | `status`                      | TEXT         | `active` / `completed` / `abandoned` |
 | `is_active`                   | INTEGER      | 当前活跃标记，全表至多 1 条为 1            |
@@ -706,7 +706,7 @@ sequenceDiagram
     participant T as Tools
     participant LP as LearningPlanStore
 
-    U->>A: "我想 8 周准备 ML 面试"
+    U->>A: "我想 8 周系统学习机器学习"
     A->>L: chat(messages, tools)
     L-->>A: load_skill(study-planner)
     A->>SK: 加载 SKILL.md body
@@ -718,7 +718,7 @@ sequenceDiagram
 
     Note over A,L: Step 1: 查领域
     A->>L: chat(...)
-    L-->>A: search_knowledge(query="机器学习面试 重点")
+    L-->>A: search_knowledge(query="机器学习 重点")
     A->>T: execute_tool
     T-->>A: hits（检索结果）
     A->>L: chat(...)

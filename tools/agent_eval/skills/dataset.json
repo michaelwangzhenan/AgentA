@@ -2,7 +2,7 @@
   {
     "id": "S01-positive-planner-zh",
     "category": "positive",
-    "question": "帮我做一份机器学习面试两周复习计划",
+    "question": "帮我做一份机器学习两周入门计划",
     "expected_skill": "study-planner",
     "note": "中文 + 直白时间框（study-planner 的主场景）"
   },
@@ -16,7 +16,7 @@
   {
     "id": "S03-positive-planner-en",
     "category": "positive",
-    "question": "Plan a 14-day study schedule for a deep learning interview, please.",
+    "question": "Plan a 14-day study schedule for deep learning, please.",
     "expected_skill": "study-planner",
     "note": "英文问 + 同样的规划意图（验证多语意图识别）"
   },

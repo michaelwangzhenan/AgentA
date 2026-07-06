@@ -641,7 +641,7 @@ def _print_plan_list(store: LearningPlanStore, out: OutputFn = _stdout) -> None:
     """`/study` / `/study list`：按 active 优先 + 创建时间倒序列出全部 plan。"""
     plans = store.list_plans(include_abandoned=False)
     if not plans:
-        out("📭 暂无学习计划。可在对话中说\"我想 8 周准备 ML 面试\"等让 Agent 帮你新建。\n")
+        out("📭 暂无学习计划。可在对话中说\"我想 8 周系统学习机器学习\"等让 Agent 帮你新建。\n")
         return
     out(f"\n📚 学习计划列表（共 {len(plans)} 个）：")
     out(f"  {'':<2}{'ID':<6}  {'进度':<8}  {'目标':<40}")

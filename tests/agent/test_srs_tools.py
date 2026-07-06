@@ -117,9 +117,9 @@ class TestAddToSrs:
         execute_tool("add_to_srs", {
             "source_type": "manual",
             "front": "Q", "back": "A",
-            "note": "面试重点",
+            "note": "复习重点",
         })
-        assert srs.list_cards()[0]["note"] == "面试重点"
+        assert srs.list_cards()[0]["note"] == "复习重点"
 
     def test_manual_missing_front(self, srs: SRSStore) -> None:
         result = execute_tool("add_to_srs", {

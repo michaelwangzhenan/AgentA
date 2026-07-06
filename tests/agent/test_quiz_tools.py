@@ -164,7 +164,7 @@ class TestCreateQuiz:
         # mock LearningPlanStore.get_plan
         from src.stores import learning_plan_store as lp_mod
         mock_lp = MagicMock()
-        mock_lp.get_plan.return_value = {"id": 7, "goal": "8 周准备 ML 面试"}
+        mock_lp.get_plan.return_value = {"id": 7, "goal": "8 周系统学习机器学习"}
         lp_mod.reset_shared_store_for_testing(mock_lp)
         try:
             res = execute_tool("create_quiz", {
@@ -172,7 +172,7 @@ class TestCreateQuiz:
             })
             assert res.status == "ok"
             quizzes = store.list_quiz_sets()
-            assert quizzes[0]["topic"].startswith("8 周准备 ML 面试")
+            assert quizzes[0]["topic"].startswith("8 周系统学习机器学习")
             assert "Stage 2" in quizzes[0]["topic"]
         finally:
             lp_mod.reset_shared_store_for_testing(None)

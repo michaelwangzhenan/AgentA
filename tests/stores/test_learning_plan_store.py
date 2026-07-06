@@ -46,10 +46,10 @@ def _sample_tasks() -> list[dict[str, object]]:
 class TestBasicCRUD:
 
     def test_create_plan_and_get(self, store: LearningPlanStore) -> None:
-        pid = store.create_plan(goal="8 周准备 ML 面试", weeks=8)
+        pid = store.create_plan(goal="8 周系统学习机器学习", weeks=8)
         plan = store.get_plan(pid)
         assert plan is not None
-        assert plan["goal"] == "8 周准备 ML 面试"
+        assert plan["goal"] == "8 周系统学习机器学习"
         assert plan["weeks"] == 8
         assert plan["status"] == "active"
         assert plan["is_active"] is True
@@ -289,11 +289,11 @@ class TestRenderPlanForPrompt:
         assert store.render_plan_for_prompt(plan_id=pid) == ""
 
     def test_basic_render_has_id_goal_progress(self, store: LearningPlanStore) -> None:
-        pid = store.create_plan(goal="8 周准备 ML 面试", weeks=8)
+        pid = store.create_plan(goal="8 周系统学习机器学习", weeks=8)
         store.add_tasks(pid, _sample_tasks())
         out = store.render_plan_for_prompt(plan_id=pid)
         assert f"plan_id={pid}" in out
-        assert "8 周准备 ML 面试" in out
+        assert "8 周系统学习机器学习" in out
         assert "8 周" in out
         assert "0/5 完成" in out
 

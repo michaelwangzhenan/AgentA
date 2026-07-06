@@ -2,7 +2,7 @@
   {
     "id": "L01-create-ml-8w",
     "category": "create",
-    "question": "我想 8 周准备机器学习面试，帮我系统规划一下",
+    "question": "我想 8 周系统学习机器学习，帮我系统规划一下",
     "expected_first_tool": ["make_plan", "create_study_plan"],
     "judge_after": true,
     "note": "明确学习目标 + 周期 → 应触发 make_plan 走嵌套 4 步（D5），或直接 create_study_plan"

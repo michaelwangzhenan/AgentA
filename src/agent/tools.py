@@ -376,7 +376,7 @@ _STUDY_PLAN_TOOLS: list[dict[str, Any]] = [
             "name": "create_study_plan",
             "description": (
                 "新建一个**跨 session 持久化的学习计划**，把目标 + 阶段任务清单一次性落库。"
-                "适用：用户表达明确学习目标（如『8 周准备 ML 面试』/『学透 RAG』），"
+                "适用：用户表达明确学习目标（如『8 周系统学习机器学习』/『学透 RAG』），"
                 "Agent 已在前几轮收集到领域知识 / 整理出阶段拆分。"
                 "**不要**直接用本 tool —— 应先按 study-planner skill 引导用 make_plan 拆解"
                 "（查领域 → 列阶段 → 列任务 → 落库），落库即调本 tool。"
@@ -388,7 +388,7 @@ _STUDY_PLAN_TOOLS: list[dict[str, Any]] = [
                 "properties": {
                     "goal": {
                         "type": "string",
-                        "description": "学习目标的一句话描述，如 \"8 周准备 ML 面试\" / \"系统学习 RAG 工程\"",
+                        "description": "学习目标的一句话描述，如 \"8 周系统学习机器学习\" / \"系统学习 RAG 工程\"",
                     },
                     "weeks": {
                         "type": "integer",
@@ -980,7 +980,7 @@ def _tool_create_study_plan(
     if not isinstance(goal, str) or not goal.strip():
         return ToolResult(
             status="error",
-            content="create_study_plan(goal) 必须是非空字符串，如 \"8 周准备 ML 面试\"",
+            content="create_study_plan(goal) 必须是非空字符串，如 \"8 周系统学习机器学习\"",
         )
     if not isinstance(weeks, int) or weeks < 0:
         return ToolResult(
@@ -1831,7 +1831,7 @@ _SRS_TOOLS: list[dict[str, Any]] = [
                     },
                     "note": {
                         "type": "string",
-                        "description": "可选自由备注（≤ 200 字）；如『错题复盘』『面试重点』等标签。",
+                        "description": "可选自由备注（≤ 200 字）；如『错题复盘』『复习重点』等标签。",
                     },
                 },
                 "required": ["source_type"],

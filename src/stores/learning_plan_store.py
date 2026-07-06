@@ -9,7 +9,7 @@ SQLite 数据库（默认 ./db/sqlite/learning.db）。区别于 plan-execute �
 表结构：
     learning_plans(
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        goal          TEXT    NOT NULL,                  -- "8 周准备 ML 面试"
+        goal          TEXT    NOT NULL,                  -- "8 周系统学习机器学习"
         weeks         INTEGER NOT NULL DEFAULT 0,        -- 总周数；0 表示未指定
         status        TEXT    NOT NULL DEFAULT 'active', -- active / completed / abandoned
         is_active     INTEGER NOT NULL DEFAULT 0,        -- 0 / 1，同时仅一条为 1
@@ -166,7 +166,7 @@ class LearningPlanStore:
         新建一个学习计划。
 
         Args:
-            goal: 学习目标描述，如 "8 周准备 ML 面试"。
+            goal: 学习目标描述，如 "8 周系统学习机器学习"。
             weeks: 总周数；0 表示未指定。
             set_active: 是否同时把它设为 active plan（新建默认 active，旧的自动置非 active）。
 

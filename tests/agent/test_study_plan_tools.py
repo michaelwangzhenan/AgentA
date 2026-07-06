@@ -76,14 +76,14 @@ class TestCreateStudyPlan:
 
     def test_creates_plan_and_sets_active(self, store: LearningPlanStore) -> None:
         res = execute_tool("create_study_plan", {
-            "goal": "8 周准备 ML 面试",
+            "goal": "8 周系统学习机器学习",
             "weeks": 8,
             "tasks": _ok_tasks(),
         })
         assert res.status == "ok"
         active = store.get_active()
         assert active is not None
-        assert active["goal"] == "8 周准备 ML 面试"
+        assert active["goal"] == "8 周系统学习机器学习"
         assert active["weeks"] == 8
         assert len(active["tasks"]) == 3
         # ack 文本含 plan_id 与任务数

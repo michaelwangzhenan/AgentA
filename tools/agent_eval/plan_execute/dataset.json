@@ -10,7 +10,7 @@
   {
     "id": "P02-positive-study-plan",
     "category": "positive",
-    "question": "帮我做一份机器学习面试两周复习计划，每周覆盖哪些主题？",
+    "question": "帮我做一份机器学习两周入门计划，每周覆盖哪些主题？",
     "min_steps": 3,
     "max_steps": 7,
     "note": "学习计划 → 必触发 make_plan，应按周/主题分步"
