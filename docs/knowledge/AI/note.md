@@ -10,7 +10,7 @@
 
 # 2. Agent 4 层
 
-Prompt 
+→ Prompt 
 → 加 Context（RAG、记忆、工具结果）
 → 加 Harness（权限、验证、持久状态） 
 → 加 Loop（调度、分诊、成本上限）

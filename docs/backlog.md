@@ -374,7 +374,9 @@ WebUI 支持导出对话。
 
 # 10. 可观测 / LLMOps
 
-## 10.1. trace 优化
+## 10.1. 部署上云
+
+## 10.2. trace 优化
 
 你需要完整的执行 trace（每一步思考、每一次工具调用、每一个返回），中间状态可观测可回放，失败 case 能复现。LangSmith、Langfuse、Phoenix 这类工具，比你写一堆 print 有用一百倍。
 

@@ -1,6 +1,6 @@
 ---
 description: AgentA 开发流程 — 需求分析 / 设计 / 复杂任务 / 调试 / 评估 / 提交代码的节奏与门槛。
-alwaysApply: true
+alwaysApply: false
 ---
 
 # AgentA 开发流程

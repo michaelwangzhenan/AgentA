@@ -15,7 +15,7 @@ alwaysApply: false
 
 ## 用哪个工具
 
-- `codegraph_explore`：主力。一次问清机制 / 流程 / 某块代码，返回相关源码 + 关系 + 影响范围
+- `codegraph_explore`：一次问清机制 / 流程 / 某块代码，返回相关源码 + 关系 + 影响范围
 - `codegraph_search`：只想按名字定位某个符号
 - `codegraph_callers`：找某函数的所有调用点（含回调注册）
 - `codegraph_node`：看单个符号的完整源码 + 调用链，或按文件读取
@@ -23,5 +23,4 @@ alwaysApply: false
 ## 约定
 
 - 把 codegraph 返回的源码当作**已经读过**，不要再用 grep 重复确认同一件事
-- 改完文件后留意结果里的 staleness 提示（`⚠️`），提示某文件待同步时直接 Read 它
 - 仓库里没有 `.codegraph/` 索引时，正常用内置工具即可

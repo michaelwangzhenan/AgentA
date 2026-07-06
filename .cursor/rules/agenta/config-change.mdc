@@ -1,5 +1,5 @@
 ---
-description: 新增或修改配置项时遵守 —— 需同步 .env / .env.example / src/config.py / 前端 UI 多处，并确保立即生效。
+description: 新增或修改配置项时需同步 .env / .env.example / src/config.py / 前端 UI。涉及增加、修改、删除 AgentA 的配置项时使用。
 alwaysApply: false
 ---
 
