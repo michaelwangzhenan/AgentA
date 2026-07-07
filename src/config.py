@@ -610,6 +610,30 @@ RERANKER_ENABLED: bool = os.getenv("RERANKER_ENABLED", "true").lower() == "true"
 # 召回窗口倍数：精排前取 top_k × N 条候选；调大召回更全但精排更慢，默认 2
 RERANKER_RECALL_MULTIPLIER: int = int(os.getenv("RERANKER_RECALL_MULTIPLIER", "2"))
 
+# ── Online API backend（SiliconFlow）─────────────────────────────────────────
+# embedding / rerank 来源：local=本地 sentence-transformers；api=云端 API。默认 local。
+# 两者独立可混搭；api 只对 ONLINE_API_MODELS 表内模型生效，表外模型走本地。
+EMBEDDING_BACKEND: str = os.getenv("EMBEDDING_BACKEND", "local").lower()
+RERANK_BACKEND: str = os.getenv("RERANK_BACKEND", "local").lower()
+
+# SiliconFlow 连接配置（domestic，直连不走 LLM_PROXY）
+SILICONFLOW_API_KEY: str = os.getenv("SILICONFLOW_API_KEY", "")
+SILICONFLOW_BASE_URL: str = os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1")
+SILICONFLOW_TIMEOUT_SEC: float = float(os.getenv("SILICONFLOW_TIMEOUT_SEC", "30"))
+SILICONFLOW_MAX_RETRIES: int = int(os.getenv("SILICONFLOW_MAX_RETRIES", "2"))
+
+# 本地模型名 → (厂商, API 模型 id)。backend=api 时只有表内模型走 API，其余回落本地。
+ONLINE_API_MODELS: dict[str, tuple[str, str]] = {
+    "BAAI/bge-m3": ("siliconflow", "BAAI/bge-m3"),                          # embedding
+    "BAAI/bge-reranker-v2-m3": ("siliconflow", "BAAI/bge-reranker-v2-m3"),  # rerank
+}
+
+
+def online_api_model(model_name: str) -> tuple[str, str] | None:
+    """查模型是否有 API 版；返回 (厂商, API 模型 id)，表外返回 None。"""
+    return ONLINE_API_MODELS.get(model_name)
+
+
 # ── RAG 召回质量阈值 ─────────────────────────────────────────────────────────
 # Dense 检索后按 cosine 相似度（= 1 - distance，cosine 空间下 ∈ [-1, 1]）过滤；
 # 低于此阈值的 chunk 直接丢弃，避免低质量片段污染 LLM 上下文。
@@ -639,8 +663,22 @@ def min_dense_score_for_collection(collection_name: str) -> float:
 # Cross-Encoder 精排后的最低相关性分（不同 reranker 输出尺度不同：
 #   bge-reranker-base / v2-m3 输出 sigmoid 概率，约 [0, 1]，建议阈值 0.30~0.50；
 #   ms-marco MiniLM 输出 raw logit，区间 [-10, 10]，建议阈值 -3 ~ 0）。
-# 默认 0.0：保守不过滤，迁移到 bge-reranker 后可上调。
-RAG_RERANK_MIN_SCORE: float = float(os.getenv("RAG_RERANK_MIN_SCORE", "0.0"))
+# 默认 0.30：按默认 reranker bge-reranker-base 标定；分布不同的模型见下方 PER_MODEL。
+# 标定常量，不进 .env；需扫阈值时仍可用同名 env 覆盖。
+RAG_RERANK_MIN_SCORE: float = float(os.getenv("RAG_RERANK_MIN_SCORE", "0.30"))
+
+# 精排阈值按 reranker 模型名覆盖，优先于全局 RAG_RERANK_MIN_SCORE，找不到时回退全局。
+# v2-m3 分数分布比 base 低，单独给 0.0。
+RAG_RERANK_MIN_SCORE_PER_MODEL: dict[str, float] = {
+    "BAAI/bge-reranker-v2-m3": float(os.getenv("RAG_RERANK_MIN_SCORE_V2_M3", "0.0")),
+}
+
+
+def min_rerank_score_for_model(model_name: str) -> float:
+    """按 reranker 模型名返回 per-model 精排阈值；找不到则回退全局 RAG_RERANK_MIN_SCORE。"""
+    if model_name in RAG_RERANK_MIN_SCORE_PER_MODEL:
+        return RAG_RERANK_MIN_SCORE_PER_MODEL[model_name]
+    return RAG_RERANK_MIN_SCORE
 
 # ── BM25 + RRF 混合检索配置 ──────────────────────────────────────────────────
 # 开启后 retriever 会同时跑 dense（向量）与 sparse（BM25 关键词）召回，并用

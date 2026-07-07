@@ -47,6 +47,7 @@ SECRET_ITEMS: list[SecretItem] = [
     SecretItem("grok", "xAI Grok", "provider", "grok", "GROK_API_KEY1"),
     SecretItem("gemini", "Google Gemini", "provider", "gemini", "GEMINI_API_KEY"),
     SecretItem("serpapi", "SerpAPI（web 搜索）", "scalar", "SERPAPI_API_KEY", "SERPAPI_API_KEY"),
+    SecretItem("siliconflow", "硅基流动 SiliconFlow（embedding / rerank）", "scalar", "SILICONFLOW_API_KEY", "SILICONFLOW_API_KEY"),
 ]
 
 _ITEMS_BY_ID: dict[str, SecretItem] = {it.id: it for it in SECRET_ITEMS}

@@ -48,11 +48,13 @@ class SemanticCacheStore:
 
     @staticmethod
     def _embed(query: str) -> list[float]:
-        """用 RAG 默认 embedding 模型编码 query；复用 retriever 的 LRU。"""
+        """用 RAG 默认 embedding 模型编码 query；复用 retriever 的 LRU，跟随 backend。"""
+        from src.rag import online_api
         from src.rag.retriever import _embed_query_cached
 
         model_name, _ = config.resolve_embedding(config.DEFAULT_EMBEDDING_ALIAS)
-        return list(_embed_query_cached(model_name, query))
+        backend = online_api.embedding_backend_for(model_name)
+        return list(_embed_query_cached(model_name, query, backend))
 
     # ── 查询 ────────────────────────────────────────────────────────────────
 

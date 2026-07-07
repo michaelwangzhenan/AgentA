@@ -1,22 +1,34 @@
 # 1. RAG / 知识库
 
-## 1.1. RAG 质量三要素
+## 1.1. 配置项简化
+
+rerank:
+RERANKER_ENABLED / RERANK_BACKEND / RERANKER_MODEL
+三个配置项合并为 RERANKER_MODEL，可选值为 disable / api-bge-reranker-v2-m3 / baai-bge-reranker-base / baai-bge-reranker-v2-m3/cross-encoder-ms-marco-MiniLM-L-6-v2 
+UI 做成下拉框
+
+embedding:
+EMBEDDING_BACKEND / EMBEDDING_MODEL 合并为 EMBEDDING_MODEL，可选值 en / zh / m3 / api-m3，UI 下拉框。
+注意 embedding 可多选（不同于单选的 rerank）：保留 RAG_ACTIVE_EMBEDDINGS 多选，其中 m3 项按 backend 映射为 m3 或 api-m3。
+
+
+## 1.2. RAG 质量三要素
 
 讨论并优化影响 RAG 质量的三要素：embedding 模型 / 入库算法 / 召回算法。
 
-## 1.2. 入库流程优化
+## 1.3. 入库流程优化
 
 入库流程对标业内最佳实践。
 
-## 1.3. 召回流程与算法
+## 1.4. 召回流程与算法
 
 召回流程与算法对标业内最佳实践。
 
-## 1.4. 入库支持更多格式
+## 1.5. 入库支持更多格式
 
 入库支持更多的文档格式。
 
-## 1.5. 文档转 markdown
+## 1.6. 文档转 markdown
 
 各种文档转 markdown（入库预处理）。
 
@@ -25,37 +37,37 @@
 - 扫描版 PDF markitdown 转不出文字 → 复用现有 rapidocr 思路做 OCR 兜底
 - 范围/形态待定：独立脚本 vs 接 UI、是否进仓库长期维护
 
-## 1.6. 文档自动同步
+## 1.7. 文档自动同步
 
 用 `watchdog` 监听 `datasets/` 变化，自动增量入库。
 
-## 1.7. 入库主题与资料
+## 1.8. 入库主题与资料
 
 选定入库主题 / 资料。
 
-## 1.8. golden 集生成
+## 1.9. golden 集生成
 
 生成真正有效的 golden 集。
 
-## 1.9. golden 可选 LLM
+## 1.10. golden 可选 LLM
 
 知识库 L2 点「生成评估」按钮时，增加可选生成 golden 的 LLM。
 
-## 1.10. 模型对比与报告对比
+## 1.11. 模型对比与报告对比
 
 各 embedding / 召回模型做对比实验；UI 页面可选多份报告进行对比。
 
-## 1.11. 消融实验
+## 1.12. 消融实验
 
 对入库 / 召回各环节做消融实验。
 
-## 1.12. 知识库权限
+## 1.13. 知识库权限
 
 UI 知识库：用户只能删除自己入库的文件。
 
-## 1.13. 企业级向量数据库
+## 1.14. 企业级向量数据库
 
-## 1.14. GraphRAG / Knowledge Graph
+## 1.15. GraphRAG / Knowledge Graph
 
 
 # 2. 模型接入与管理

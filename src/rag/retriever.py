@@ -36,6 +36,7 @@ from chromadb.errors import NotFoundError
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
 import src.config as config
+from src.rag import online_api
 
 logger = logging.getLogger(__name__)
 
@@ -62,32 +63,49 @@ def _query_prefix_for(model_name: str) -> str:
 
 
 # ── Embedding function 进程级缓存 ────────────────────────────────────────────
-_embedding_fn_cache: dict[str, SentenceTransformerEmbeddingFunction] = {}
+# 缓存键带 backend（"local:model" / "api:model"）：运行时切 EMBEDDING_BACKEND 会命中
+# 不同缓存条目，天然避免拿到上一个 backend 的陈旧实例，无需手动清缓存。
+_embedding_fn_cache: dict[str, Any] = {}
 _embedding_fn_lock = threading.RLock()
 
 
-def _get_embedding_fn(model_name: str) -> SentenceTransformerEmbeddingFunction:
-    """懒加载 embedding function，多次调用复用同一实例；线程安全。"""
-    fn = _embedding_fn_cache.get(model_name)
+def _get_embedding_fn(model_name: str) -> Any:
+    """懒加载 embedding function，多次调用复用同一实例；线程安全。
+
+    按当前 backend 分发：api（且模型在映射表内）→ ApiEmbeddingFunction（不加载本地模型），
+    否则 → 本地 SentenceTransformerEmbeddingFunction（现状）。
+    """
+    backend = online_api.embedding_backend_for(model_name)
+    cache_key = f"{backend}:{model_name}"
+    fn = _embedding_fn_cache.get(cache_key)
     if fn is not None:
         return fn
     with _embedding_fn_lock:
-        fn = _embedding_fn_cache.get(model_name)
+        fn = _embedding_fn_cache.get(cache_key)
         if fn is None:
-            fn = SentenceTransformerEmbeddingFunction(model_name=model_name)
-            _embedding_fn_cache[model_name] = fn
+            if backend == "api":
+                fn = online_api.ApiEmbeddingFunction(model_name)
+                logger.info("[Embedding] model=%s backend=api 生效", model_name)
+            else:
+                fn = SentenceTransformerEmbeddingFunction(model_name=model_name)
+            _embedding_fn_cache[cache_key] = fn
     return fn
 
 
 @lru_cache(maxsize=512)
-def _embed_query_cached(model_name: str, text: str) -> tuple[float, ...]:
-    """编码单条 query 为向量并按 (model, text) 缓存。
+def _embed_query_cached(model_name: str, text: str, backend: str) -> tuple[float, ...]:
+    """编码单条 query 为向量并按 (model, text, backend) 缓存。
 
     同一 query 重复检索（含多路改写命中相同文本）时零编码开销 —— query 编码是
-    CPU 密集的耗时项。返回 tuple 以满足 lru_cache 不可变要求。
+    CPU 密集的耗时项。backend 入 key，切换 backend 不会命中另一来源的旧向量。
+    返回 tuple 以满足 lru_cache 不可变要求。
     """
-    fn = _get_embedding_fn(model_name)
-    vec = fn([text])[0]
+    if backend == "api":
+        _vendor, api_model_id = config.online_api_model(model_name)  # type: ignore[misc]
+        vec = online_api.embed_texts([text], api_model_id)[0]
+    else:
+        fn = _get_embedding_fn(model_name)
+        vec = fn([text])[0]
     return tuple(float(x) for x in vec)
 
 
@@ -196,9 +214,20 @@ def _query_collection(
     prefix = _query_prefix_for(model_name)
     effective_query = (prefix + query) if prefix else query
 
-    # 自己编码 query（带缓存）并以 query_embeddings 传入，避免 chroma 每次重复编码
+    # 自己编码 query（带缓存）并以 query_embeddings 传入，避免 chroma 每次重复编码。
+    # backend=api 时若调用失败：记 error 并跳过本 collection 的 dense（BM25 仍在 search
+    # 层继续召回），既不崩整链、也不回落本地模型（VPS 上本无本地模型）。
+    backend = online_api.embedding_backend_for(model_name)
+    try:
+        query_vec = list(_embed_query_cached(model_name, effective_query, backend))
+    except online_api.OnlineApiError as e:
+        logger.error(
+            "[Retriever] api 编码 query 失败，跳过 collection '%s' 的 dense 召回（BM25 仍生效）: %s",
+            collection_name, e,
+        )
+        return []
     query_kwargs: dict[str, Any] = {
-        "query_embeddings": [list(_embed_query_cached(model_name, effective_query))],
+        "query_embeddings": [query_vec],
         "n_results": min(top_k, count),
         "include": ["documents", "metadatas", "distances"],
     }
@@ -500,7 +529,7 @@ def search(
         # 精排后 min_score 阈值过滤：只过滤真正经过精排打分（reranked=True）的 hit。
         # 未精排的 hit（候选≤1 / 模型降级）其 score 仍是召回阶段 RRF 小分，
         # 用精排阈值过滤会把它们全删（曾导致 multiplier=2 时召回归零），故放行。
-        min_rerank = config.RAG_RERANK_MIN_SCORE
+        min_rerank = config.min_rerank_score_for_model(online_api.effective_rerank_model())
         if min_rerank > 0:
             before = len(top_hits)
             top_hits = [

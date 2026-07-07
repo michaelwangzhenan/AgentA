@@ -20,6 +20,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import src.config as config
+from src.rag import online_api
 
 if TYPE_CHECKING:
     from src.rag.retriever import Hit
@@ -52,6 +53,9 @@ def _get_cross_encoder() -> "CrossEncoder":  # type: ignore[name-defined]
 def warm_up() -> None:
     """主动触发 CrossEncoder 预加载，避免首次检索时延抖动。失败仅警告。"""
     if not config.RERANKER_ENABLED:
+        return
+    if online_api.rerank_backend_for(online_api.effective_rerank_model()) == "api":
+        logger.info("[Reranker] backend=api，跳过本地 CrossEncoder 预热")
         return
     try:
         _get_cross_encoder()
@@ -98,26 +102,50 @@ def rerank(query: str, hits: "list[Hit]", top_k: int) -> "list[Hit]":
         logger.info("[Reranker] 候选数 %d ≤ 1，无需精排直接透传", len(hits))
         return hits
 
-    # 优雅降级：模型加载失败（本地无缓存 + TRANSFORMERS_OFFLINE=1 / 网络不可达 / 模型名错误）
-    # 不应让整条检索链崩溃。降级为不精排，直接截取召回前 top_k 条。
-    try:
-        model = _get_cross_encoder()
-    except Exception as e:  # noqa: BLE001 — 模型加载层异常种类繁多，统一兜底
-        logger.warning(
-            "[Reranker] 加载模型 %r 失败，本次降级为不精排（直接返回召回前 %d 条）。"
-            "若需启用精排请检查：1) 模型名拼写；2) 本地已缓存或可联网下载；"
-            "3) 关闭 TRANSFORMERS_OFFLINE，或切换 RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2。"
-            " 原始错误: %s",
-            config.RERANKER_MODEL, top_k, e,
+    # 实际精排模型：backend=api 且 RERANKER_MODEL 非 api 托管时，effective 会兜底到 api reranker
+    # （忽略 RERANKER_MODEL），避免静默回落本地；下游阈值也按这个 effective 模型取，保持一致。
+    model_name = online_api.effective_rerank_model()
+    if model_name != config.RERANKER_MODEL:
+        logger.info(
+            "[Reranker] backend=api：RERANKER_MODEL=%s 非 api 托管，本次改用 %s",
+            config.RERANKER_MODEL, model_name,
         )
-        return hits[:top_k]
+    backend = online_api.rerank_backend_for(model_name)
+    if backend == "api":
+        # API rerank：bge-reranker-v2-m3 已返回 [0,1] 相关度（相关句≈0.99、无关≈0.00），
+        # 直接采用、不二次 sigmoid。注意 v2-m3 分数分布比本地默认 base 低，下游精排阈值
+        # 由 config.min_rerank_score_for_model() 按模型名给它单独的低阈值（见 config.py）。
+        # 失败沿用本地同款降级：不精排，直接截取召回前 top_k 条。
+        _vendor, api_model_id = config.online_api_model(model_name)  # type: ignore[misc]
+        try:
+            raw_scores = online_api.rerank_scores(query, [h.document for h in hits], api_model_id)
+        except online_api.OnlineApiError as e:
+            logger.warning(
+                "[Reranker] api 精排失败，本次降级为不精排（返回召回前 %d 条）: %s", top_k, e,
+            )
+            return hits[:top_k]
+        norm_scores: list[float] = list(raw_scores)
+    else:
+        # 优雅降级：模型加载失败（本地无缓存 + TRANSFORMERS_OFFLINE=1 / 网络不可达 / 模型名错误）
+        # 不应让整条检索链崩溃。降级为不精排，直接截取召回前 top_k 条。
+        try:
+            model = _get_cross_encoder()
+        except Exception as e:  # noqa: BLE001 — 模型加载层异常种类繁多，统一兜底
+            logger.warning(
+                "[Reranker] 加载模型 %r 失败，本次降级为不精排（直接返回召回前 %d 条）。"
+                "若需启用精排请检查：1) 模型名拼写；2) 本地已缓存或可联网下载；"
+                "3) 关闭 TRANSFORMERS_OFFLINE，或切换 RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2。"
+                " 原始错误: %s",
+                config.RERANKER_MODEL, top_k, e,
+            )
+            return hits[:top_k]
 
-    # 构造 (query, document) 对，批量送入 CrossEncoder
-    pairs: list[tuple[str, str]] = [(query, hit.document) for hit in hits]
-    raw = model.predict(pairs)
-    # 真实 CrossEncoder 返回 numpy ndarray，mock 可能直接返回 list，统一转换
-    raw_scores: list[float] = [float(x) for x in (raw.tolist() if hasattr(raw, "tolist") else raw)]
-    norm_scores: list[float] = [_normalize_score(s) for s in raw_scores]
+        # 构造 (query, document) 对，批量送入 CrossEncoder
+        pairs: list[tuple[str, str]] = [(query, hit.document) for hit in hits]
+        raw = model.predict(pairs)
+        # 真实 CrossEncoder 返回 numpy ndarray，mock 可能直接返回 list，统一转换
+        raw_scores = [float(x) for x in (raw.tolist() if hasattr(raw, "tolist") else raw)]
+        norm_scores = [_normalize_score(s) for s in raw_scores]
 
     # 按归一化分数降序排列，截取 top_k 条；同时把分数写回 Hit.score
     indexed = sorted(
@@ -132,9 +160,10 @@ def rerank(query: str, hits: "list[Hit]", top_k: int) -> "list[Hit]":
         result.append(replace(hit, score=norm, reranked=True))
 
     logger.info(
-        "[Reranker] 从 %d 候选精排至 %d 条，最高分: %.4f，最低分: %.4f（已归一化到 [0,1]）",
+        "[Reranker] 从 %d 候选精排至 %d 条 backend=%s，最高分: %.4f，最低分: %.4f（已归一化到 [0,1]）",
         len(hits),
         len(result),
+        backend,
         indexed[0][0],
         indexed[len(result) - 1][0],
     )

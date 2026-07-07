@@ -196,6 +196,16 @@ REGISTRY: list[ConfigItem] = [
     ),
     # —— 召回（向量 + BM25 检索）——
     ConfigItem(
+        key="EMBEDDING_BACKEND",
+        group="rag",
+        section="召回",
+        type=ItemType.ENUM_STR,
+        brief="Embedding 来源",
+        detail="local=本地模型；api=硅基流动云端 API。api 只对已托管的模型（bge-m3）生效，其余（MiniLM / bge-small-zh）自动回落本地。同时影响 query 编码与新文档入库。切 api 需先在 API Keys 页配 SiliconFlow key。",
+        options=("local", "api"),
+        side_effect_hint="切换后下一次检索 / 入库即生效，无需重启",
+    ),
+    ConfigItem(
         key="RAG_ACTIVE_EMBEDDINGS",
         group="rag",
         section="召回",
@@ -280,6 +290,16 @@ REGISTRY: list[ConfigItem] = [
         detail="用 Cross-Encoder 对召回结果二次精排，提高相关性。",
     ),
     ConfigItem(
+        key="RERANK_BACKEND",
+        group="rag",
+        section="精排",
+        type=ItemType.ENUM_STR,
+        brief="Rerank 来源",
+        detail="local=本地 CrossEncoder；api=硅基流动云端 rerank（bge-reranker-v2-m3）。选 api 时忽略下方 Reranker 模型、自动用云端 v2-m3。切 api 需先在 API Keys 页配 SiliconFlow key。",
+        options=("local", "api"),
+        side_effect_hint="切换后下一次检索即生效，无需重启",
+    ),
+    ConfigItem(
         key="RERANKER_RECALL_MULTIPLIER",
         group="rag",
         section="精排",
@@ -295,7 +315,7 @@ REGISTRY: list[ConfigItem] = [
         section="精排",
         type=ItemType.STRING,
         brief="Reranker 模型",
-        detail="精排用的 Cross-Encoder 模型；中英用 bge-reranker-base，多语言用 bge-reranker-v2-m3。",
+        detail="精排用的本地 Cross-Encoder 模型；中英用 bge-reranker-base，多语言用 bge-reranker-v2-m3。仅在 Rerank 来源=local 时生效；来源=api 时本项被忽略。",
         side_effect_hint="切换后第一次检索会重新加载模型（几秒）",
     ),
     # —— 召回自检（LLM 相关性把关）——
