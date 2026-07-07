@@ -166,12 +166,12 @@ def test_get_value_reflects_runtime_setattr(
 # ─── PATCH 成功路径 ───────────────────────────────────────────────────────
 
 def test_patch_bool_takes_effect_immediately(client: TestClient) -> None:
-    r = client.patch("/api/config/RERANKER_ENABLED", json={"value": False})
+    r = client.patch("/api/config/RAG_QUERY_REWRITE_ENABLED", json={"value": False})
     assert r.status_code == 200
     body = r.json()
     assert body["item"]["value"] is False
     assert body["item"]["source"] == "override"
-    assert _cfg.RERANKER_ENABLED is False
+    assert _cfg.RAG_QUERY_REWRITE_ENABLED is False
 
 
 def test_patch_int_within_range(client: TestClient) -> None:

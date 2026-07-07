@@ -34,8 +34,8 @@ _cross_encoder_lock = threading.RLock()
 
 
 def _get_cross_encoder() -> "CrossEncoder":  # type: ignore[name-defined]
-    """懒加载 CrossEncoder，按当前 config.RERANKER_MODEL 取实例，多次调用复用。"""
-    name = config.RERANKER_MODEL
+    """懒加载 CrossEncoder，按当前精排模型名取实例，多次调用复用。"""
+    name = config.rerank_model_name()
     ce = _cross_encoder_cache.get(name)
     if ce is not None:
         return ce
@@ -52,15 +52,15 @@ def _get_cross_encoder() -> "CrossEncoder":  # type: ignore[name-defined]
 
 def warm_up() -> None:
     """主动触发 CrossEncoder 预加载，避免首次检索时延抖动。失败仅警告。"""
-    if not config.RERANKER_ENABLED:
+    if not config.rerank_enabled():
         return
-    if online_api.rerank_backend_for(online_api.effective_rerank_model()) == "api":
-        logger.info("[Reranker] backend=api，跳过本地 CrossEncoder 预热")
+    if config.rerank_is_api():
+        logger.info("[Reranker] 精排走 api，跳过本地 CrossEncoder 预热")
         return
     try:
         _get_cross_encoder()
     except Exception as e:
-        logger.warning("[Reranker] 预热失败 %s: %s", config.RERANKER_MODEL, e)
+        logger.warning("[Reranker] 预热失败 %s: %s", config.rerank_model_name(), e)
 
 
 def _normalize_score(raw: float) -> float:
@@ -102,23 +102,16 @@ def rerank(query: str, hits: "list[Hit]", top_k: int) -> "list[Hit]":
         logger.info("[Reranker] 候选数 %d ≤ 1，无需精排直接透传", len(hits))
         return hits
 
-    # 实际精排模型：backend=api 且 RERANKER_MODEL 非 api 托管时，effective 会兜底到 api reranker
-    # （忽略 RERANKER_MODEL），避免静默回落本地；下游阈值也按这个 effective 模型取，保持一致。
-    model_name = online_api.effective_rerank_model()
-    if model_name != config.RERANKER_MODEL:
-        logger.info(
-            "[Reranker] backend=api：RERANKER_MODEL=%s 非 api 托管，本次改用 %s",
-            config.RERANKER_MODEL, model_name,
-        )
-    backend = online_api.rerank_backend_for(model_name)
-    if backend == "api":
+    # 实际精排模型名（去掉 api: 前缀）：打分与下游阈值查表都用它，保持一致。
+    model_name = config.rerank_model_name()
+    use_api = config.rerank_is_api()
+    if use_api:
         # API rerank：bge-reranker-v2-m3 已返回 [0,1] 相关度（相关句≈0.99、无关≈0.00），
         # 直接采用、不二次 sigmoid。注意 v2-m3 分数分布比本地默认 base 低，下游精排阈值
         # 由 config.min_rerank_score_for_model() 按模型名给它单独的低阈值（见 config.py）。
         # 失败沿用本地同款降级：不精排，直接截取召回前 top_k 条。
-        _vendor, api_model_id = config.online_api_model(model_name)  # type: ignore[misc]
         try:
-            raw_scores = online_api.rerank_scores(query, [h.document for h in hits], api_model_id)
+            raw_scores = online_api.rerank_scores(query, [h.document for h in hits], model_name)
         except online_api.OnlineApiError as e:
             logger.warning(
                 "[Reranker] api 精排失败，本次降级为不精排（返回召回前 %d 条）: %s", top_k, e,
@@ -134,9 +127,9 @@ def rerank(query: str, hits: "list[Hit]", top_k: int) -> "list[Hit]":
             logger.warning(
                 "[Reranker] 加载模型 %r 失败，本次降级为不精排（直接返回召回前 %d 条）。"
                 "若需启用精排请检查：1) 模型名拼写；2) 本地已缓存或可联网下载；"
-                "3) 关闭 TRANSFORMERS_OFFLINE，或切换 RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2。"
+                "3) 关闭 TRANSFORMERS_OFFLINE，或把 RERANKER_MODEL 换成 cross-encoder/ms-marco-MiniLM-L-6-v2。"
                 " 原始错误: %s",
-                config.RERANKER_MODEL, top_k, e,
+                model_name, top_k, e,
             )
             return hits[:top_k]
 
@@ -160,10 +153,10 @@ def rerank(query: str, hits: "list[Hit]", top_k: int) -> "list[Hit]":
         result.append(replace(hit, score=norm, reranked=True))
 
     logger.info(
-        "[Reranker] 从 %d 候选精排至 %d 条 backend=%s，最高分: %.4f，最低分: %.4f（已归一化到 [0,1]）",
+        "[Reranker] 从 %d 候选精排至 %d 条 来源=%s，最高分: %.4f，最低分: %.4f（已归一化到 [0,1]）",
         len(hits),
         len(result),
-        backend,
+        "api" if use_api else "本地",
         indexed[0][0],
         indexed[len(result) - 1][0],
     )

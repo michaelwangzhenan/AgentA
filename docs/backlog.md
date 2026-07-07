@@ -1,13 +1,13 @@
 # 1. RAG / 知识库
 
-## 1.1. 配置项简化
+## 1.1. 配置项简化 [Done]
 
-rerank:
+C1. rerank:
 RERANKER_ENABLED / RERANK_BACKEND / RERANKER_MODEL
 三个配置项合并为 RERANKER_MODEL，可选值为 disable / api-bge-reranker-v2-m3 / baai-bge-reranker-base / baai-bge-reranker-v2-m3/cross-encoder-ms-marco-MiniLM-L-6-v2 
 UI 做成下拉框
 
-embedding:
+C2. embedding:
 EMBEDDING_BACKEND / EMBEDDING_MODEL 合并为 EMBEDDING_MODEL，可选值 en / zh / m3 / api-m3，UI 下拉框。
 注意 embedding 可多选（不同于单选的 rerank）：保留 RAG_ACTIVE_EMBEDDINGS 多选，其中 m3 项按 backend 映射为 m3 或 api-m3。
 
@@ -76,7 +76,7 @@ UI 知识库：用户只能删除自己入库的文件。
 
 `download_models.py` 加 UI，支持任意模型下载；下载后可按配置直接使用。
 
-## 2.2. online 模型
+## 2.2. online 模型 [Done]
 
 支持 online 模型（Key + API）。
 
@@ -386,7 +386,7 @@ WebUI 支持导出对话。
 
 # 10. 可观测 / LLMOps
 
-## 10.1. 部署上云
+## 10.1. 部署上云 [ongoing]
 
 ## 10.2. trace 优化
 

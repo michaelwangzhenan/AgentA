@@ -275,8 +275,9 @@ def _collect_metadata(
         },
         "kb_counts": _kb_counts(active),
         "reranker": {
-            "enabled": bool(config.RERANKER_ENABLED and use_rerank_eff),
-            "model": config.RERANKER_MODEL,
+            "enabled": bool(config.rerank_enabled() and use_rerank_eff),
+            "model": config.rerank_model_name(),
+            "is_api": config.rerank_is_api(),
             "recall_multiplier": config.RERANKER_RECALL_MULTIPLIER,
             "min_score": config.RAG_RERANK_MIN_SCORE,
         },
@@ -381,16 +382,16 @@ def evaluate(
 
     # rerank 不再由 eval 包外层冗余精排，而是通过 search(rerank=...) 透传给 retriever
     # 内层，让 retriever 自己决定是否启用 cross-encoder：
-    #   · use_rerank=True  → search(rerank=None)，retriever 走 config.RERANKER_ENABLED
+    #   · use_rerank=True  → search(rerank=None)，retriever 走 config.rerank_enabled()
     #   · use_rerank=False → search(rerank=False)，retriever 强制跳过
     # 早期版本在拿到 search() 结果后又调一次 rerank_fn，造成 double-rerank：
     # 关 eval 层 rerank_fn 仍然不能关掉 retriever 内层那一次，
     # baseline vs --no-rerank 因此完全等同。这里彻底删除外层调用。
     search_rerank: bool | None = None if use_rerank else False
     # 同步把"实际生效的 rerank 状态"反映到 use_rerank：retriever 还可能因
-    # config.RERANKER_ENABLED=False 默默不跑，把它显式落地，避免后续 metadata
+    # RERANKER_MODEL=disable 默默不跑，把它显式落地，避免后续 metadata
     # 显示 ON 但 trace 显示 skipped 这种和实际不一致。
-    if use_rerank and not config.RERANKER_ENABLED:
+    if use_rerank and not config.rerank_enabled():
         use_rerank = False
 
     for i, item in enumerate(items, start=1):

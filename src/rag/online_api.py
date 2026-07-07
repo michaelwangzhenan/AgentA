@@ -1,12 +1,13 @@
-"""SiliconFlow 云端 API 客户端 —— embedding / rerank 的 online backend。
+"""SiliconFlow 云端 API 客户端 —— embedding / rerank 的云端实现。
 
-embedding / rerank 默认走本地 sentence-transformers；本模块提供云端替代，由
-`EMBEDDING_BACKEND` / `RERANK_BACKEND` 切换（见 `src/config.py`）。只对
-`config.ONLINE_API_MODELS` 表内的模型生效，表外模型仍回落本地。
+- embedding 是否走云端由 `config.EMBEDDING_MODEL=api-m3` 决定（见 `embedding_is_api`），
+  只对 `config.ONLINE_API_MODELS` 表内的模型生效，表外模型仍走本地。
+- rerank 是否走云端由 `config.RERANKER_MODEL` 的 `api:` 前缀自解释（见 `src/config.py`），
+  本模块只提供 `rerank_scores()` HTTP 调用。
 
 用法：
     from src.rag import online_api
-    online_api.embedding_backend_for("BAAI/bge-m3")   # -> "api" | "local"
+    online_api.embedding_is_api("BAAI/bge-m3")        # -> True | False
     online_api.embed_texts(["hi"], "BAAI/bge-m3")     # -> [[...]]
     online_api.rerank_scores(q, docs, "BAAI/bge-reranker-v2-m3")  # -> [0.99, ...]
 """
@@ -29,38 +30,10 @@ class OnlineApiError(RuntimeError):
     """SiliconFlow 调用失败（重试耗尽 / 不可重试的 4xx / 响应解析失败）。"""
 
 
-# RERANK_BACKEND=api 但 RERANKER_MODEL 非 api 托管时，兜底用的 api reranker（避免静默回落本地）。
-DEFAULT_API_RERANK_MODEL = "BAAI/bge-reranker-v2-m3"
-
-
-# ── backend 判定 ─────────────────────────────────────────────────────────────
-def embedding_backend_for(model_name: str) -> str:
-    """该模型实际生效的 embedding backend：开关=api 且模型在映射表内才 api，否则 local。"""
-    if config.EMBEDDING_BACKEND == "api" and config.online_api_model(model_name):
-        return "api"
-    return "local"
-
-
-def rerank_backend_for(model_name: str) -> str:
-    """该 reranker 实际生效的 backend：开关=api 且模型在映射表内才 api，否则 local。"""
-    if config.RERANK_BACKEND == "api" and config.online_api_model(model_name):
-        return "api"
-    return "local"
-
-
-def effective_rerank_model() -> str:
-    """实际用于精排的 reranker 模型名（打分模型与阈值模型的唯一真相，避免两处不一致）。
-
-    RERANK_BACKEND=api 时：RERANKER_MODEL 本身是 api 托管的就用它，否则忽略它、兜底到
-    DEFAULT_API_RERANK_MODEL（否则会静默回落本地 base，见 backlog 的 UI 联动遗留项）。
-    RERANK_BACKEND!=api 时：原样返回 RERANKER_MODEL（本地）。
-    """
-    model = config.RERANKER_MODEL
-    if config.RERANK_BACKEND != "api":
-        return model
-    if config.online_api_model(model) is not None:
-        return model
-    return DEFAULT_API_RERANK_MODEL if config.online_api_model(DEFAULT_API_RERANK_MODEL) else model
+# ── 云端判定 ─────────────────────────────────────────────────────────────────
+def embedding_is_api(model_name: str) -> bool:
+    """该 embedding 模型是否走云端 API：仅 bge-m3 可，且默认 embedding 选了 api-m3。"""
+    return config.online_api_model(model_name) is not None and config.default_embedding_is_api()
 
 
 # ── HTTP ─────────────────────────────────────────────────────────────────────

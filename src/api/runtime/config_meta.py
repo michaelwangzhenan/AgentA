@@ -161,8 +161,9 @@ REGISTRY: list[ConfigItem] = [
         section="索引与切块",
         type=ItemType.ENUM_STR,
         brief="默认 embedding",
-        detail="新入库文档默认用的 embedding 模型。",
-        options=("en", "zh", "m3"),
+        detail="新入库文档默认用的 embedding 模型。选 api-m3 表示 m3 走硅基流动云端（与本地 m3 共用 kb_m3、免重灌，需配 SiliconFlow key）；同时决定检索里 m3 走本地还是云端。",
+        options=("en", "zh", "m3", "api-m3"),
+        side_effect_hint="切换后下一次入库 / 检索即生效，无需重启",
     ),
     ConfigItem(
         key="CHUNK_SIZE",
@@ -196,22 +197,12 @@ REGISTRY: list[ConfigItem] = [
     ),
     # —— 召回（向量 + BM25 检索）——
     ConfigItem(
-        key="EMBEDDING_BACKEND",
-        group="rag",
-        section="召回",
-        type=ItemType.ENUM_STR,
-        brief="Embedding 来源",
-        detail="local=本地模型；api=硅基流动云端 API。api 只对已托管的模型（bge-m3）生效，其余（MiniLM / bge-small-zh）自动回落本地。同时影响 query 编码与新文档入库。切 api 需先在 API Keys 页配 SiliconFlow key。",
-        options=("local", "api"),
-        side_effect_hint="切换后下一次检索 / 入库即生效，无需重启",
-    ),
-    ConfigItem(
         key="RAG_ACTIVE_EMBEDDINGS",
         group="rag",
         section="召回",
         type=ItemType.MULTI_ENUM_STR,
         brief="启用的 embedding 模型",
-        detail="检索时同时查询哪几个 embedding；多选可跨语言联合召回。",
+        detail="检索时同时查询哪几个 embedding；多选可跨语言联合召回。其中 m3 走本地还是云端跟随「默认 embedding」（选 api-m3 即云端）。",
         options=("en", "zh", "m3"),
         side_effect_hint="首次切到新 alias 会触发 embedding 模型加载（几秒）",
     ),
@@ -282,22 +273,25 @@ REGISTRY: list[ConfigItem] = [
     ),
     # —— 精排（Cross-Encoder 二阶段重排）——
     ConfigItem(
-        key="RERANKER_ENABLED",
-        group="rag",
-        section="精排",
-        type=ItemType.BOOL,
-        brief="Reranker 精排",
-        detail="用 Cross-Encoder 对召回结果二次精排，提高相关性。",
-    ),
-    ConfigItem(
-        key="RERANK_BACKEND",
+        key="RERANKER_MODEL",
         group="rag",
         section="精排",
         type=ItemType.ENUM_STR,
-        brief="Rerank 来源",
-        detail="local=本地 CrossEncoder；api=硅基流动云端 rerank（bge-reranker-v2-m3）。选 api 时忽略下方 Reranker 模型、自动用云端 v2-m3。切 api 需先在 API Keys 页配 SiliconFlow key。",
-        options=("local", "api"),
-        side_effect_hint="切换后下一次检索即生效，无需重启",
+        brief="精排模型",
+        detail=(
+            "精排模型："
+            "disable=关闭；api:BAAI/bge-reranker-v2-m3=硅基流动云端；"
+            "BAAI/bge-reranker-base=本地中英；BAAI/bge-reranker-v2-m3=本地多语言；"
+            "cross-encoder/ms-marco-MiniLM-L-6-v2=本地英文轻量。"
+        ),
+        options=(
+            "disable",
+            "api:BAAI/bge-reranker-v2-m3",
+            "BAAI/bge-reranker-base",
+            "BAAI/bge-reranker-v2-m3",
+            "cross-encoder/ms-marco-MiniLM-L-6-v2",
+        ),
+        side_effect_hint="切换本地模型后第一次检索会重新加载（几秒）；api 与 disable 无需加载",
     ),
     ConfigItem(
         key="RERANKER_RECALL_MULTIPLIER",
@@ -308,15 +302,6 @@ REGISTRY: list[ConfigItem] = [
         detail="精排前取 top_k × 该倍数 条候选；调小更快、略降召回。",
         min=1,
         max=10,
-    ),
-    ConfigItem(
-        key="RERANKER_MODEL",
-        group="rag",
-        section="精排",
-        type=ItemType.STRING,
-        brief="Reranker 模型",
-        detail="精排用的本地 Cross-Encoder 模型；中英用 bge-reranker-base，多语言用 bge-reranker-v2-m3。仅在 Rerank 来源=local 时生效；来源=api 时本项被忽略。",
-        side_effect_hint="切换后第一次检索会重新加载模型（几秒）",
     ),
     # —— 召回自检（LLM 相关性把关）——
     ConfigItem(

@@ -1,11 +1,12 @@
 """测试：online API backend（SiliconFlow）—— embedding / rerank 云端分发。
 
 覆盖核心路径（纯单元测试，mock requests / 不发真实请求、不加载本地模型）：
-    - backend 判定：按开关 + 映射表生效，表外回落 local
+    - embedding 云端判定：仅 bge-m3 且默认 embedding=api-m3 走云端，表外回落本地
+    - 精排单开关派生：RERANKER_MODEL 的 disable / api: 前缀解析（rerank_enabled/is_api/model_name）
     - HTTP：重试（网络异常 / 429 / 5xx）、4xx 立即抛、耗尽抛 OnlineApiError
     - embed_texts / rerank_scores：请求体、按 index 对齐、异常
     - ApiEmbeddingFunction：name 同名复用、未托管模型报错
-    - retriever._get_embedding_fn 分发 + _embed_query_cached backend 键
+    - retriever._get_embedding_fn 分发 + _embed_query_cached 云端/本地键
     - reranker.rerank api 路径：不二次 sigmoid、失败降级不精排
 """
 
@@ -28,32 +29,72 @@ def _resp(status: int, payload: dict | None = None, text: str = "") -> MagicMock
 
 @pytest.fixture
 def _api_on(monkeypatch):
-    """把两个 backend 开关切到 api，并给一个假 key / 基址。"""
-    monkeypatch.setattr(config, "EMBEDDING_BACKEND", "api")
-    monkeypatch.setattr(config, "RERANK_BACKEND", "api")
+    """把默认 embedding 切到 api-m3（m3 走云端），并给一个假 key / 基址。"""
+    monkeypatch.setattr(config, "DEFAULT_EMBEDDING_ALIAS", "api-m3")
     monkeypatch.setattr(config, "SILICONFLOW_API_KEY", "sk-test")
     monkeypatch.setattr(config, "SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1")
     monkeypatch.setattr(config, "SILICONFLOW_MAX_RETRIES", 2)
     monkeypatch.setattr(config, "SILICONFLOW_TIMEOUT_SEC", 5)
 
 
-class TestBackendResolve:
-    """backend 判定：只有开关=api 且模型在映射表内才 api，其余一律 local。"""
+class TestEmbeddingIsApi:
+    """embedding 云端判定：只有 bge-m3 且默认 embedding=api-m3 才走云端，其余一律本地。"""
 
-    def test_mapped_model_api_when_switch_on(self, _api_on) -> None:
-        assert online_api.embedding_backend_for("BAAI/bge-m3") == "api"
-        assert online_api.rerank_backend_for("BAAI/bge-reranker-v2-m3") == "api"
+    def test_default_embedding_is_api(self, monkeypatch) -> None:
+        monkeypatch.setattr(config, "DEFAULT_EMBEDDING_ALIAS", "api-m3")
+        assert config.default_embedding_is_api() is True
+        monkeypatch.setattr(config, "DEFAULT_EMBEDDING_ALIAS", "m3")
+        assert config.default_embedding_is_api() is False
 
-    def test_unmapped_model_falls_back_local(self, _api_on) -> None:
-        # MiniLM / bge-small-zh 不在映射表 → 即便开关 api 也回落 local
-        assert online_api.embedding_backend_for("all-MiniLM-L6-v2") == "local"
-        assert online_api.embedding_backend_for("BAAI/bge-small-zh") == "local"
+    def test_resolve_api_m3_shares_m3(self) -> None:
+        # api-m3 与本地 m3 解析到同一 (模型, collection)，共用 kb_m3、免重灌
+        assert config.resolve_embedding("api-m3") == config.resolve_embedding("m3")
 
-    def test_switch_off_is_local(self, monkeypatch) -> None:
-        monkeypatch.setattr(config, "EMBEDDING_BACKEND", "local")
-        monkeypatch.setattr(config, "RERANK_BACKEND", "local")
-        assert online_api.embedding_backend_for("BAAI/bge-m3") == "local"
-        assert online_api.rerank_backend_for("BAAI/bge-reranker-v2-m3") == "local"
+    def test_mapped_model_api_when_default_api(self, _api_on) -> None:
+        assert online_api.embedding_is_api("BAAI/bge-m3") is True
+
+    def test_unmapped_model_stays_local(self, _api_on) -> None:
+        # MiniLM / bge-small-zh 不在映射表 → 即便默认 api-m3 也本地
+        assert online_api.embedding_is_api("all-MiniLM-L6-v2") is False
+        assert online_api.embedding_is_api("BAAI/bge-small-zh") is False
+
+    def test_default_not_api_is_local(self, monkeypatch) -> None:
+        monkeypatch.setattr(config, "DEFAULT_EMBEDDING_ALIAS", "m3")
+        assert online_api.embedding_is_api("BAAI/bge-m3") is False
+
+
+class TestRerankModelHelpers:
+    """精排单开关派生：RERANKER_MODEL 一个值同时表达 开不开 / 云端还是本地 / 哪个模型。"""
+
+    def test_disable(self, monkeypatch) -> None:
+        monkeypatch.setattr(config, "RERANKER_MODEL", "disable")
+        assert config.rerank_enabled() is False
+        assert config.rerank_is_api() is False
+
+    def test_api_value(self, monkeypatch) -> None:
+        monkeypatch.setattr(config, "RERANKER_MODEL", "api:BAAI/bge-reranker-v2-m3")
+        assert config.rerank_enabled() is True
+        assert config.rerank_is_api() is True
+        # 去前缀后的真实模型名：api 打分模型 id / 阈值查表都用它
+        assert config.rerank_model_name() == "BAAI/bge-reranker-v2-m3"
+
+    def test_local_values(self, monkeypatch) -> None:
+        for name in (
+            "BAAI/bge-reranker-base",
+            "BAAI/bge-reranker-v2-m3",
+            "cross-encoder/ms-marco-MiniLM-L-6-v2",
+        ):
+            monkeypatch.setattr(config, "RERANKER_MODEL", name)
+            assert config.rerank_enabled() is True
+            assert config.rerank_is_api() is False
+            assert config.rerank_model_name() == name
+
+    def test_api_and_local_v2m3_share_threshold(self, monkeypatch) -> None:
+        # api: 与本地同款 v2-m3 去前缀后同名 → 命中同一条 per-model 阈值（0.0）
+        monkeypatch.setattr(config, "RERANKER_MODEL", "api:BAAI/bge-reranker-v2-m3")
+        assert config.min_rerank_score_for_model(config.rerank_model_name()) == 0.0
+        monkeypatch.setattr(config, "RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
+        assert config.min_rerank_score_for_model(config.rerank_model_name()) == 0.0
 
 
 class TestHttpRetry:
@@ -148,7 +189,7 @@ class TestApiEmbeddingFunction:
 
 
 class TestRetrieverDispatch:
-    """retriever._get_embedding_fn / _embed_query_cached 按 backend 分发。"""
+    """retriever._get_embedding_fn / _embed_query_cached 按云端 / 本地分发。"""
 
     @pytest.fixture(autouse=True)
     def _clear_caches(self):
@@ -173,7 +214,7 @@ class TestRetrieverDispatch:
     def test_embed_query_cached_api_branch(self, _api_on) -> None:
         from src.rag import retriever
         with patch("src.rag.online_api.embed_texts", return_value=[[0.5, 0.6]]) as m:
-            vec = retriever._embed_query_cached("BAAI/bge-m3", "hello", "api")
+            vec = retriever._embed_query_cached("BAAI/bge-m3", "hello", True)
         m.assert_called_once_with(["hello"], "BAAI/bge-m3")
         assert vec == (0.5, 0.6)
 
@@ -187,11 +228,12 @@ class TestRerankApiPath:
 
     def test_api_scores_used_without_sigmoid(self, monkeypatch) -> None:
         from src.rag import reranker
-        monkeypatch.setattr(config, "RERANK_BACKEND", "api")
-        monkeypatch.setattr(config, "RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
+        monkeypatch.setattr(config, "RERANKER_MODEL", "api:BAAI/bge-reranker-v2-m3")
         hits = self._hits(3)
-        with patch("src.rag.online_api.rerank_scores", return_value=[0.99, 0.00, 0.50]):
+        with patch("src.rag.online_api.rerank_scores", return_value=[0.99, 0.00, 0.50]) as m:
             result = reranker.rerank("q", hits, top_k=3)
+        # 走 api 时把去前缀的真实模型名作为打分 model id 传下去
+        assert m.call_args[0][2] == "BAAI/bge-reranker-v2-m3"
         # 分数原样保留（若二次 sigmoid，0.99 会被压到 ~0.729）
         assert result[0].score == pytest.approx(0.99)
         assert result[0].document == "doc 0"
@@ -199,28 +241,15 @@ class TestRerankApiPath:
 
     def test_api_failure_degrades_to_no_rerank(self, monkeypatch) -> None:
         from src.rag import reranker
-        monkeypatch.setattr(config, "RERANK_BACKEND", "api")
-        monkeypatch.setattr(config, "RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
+        monkeypatch.setattr(config, "RERANKER_MODEL", "api:BAAI/bge-reranker-v2-m3")
         hits = self._hits(5)
         with patch("src.rag.online_api.rerank_scores", side_effect=online_api.OnlineApiError("boom")):
             result = reranker.rerank("q", hits, top_k=3)
         assert result == hits[:3]  # 降级：返回召回前 top_k，不动分数
 
-    def test_api_backend_coerces_base_to_api_rerank(self, monkeypatch) -> None:
-        # backend=api 但 RERANKER_MODEL=base（非 api 托管）：应走 api 打分（v2-m3），不落本地
+    def test_local_value_still_uses_cross_encoder(self, monkeypatch) -> None:
         from src.rag import reranker
-        monkeypatch.setattr(config, "RERANK_BACKEND", "api")
         monkeypatch.setattr(config, "RERANKER_MODEL", "BAAI/bge-reranker-base")
-        hits = self._hits(3)
-        with patch("src.rag.online_api.rerank_scores", return_value=[0.9, 0.1, 0.5]) as m:
-            result = reranker.rerank("q", hits, top_k=3)
-        m.assert_called_once()
-        assert m.call_args[0][2] == "BAAI/bge-reranker-v2-m3"  # 用兜底 api 模型 id 打分
-        assert result[0].score == pytest.approx(0.9)
-
-    def test_local_backend_still_uses_cross_encoder(self, monkeypatch) -> None:
-        from src.rag import reranker
-        monkeypatch.setattr(config, "RERANK_BACKEND", "local")
         hits = self._hits(3)
         mock_model = MagicMock()
         mock_model.predict.return_value = [0.9, 0.8, 0.7]
@@ -228,28 +257,6 @@ class TestRerankApiPath:
             result = reranker.rerank("q", hits, top_k=3)
         mock_model.predict.assert_called_once()
         assert len(result) == 3
-
-
-class TestEffectiveRerankModel:
-    """backend=api 时的模型兜底：非 api 托管的 RERANKER_MODEL 被忽略、改用默认 api reranker。"""
-
-    def test_local_backend_returns_configured_model(self, monkeypatch) -> None:
-        monkeypatch.setattr(config, "RERANK_BACKEND", "local")
-        monkeypatch.setattr(config, "RERANKER_MODEL", "BAAI/bge-reranker-base")
-        assert online_api.effective_rerank_model() == "BAAI/bge-reranker-base"
-
-    def test_api_backend_coerces_unmapped_model(self, monkeypatch) -> None:
-        # 开关=api 但选了非 api 托管的 base → 兜底到默认 api reranker（不静默回落本地）
-        monkeypatch.setattr(config, "RERANK_BACKEND", "api")
-        monkeypatch.setattr(config, "RERANKER_MODEL", "BAAI/bge-reranker-base")
-        assert online_api.effective_rerank_model() == online_api.DEFAULT_API_RERANK_MODEL
-        # 阈值也应跟着 effective 模型走（v2-m3=0.0），而非 base 的全局值
-        assert config.min_rerank_score_for_model(online_api.effective_rerank_model()) == 0.0
-
-    def test_api_backend_keeps_mapped_model(self, monkeypatch) -> None:
-        monkeypatch.setattr(config, "RERANK_BACKEND", "api")
-        monkeypatch.setattr(config, "RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
-        assert online_api.effective_rerank_model() == "BAAI/bge-reranker-v2-m3"
 
 
 class TestRerankMinScorePerModel:

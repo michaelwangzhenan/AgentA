@@ -63,8 +63,8 @@ def _query_prefix_for(model_name: str) -> str:
 
 
 # ── Embedding function 进程级缓存 ────────────────────────────────────────────
-# 缓存键带 backend（"local:model" / "api:model"）：运行时切 EMBEDDING_BACKEND 会命中
-# 不同缓存条目，天然避免拿到上一个 backend 的陈旧实例，无需手动清缓存。
+# 缓存键带来源标记（"local:model" / "api:model"）：切换 EMBEDDING_MODEL=api-m3 会命中
+# 不同缓存条目，天然避免拿到上一来源的陈旧实例，无需手动清缓存。
 _embedding_fn_cache: dict[str, Any] = {}
 _embedding_fn_lock = threading.RLock()
 
@@ -72,20 +72,20 @@ _embedding_fn_lock = threading.RLock()
 def _get_embedding_fn(model_name: str) -> Any:
     """懒加载 embedding function，多次调用复用同一实例；线程安全。
 
-    按当前 backend 分发：api（且模型在映射表内）→ ApiEmbeddingFunction（不加载本地模型），
+    走云端（api-m3 且模型在映射表内）→ ApiEmbeddingFunction（不加载本地模型），
     否则 → 本地 SentenceTransformerEmbeddingFunction（现状）。
     """
-    backend = online_api.embedding_backend_for(model_name)
-    cache_key = f"{backend}:{model_name}"
+    use_api = online_api.embedding_is_api(model_name)
+    cache_key = f"{'api' if use_api else 'local'}:{model_name}"
     fn = _embedding_fn_cache.get(cache_key)
     if fn is not None:
         return fn
     with _embedding_fn_lock:
         fn = _embedding_fn_cache.get(cache_key)
         if fn is None:
-            if backend == "api":
+            if use_api:
                 fn = online_api.ApiEmbeddingFunction(model_name)
-                logger.info("[Embedding] model=%s backend=api 生效", model_name)
+                logger.info("[Embedding] model=%s 走云端 api", model_name)
             else:
                 fn = SentenceTransformerEmbeddingFunction(model_name=model_name)
             _embedding_fn_cache[cache_key] = fn
@@ -93,14 +93,14 @@ def _get_embedding_fn(model_name: str) -> Any:
 
 
 @lru_cache(maxsize=512)
-def _embed_query_cached(model_name: str, text: str, backend: str) -> tuple[float, ...]:
-    """编码单条 query 为向量并按 (model, text, backend) 缓存。
+def _embed_query_cached(model_name: str, text: str, use_api: bool) -> tuple[float, ...]:
+    """编码单条 query 为向量并按 (model, text, use_api) 缓存。
 
     同一 query 重复检索（含多路改写命中相同文本）时零编码开销 —— query 编码是
-    CPU 密集的耗时项。backend 入 key，切换 backend 不会命中另一来源的旧向量。
+    CPU 密集的耗时项。use_api 入 key，切换来源不会命中另一来源的旧向量。
     返回 tuple 以满足 lru_cache 不可变要求。
     """
-    if backend == "api":
+    if use_api:
         _vendor, api_model_id = config.online_api_model(model_name)  # type: ignore[misc]
         vec = online_api.embed_texts([text], api_model_id)[0]
     else:
@@ -129,7 +129,7 @@ def warm_up() -> None:
     主动触发所有已配置 embedding 模型 + reranker 的加载，避免首次检索时延抖动。
 
     使用场景：CLI 启动时由 main._warm_up_rag_models() 调用；其它入口也可显式调用。
-    RERANKER_ENABLED=false 时不会加载 CrossEncoder（内层 reranker.warm_up 直接 return）。
+    RERANKER_MODEL=disable 时不会加载 CrossEncoder（内层 reranker.warm_up 直接 return）。
     任一模型加载失败仅记录 warning，不抛异常。
     """
     for alias, model_name, _coll in config.iter_active_embeddings():
@@ -138,7 +138,7 @@ def warm_up() -> None:
             logger.info("[Retriever] embedding 模型已预热 [%s]: %s", alias, model_name)
         except Exception as e:
             logger.warning("[Retriever] embedding 预热失败 [%s] %s: %s", alias, model_name, e)
-    if config.RERANKER_ENABLED:
+    if config.rerank_enabled():
         try:
             from src.rag.reranker import warm_up as _rerank_warm_up
             _rerank_warm_up()
@@ -215,11 +215,11 @@ def _query_collection(
     effective_query = (prefix + query) if prefix else query
 
     # 自己编码 query（带缓存）并以 query_embeddings 传入，避免 chroma 每次重复编码。
-    # backend=api 时若调用失败：记 error 并跳过本 collection 的 dense（BM25 仍在 search
+    # 走云端时若调用失败：记 error 并跳过本 collection 的 dense（BM25 仍在 search
     # 层继续召回），既不崩整链、也不回落本地模型（VPS 上本无本地模型）。
-    backend = online_api.embedding_backend_for(model_name)
+    use_api = online_api.embedding_is_api(model_name)
     try:
-        query_vec = list(_embed_query_cached(model_name, effective_query, backend))
+        query_vec = list(_embed_query_cached(model_name, effective_query, use_api))
     except online_api.OnlineApiError as e:
         logger.error(
             "[Retriever] api 编码 query 失败，跳过 collection '%s' 的 dense 召回（BM25 仍生效）: %s",
@@ -387,7 +387,7 @@ def search(
         where:    可选 metadata 过滤子句（透传给 chroma 与 BM25）。
         queries:  可选多 query 列表，只影响召回阶段，不改变 rerank 使用的 query。
         rerank:   是否启用 cross-encoder 精排：
-                    · None  → 沿用 config.RERANKER_ENABLED；
+                    · None  → 沿用 config.rerank_enabled()；
                     · True  → 强制开启；
                     · False → 强制关闭（评估 ablation 用 search(rerank=False)）。
 
@@ -398,7 +398,7 @@ def search(
     client = _get_chroma_client()
 
     # 是否启用 rerank：参数 > 全局 config
-    use_rerank = config.RERANKER_ENABLED if rerank is None else bool(rerank)
+    use_rerank = config.rerank_enabled() if rerank is None else bool(rerank)
 
     # 召回窗口：开启精排时扩大候选，BM25 与 dense 各取 recall_k 条
     recall_k = top_k * config.RERANKER_RECALL_MULTIPLIER if use_rerank else top_k
@@ -529,7 +529,7 @@ def search(
         # 精排后 min_score 阈值过滤：只过滤真正经过精排打分（reranked=True）的 hit。
         # 未精排的 hit（候选≤1 / 模型降级）其 score 仍是召回阶段 RRF 小分，
         # 用精排阈值过滤会把它们全删（曾导致 multiplier=2 时召回归零），故放行。
-        min_rerank = config.min_rerank_score_for_model(online_api.effective_rerank_model())
+        min_rerank = config.min_rerank_score_for_model(config.rerank_model_name())
         if min_rerank > 0:
             before = len(top_hits)
             top_hits = [

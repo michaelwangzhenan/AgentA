@@ -517,19 +517,28 @@ EMBEDDING_MODELS: dict[str, tuple[str, str]] = {
     "m3": ("BAAI/bge-m3", "kb_m3"),            # 多语言（dense），1024维
 }
 
-# 默认 embedding 别名，可通过 .env 中的 EMBEDDING_MODEL 覆盖（填别名 en/zh/m3，或直接填模型名）
+# 默认 embedding 别名，可通过 .env 中的 EMBEDDING_MODEL 覆盖（en/zh/m3/api-m3，或直接填模型名）
 DEFAULT_EMBEDDING_ALIAS: str = os.getenv("EMBEDDING_MODEL", "en")
+
+
+def default_embedding_is_api() -> bool:
+    """默认 embedding 是否走云端 API（EMBEDDING_MODEL 选了 api-m3）。"""
+    return DEFAULT_EMBEDDING_ALIAS == "api-m3"
+
 
 def resolve_embedding(model_alias: str) -> tuple[str, str]:
     """
-    将别名（en/zh/m3）或模型名称解析为 (model_name, collection_name)。
+    将别名（en/zh/m3/api-m3）或模型名称解析为 (model_name, collection_name)。
 
-    - 若传入已知别名（en/zh/m3），直接查表返回。
+    - api-m3 走云端 bge-m3，与本地 m3 共用同一 (bge-m3, kb_m3)，仅编码来源不同。
+    - 若传入已知别名，直接查表返回。
     - 若传入自定义模型名（含 /），以模型名的最后一段作为 collection 名前缀。
 
     Returns:
         (model_name, collection_name) 元组
     """
+    if model_alias == "api-m3":
+        return EMBEDDING_MODELS["m3"]
     if model_alias in EMBEDDING_MODELS:
         return EMBEDDING_MODELS[model_alias]
     # 允许直接传入模型名（如 "sentence-transformers/all-mpnet-base-v2"）
@@ -599,30 +608,49 @@ CHUNK_OVERLAP: int = int(os.getenv("CHUNK_OVERLAP", "100"))
 CLAUDE_MAX_TOKENS: int = int(os.getenv("CLAUDE_MAX_TOKENS", "4096"))
 
 # ── Reranker 配置 ────────────────────────────────────────────────────────────
-# Cross-Encoder 模型，用于在 Bi-Encoder 召回结果上做二阶段精排
-# 默认改为 BAAI/bge-reranker-base（中英双语，中文场景显著优于 ms-marco MiniLM）。
-# 多语言/混合语种推荐换为 BAAI/bge-reranker-v2-m3（更准但更大）。
+# 单下拉值即「唯一真相」，一个值同时表达「开不开 / 云端还是本地 / 哪个模型」：
+#   disable                              → 关闭精排
+#   api:<模型名>（如 api:BAAI/bge-reranker-v2-m3） → 走硅基云端精排
+#   <本地模型名>（如 BAAI/bge-reranker-base）      → 本地 CrossEncoder
+# 靠 disable 特判 + api: 前缀自解释，代码里不再有独立的 enabled / backend 开关。
 RERANKER_MODEL: str = os.getenv(
     "RERANKER_MODEL", "BAAI/bge-reranker-base"
 )
-# true 开启二阶段精排；false 跳过精排，直接使用 round-robin 结果（向后兼容）
-RERANKER_ENABLED: bool = os.getenv("RERANKER_ENABLED", "true").lower() == "true"
 # 召回窗口倍数：精排前取 top_k × N 条候选；调大召回更全但精排更慢，默认 2
 RERANKER_RECALL_MULTIPLIER: int = int(os.getenv("RERANKER_RECALL_MULTIPLIER", "2"))
 
-# ── Online API backend（SiliconFlow）─────────────────────────────────────────
-# embedding / rerank 来源：local=本地 sentence-transformers；api=云端 API。默认 local。
-# 两者独立可混搭；api 只对 ONLINE_API_MODELS 表内模型生效，表外模型走本地。
-EMBEDDING_BACKEND: str = os.getenv("EMBEDDING_BACKEND", "local").lower()
-RERANK_BACKEND: str = os.getenv("RERANK_BACKEND", "local").lower()
+_RERANK_API_PREFIX = "api:"
 
+
+def rerank_enabled() -> bool:
+    """是否开启精排：RERANKER_MODEL 非 disable 即开。"""
+    return RERANKER_MODEL != "disable"
+
+
+def rerank_is_api() -> bool:
+    """精排是否走云端 API：RERANKER_MODEL 以 api: 前缀开头即 api。"""
+    return RERANKER_MODEL.startswith(_RERANK_API_PREFIX)
+
+
+def rerank_model_name() -> str:
+    """去掉 api: 前缀后的真实模型名。
+
+    本地加载 / api 模型 id / 阈值查表都用它——api 与本地同款模型去前缀后同名，
+    自动命中同一条 per-model 阈值。
+    """
+    return RERANKER_MODEL[len(_RERANK_API_PREFIX):] if rerank_is_api() else RERANKER_MODEL
+
+
+# ── SiliconFlow 云端 API（embedding / rerank）────────────────────────────────
+# embedding 是否走云端由 EMBEDDING_MODEL=api-m3 决定；rerank 由 RERANKER_MODEL 的
+# api: 前缀决定。二者都只对 ONLINE_API_MODELS 表内模型生效，表外模型走本地。
 # SiliconFlow 连接配置（domestic，直连不走 LLM_PROXY）
 SILICONFLOW_API_KEY: str = os.getenv("SILICONFLOW_API_KEY", "")
 SILICONFLOW_BASE_URL: str = os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1")
 SILICONFLOW_TIMEOUT_SEC: float = float(os.getenv("SILICONFLOW_TIMEOUT_SEC", "30"))
 SILICONFLOW_MAX_RETRIES: int = int(os.getenv("SILICONFLOW_MAX_RETRIES", "2"))
 
-# 本地模型名 → (厂商, API 模型 id)。backend=api 时只有表内模型走 API，其余回落本地。
+# 本地模型名 → (厂商, API 模型 id)：表内模型才有云端版，表外一律本地。
 ONLINE_API_MODELS: dict[str, tuple[str, str]] = {
     "BAAI/bge-m3": ("siliconflow", "BAAI/bge-m3"),                          # embedding
     "BAAI/bge-reranker-v2-m3": ("siliconflow", "BAAI/bge-reranker-v2-m3"),  # rerank

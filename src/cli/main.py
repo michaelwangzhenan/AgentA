@@ -178,8 +178,8 @@ def _warm_up_rag_models() -> None:
     """启动时预加载 embedding（及可选 reranker），并提示用户勿误以为卡死。"""
     aliases = ", ".join(a for a, _, _ in config.iter_active_embeddings())
     parts = [f"embedding（{aliases or '默认'}）"]
-    if config.RERANKER_ENABLED:
-        parts.append(f"reranker（{config.RERANKER_MODEL}）")
+    if config.rerank_enabled():
+        parts.append(f"reranker（{config.rerank_model_name()}）")
     targets = "、".join(parts)
     print(
         f"⏳ 正在预加载 {targets}, 可能需数十秒至数分钟，请稍候…",
