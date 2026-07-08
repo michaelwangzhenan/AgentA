@@ -319,12 +319,24 @@ export function IngestPanel({ collections, defaultAlias, onIngested, onGotoGolde
                 className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
                 aria-label="目标库"
               >
-                {collections.map((c) => (
-                  <option key={c.alias} value={c.alias}>
-                    {c.alias}
-                    {c.is_default ? '（默认）' : ''} · {c.model}
-                  </option>
-                ))}
+                {collections.flatMap((c) => {
+                  // 有云端版的库（m3）拆成「本地 / 云端(api)」两项，让入库路径可见且可选；
+                  // 云端项 value=api-<alias>（如 api-m3），后端 resolve 到同一 kb_<alias>
+                  const local = (
+                    <option key={c.alias} value={c.alias}>
+                      {c.alias}
+                      {c.is_default ? '（默认）' : ''} · {c.model}
+                      {c.supports_api ? ' · 本地' : ''}
+                    </option>
+                  )
+                  if (!c.supports_api) return [local]
+                  return [
+                    local,
+                    <option key={`api-${c.alias}`} value={`api-${c.alias}`}>
+                      {c.alias} · {c.model} · 云端(api)
+                    </option>,
+                  ]
+                })}
               </select>
               {running ? (
                 <Button

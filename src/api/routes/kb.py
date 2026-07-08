@@ -38,11 +38,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 def _validate_alias(model: str) -> str:
-    """校验 embedding 别名必须是已定义的（en/zh/m3），否则 400。"""
-    if model not in config.EMBEDDING_MODELS:
+    """校验 embedding 别名：已定义的（en/zh/m3）或云端入库别名 api-m3，否则 400。
+
+    api-m3 与本地 m3 落同一 kb_m3，仅入库编码来源不同（见 config.resolve_embedding）。
+    """
+    valid = list(config.EMBEDDING_MODELS) + ["api-m3"]
+    if model not in valid:
         raise HTTPException(
             status_code=400,
-            detail=f"未知库别名 {model!r}；可选：{', '.join(config.EMBEDDING_MODELS)}",
+            detail=f"未知库别名 {model!r}；可选：{', '.join(valid)}",
         )
     return model
 
@@ -94,8 +98,10 @@ def list_collections(
     """列出全部已定义的库（L1）：每个 embedding 别名 + 模型 + 文档数 + chunk 数。
 
     文档 / chunk 数有进程内缓存（写操作自动失效）；refresh=true 强制重算。
-    高亮标识来自 is_default（= .env 配置的默认入库别名）。
+    高亮标识来自 is_default（= 当前默认入库库）。默认别名可能是 api-m3（云端），
+    它与本地 m3 落同一 kb_m3，故按「解析后的 collection」比对，避免 api-m3 时无库被标默认。
     """
+    default_collection = config.resolve_embedding(config.DEFAULT_EMBEDDING_ALIAS)[1]
     items: list[KBCollection] = []
     for alias, (model_name, collection_name) in config.EMBEDDING_MODELS.items():
         doc_count, chunk_count = count_kb_documents(model=alias, use_cache=not refresh)
@@ -105,18 +111,19 @@ def list_collections(
             collection=collection_name,
             doc_count=doc_count,
             chunk_count=chunk_count,
-            is_default=alias == config.DEFAULT_EMBEDDING_ALIAS,
+            is_default=collection_name == default_collection,
+            supports_api=config.online_api_model(model_name) is not None,
         ))
     return KBCollectionListResponse(collections=items)
 
 
 @router.get("/kb/documents", response_model=KBDocumentListResponse)
 def list_documents(
-    model: str = Query(config.DEFAULT_EMBEDDING_ALIAS, description="库别名 en/zh/m3"),
+    model: str | None = Query(None, description="库别名 en/zh/m3/api-m3；缺省用当前默认"),
     _: dict = Depends(get_current_user),
 ) -> KBDocumentListResponse:
     """列出指定库内已入库的所有文档（按上传时间倒序），附每文档的 golden 候选计数。"""
-    _validate_alias(model)
+    model = _validate_alias(model or config.DEFAULT_EMBEDDING_ALIAS)
     docs = list_kb_documents(model=model)
     from src.stores.golden_store import get_shared_store
     dc = get_shared_store().doc_counts()  # {doc_id: {total, pending}}
@@ -215,7 +222,7 @@ async def _ingest_event_stream(
 @router.post("/kb/upload")
 async def upload_document(
     file: UploadFile = File(...),
-    model: str = Form(config.DEFAULT_EMBEDDING_ALIAS),
+    model: str | None = Form(None),
     relpath: str = Form(""),
     user: dict = Depends(get_current_user),
 ) -> StreamingResponse:
@@ -224,8 +231,10 @@ async def upload_document(
     落盘到 `web_uploads/<alias>/<relpath>`：按库分子目录隔离，relpath 保留文件夹
     上传时的相对路径，避免不同文件夹同名文件互相覆盖。relpath 为空则用文件名。
 
+    model 缺省时取当前默认别名（运行时取值，跟随配置；含 api-m3=m3 走云端编码）。
+
     校验（失败走普通 HTTP 错误）：
-      - 库别名必须是已定义的（en/zh/m3），否则 400
+      - 库别名必须是已定义的（en/zh/m3/api-m3），否则 400
       - 扩展名必须在 `SUPPORTED_EXTENSIONS`，否则 415
       - 文件大小 ≤ `config.WEB_MAX_UPLOAD_MB` MB，否则 413
     校验通过后返回 text/event-stream：
@@ -233,7 +242,7 @@ async def upload_document(
       - `{type:"done", doc_id, chunks, status, skipped_unchanged, message}`
       - `{type:"error", message}`
     """
-    _validate_alias(model)
+    model = _validate_alias(model or config.DEFAULT_EMBEDDING_ALIAS)
     if not file.filename:
         raise HTTPException(status_code=422, detail="filename 不能为空")
 
@@ -277,14 +286,14 @@ async def upload_document(
 @router.delete("/kb/documents/{doc_id}", response_model=KBDeleteResponse)
 def delete_document(
     doc_id: str,
-    model: str = Query(config.DEFAULT_EMBEDDING_ALIAS, description="库别名 en/zh/m3"),
+    model: str | None = Query(None, description="库别名 en/zh/m3/api-m3；缺省用当前默认"),
     _: dict = Depends(get_current_user),
 ) -> KBDeleteResponse:
     """从指定库删除单文档（Chroma + BM25 + web_uploads 物理文件，一并清）。
 
     幂等：doc_id 不存在返回 200 + deleted=False。
     """
-    _validate_alias(model)
+    model = _validate_alias(model or config.DEFAULT_EMBEDDING_ALIAS)
     found, chunks_removed = delete_kb_document(
         doc_id=doc_id, model=model, web_upload_dir=str(_alias_upload_root(model))
     )
@@ -293,14 +302,14 @@ def delete_document(
 
 @router.delete("/kb/documents", response_model=KBClearAllResponse)
 def clear_all_documents(
-    model: str = Query(config.DEFAULT_EMBEDDING_ALIAS, description="库别名 en/zh/m3"),
+    model: str | None = Query(None, description="库别名 en/zh/m3/api-m3；缺省用当前默认"),
     _: dict = Depends(get_current_user),
 ) -> KBClearAllResponse:
     """清空指定库（Chroma collection + BM25 + web_uploads 物理文件）。
 
     破坏性操作；前端应在调用前做二次确认。幂等：空 KB 调用返回全 0。
     """
-    _validate_alias(model)
+    model = _validate_alias(model or config.DEFAULT_EMBEDDING_ALIAS)
     result = delete_all_kb_documents(
         model=model, web_upload_dir=str(_alias_upload_root(model))
     )

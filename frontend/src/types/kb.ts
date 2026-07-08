@@ -25,6 +25,7 @@ export type KBCollection = {
   doc_count: number
   chunk_count: number
   is_default: boolean // 是否为 .env 默认入库库
+  supports_api: boolean // 该模型有云端版时为 true（入库可选 api-<alias> 走云端编码）
 }
 
 export type KBCollectionListResponse = {

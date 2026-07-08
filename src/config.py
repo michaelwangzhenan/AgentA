@@ -521,9 +521,20 @@ EMBEDDING_MODELS: dict[str, tuple[str, str]] = {
 DEFAULT_EMBEDDING_ALIAS: str = os.getenv("EMBEDDING_MODEL", "en")
 
 
+def alias_is_api(alias: str) -> bool:
+    """别名是否显式要求走云端 API（目前仅 api-m3）。
+
+    用于「入库按次选来源」：入库传 api-m3 即云端、传 m3 即本地，与全局默认解耦。
+    """
+    return alias == "api-m3"
+
+
 def default_embedding_is_api() -> bool:
-    """默认 embedding 是否走云端 API（EMBEDDING_MODEL 选了 api-m3）。"""
-    return DEFAULT_EMBEDDING_ALIAS == "api-m3"
+    """默认 embedding 是否走云端 API（EMBEDDING_MODEL 选了 api-m3）。
+
+    决定「检索」与「语义缓存」里 m3 的编码来源（全局）；入库来源另由所选别名决定。
+    """
+    return alias_is_api(DEFAULT_EMBEDDING_ALIAS)
 
 
 def resolve_embedding(model_alias: str) -> tuple[str, str]:

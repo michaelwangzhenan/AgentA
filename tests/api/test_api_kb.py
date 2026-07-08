@@ -74,6 +74,11 @@ def test_list_collections(
     assert one["doc_count"] == 2
     assert one["chunk_count"] == 11
     assert one["collection"]  # 非空
+    # supports_api：仅有云端版的模型（m3→bge-m3）为 True，en/zh 为 False
+    by_alias = {c["alias"]: c for c in cols}
+    assert by_alias["m3"]["supports_api"] is True
+    assert by_alias["en"]["supports_api"] is False
+    assert by_alias["zh"]["supports_api"] is False
 
 
 # ─── GET /api/kb/documents ───────────────────────────────────────────────

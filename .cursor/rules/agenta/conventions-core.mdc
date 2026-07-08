@@ -5,6 +5,10 @@ alwaysApply: true
 
 # AgentA 工程公约
 
+
+## Python 环境
+使用工程目录下 .venv， 不要使用系统环境下的python
+
 ## 语言规范
 
 本规范适用：AI Agent 对话/思考、文档写作、代码注释等。

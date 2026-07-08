@@ -218,6 +218,33 @@ class TestRetrieverDispatch:
         m.assert_called_once_with(["hello"], "BAAI/bge-m3")
         assert vec == (0.5, 0.6)
 
+    def test_get_embedding_fn_use_api_override_decouples_global(self, monkeypatch) -> None:
+        # 全局本地（default 非 api-m3），但入库显式 use_api=True → 仍走云端 ApiEmbeddingFunction
+        from src.rag import retriever
+        monkeypatch.setattr(config, "DEFAULT_EMBEDDING_ALIAS", "m3")
+        fn = retriever._get_embedding_fn("BAAI/bge-m3", use_api=True)
+        assert isinstance(fn, online_api.ApiEmbeddingFunction)
+
+    def test_get_embedding_fn_use_api_false_forces_local(self, monkeypatch) -> None:
+        # 全局云端（api-m3），但入库显式 use_api=False → 强制本地，不看全局
+        from src.rag import retriever
+        monkeypatch.setattr(config, "DEFAULT_EMBEDDING_ALIAS", "api-m3")
+        with patch("src.rag.retriever.SentenceTransformerEmbeddingFunction") as mock_st:
+            retriever._get_embedding_fn("BAAI/bge-m3", use_api=False)
+        mock_st.assert_called_once()
+
+    def test_get_embedding_fn_use_api_true_unmapped_falls_back_local(self, monkeypatch) -> None:
+        # 防御：显式 use_api=True 但该模型无云端版 → 回落本地，不炸
+        from src.rag import retriever
+        with patch("src.rag.retriever.SentenceTransformerEmbeddingFunction") as mock_st:
+            retriever._get_embedding_fn("all-MiniLM-L6-v2", use_api=True)
+        mock_st.assert_called_once()
+
+    def test_alias_is_api(self) -> None:
+        assert config.alias_is_api("api-m3") is True
+        assert config.alias_is_api("m3") is False
+        assert config.alias_is_api("en") is False
+
 
 class TestRerankApiPath:
     """reranker.rerank api 路径：不二次 sigmoid、失败降级不精排。"""

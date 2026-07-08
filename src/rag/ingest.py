@@ -92,9 +92,11 @@ def _detect_lang(text: str) -> str:
     return "en"
 
 
-def _open_collection(client, model_name: str, collection_name: str):
+def _open_collection(client, model_name: str, collection_name: str, use_api: bool | None = None):
     """
     获取（或创建）collection，并保证其 hnsw:space=cosine。
+
+    use_api：入库来源（None=按全局；True/False=显式指定，见 `_get_embedding_fn`）。
 
     场景：
       - collection 不存在 → 直接创建，写入 cosine metadata。
@@ -104,7 +106,7 @@ def _open_collection(client, model_name: str, collection_name: str):
     """
     # 复用 retriever 的进程级缓存：同名模型只加载一次，ingest 与检索端共用同一实例
     from src.rag.retriever import _get_embedding_fn
-    embedding_fn = _get_embedding_fn(model_name)
+    embedding_fn = _get_embedding_fn(model_name, use_api=use_api)
 
     existing = None
     try:
@@ -303,12 +305,13 @@ def ingest_one(
 
     docs_path = Path(docs_root).resolve() if docs_root else fp.parent
 
+    use_api = config.alias_is_api(model)
     model_name, collection_name = config.resolve_embedding(model)
-    logger.info("Embedding 模型: %s  →  collection: %s (space=%s)",
-                model_name, collection_name, _HNSW_SPACE)
+    logger.info("Embedding 模型: %s  →  collection: %s (space=%s, 来源=%s)",
+                model_name, collection_name, _HNSW_SPACE, "api" if use_api else "本地")
 
     client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
-    collection = _open_collection(client, model_name, collection_name)
+    collection = _open_collection(client, model_name, collection_name, use_api=use_api)
     result = _ingest_one_file(fp, docs_path, collection, collection_name, progress_cb)
     # KB 内容变了，语义缓存里依赖旧 KB 的答案可能过期 → 全量作废（软失败旁路）
     if result.get("status") == "ingested":
@@ -344,6 +347,7 @@ def ingest_all(
 
     Web 单文件上传请用 `ingest_one`，不要用此函数（避免扫整个目录 re-parse 大文件）。
     """
+    use_api = config.alias_is_api(model)
     model_name, collection_name = config.resolve_embedding(model)
 
     docs_path = Path(docs_dir).resolve()
@@ -351,11 +355,11 @@ def ingest_all(
         logger.error("文档目录不存在: %s", docs_path)
         return
 
-    logger.info("Embedding 模型: %s  →  collection: %s (space=%s)",
-                model_name, collection_name, _HNSW_SPACE)
+    logger.info("Embedding 模型: %s  →  collection: %s (space=%s, 来源=%s)",
+                model_name, collection_name, _HNSW_SPACE, "api" if use_api else "本地")
 
     client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
-    collection = _open_collection(client, model_name, collection_name)
+    collection = _open_collection(client, model_name, collection_name, use_api=use_api)
 
     all_files = [
         f for f in docs_path.rglob("*")
@@ -642,8 +646,9 @@ def _build_arg_parser() -> "argparse.ArgumentParser":
         "-m", "--model",
         default=config.DEFAULT_EMBEDDING_ALIAS,
         help=(
-            "embedding 模型别名（en/zh/m3，详见 src/config.py EMBEDDING_MODELS）；"
-            f"默认 {config.DEFAULT_EMBEDDING_ALIAS}（来自 .env EMBEDDING_MODEL）"
+            "embedding 模型别名（en/zh/m3，或 api-m3=m3 走云端编码，详见 src/config.py EMBEDDING_MODELS）；"
+            f"默认 {config.DEFAULT_EMBEDDING_ALIAS}（来自 .env EMBEDDING_MODEL）。"
+            "选 m3=本地编码、api-m3=云端编码，与 .env 全局默认解耦"
         ),
     )
     return p

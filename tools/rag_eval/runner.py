@@ -267,7 +267,16 @@ def _collect_metadata(
         },
         "embeddings": {
             "active_aliases": [a for a, _, _ in active],
-            "by_alias": {a: {"model": m, "collection": c} for a, m, c in active},
+            # is_api 与 retriever 判定一致：模型在云端表内 且 默认 embedding 选了 api-m3
+            "by_alias": {
+                a: {
+                    "model": m,
+                    "collection": c,
+                    "is_api": config.online_api_model(m) is not None
+                    and config.default_embedding_is_api(),
+                }
+                for a, m, c in active
+            },
         },
         "retriever": {
             # RAG_ACTIVE_EMBEDDINGS 原始配置值（可能含未知别名，与 active 经过 fallback 后未必一致）
@@ -695,16 +704,19 @@ def _print_report(rep: EvalReport, report_path: Path | None = None) -> None:
         for a in em.get("active_aliases", []):
             info = by.get(a, {})
             model_short = info.get("model", "?").split("/")[-1]
+            src = "api" if info.get("is_api") else "local"
             coll = info.get("collection", "?")
-            parts.append(f"{a}({model_short}, {coll}={kb.get(coll, '?')})")
+            parts.append(f"{a}({model_short}@{src}, {coll}={kb.get(coll, '?')})")
         print(f"  Embeddings:     {', '.join(parts) or '?'}")
         rt_aliases = m.get("retriever", {}).get("active_aliases", [])
         print(f"  Retriever:      {','.join(rt_aliases) or '?'}")
         rr = m.get("reranker", {})
         rr_model_short = rr.get("model", "?").split("/")[-1]
+        rr_src = "@api" if rr.get("is_api") else "@local"
         print(
             f"  Reranker:       {'ON ' if rr.get('enabled') else 'OFF'} "
-            f"{rr_model_short}  min_score={rr.get('min_score', '?')}"
+            f"{rr_model_short if rr.get('enabled') else '-'}{rr_src if rr.get('enabled') else ''}"
+            f"  min_score={rr.get('min_score', '?')}"
         )
         bm = m.get("bm25", {})
         qr = m.get("query_rewrite", {})
@@ -792,14 +804,17 @@ def _render_markdown(rep: EvalReport) -> str:
     for a in em.get("active_aliases", []):
         info = by.get(a, {})
         model_short = info.get("model", "?").split("/")[-1]
+        src = "api" if info.get("is_api") else "local"
         coll = info.get("collection", "?")
-        emb_parts.append(f"{a}({model_short}, {coll}={kb.get(coll, '?')})")
+        emb_parts.append(f"{a}({model_short}@{src}, {coll}={kb.get(coll, '?')})")
     lines.append(f"- **Embeddings**: {', '.join(emb_parts) or '?'}")
     rt_aliases = m.get("retriever", {}).get("active_aliases", [])
     lines.append(f"- **Retriever**: {','.join(rt_aliases) or '?'}")
     rr_model_short = rr.get("model", "?").split("/")[-1]
+    rr_src = "@api" if rr.get("is_api") else "@local"
+    rr_model_disp = f"{rr_model_short}{rr_src}" if rr.get("enabled") else "-"
     lines.append(
-        f"- **Reranker**: {'ON' if rr.get('enabled') else 'OFF'}  {rr_model_short}  "
+        f"- **Reranker**: {'ON' if rr.get('enabled') else 'OFF'}  {rr_model_disp}  "
         f"min_score={rr.get('min_score', '?')}  recall_x{rr.get('recall_multiplier', '?')}"
     )
     lines.append(

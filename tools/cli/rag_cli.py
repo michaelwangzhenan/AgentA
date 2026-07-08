@@ -244,6 +244,9 @@ def _cmd_status(_args: argparse.Namespace) -> int:
     # 把 alias 渲染成 "alias (model_name)"，让"模型"标签名字与显示值对得上；
     # alias 不在 EMBEDDING_MODELS 里时（罕见，比如自定义 hf 路径）就只显示 alias。
     def _render_alias(a: str) -> str:
+        if config.alias_is_api(a):
+            # api-m3：显示解析后的真实模型 + 云端标记
+            return f"{a} ({config.resolve_embedding(a)[0]} · 云端)"
         if a in config.EMBEDDING_MODELS:
             return f"{a} ({config.EMBEDDING_MODELS[a][0]})"
         return a

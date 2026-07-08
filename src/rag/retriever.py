@@ -69,13 +69,21 @@ _embedding_fn_cache: dict[str, Any] = {}
 _embedding_fn_lock = threading.RLock()
 
 
-def _get_embedding_fn(model_name: str) -> Any:
+def _get_embedding_fn(model_name: str, use_api: bool | None = None) -> Any:
     """懒加载 embedding function，多次调用复用同一实例；线程安全。
 
-    走云端（api-m3 且模型在映射表内）→ ApiEmbeddingFunction（不加载本地模型），
-    否则 → 本地 SentenceTransformerEmbeddingFunction（现状）。
+    走云端 → ApiEmbeddingFunction（不加载本地模型），否则 → 本地
+    SentenceTransformerEmbeddingFunction（现状）。
+
+    use_api：
+      - None（默认，检索/缓存用）：按全局 `embedding_is_api(model_name)` 判定；
+      - True/False（入库用）：显式指定来源，与全局默认解耦（入库下拉选 api-m3 即 True）。
+        若指定 True 但该模型无云端版，防御性回落本地。
     """
-    use_api = online_api.embedding_is_api(model_name)
+    if use_api is None:
+        use_api = online_api.embedding_is_api(model_name)
+    elif use_api and config.online_api_model(model_name) is None:
+        use_api = False
     cache_key = f"{'api' if use_api else 'local'}:{model_name}"
     fn = _embedding_fn_cache.get(cache_key)
     if fn is not None:

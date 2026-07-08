@@ -32,6 +32,9 @@ class KBCollection(BaseModel):
     doc_count: int = Field(0, description="该库内文档数（按 doc_id 去重）")
     chunk_count: int = Field(0, description="该库内 chunk 总数")
     is_default: bool = Field(False, description="是否为 .env 配置的默认入库库")
+    supports_api: bool = Field(
+        False, description="该模型是否有云端版（有则入库可选 api-<alias> 走云端编码）"
+    )
 
 
 class KBCollectionListResponse(BaseModel):
