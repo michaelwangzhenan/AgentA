@@ -303,6 +303,9 @@ def _sse_frame(event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     return {"event": "message", "data": json.dumps({"type": event_type, "payload": payload}, ensure_ascii=False)}
 
 
+_SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
+
 @router.post("/chat/stream")
 async def chat_stream(
     req: ChatRequest,
@@ -359,7 +362,7 @@ async def chat_stream(
                 yield _sse_frame("token_chunk", {"text": cached})
                 yield _sse_frame("final_answer", {"text": cached, "usage": None, "cached": True})
 
-            return EventSourceResponse(_cached_gen())
+            return EventSourceResponse(_cached_gen(), headers=_SSE_HEADERS)
 
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
@@ -478,4 +481,4 @@ async def chat_stream(
             if not run_task.done():
                 run_task.cancel()
 
-    return EventSourceResponse(_event_gen())
+    return EventSourceResponse(_event_gen(), headers=_SSE_HEADERS)
