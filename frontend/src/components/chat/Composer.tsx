@@ -44,6 +44,7 @@ import { listSkills } from '@/api/client'
 import type { SkillItem } from '@/types/resources'
 import type { ChatMode } from '@/types/chat'
 import { cn } from '@/lib/utils'
+import { generateId } from '@/lib/id'
 
 export type ComposerHandle = {
   fill: (text: string) => void
@@ -192,7 +193,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     const next: Attachment[] = []
     for (const file of list) {
       const kind = classifyFile(file)
-      const att: Attachment = { id: crypto.randomUUID(), file, kind }
+      const att: Attachment = { id: generateId(), file, kind }
       if (kind === 'image') att.previewUrl = URL.createObjectURL(file)
       if (kind === 'text') {
         try {

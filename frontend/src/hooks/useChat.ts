@@ -15,6 +15,7 @@ import type {
 } from '@/types/chat'
 import { backendMessagesToFrontend } from '@/types/session'
 import { parseUserMessage } from '@/lib/attachments'
+import { generateId } from '@/lib/id'
 
 function newResearchState(): ResearchState {
   return { phase: 'planning', query: '', subquestions: [], subagents: [], reflect: null }
@@ -22,7 +23,7 @@ function newResearchState(): ResearchState {
 
 function newAssistantMessage(mode?: ChatMode): AssistantMessage {
   return {
-    id: crypto.randomUUID(),
+    id: generateId(),
     role: 'assistant',
     content: '',
     plan: null,
@@ -168,7 +169,7 @@ export function useChat({ sessionId, onSettled }: Options) {
                 case 'thinking_chunk': {
                   const now = Date.now()
                   if (currentThinkingId === null) {
-                    const segId = crypto.randomUUID()
+                    const segId = generateId()
                     currentThinkingId = segId
                     thinkingStart = now
                     update((m) => ({
@@ -457,7 +458,7 @@ export function useChat({ sessionId, onSettled }: Options) {
       // text 是含内联附件正文的完整消息：发给后端用全文，气泡展示只留 query + 附件卡片
       const { text: display, attachments } = parseUserMessage(text)
       const userMsg: UserMessage = {
-        id: crypto.randomUUID(),
+        id: generateId(),
         role: 'user',
         content: display,
         rawContent: text,
@@ -508,7 +509,7 @@ export function useChat({ sessionId, onSettled }: Options) {
       setMessages((prev) => {
         const kept = prev.slice(0, idx)
         const editedUser: UserMessage = {
-          id: crypto.randomUUID(),
+          id: generateId(),
           role: 'user',
           content: newText,
           createdAt: Date.now(),

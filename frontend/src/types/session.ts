@@ -1,6 +1,7 @@
 // Session 元数据类型 —— 对齐后端 src/api/schemas/session.py
 import type { AssistantMessage, Message, ToolCallState } from '@/types/chat'
 import { parseUserMessage } from '@/lib/attachments'
+import { generateId } from '@/lib/id'
 
 export type Session = {
   id: string
@@ -63,7 +64,7 @@ export function backendMessagesToFrontend(
       finalize()
       const { text, attachments } = parseUserMessage(m.content)
       out.push({
-        id: crypto.randomUUID(),
+        id: generateId(),
         role: 'user',
         content: text,
         rawContent: m.content,
@@ -75,7 +76,7 @@ export function backendMessagesToFrontend(
     if (m.role === 'assistant') {
       if (!pendingAssistant) {
         pendingAssistant = {
-          id: crypto.randomUUID(),
+          id: generateId(),
           role: 'assistant',
           content: '',
           plan: null,
