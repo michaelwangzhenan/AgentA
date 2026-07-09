@@ -1,0 +1,12 @@
+---
+applyTo: "tests/**/*.py"
+---
+
+# 测试规范
+
+- 测试环境在 `.venv/`，不要用系统环境
+- 用 `pytest`，markers 在 `pytest.ini` 里，deselect 默认 integration / langchain / autogpt / extended_providers — 跑 `pytest -q` 默认走 fast UT 集
+- 用 `MagicMock` mock 外部依赖（LLM / DB / 文件 IO），不要在 UT 里真发 LLM call
+- UT 过程中产生的临时文档，临时数据（db里），在UT结束后删除
+- 评估脚本放 `tools/`，不放 `tests/`
+- 新加 feature 必须有 UT 覆盖核心路径；触发节流 / 顺序约定这类"行为约束"要有独立 Test 类锁住

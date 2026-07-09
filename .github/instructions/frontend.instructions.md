@@ -1,0 +1,18 @@
+---
+applyTo: "frontend/**/*.{ts,tsx}"
+---
+
+# 前端（React / TypeScript）代码规范
+
+## 文件 / 模块命名
+
+| 类型 | 位置 | 命名 |
+|---|---|---|
+| 业务组件 | `frontend/src/components/<area>/` | 文件与组件同名、大驼峰 `.tsx`（如 `chat/ChatView.tsx`）；`<area>` 按领域分（chat / kb / usage / settings / business / resources …） |
+| 基础 UI 控件 | `frontend/src/components/ui/` | 小写文件名（如 `button.tsx` / `dialog.tsx`），只放无业务逻辑的通用控件 |
+| 类型定义 | `frontend/src/types/<feature>.ts` | 小写文件，按 feature 拆（如 `routing.ts` / `usage.ts`） |
+| 接口调用 | `frontend/src/api/client.ts` | 统一出口，导出 `getXxx` / `putXxx` 等函数 |
+| React hook | `frontend/src/hooks/use<Name>.ts` | `use` 前缀、小驼峰（如 `useChat.ts`） |
+| 通用工具 / Context | `frontend/src/lib/` | 小写文件（如 `auth.tsx` / `theme.tsx` / `utils.ts`） |
+
+开新文件前先确认归属：能在已有文件里加就别另起新文件；确需新增上表没有的类型，先在本表补一行约定再落地。

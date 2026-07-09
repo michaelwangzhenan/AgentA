@@ -24,6 +24,11 @@ from src.services.log_setup import build_uvicorn_log_config  # noqa: E402
 _HOST = "127.0.0.1"
 _PORT = 8000
 _LOG_FILE = "./logs/uvicorn.log"
+# 本地开发默认开热重载（改代码立即生效）；生产部署（VPS systemd）在 .env 里设
+# UVICORN_RELOAD=false 关掉——reload 会多起一个文件监视子进程，且线上代码只在
+# 手动 restart 时才应该变，不需要监视磁盘变化。不进 src/config.py 统一配置注册表
+# / UI：这是进程启动参数，不是运行期可调的业务配置。
+_RELOAD = os.getenv("UVICORN_RELOAD", "true").strip().lower() not in ("0", "false", "no")
 
 
 def main() -> None:
@@ -38,8 +43,8 @@ def main() -> None:
         "src.api.main:app",
         host=_HOST,
         port=_PORT,
-        reload=True,
-        reload_dirs=["src"],
+        reload=_RELOAD,
+        reload_dirs=["src"] if _RELOAD else None,
         log_config=log_config,
     )
 
