@@ -166,6 +166,20 @@ def test_doc_counts_and_delete_pending_by_doc(store: GoldenStore) -> None:
     assert dc2["d1"] == {"total": 1, "pending": 0}
 
 
+def test_delete_by_doc_removes_all_statuses(store: GoldenStore) -> None:
+    store.create("p", doc_id="d1", status=STATUS_PENDING)
+    store.create("a", doc_id="d1", status=STATUS_APPROVED)
+    store.create("r", doc_id="d1", status=STATUS_REJECTED)
+    store.create("other", doc_id="d2", status=STATUS_APPROVED)
+    store.create("no-doc")
+    assert store.delete_by_doc("d1") == 3
+    assert store.counts()["total"] == 2
+    rows, _ = store.list(doc_id="d1")
+    assert rows == []
+    assert store.delete_by_doc("") == 0
+    assert store.delete_by_doc("missing") == 0
+
+
 def test_list_doc_id_filter_and_export_all(store: GoldenStore) -> None:
     store.create("q-a", doc_id="da")
     store.create("q-b", doc_id="db")

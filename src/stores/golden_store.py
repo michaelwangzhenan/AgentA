@@ -297,6 +297,17 @@ class GoldenStore:
             )
         return cur.rowcount
 
+    def delete_by_doc(self, doc_id: str) -> int:
+        """删某文档关联的全部 golden（pending / approved / rejected）。"""
+        if not doc_id:
+            return 0
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "DELETE FROM rag_golden WHERE doc_id = ?",
+                (str(doc_id),),
+            )
+        return cur.rowcount
+
     def export_all(self) -> list[dict[str, Any]]:
         """导出全部 golden（完整字段，时间倒序），供"导出 json"下载。"""
         with self._lock:

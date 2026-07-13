@@ -422,21 +422,38 @@ def test_delete_document_success(
         "src.api.routes.kb.delete_kb_document",
         lambda doc_id, model, web_upload_dir=None: (True, 7),
     )
+    golden_calls: list[str] = []
+    monkeypatch.setattr(
+        "src.stores.golden_store.GoldenStore.delete_by_doc",
+        lambda self, doc_id: golden_calls.append(doc_id) or 2,
+    )
     r = client.delete("/api/kb/documents/abc123")
     assert r.status_code == 200
     assert r.json() == {"deleted": True, "chunks_removed": 7}
+    assert golden_calls == ["abc123"]
 
 
-def test_delete_document_not_found_returns_deleted_false(
+def test_delete_document_not_found_skips_golden(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
         "src.api.routes.kb.delete_kb_document",
         lambda doc_id, model, web_upload_dir=None: (False, 0),
     )
+    called = False
+
+    def _no_delete(self, doc_id: str) -> int:
+        nonlocal called
+        called = True
+        return 0
+
+    monkeypatch.setattr(
+        "src.stores.golden_store.GoldenStore.delete_by_doc", _no_delete,
+    )
     r = client.delete("/api/kb/documents/not-exist")
     assert r.status_code == 200
     assert r.json() == {"deleted": False, "chunks_removed": 0}
+    assert called is False
 
 
 def test_delete_document_passes_model(

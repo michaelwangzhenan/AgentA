@@ -324,7 +324,7 @@ def delete_document(
     model: str | None = Query(None, description="库别名 en/zh/m3/api-m3；缺省用当前默认"),
     _: dict = Depends(get_current_user),
 ) -> KBDeleteResponse:
-    """从指定库删除单文档（Chroma + BM25 + web_uploads 物理文件，一并清）。
+    """从指定库删除单文档（Chroma + BM25 + web_uploads 物理文件 + 关联 golden，一并清）。
 
     幂等：doc_id 不存在返回 200 + deleted=False。
     """
@@ -332,6 +332,14 @@ def delete_document(
     found, chunks_removed = delete_kb_document(
         doc_id=doc_id, model=model, web_upload_dir=str(_alias_upload_root(model))
     )
+    if found:
+        from src.stores.golden_store import get_shared_store
+
+        removed = get_shared_store().delete_by_doc(doc_id)
+        if removed:
+            logger.info(
+                "[KB] 删除文档 doc_id=%s → 移除 golden %d 条", doc_id, removed,
+            )
     return KBDeleteResponse(deleted=found, chunks_removed=chunks_removed)
 
 
