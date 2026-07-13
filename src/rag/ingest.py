@@ -31,9 +31,11 @@ for _key in ("HF_ENDPOINT", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE"):
 import hashlib
 import logging
 import shutil
+import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 # 分批 upsert 的批大小：把整文件的 N 块分批写入，便于在批与批之间上报"第 M/N 块"进度。
 # 越小进度越细、嵌入调用次数越多；16 在体验与开销间折中。
@@ -404,6 +406,67 @@ def _char_count_from_metadata(md: dict) -> int:
         return 0
 
 
+# KB 列表/统计：复用 Chroma 客户端 + 分批扫 metadata，避免单次 get 全库 OOM。
+_KB_CHROMA_CLIENT: Any = None
+_KB_CHROMA_LOCK = threading.Lock()
+_KB_META_BATCH = 256
+
+
+def _kb_chroma_client() -> Any:
+    global _KB_CHROMA_CLIENT
+    if _KB_CHROMA_CLIENT is None:
+        with _KB_CHROMA_LOCK:
+            if _KB_CHROMA_CLIENT is None:
+                _KB_CHROMA_CLIENT = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
+    return _KB_CHROMA_CLIENT
+
+
+def _iter_chunk_metadatas(collection) -> Iterator[dict]:
+    """分批遍历 collection 的 chunk metadata（不取正文 / 向量）。"""
+    total = collection.count()
+    offset = 0
+    while offset < total:
+        got = collection.get(
+            limit=_KB_META_BATCH,
+            offset=offset,
+            include=["metadatas"],
+        )
+        metas = got.get("metadatas") or []
+        if not metas:
+            break
+        for md in metas:
+            if md:
+                yield md
+        offset += len(metas)
+
+
+def _merge_doc_row(grouped: dict[str, dict], md: dict) -> None:
+    """把单条 chunk metadata 合并进按 doc_id 聚合的文档行。"""
+    doc_id = md.get("doc_id")
+    if not doc_id:
+        return
+    chars = _char_count_from_metadata(md)
+    ingested_at = float(md.get("ingested_at") or 0.0)
+    if doc_id in grouped:
+        row = grouped[doc_id]
+        row["chunks"] += 1
+        row["total_chars"] += chars
+        if ingested_at > row["ingested_at"]:
+            row["ingested_at"] = ingested_at
+        return
+    grouped[doc_id] = {
+        "doc_id": doc_id,
+        "source": md.get("source") or md.get("filename") or "",
+        "filename": md.get("filename") or "",
+        "ext": md.get("ext") or "",
+        "lang": md.get("lang") or "",
+        "mtime": float(md.get("mtime") or 0.0),
+        "ingested_at": ingested_at,
+        "chunks": 1,
+        "total_chars": chars,
+    }
+
+
 def list_kb_documents(model: str = config.DEFAULT_EMBEDDING_ALIAS) -> list[dict]:
     """聚合指定 collection 内所有 chunks 的 metadata，按 doc_id 分组返回文档级清单。
 
@@ -415,40 +478,18 @@ def list_kb_documents(model: str = config.DEFAULT_EMBEDDING_ALIAS) -> list[dict]
         ingested_at / chunks / total_chars。collection 不存在或为空时返回 []。
         老数据缺 ingested_at 时返回 0.0（前端显示 "-"，重传后更新）。
         total_chars 来自 metadata.char_count；缺该字段的老 chunk 计 0（避免拉全库正文 OOM）。
+        扫描按 256 条一批拉 metadata，降低峰值内存。
     """
-    model_name, collection_name = config.resolve_embedding(model)
-    client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
+    _, collection_name = config.resolve_embedding(model)
+    client = _kb_chroma_client()
     try:
         collection = client.get_collection(name=collection_name)
     except Exception:
         return []
 
-    data = collection.get(include=["metadatas"])
-    metadatas = data.get("metadatas") or []
-
     grouped: dict[str, dict] = {}
-    for md in metadatas:
-        if not md:
-            continue
-        doc_id = md.get("doc_id")
-        if not doc_id:
-            continue
-        chars = _char_count_from_metadata(md)
-        if doc_id in grouped:
-            grouped[doc_id]["chunks"] += 1
-            grouped[doc_id]["total_chars"] += chars
-        else:
-            grouped[doc_id] = {
-                "doc_id": doc_id,
-                "source": md.get("source") or md.get("filename") or "",
-                "filename": md.get("filename") or "",
-                "ext": md.get("ext") or "",
-                "lang": md.get("lang") or "",
-                "mtime": float(md.get("mtime") or 0.0),
-                "ingested_at": float(md.get("ingested_at") or 0.0),
-                "chunks": 1,
-                "total_chars": chars,
-            }
+    for md in _iter_chunk_metadatas(collection):
+        _merge_doc_row(grouped, md)
 
     # 按 ingested_at 倒序（最近入库的在前）；缺失值（老数据）排在最后
     return sorted(grouped.values(), key=lambda x: x["ingested_at"], reverse=True)
@@ -477,19 +518,18 @@ def count_kb_documents(
     if use_cache and collection_name in _KB_STATS_CACHE:
         return _KB_STATS_CACHE[collection_name]
 
-    client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
+    client = _kb_chroma_client()
     try:
         collection = client.get_collection(name=collection_name)
     except Exception:
         return 0, 0
 
     chunk_count = collection.count()
-    data = collection.get(include=["metadatas"])
-    doc_ids = {
-        md.get("doc_id")
-        for md in (data.get("metadatas") or [])
-        if md and md.get("doc_id")
-    }
+    doc_ids: set[str] = set()
+    for md in _iter_chunk_metadatas(collection):
+        did = md.get("doc_id")
+        if did:
+            doc_ids.add(str(did))
     stats = (len(doc_ids), chunk_count)
     _KB_STATS_CACHE[collection_name] = stats
     return stats
