@@ -72,7 +72,11 @@ export function KnowledgeBaseView({
       <div className="flex-1 overflow-y-auto p-6">
         <div className="max-w-6xl space-y-6">
           {alias === null ? (
-            <L1View onOpen={setAlias} onGotoGolden={isAdmin ? onGotoGolden : undefined} />
+            <L1View
+              onOpen={setAlias}
+              onGotoGolden={isAdmin ? onGotoGolden : undefined}
+              isAdmin={isAdmin}
+            />
           ) : (
             <LibraryView
               alias={alias}
@@ -95,9 +99,11 @@ let _cachedKbCollections: KBCollectionListResponse | null = null
 function L1View({
   onOpen,
   onGotoGolden,
+  isAdmin,
 }: {
   onOpen: (alias: string) => void
   onGotoGolden?: () => void
+  isAdmin: boolean
 }) {
   const [collections, setCollections] = useState<KBCollection[]>(
     () => _cachedKbCollections?.collections ?? [],
@@ -220,6 +226,7 @@ function L1View({
       <IngestPanel
         collections={ordered}
         defaultAlias={defaultAlias}
+        isAdmin={isAdmin}
         onIngested={() => load(true)}
         onGotoGolden={onGotoGolden}
       />

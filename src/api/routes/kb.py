@@ -144,7 +144,9 @@ def _done_message(status: str, chunks: int) -> str:
     return f"已入库 {chunks} 个 chunks"
 
 
-def _generate_golden_sync(target_path: Path, safe_name: str, doc_id: str) -> int:
+def _generate_golden_sync(
+    target_path: Path, safe_name: str, doc_id: str, llm_model: str, max_q: int,
+) -> int:
     """入库成功后同步生成 golden 候选（在工作线程里跑）。返回生成条数；软失败返回 0。
 
     重生成前先清该文档旧的 pending 候选（避免重入库累积重复），approved/rejected 保留。
@@ -156,7 +158,12 @@ def _generate_golden_sync(target_path: Path, safe_name: str, doc_id: str) -> int
         if doc_id:
             get_shared_store().delete_pending_by_doc(doc_id)
         return run_generation_for_file(
-            file_path=str(target_path), source=safe_name, doc_id=doc_id,
+            file_path=str(target_path),
+            source=safe_name,
+            doc_id=doc_id,
+            max_q=max_q,
+            llm_model=llm_model,
+            force=True,
         )
     except Exception:  # noqa: BLE001 — 出题失败不影响已完成的入库
         logger.warning("[KB] golden 生成失败: %s", safe_name)
@@ -164,7 +171,12 @@ def _generate_golden_sync(target_path: Path, safe_name: str, doc_id: str) -> int
 
 
 async def _ingest_event_stream(
-    target_path: Path, upload_root: Path, model: str, safe_name: str, gen_golden: bool,
+    target_path: Path,
+    upload_root: Path,
+    model: str,
+    safe_name: str,
+    golden_llm: str,
+    golden_max_q: int,
 ):
     """把同步 ingest 的进度桥接成 SSE 事件流。
 
@@ -191,11 +203,18 @@ async def _ingest_event_stream(
             )
             status, chunks, doc_id = result["status"], result["chunks"], result["doc_id"]
             golden_n = 0
-            if status == "ingested" and config.EVAL_AUTO_GOLDEN_ENABLED and gen_golden:
-                # 同步出题：先推"出题中"相位，再在工作线程跑 LLM，完成后并入 done
+            from src.rag.golden_options import model_id_for_golden, should_generate_golden
+
+            if status == "ingested" and should_generate_golden(golden_llm):
                 q.put_nowait({"type": "progress", "phase": "golden", "done": 0, "total": 0})
+                llm_id = model_id_for_golden(golden_llm)
                 golden_n = await asyncio.to_thread(
-                    _generate_golden_sync, target_path, safe_name, doc_id,
+                    _generate_golden_sync,
+                    target_path,
+                    safe_name,
+                    doc_id,
+                    llm_id,
+                    golden_max_q,
                 )
             q.put_nowait({
                 "type": "done",
@@ -227,6 +246,8 @@ async def upload_document(
     file: UploadFile = File(...),
     model: str | None = Form(None),
     relpath: str = Form(""),
+    golden_llm: str | None = Form(None),
+    golden_max_q: int | None = Form(None),
     user: dict = Depends(get_current_user),
 ) -> StreamingResponse:
     """上传一个文件并以 SSE 流式回传入库进度 + 最终结果。
@@ -275,12 +296,23 @@ async def upload_document(
     rel_name = target_path.relative_to(upload_root).as_posix()
     logger.info("[KB] 文件落盘: %s (%d bytes)", target_path, len(content))
 
-    # 单文件入库走 SSE 流：不再设硬超时（ingest 跑在 thread，进度实时回传，
-    # 大文件也能看到逐块进度，不会再出现"超时误报但其实入库成功"）。
-    # golden 出题仅 admin 入库时触发（golden 是 admin 维护的评估集；普通用户入库不为此变慢）
-    gen_golden = user.get("role") == ROLE_ADMIN
+    from src.rag.golden_options import (
+        GOLDEN_LLM_NONE,
+        clamp_golden_max_q,
+        effective_golden_llm,
+    )
+
+    if user.get("role") == ROLE_ADMIN:
+        llm_choice = effective_golden_llm(golden_llm)
+        max_q = clamp_golden_max_q(golden_max_q)
+    else:
+        llm_choice = GOLDEN_LLM_NONE
+        max_q = clamp_golden_max_q(None)
+
     return StreamingResponse(
-        _ingest_event_stream(target_path, upload_root, model, rel_name, gen_golden),
+        _ingest_event_stream(
+            target_path, upload_root, model, rel_name, llm_choice, max_q,
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

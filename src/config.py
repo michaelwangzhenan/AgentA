@@ -446,10 +446,10 @@ MODEL_PRICING_DEFAULTS: dict[str, tuple[float, float]] = {
 TRACE_ENABLED: bool = os.getenv("TRACE_ENABLED", "true").lower() == "true"
 # RAG golden 数据集库路径（带来源 / 审核状态，支持在线 CRUD）
 RAG_GOLDEN_DB_PATH: str = os.getenv("RAG_GOLDEN_DB_PATH", "./db/sqlite/rag_golden.db")
-# RAG 入库后是否调 LLM 自动生成 golden 候选（后台运行；可选值：true / false）
-EVAL_AUTO_GOLDEN_ENABLED: bool = os.getenv("EVAL_AUTO_GOLDEN_ENABLED", "true").lower() == "true"
-# 入库单个文档自动生成 golden 候选的最大条数
-EVAL_AUTO_GOLDEN_MAX_Q: int = int(os.getenv("EVAL_AUTO_GOLDEN_MAX_Q", "3"))
+# 生成 golden 默认 LLM：none | kimi-k2.5 | deepseek-v4-flash（UI/CLI 未指定时回落）
+EVAL_GOLDEN_LLM: str = os.getenv("EVAL_GOLDEN_LLM", "none")
+# UI/CLI 未指定数量时的默认出题条数
+EVAL_GOLDEN_MAX_Q: int = int(os.getenv("EVAL_GOLDEN_MAX_Q", "3"))
 # 跑评估时是否纳入未审核（pending）的 golden；默认只用已审核（approved）的
 EVAL_GOLDEN_USE_PENDING: bool = os.getenv("EVAL_GOLDEN_USE_PENDING", "false").lower() == "true"
 # 答案质量评委（faithfulness / 相关度）用的模型 id；空则回落 ACTIVE_MODEL。

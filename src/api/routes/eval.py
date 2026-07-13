@@ -32,7 +32,9 @@ from src.api.schemas.eval import (
     GoldenCreateRequest,
     GoldenGenerateRequest,
     GoldenGenerateResponse,
+    GoldenGenOptionsResponse,
     GoldenItem,
+    GoldenLlmChoice,
     GoldenList,
     GoldenUpdateRequest,
     ReportContent,
@@ -133,6 +135,20 @@ def export_golden(
     )
 
 
+@router.get("/golden/gen-options", response_model=GoldenGenOptionsResponse)
+def golden_gen_options(_: dict = Depends(get_current_user)) -> GoldenGenOptionsResponse:
+    """入库 / L2 生成 golden 的 LLM 与数量选项（与 golden_options 同源）。"""
+    from src.rag.golden_options import api_gen_options
+
+    opts = api_gen_options()
+    return GoldenGenOptionsResponse(
+        llm_choices=[GoldenLlmChoice(**c) for c in opts["llm_choices"]],
+        max_q_default=opts["max_q_default"],
+        max_q_min=opts["max_q_min"],
+        max_q_max=opts["max_q_max"],
+    )
+
+
 @router.post("/golden/generate", response_model=GoldenGenerateResponse)
 def generate_golden(
     req: GoldenGenerateRequest,
@@ -145,6 +161,11 @@ def generate_golden(
     """
     import src.config as config
     from src.rag.golden_gen import run_generation_for_file
+    from src.rag.golden_options import (
+        clamp_golden_max_q,
+        model_id_for_golden,
+        resolve_llm_for_manual_generate,
+    )
 
     # 定位物理文件：web_uploads/<model>/<source>，并防路径穿越（须落在该库上传根内）
     upload_root = (Path(config.WEB_UPLOAD_DIR).resolve() / req.model)
@@ -157,8 +178,14 @@ def generate_golden(
             detail="文档物理文件不存在（仅 Web 上传的文档支持手动生成）",
         )
     removed = store.delete_pending_by_doc(req.doc_id) if req.doc_id else 0
+    llm_choice = resolve_llm_for_manual_generate(None)
     n = run_generation_for_file(
-        file_path=target, source=req.source, doc_id=req.doc_id, force=True,
+        file_path=target,
+        source=req.source,
+        doc_id=req.doc_id,
+        max_q=clamp_golden_max_q(None),
+        llm_model=model_id_for_golden(llm_choice),
+        force=True,
     )
     return GoldenGenerateResponse(generated=n, removed_pending=removed)
 

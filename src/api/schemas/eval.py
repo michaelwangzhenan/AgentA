@@ -61,6 +61,19 @@ class GoldenGenerateResponse(BaseModel):
     removed_pending: int   # 重生成前清掉的旧 pending 数
 
 
+class GoldenLlmChoice(BaseModel):
+    value: str
+    label: str
+
+
+class GoldenGenOptionsResponse(BaseModel):
+    """入库 / L2 生成 golden 的下拉选项（与 golden_options 同源）。"""
+    llm_choices: list[GoldenLlmChoice]
+    max_q_default: int
+    max_q_min: int
+    max_q_max: int
+
+
 # ── trace 可观测 ─────────────────────────────────────────────────────────────
 
 class TraceOverview(BaseModel):

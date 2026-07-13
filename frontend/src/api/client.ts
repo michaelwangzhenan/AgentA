@@ -99,6 +99,7 @@ import type {
   EvalRunStatus,
   EvalSummary,
   GoldenCreateInput,
+  GoldenGenOptions,
   GoldenItem,
   GoldenList,
   GoldenUpdateInput,
@@ -327,17 +328,25 @@ export async function listKBDocuments(model: string): Promise<KBDocument[]> {
 
 // 上传 + 入库：SSE 流式，progress 事件回调 onProgress，最终返回 done 结果。
 // 校验失败（400/415/413/422）按普通 HTTP 错误抛出；流中 error 事件转为异常抛出。
+export type IngestGoldenOpts = {
+  goldenLlm?: string
+  goldenMaxQ?: number
+}
+
 export async function ingestKBFileStream(
   file: File,
   model: string,
   relpath: string,
   onProgress?: (p: IngestProgress) => void,
   signal?: AbortSignal,
+  golden?: IngestGoldenOpts,
 ): Promise<IngestResult> {
   const form = new FormData()
   form.append('file', file)
   form.append('model', model)
   form.append('relpath', relpath)
+  if (golden?.goldenLlm != null) form.append('golden_llm', golden.goldenLlm)
+  if (golden?.goldenMaxQ != null) form.append('golden_max_q', String(golden.goldenMaxQ))
   const res = await apiFetch('/api/kb/upload', { method: 'POST', body: form, signal })
   if (!res.ok) {
     await _ensureOk(res) // 抛出带 detail 的错误
@@ -1161,6 +1170,12 @@ export async function exportGolden(): Promise<boolean> {
 }
 
 // 为某已入库文档手动生成 golden 候选（pending）
+export async function getGoldenGenOptions(): Promise<GoldenGenOptions> {
+  const res = await apiFetch('/api/eval/golden/gen-options')
+  await _ensureOk(res)
+  return (await res.json()) as GoldenGenOptions
+}
+
 export async function generateGolden(
   model: string,
   source: string,

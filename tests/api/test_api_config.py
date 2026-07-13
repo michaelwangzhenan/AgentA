@@ -24,8 +24,6 @@ import src.config as _cfg
 from src.api.runtime import config_overrides
 from src.api.runtime.config_meta import REGISTRY
 from src.api.main import app
-from src.stores import golden_store
-
 
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
@@ -366,9 +364,11 @@ def test_eval_group_present_with_items(client: TestClient) -> None:
     eval_g = next(g for g in body["groups"] if g["name"] == "eval")
     keys = {it["key"] for it in eval_g["items"]}
     assert {
-        "TRACE_ENABLED", "RAG_GOLDEN_DB_PATH", "EVAL_AUTO_GOLDEN_ENABLED",
-        "EVAL_AUTO_GOLDEN_MAX_Q", "EVAL_GOLDEN_USE_PENDING", "EVAL_JUDGE_MODEL",
+        "TRACE_ENABLED", "EVAL_GOLDEN_USE_PENDING", "EVAL_JUDGE_MODEL",
     } <= keys
+    assert "RAG_GOLDEN_DB_PATH" not in keys
+    assert "EVAL_AUTO_GOLDEN_ENABLED" not in keys
+    assert "EVAL_AUTO_GOLDEN_MAX_Q" not in keys
 
 
 def test_judge_model_options_follow_routing_pool(
@@ -418,16 +418,7 @@ def test_judge_model_patch_outside_pool_400(
         assert r2.status_code == 400
 
 
-def test_golden_db_path_hook_resets_shared_store(client: TestClient) -> None:
-    """改 RAG_GOLDEN_DB_PATH 触发 hook 清掉 golden 单例（下次按新路径重建）。"""
-    sentinel = object()
-    golden_store._shared_store = sentinel  # type: ignore[assignment]
-    try:
-        r = client.patch(
-            "/api/config/RAG_GOLDEN_DB_PATH",
-            json={"value": "./db/sqlite/rag_golden_test.db"},
-        )
-        assert r.status_code == 200
-        assert golden_store._shared_store is None
-    finally:
-        golden_store._shared_store = None
+def test_golden_db_path_still_in_config_module() -> None:
+    """RAG_GOLDEN_DB_PATH 仅从设置页移除，config 模块仍保留供部署 / 备份使用。"""
+    import src.config as cfg
+    assert cfg.RAG_GOLDEN_DB_PATH

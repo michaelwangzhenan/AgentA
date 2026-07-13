@@ -26,6 +26,18 @@ export type GoldenList = {
   counts: Record<string, number>
 }
 
+export type GoldenLlmChoice = {
+  value: string
+  label: string
+}
+
+export type GoldenGenOptions = {
+  llm_choices: GoldenLlmChoice[]
+  max_q_default: number
+  max_q_min: number
+  max_q_max: number
+}
+
 export type GoldenCreateInput = {
   query: string
   expected_keywords: string[]

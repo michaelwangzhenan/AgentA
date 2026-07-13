@@ -4,12 +4,14 @@ import { Check, Folder, FolderUp, Loader2, Play, Trash2, X } from 'lucide-react'
 import { ingestKBFileStream } from '@/api/client'
 import type { IngestProgress, KBCollection } from '@/types/kb'
 import { ACCEPT_EXTENSIONS, DropZone } from '@/components/kb/DropZone'
+import { GoldenGenControls } from '@/components/kb/GoldenGenControls'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/lib/toast'
 
 export type IngestPanelProps = {
   collections: KBCollection[]
   defaultAlias: string
+  isAdmin?: boolean
   onIngested: () => void
   onGotoGolden?: () => void // 入库完成 toast 里"去 Golden 管理"链接
 }
@@ -39,9 +41,17 @@ function relPathOf(f: File): string {
   return (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name
 }
 
-export function IngestPanel({ collections, defaultAlias, onIngested, onGotoGolden }: IngestPanelProps) {
+export function IngestPanel({
+  collections,
+  defaultAlias,
+  isAdmin = false,
+  onIngested,
+  onGotoGolden,
+}: IngestPanelProps) {
   const [target, setTarget] = useState('')
   const userPickedRef = useRef(false)
+  const [goldenLlm, setGoldenLlm] = useState('none')
+  const [goldenMaxQ, setGoldenMaxQ] = useState(3)
   const [items, setItems] = useState<StageItem[]>([])
   const [running, setRunning] = useState(false)
   const [current, setCurrent] = useState('')
@@ -150,6 +160,7 @@ export function IngestPanel({ collections, defaultAlias, onIngested, onGotoGolde
             label,
             (p) => setChunk(p),
             ac.signal,
+            isAdmin ? { goldenLlm, goldenMaxQ } : undefined,
           )
           if (resp.chunks > 0 && resp.status === 'ingested') {
             ok++
@@ -302,7 +313,7 @@ export function IngestPanel({ collections, defaultAlias, onIngested, onGotoGolde
         <div className="rounded-md border border-border">
           <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
             <span className="text-sm font-medium">待入库（{totalFiles} 个文件）</span>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <Button
                 variant="ghost"
                 size="sm"
@@ -313,6 +324,15 @@ export function IngestPanel({ collections, defaultAlias, onIngested, onGotoGolde
                 <Trash2 className="h-3.5 w-3.5" />
                 清空
               </Button>
+              {isAdmin && (
+                <GoldenGenControls
+                  goldenLlm={goldenLlm}
+                  goldenMaxQ={goldenMaxQ}
+                  onGoldenLlmChange={setGoldenLlm}
+                  onGoldenMaxQChange={setGoldenMaxQ}
+                  disabled={running}
+                />
+              )}
               <select
                 value={target}
                 onChange={(e) => {

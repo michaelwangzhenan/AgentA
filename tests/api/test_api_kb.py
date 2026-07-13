@@ -197,7 +197,7 @@ def _stub_successful_ingest(monkeypatch: pytest.MonkeyPatch, chunks: int = 3) ->
     # 出题改为入库流程内同步执行：测试里 stub 掉，避免真打 LLM（默认返回 2 条）
     monkeypatch.setattr(
         "src.api.routes.kb._generate_golden_sync",
-        lambda target_path, safe_name, doc_id: 2,
+        lambda target_path, safe_name, doc_id, llm_model, max_q: 2,
     )
 
 
@@ -209,7 +209,8 @@ def test_upload_success(
     _stub_successful_ingest(monkeypatch, chunks=5)
 
     files = {"file": ("hello.md", b"# Hello\n\nThis is a test.", "text/markdown")}
-    r = client.post("/api/kb/upload", files=files)
+    data = {"golden_llm": "kimi-k2.5", "golden_max_q": "3"}
+    r = client.post("/api/kb/upload", files=files, data=data)
 
     assert r.status_code == 200
     # 流式：含 progress 事件 + 最终 done 事件
@@ -227,6 +228,29 @@ def test_upload_success(
     saved = _tmp_upload_dir / config.DEFAULT_EMBEDDING_ALIAS / "hello.md"
     assert saved.exists()
     assert saved.read_bytes() == b"# Hello\n\nThis is a test."
+
+
+def test_upload_skips_golden_when_llm_none(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    _tmp_upload_dir: Path,
+) -> None:
+    _stub_successful_ingest(monkeypatch, chunks=5)
+    called: list[bool] = []
+
+    def _no_golden(*_a, **_k):
+        called.append(True)
+        return 2
+
+    monkeypatch.setattr("src.api.routes.kb._generate_golden_sync", _no_golden)
+
+    files = {"file": ("hello.md", b"# Hello", "text/markdown")}
+    data = {"golden_llm": "none"}
+    r = client.post("/api/kb/upload", files=files, data=data)
+    assert r.status_code == 200
+    events = _sse_events(r.text)
+    assert not any(e.get("type") == "progress" and e.get("phase") == "golden" for e in events)
+    assert called == []
 
 
 def test_upload_unsupported_extension_returns_415(client: TestClient) -> None:

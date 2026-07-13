@@ -115,6 +115,15 @@ def test_golden_export(client: TestClient, golden: GoldenStore) -> None:
     assert isinstance(rows, list) and len(rows) == 2
 
 
+def test_golden_gen_options(client: TestClient) -> None:
+    r = client.get("/api/eval/golden/gen-options")
+    assert r.status_code == 200
+    body = r.json()
+    values = {c["value"] for c in body["llm_choices"]}
+    assert values == {"none", "kimi-k2.5", "deepseek-v4-flash"}
+    assert body["max_q_default"] >= 1
+
+
 def test_golden_generate_missing_file_404(client: TestClient) -> None:
     r = client.post(
         "/api/eval/golden/generate",
@@ -137,7 +146,7 @@ def test_golden_generate_ok(
     # mock LLM 出题：直接写两条
     import src.rag.golden_gen as gg
 
-    def fake_run(file_path, source, doc_id="", max_q=None, force=False):
+    def fake_run(file_path, source, doc_id="", max_q=None, llm_model=None, *, force=False):
         from src.stores.golden_store import SOURCE_AI, STATUS_PENDING as SP, get_shared_store
         st = get_shared_store()
         st.create(query="gen-1", expected_source_contains=source, source=SOURCE_AI, status=SP, doc_id=doc_id)

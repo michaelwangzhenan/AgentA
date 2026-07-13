@@ -36,7 +36,9 @@ _GEN_SYS = """你是一个 RAG 评估数据集出题助手。给你一篇资料�
 只输出 JSON 数组一段，不要 markdown 代码块、不要前后说明。"""
 
 
-def generate_candidates(text: str, max_q: int) -> list[dict[str, Any]]:
+def generate_candidates(
+    text: str, max_q: int, llm_model: str | None = None,
+) -> list[dict[str, Any]]:
     """调 LLM 据资料正文生成 golden 候选；失败返回空列表（不抛）。"""
     body = (text or "").strip()
     if not body:
@@ -51,7 +53,11 @@ def generate_candidates(text: str, max_q: int) -> list[dict[str, Any]]:
         {"role": "user", "content": f"## 资料正文\n{snippet}"},
     ]
     try:
-        resp = chat(msgs, temperature=0.3)
+        if llm_model:
+            with config.use_llm_prefs(llm_model, False, 0):
+                resp = chat(msgs, temperature=0.3)
+        else:
+            resp = chat(msgs, temperature=0.3)
         raw = (resp.choices[0].message.content or "").strip()
     except Exception as e:  # noqa: BLE001 — 后台旁路，吞异常
         logger.warning("[golden_gen] LLM 生成失败（已忽略）: %s", e)
@@ -91,20 +97,27 @@ def run_generation_for_file(
     source: str,
     doc_id: str = "",
     max_q: int | None = None,
+    llm_model: str | None = None,
+    *,
     force: bool = False,
 ) -> int:
     """解析文件 → LLM 出题 → 写入 GoldenStore（pending / ai）。返回写入条数。
 
-    全程软失败：任何异常只记日志、返回 0。供后台任务 fire-and-forget 调用。
-    force=True 时绕过 EVAL_AUTO_GOLDEN_ENABLED 开关（供 UI 手动生成显式触发）。
+    全程软失败：任何异常只记日志、返回 0。
+    llm_model 为 MODEL_CONFIGS 的 model id；force=True 时 llm_model 必填（L2 手动生成）。
     """
-    if not force and not config.EVAL_AUTO_GOLDEN_ENABLED:
+    from src.rag.golden_options import clamp_golden_max_q
+
+    if not llm_model and not force:
+        return 0
+    if not llm_model:
         return 0
     try:
         from src.rag.parser import parse_file
 
         text = parse_file(Path(file_path))
-        candidates = generate_candidates(text, max_q or config.EVAL_AUTO_GOLDEN_MAX_Q)
+        q = clamp_golden_max_q(max_q)
+        candidates = generate_candidates(text, q, llm_model=llm_model)
         if not candidates:
             return 0
         from src.stores.golden_store import (
