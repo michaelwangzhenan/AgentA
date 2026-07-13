@@ -114,7 +114,10 @@ def list_collections(
             is_default=collection_name == default_collection,
             supports_api=config.online_api_model(model_name) is not None,
         ))
-    return KBCollectionListResponse(collections=items)
+    return KBCollectionListResponse(
+        collections=items,
+        default_ingest_alias=config.DEFAULT_EMBEDDING_ALIAS,
+    )
 
 
 @router.get("/kb/documents", response_model=KBDocumentListResponse)

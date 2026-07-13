@@ -18,7 +18,7 @@ import {
   getKBCollections,
   listKBDocuments,
 } from '@/api/client'
-import type { KBCollection, KBDocument } from '@/types/kb'
+import type { KBCollection, KBCollectionListResponse, KBDocument } from '@/types/kb'
 import { DocumentList } from '@/components/kb/DocumentList'
 import { IngestPanel } from '@/components/kb/IngestPanel'
 import { Button } from '@/components/ui/button'
@@ -90,7 +90,7 @@ export function KnowledgeBaseView({
 // ── L1：库列表 ───────────────────────────────────────────────────────────────
 
 // 模块级缓存：在 KB 页反复进出时立即回显上次结果，后台再静默校验，避免每次都干等。
-let _cachedCollections: KBCollection[] | null = null
+let _cachedKbCollections: KBCollectionListResponse | null = null
 
 function L1View({
   onOpen,
@@ -100,10 +100,13 @@ function L1View({
   onGotoGolden?: () => void
 }) {
   const [collections, setCollections] = useState<KBCollection[]>(
-    () => _cachedCollections ?? [],
+    () => _cachedKbCollections?.collections ?? [],
+  )
+  const [defaultIngestAlias, setDefaultIngestAlias] = useState(
+    () => _cachedKbCollections?.default_ingest_alias ?? '',
   )
   // 有缓存就先不转圈，直接显示旧数据；无缓存才显示首屏 loading
-  const [loading, setLoading] = useState(_cachedCollections === null)
+  const [loading, setLoading] = useState(_cachedKbCollections === null)
   const [refreshing, setRefreshing] = useState(false)
 
   // force=true 走后端 refresh（跳过进程内缓存，重新扫库统计）
@@ -111,8 +114,9 @@ function L1View({
     if (force) setRefreshing(true)
     try {
       const data = await getKBCollections(force)
-      _cachedCollections = data
-      setCollections(data)
+      _cachedKbCollections = data
+      setCollections(data.collections)
+      setDefaultIngestAlias(data.default_ingest_alias)
     } catch (e) {
       toast.error(`拉取库列表失败：${(e as Error).message}`)
     } finally {
@@ -139,7 +143,10 @@ function L1View({
     (a, b) => Number(b.is_default) - Number(a.is_default),
   )
   const defaultAlias =
-    collections.find((c) => c.is_default)?.alias ?? collections[0]?.alias ?? ''
+    defaultIngestAlias ||
+    collections.find((c) => c.is_default)?.alias ||
+    collections[0]?.alias ||
+    ''
 
   return (
     <div className="space-y-6">

@@ -64,12 +64,18 @@ def test_list_collections(
     )
     r = client.get("/api/kb/collections")
     assert r.status_code == 200
-    cols = r.json()["collections"]
+    body = r.json()
+    cols = body["collections"]
     aliases = {c["alias"] for c in cols}
     assert aliases == set(config.EMBEDDING_MODELS)
-    # 恰好一个被标为默认，且 = config.DEFAULT_EMBEDDING_ALIAS
+    assert body["default_ingest_alias"] == config.DEFAULT_EMBEDDING_ALIAS
+    # is_default 按 collection 比对；api-m3 与 m3 共用 kb_m3 时标在 m3 上
+    default_coll = config.resolve_embedding(config.DEFAULT_EMBEDDING_ALIAS)[1]
     defaults = [c["alias"] for c in cols if c["is_default"]]
-    assert defaults == [config.DEFAULT_EMBEDDING_ALIAS]
+    expected_alias = next(
+        a for a, (_m, coll) in config.EMBEDDING_MODELS.items() if coll == default_coll
+    )
+    assert defaults == [expected_alias]
     one = cols[0]
     assert one["doc_count"] == 2
     assert one["chunk_count"] == 11

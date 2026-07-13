@@ -30,6 +30,8 @@ export type KBCollection = {
 
 export type KBCollectionListResponse = {
   collections: KBCollection[]
+  /** 当前配置的默认入库别名（如 api-m3）；入库下拉初始选中此项 */
+  default_ingest_alias: string
 }
 
 // 入库进度阶段：解析 / 切分 / 嵌入 / 出题（golden 生成）

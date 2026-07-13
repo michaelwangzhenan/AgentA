@@ -39,6 +39,10 @@ class KBCollection(BaseModel):
 
 class KBCollectionListResponse(BaseModel):
     collections: list[KBCollection]
+    default_ingest_alias: str = Field(
+        ...,
+        description="当前配置的默认入库别名（含 api-m3 等云端别名；与 is_default 按 collection 比对互补）",
+    )
 
 
 class KBDeleteResponse(BaseModel):

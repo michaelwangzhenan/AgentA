@@ -31,8 +31,8 @@ $DevScript = Join-Path $ScriptDir 'tools\dev_server.ps1'
 
 # getlog：拉远程日志，跟本地 dev server 管理无关，不需要虚拟环境，直接处理并退出。
 if ($Action -eq 'getlog') {
-    $RemoteHost = 'root@114.55.66.20'
-    $RemotePath = '/root/AgentA/logs/uvicorn.log'
+    $RemoteHost = 'admin@47.96.93.237'
+    $RemotePath = '/home/admin/AgentA/logs/uvicorn.log'
     $LocalDir = Join-Path $ScriptDir 'logs\vps'
     if (-not (Test-Path $LocalDir)) { New-Item -ItemType Directory -Path $LocalDir | Out-Null }
     scp "${RemoteHost}:${RemotePath}" "$LocalDir\"

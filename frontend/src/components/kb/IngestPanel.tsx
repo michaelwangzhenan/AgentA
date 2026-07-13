@@ -40,7 +40,8 @@ function relPathOf(f: File): string {
 }
 
 export function IngestPanel({ collections, defaultAlias, onIngested, onGotoGolden }: IngestPanelProps) {
-  const [target, setTarget] = useState(defaultAlias)
+  const [target, setTarget] = useState('')
+  const userPickedRef = useRef(false)
   const [items, setItems] = useState<StageItem[]>([])
   const [running, setRunning] = useState(false)
   const [current, setCurrent] = useState('')
@@ -52,9 +53,9 @@ export function IngestPanel({ collections, defaultAlias, onIngested, onGotoGolde
   const cancelRef = useRef(false)
   const abortRef = useRef<AbortController | null>(null)
 
-  // 默认库异步加载完后回填下拉默认值（用户未手动改过时）
+  // 默认库加载后回填下拉（用户手动改过则不再覆盖）
   useEffect(() => {
-    if (defaultAlias) setTarget((cur) => cur || defaultAlias)
+    if (defaultAlias && !userPickedRef.current) setTarget(defaultAlias)
   }, [defaultAlias])
 
   // webkitdirectory 非标准属性，React 类型里没有，用 ref 直接设
@@ -314,7 +315,10 @@ export function IngestPanel({ collections, defaultAlias, onIngested, onGotoGolde
               </Button>
               <select
                 value={target}
-                onChange={(e) => setTarget(e.target.value)}
+                onChange={(e) => {
+                  userPickedRef.current = true
+                  setTarget(e.target.value)
+                }}
                 disabled={running}
                 className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
                 aria-label="目标库"
@@ -322,18 +326,21 @@ export function IngestPanel({ collections, defaultAlias, onIngested, onGotoGolde
                 {collections.flatMap((c) => {
                   // 有云端版的库（m3）拆成「本地 / 云端(api)」两项，让入库路径可见且可选；
                   // 云端项 value=api-<alias>（如 api-m3），后端 resolve 到同一 kb_<alias>
+                  const localValue = c.alias
+                  const apiValue = `api-${c.alias}`
                   const local = (
-                    <option key={c.alias} value={c.alias}>
+                    <option key={c.alias} value={localValue}>
                       {c.alias}
-                      {c.is_default ? '（默认）' : ''} · {c.model}
+                      {defaultAlias === localValue ? '（默认）' : ''} · {c.model}
                       {c.supports_api ? ' · 本地' : ''}
                     </option>
                   )
                   if (!c.supports_api) return [local]
                   return [
                     local,
-                    <option key={`api-${c.alias}`} value={`api-${c.alias}`}>
+                    <option key={apiValue} value={apiValue}>
                       {c.alias} · {c.model} · 云端(api)
+                      {defaultAlias === apiValue ? '（默认）' : ''}
                     </option>,
                   ]
                 })}

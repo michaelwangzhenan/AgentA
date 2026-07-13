@@ -313,10 +313,10 @@ export async function truncateSession(
 
 // ─── Step 4：Knowledge Base ────────────────────────────────────────────
 
-export async function getKBCollections(refresh = false): Promise<KBCollection[]> {
+export async function getKBCollections(refresh = false): Promise<KBCollectionListResponse> {
   const res = await apiFetch(`/api/kb/collections${refresh ? '?refresh=true' : ''}`)
   await _ensureOk(res)
-  return ((await res.json()) as KBCollectionListResponse).collections
+  return (await res.json()) as KBCollectionListResponse
 }
 
 export async function listKBDocuments(model: string): Promise<KBDocument[]> {
