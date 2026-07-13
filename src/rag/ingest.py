@@ -216,6 +216,7 @@ def _ingest_one_file(
             "mtime": mtime,
             "ingested_at": ingested_at,
             "content_sha1": content_hash,
+            "char_count": len(c.text),     # L2 列表聚合字数用，避免 collection.get(documents)
             "chunk_index": i,
             "chunk_total": len(structured),
             "line_start": int(c.line_start or 0),
@@ -392,6 +393,17 @@ def ingest_all(
 
 # ── Web UI 知识库管理辅助函数 ───────────────────────────────────────────────
 
+def _char_count_from_metadata(md: dict) -> int:
+    """从 chunk metadata 取字数；老数据无 char_count 时返回 0（不拉正文）。"""
+    raw = md.get("char_count")
+    if raw is None:
+        return 0
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return 0
+
+
 def list_kb_documents(model: str = config.DEFAULT_EMBEDDING_ALIAS) -> list[dict]:
     """聚合指定 collection 内所有 chunks 的 metadata，按 doc_id 分组返回文档级清单。
 
@@ -402,6 +414,7 @@ def list_kb_documents(model: str = config.DEFAULT_EMBEDDING_ALIAS) -> list[dict]
         list of dict，每项含 doc_id / filename / source / ext / lang / mtime /
         ingested_at / chunks / total_chars。collection 不存在或为空时返回 []。
         老数据缺 ingested_at 时返回 0.0（前端显示 "-"，重传后更新）。
+        total_chars 来自 metadata.char_count；缺该字段的老 chunk 计 0（避免拉全库正文 OOM）。
     """
     model_name, collection_name = config.resolve_embedding(model)
     client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
@@ -410,18 +423,17 @@ def list_kb_documents(model: str = config.DEFAULT_EMBEDDING_ALIAS) -> list[dict]
     except Exception:
         return []
 
-    data = collection.get(include=["metadatas", "documents"])
+    data = collection.get(include=["metadatas"])
     metadatas = data.get("metadatas") or []
-    documents = data.get("documents") or []
 
     grouped: dict[str, dict] = {}
-    for md, doc in zip(metadatas, documents):
+    for md in metadatas:
         if not md:
             continue
         doc_id = md.get("doc_id")
         if not doc_id:
             continue
-        chars = len(doc) if isinstance(doc, str) else 0
+        chars = _char_count_from_metadata(md)
         if doc_id in grouped:
             grouped[doc_id]["chunks"] += 1
             grouped[doc_id]["total_chars"] += chars
