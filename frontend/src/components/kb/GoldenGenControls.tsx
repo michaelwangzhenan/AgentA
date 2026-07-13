@@ -80,7 +80,7 @@ export function GoldenGenControls({
         </select>
       </label>
       <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <span className="shrink-0">出题数</span>
+        <span className="shrink-0">出题上限</span>
         <input
           type="number"
           min={opts.max_q_min}
@@ -92,7 +92,7 @@ export function GoldenGenControls({
           }}
           disabled={llmDisabled}
           className={`${selectCls} w-14 tabular-nums`}
-          aria-label="生成 Golden 数量"
+          aria-label="生成 Golden 出题上限"
         />
       </label>
     </>

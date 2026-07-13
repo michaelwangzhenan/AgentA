@@ -57,7 +57,7 @@ class GoldenGenerateRequest(BaseModel):
     golden_llm: str | None = Field(
         None, description="出题 LLM：kimi-k2.5 | deepseek-v4-flash；缺省回落 env / kimi-k2.5"
     )
-    golden_max_q: int | None = Field(None, description="出题数量；缺省 EVAL_GOLDEN_MAX_Q")
+    golden_max_q: int | None = Field(None, description="出题上限；缺省 EVAL_GOLDEN_MAX_Q")
 
 
 class GoldenGenerateResponse(BaseModel):

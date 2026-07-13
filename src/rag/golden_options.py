@@ -22,6 +22,7 @@ GOLDEN_LLM_LABELS: dict[str, str] = {
 
 GOLDEN_MAX_Q_MIN = 1
 GOLDEN_MAX_Q_MAX = 20
+GOLDEN_CHARS_PER_Q = 1000
 
 
 def normalize_golden_llm(raw: str | None) -> str:
@@ -61,9 +62,15 @@ def model_id_for_golden(llm_choice: str) -> str:
 
 
 def clamp_golden_max_q(value: int | None) -> int:
-    """限制在合法范围；None 时用 config.EVAL_GOLDEN_MAX_Q。"""
+    """出题上限：限制在合法范围；None 时用 config.EVAL_GOLDEN_MAX_Q。"""
     n = config.EVAL_GOLDEN_MAX_Q if value is None else int(value)
     return max(GOLDEN_MAX_Q_MIN, min(GOLDEN_MAX_Q_MAX, n))
+
+
+def compute_golden_max_q(char_count: int, cap: int | None = None) -> int:
+    """按字数自动算题数（每 GOLDEN_CHARS_PER_Q 一题），再与 UI/env 上限取 min。"""
+    auto = max(GOLDEN_MAX_Q_MIN, (max(0, int(char_count)) + GOLDEN_CHARS_PER_Q - 1) // GOLDEN_CHARS_PER_Q)
+    return min(auto, clamp_golden_max_q(cap))
 
 
 def resolve_llm_for_manual_generate(request_llm: str | None) -> str:

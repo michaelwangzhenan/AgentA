@@ -28,6 +28,14 @@ def test_clamp_golden_max_q(monkeypatch: pytest.MonkeyPatch) -> None:
     assert go.clamp_golden_max_q(99) == go.GOLDEN_MAX_Q_MAX
 
 
+def test_compute_golden_max_q(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(config, "EVAL_GOLDEN_MAX_Q", 3)
+    assert go.compute_golden_max_q(800, None) == 1
+    assert go.compute_golden_max_q(3500, None) == 3
+    assert go.compute_golden_max_q(3500, 5) == 4
+    assert go.compute_golden_max_q(25_000, 20) == 20
+
+
 def test_resolve_llm_for_manual_generate_defaults_kimi(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config, "EVAL_GOLDEN_LLM", "none")
     assert go.resolve_llm_for_manual_generate(None) == go.GOLDEN_LLM_KIMI

@@ -588,8 +588,9 @@ export function DocumentList({
             <AlertDialogTitle>生成评估题候选？</AlertDialogTitle>
             <AlertDialogDescription>
               将用 <b>{goldenGenPreview?.llmLabel ?? 'LLM'}</b> 为 &quot;
-              {genTarget?.filename}&quot; 生成 <b>{goldenGenPreview?.maxQ ?? 3}</b>{' '}
-              条评估题候选。会清掉该文档旧 pending（approved 保留），消耗 token 并耗时若干秒。
+              {genTarget?.filename}&quot; 生成评估题候选（按文档字数，上限{' '}
+              <b>{goldenGenPreview?.maxQ ?? 3}</b> 条）。会清掉该文档旧 pending（approved
+              保留），消耗 token 并耗时若干秒。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
