@@ -37,6 +37,8 @@ export type DocumentListProps = {
   onOpenGolden?: (docId: string, label: string) => void
   // 是否显示「评估题」列（golden 仅 admin 可见）
   showGolden?: boolean
+  /** L2 顶栏统一设置，确认框只读展示 */
+  goldenGenPreview?: { llmLabel: string; maxQ: number }
 }
 
 type SortKey =
@@ -122,6 +124,7 @@ export function DocumentList({
   generatingDocId,
   onOpenGolden,
   showGolden,
+  goldenGenPreview,
 }: DocumentListProps) {
   const [deleteTarget, setDeleteTarget] = useState<KBDocument | null>(null)
   const [genTarget, setGenTarget] = useState<KBDocument | null>(null)
@@ -584,7 +587,9 @@ export function DocumentList({
           <AlertDialogHeader>
             <AlertDialogTitle>生成评估题候选？</AlertDialogTitle>
             <AlertDialogDescription>
-              将调用 LLM 为 "{genTarget?.filename}" 生成 golden 评估题候选，会消耗 token 并耗时若干秒。
+              将用 <b>{goldenGenPreview?.llmLabel ?? 'LLM'}</b> 为 &quot;
+              {genTarget?.filename}&quot; 生成 <b>{goldenGenPreview?.maxQ ?? 3}</b>{' '}
+              条评估题候选。会清掉该文档旧 pending（approved 保留），消耗 token 并耗时若干秒。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

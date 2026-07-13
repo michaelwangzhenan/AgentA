@@ -20,6 +20,7 @@ import {
 } from '@/api/client'
 import type { KBCollection, KBCollectionListResponse, KBDocument } from '@/types/kb'
 import { DocumentList } from '@/components/kb/DocumentList'
+import { GOLDEN_LLM_LABELS, GoldenGenControls } from '@/components/kb/GoldenGenControls'
 import { IngestPanel } from '@/components/kb/IngestPanel'
 import { Button } from '@/components/ui/button'
 import {
@@ -272,6 +273,8 @@ function LibraryView({
   const [clearDialogOpen, setClearDialogOpen] = useState(false)
   const [clearing, setClearing] = useState(false)
   const [genDocId, setGenDocId] = useState<string | null>(null)
+  const [goldenLlm, setGoldenLlm] = useState('kimi-k2.5')
+  const [goldenMaxQ, setGoldenMaxQ] = useState(3)
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -349,7 +352,10 @@ function LibraryView({
     async (doc: KBDocument) => {
       setGenDocId(doc.doc_id)
       try {
-        const r = await generateGolden(alias, doc.source, doc.doc_id)
+        const r = await generateGolden(alias, doc.source, doc.doc_id, {
+          goldenLlm,
+          goldenMaxQ,
+        })
         const cleared = r.removed_pending ? `（清旧待审 ${r.removed_pending}）` : ''
         toast.success(`已生成 ${r.generated} 条评估题候选${cleared}，去 Golden 管理审核`)
         await refresh()
@@ -359,8 +365,10 @@ function LibraryView({
         setGenDocId(null)
       }
     },
-    [alias, refresh],
+    [alias, refresh, goldenLlm, goldenMaxQ],
   )
+
+  const goldenLlmLabel = GOLDEN_LLM_LABELS[goldenLlm] ?? goldenLlm
 
   const totalChunks = documents.reduce((sum, d) => sum + d.chunks, 0)
 
@@ -380,18 +388,30 @@ function LibraryView({
       </div>
 
       <div className="rounded-lg border border-border bg-card">
-        <div className="flex items-center justify-between border-b border-border px-3 py-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
           <span className="text-sm font-medium">已入库文档 ({documents.length})</span>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 gap-1 text-xs text-muted-foreground hover:text-destructive"
-            disabled={documents.length === 0 || clearing}
-            onClick={() => setClearDialogOpen(true)}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            一键清空
-          </Button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {showGolden && (
+              <GoldenGenControls
+                includeNone={false}
+                goldenLlm={goldenLlm}
+                goldenMaxQ={goldenMaxQ}
+                onGoldenLlmChange={setGoldenLlm}
+                onGoldenMaxQChange={setGoldenMaxQ}
+                disabled={clearing}
+              />
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1 text-xs text-muted-foreground hover:text-destructive"
+              disabled={documents.length === 0 || clearing}
+              onClick={() => setClearDialogOpen(true)}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              一键清空
+            </Button>
+          </div>
         </div>
         <DocumentList
           documents={documents}
@@ -401,6 +421,9 @@ function LibraryView({
           showGolden={showGolden}
           onGenerateGolden={showGolden ? handleGenerate : undefined}
           generatingDocId={genDocId}
+          goldenGenPreview={
+            showGolden ? { llmLabel: goldenLlmLabel, maxQ: goldenMaxQ } : undefined
+          }
           onOpenGolden={
             showGolden ? (docId, label) => onOpenGolden?.(docId, label, alias) : undefined
           }

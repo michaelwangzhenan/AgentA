@@ -124,6 +124,20 @@ def test_golden_gen_options(client: TestClient) -> None:
     assert body["max_q_default"] >= 1
 
 
+def test_golden_generate_rejects_none_llm(client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import src.config as cfg
+
+    upload_root = tmp_path / "web_uploads"
+    (upload_root / "en").mkdir(parents=True)
+    (upload_root / "en" / "doc.md").write_text("hello", encoding="utf-8")
+    monkeypatch.setattr(cfg, "WEB_UPLOAD_DIR", str(upload_root))
+    r = client.post(
+        "/api/eval/golden/generate",
+        json={"model": "en", "source": "doc.md", "doc_id": "x", "golden_llm": "none"},
+    )
+    assert r.status_code == 400
+
+
 def test_golden_generate_missing_file_404(client: TestClient) -> None:
     r = client.post(
         "/api/eval/golden/generate",
@@ -159,7 +173,13 @@ def test_golden_generate_ok(
 
     r = client.post(
         "/api/eval/golden/generate",
-        json={"model": "en", "source": "doc.md", "doc_id": "d1"},
+        json={
+            "model": "en",
+            "source": "doc.md",
+            "doc_id": "d1",
+            "golden_llm": "deepseek-v4-flash",
+            "golden_max_q": 5,
+        },
     )
     assert r.status_code == 200
     body = r.json()

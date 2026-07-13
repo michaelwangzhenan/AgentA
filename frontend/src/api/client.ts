@@ -14,7 +14,6 @@ import type {
   IngestProgress,
   IngestResult,
   KBClearAllResponse,
-  KBCollection,
   KBCollectionListResponse,
   KBDeleteResponse,
   KBDocument,
@@ -1176,15 +1175,27 @@ export async function getGoldenGenOptions(): Promise<GoldenGenOptions> {
   return (await res.json()) as GoldenGenOptions
 }
 
+export type GenerateGoldenOpts = {
+  goldenLlm?: string
+  goldenMaxQ?: number
+}
+
 export async function generateGolden(
   model: string,
   source: string,
   docId: string,
+  golden?: GenerateGoldenOpts,
 ): Promise<{ generated: number; removed_pending: number }> {
   const res = await apiFetch('/api/eval/golden/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, source, doc_id: docId }),
+    body: JSON.stringify({
+      model,
+      source,
+      doc_id: docId,
+      golden_llm: golden?.goldenLlm,
+      golden_max_q: golden?.goldenMaxQ,
+    }),
   })
   await _ensureOk(res)
   return (await res.json()) as { generated: number; removed_pending: number }

@@ -3,12 +3,20 @@ import { useEffect, useState } from 'react'
 import { getGoldenGenOptions } from '@/api/client'
 import type { GoldenGenOptions } from '@/types/eval'
 
+export const GOLDEN_LLM_LABELS: Record<string, string> = {
+  none: '不生成',
+  'kimi-k2.5': 'Kimi K2.5',
+  'deepseek-v4-flash': 'DeepSeek V4 Flash',
+}
+
 export type GoldenGenControlsProps = {
   goldenLlm: string
   goldenMaxQ: number
   onGoldenLlmChange: (v: string) => void
   onGoldenMaxQChange: (v: number) => void
   disabled?: boolean
+  /** 入库 true（含不生成）；L2 手动生成 false */
+  includeNone?: boolean
 }
 
 const FALLBACK: GoldenGenOptions = {
@@ -28,16 +36,28 @@ export function GoldenGenControls({
   onGoldenLlmChange,
   onGoldenMaxQChange,
   disabled,
+  includeNone = true,
 }: GoldenGenControlsProps) {
   const [opts, setOpts] = useState<GoldenGenOptions>(FALLBACK)
 
   useEffect(() => {
     getGoldenGenOptions()
-      .then(setOpts)
+      .then((o) => {
+        setOpts(o)
+        if (!includeNone) {
+          const first = o.llm_choices.find((c) => c.value !== 'none')
+          if (first && goldenLlm === 'none') onGoldenLlmChange(first.value)
+        }
+      })
       .catch(() => setOpts(FALLBACK))
-  }, [])
+    // 仅挂载时按服务端选项校正 L2 默认 LLM
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [includeNone])
 
-  const llmDisabled = disabled || goldenLlm === 'none'
+  const llmChoices = includeNone
+    ? opts.llm_choices
+    : opts.llm_choices.filter((c) => c.value !== 'none')
+  const llmDisabled = disabled || (includeNone && goldenLlm === 'none')
   const selectCls =
     'rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground disabled:opacity-50'
 
@@ -52,7 +72,7 @@ export function GoldenGenControls({
           className={selectCls}
           aria-label="评估题 LLM"
         >
-          {opts.llm_choices.map((c) => (
+          {llmChoices.map((c) => (
             <option key={c.value} value={c.value}>
               {c.label}
             </option>

@@ -54,6 +54,10 @@ class GoldenGenerateRequest(BaseModel):
     model: str = Field(..., description="库别名 en/zh/m3")
     source: str = Field(..., min_length=1, description="文档相对 web_uploads/<model> 的路径")
     doc_id: str = Field("", description="KB 文档 doc_id；用于关联 + 重生成前清旧 pending")
+    golden_llm: str | None = Field(
+        None, description="出题 LLM：kimi-k2.5 | deepseek-v4-flash；缺省回落 env / kimi-k2.5"
+    )
+    golden_max_q: int | None = Field(None, description="出题数量；缺省 EVAL_GOLDEN_MAX_Q")
 
 
 class GoldenGenerateResponse(BaseModel):

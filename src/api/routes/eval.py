@@ -178,12 +178,20 @@ def generate_golden(
             detail="文档物理文件不存在（仅 Web 上传的文档支持手动生成）",
         )
     removed = store.delete_pending_by_doc(req.doc_id) if req.doc_id else 0
-    llm_choice = resolve_llm_for_manual_generate(None)
+    if req.golden_llm is not None:
+        from src.rag.golden_options import GOLDEN_LLM_NONE, normalize_golden_llm
+
+        choice = normalize_golden_llm(req.golden_llm)
+        if choice == GOLDEN_LLM_NONE:
+            raise HTTPException(status_code=400, detail="golden_llm 不能为 none")
+        llm_choice = choice
+    else:
+        llm_choice = resolve_llm_for_manual_generate(None)
     n = run_generation_for_file(
         file_path=target,
         source=req.source,
         doc_id=req.doc_id,
-        max_q=clamp_golden_max_q(None),
+        max_q=clamp_golden_max_q(req.golden_max_q),
         llm_model=model_id_for_golden(llm_choice),
         force=True,
     )
