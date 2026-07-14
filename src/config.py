@@ -366,6 +366,8 @@ ACTIVE_MODEL: str = os.getenv("AGENTA_EVAL_ACTIVE_MODEL") or os.getenv("ACTIVE_M
 
 # ChromaDB 存储路径（仅向量库元数据 + 段目录；BM25 默认另见 BM25_INDEX_DIR）
 CHROMA_DB_PATH: str = os.getenv("CHROMA_DB_PATH", "./db/chroma")
+# 知识库文档级索引（L2 列表分页）
+KB_DOC_INDEX_DB_PATH: str = os.getenv("KB_DOC_INDEX_DB_PATH", "./db/sqlite/kb_doc_index.db")
 # 管理巡检：Chroma 筛选扫描候选上限、分批 get 大小、列表正文摘要长度
 CHROMA_SCAN_CAP: int = int(os.getenv("CHROMA_SCAN_CAP", "20000"))
 CHROMA_SCAN_BATCH: int = int(os.getenv("CHROMA_SCAN_BATCH", "500"))

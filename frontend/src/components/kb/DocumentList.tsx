@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ChevronDown, ChevronUp, FileText, Loader2, Sparkles, Trash2, X } from 'lucide-react'
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const
 const DEFAULT_PAGE_SIZE = 10
 
 // 'YYYY-MM-DD' → epoch 秒（本地时区）；空串返回 undefined
-function dateToEpoch(s: string, endOfDay: boolean): number | undefined {
+export function dateToEpoch(s: string, endOfDay: boolean): number | undefined {
   if (!s) return undefined
   const d = new Date(`${s}T${endOfDay ? '23:59:59' : '00:00:00'}`)
   return Number.isNaN(d.getTime()) ? undefined : Math.floor(d.getTime() / 1000)
@@ -23,21 +23,44 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
-import type { KBDocument } from '@/types/kb'
+import type { KBDocument, KBDocumentsQuery } from '@/types/kb'
+
+export type DocumentListQuery = {
+  page: number
+  pageSize: number
+  sortKey: SortKey
+  sortDir: SortDir
+  nameQ: string
+  lang: string
+  ext: string
+  tsFrom: string
+  tsTo: string
+}
+
+export const DEFAULT_DOCUMENT_LIST_QUERY: DocumentListQuery = {
+  page: 1,
+  pageSize: DEFAULT_PAGE_SIZE,
+  sortKey: 'ingested_at',
+  sortDir: 'desc',
+  nameQ: '',
+  lang: '',
+  ext: '',
+  tsFrom: '',
+  tsTo: '',
+}
 
 export type DocumentListProps = {
   documents: KBDocument[]
+  total: number
   loading: boolean
+  query: DocumentListQuery
+  onQueryChange: (patch: Partial<DocumentListQuery>) => void
   onDelete: (docId: string) => Promise<void> | void
   onDeleteMany?: (docIds: string[]) => Promise<void> | void
-  // 为某文档生成 golden 评估题候选；generatingDocId = 正在生成的文档（转圈）
   onGenerateGolden?: (doc: KBDocument) => Promise<void> | void
   generatingDocId?: string | null
-  // 点候选数 → 跳质量看板 Golden 管理（按该文档筛选）
   onOpenGolden?: (docId: string, label: string) => void
-  // 是否显示「评估题」列（golden 仅 admin 可见）
   showGolden?: boolean
-  /** L2 顶栏统一设置，确认框只读展示 */
   goldenGenPreview?: { llmLabel: string; maxQ: number }
 }
 
@@ -66,40 +89,18 @@ const SORT_COLUMNS: readonly SortColumn[] = [
   { key: 'ingested_at', label: '入库时间', align: 'left', defaultDir: 'desc' },
 ] as const
 
-function getSortValue(d: KBDocument, key: SortKey): string | number {
-  switch (key) {
-    case 'filename':
-      return (d.filename || d.source || '').toLowerCase()
-    case 'lang':
-      return (d.lang || '').toLowerCase()
-    case 'chunks':
-      return d.chunks
-    case 'total_chars':
-      return d.total_chars
-    case 'mtime':
-      return d.mtime
-    case 'ingested_at':
-      return d.ingested_at
+export function documentListQueryToApi(q: DocumentListQuery): KBDocumentsQuery {
+  return {
+    page: q.page,
+    pageSize: q.pageSize,
+    sortBy: q.sortKey,
+    desc: q.sortDir === 'desc',
+    filenameQ: q.nameQ.trim() || undefined,
+    lang: q.lang || undefined,
+    ext: q.ext || undefined,
+    tsFrom: dateToEpoch(q.tsFrom, false),
+    tsTo: dateToEpoch(q.tsTo, true),
   }
-}
-
-function compareDocs(
-  a: KBDocument,
-  b: KBDocument,
-  key: SortKey,
-  dir: SortDir,
-): number {
-  const va = getSortValue(a, key)
-  const vb = getSortValue(b, key)
-  let cmp: number
-  if (typeof va === 'number' && typeof vb === 'number') {
-    cmp = va - vb
-  } else {
-    cmp = String(va).localeCompare(String(vb), 'zh-Hans-CN', {
-      sensitivity: 'base',
-    })
-  }
-  return dir === 'asc' ? cmp : -cmp
 }
 
 function formatTime(mtime: number): string {
@@ -117,7 +118,10 @@ function formatChars(n: number): string {
 
 export function DocumentList({
   documents,
+  total,
   loading,
+  query,
+  onQueryChange,
   onDelete,
   onDeleteMany,
   onGenerateGolden,
@@ -129,66 +133,24 @@ export function DocumentList({
   const [deleteTarget, setDeleteTarget] = useState<KBDocument | null>(null)
   const [genTarget, setGenTarget] = useState<KBDocument | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [batchOpen, setBatchOpen] = useState(false)
-  // 默认按"入库时间"倒序，跟后端 list_kb_documents 默认排序一致
-  const [sortKey, setSortKey] = useState<SortKey>('ingested_at')
-  const [sortDir, setSortDir] = useState<SortDir>('desc')
 
-  const [offset, setOffset] = useState(0)
-  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE)
+  const { sortKey, sortDir, pageSize, page, nameQ, lang, ext, tsFrom, tsTo } = query
+  const offset = (page - 1) * pageSize
 
-  // 过滤条件：文件名关键词 / 语言 / 扩展名 / 入库时间范围
-  const [nameQ, setNameQ] = useState('')
-  const [lang, setLang] = useState('')
-  const [ext, setExt] = useState('')
-  const [tsFrom, setTsFrom] = useState('')
-  const [tsTo, setTsTo] = useState('')
+  const patch = (p: Partial<DocumentListQuery>) => {
+    const resetsPage = 'nameQ' in p || 'lang' in p || 'ext' in p || 'tsFrom' in p || 'tsTo' in p
+      || 'sortKey' in p || 'sortDir' in p || 'pageSize' in p
+    onQueryChange({ ...p, ...(resetsPage ? { page: 1 } : {}) })
+  }
 
-  // 下拉选项从当前文档实际出现的值动态生成
-  const langOptions = useMemo(
-    () => Array.from(new Set(documents.map((d) => d.lang).filter(Boolean))).sort(),
-    [documents],
-  )
-  const extOptions = useMemo(
-    () => Array.from(new Set(documents.map((d) => d.ext).filter(Boolean))).sort(),
-    [documents],
-  )
-
-  const filteredDocs = useMemo(() => {
-    const q = nameQ.trim().toLowerCase()
-    const from = dateToEpoch(tsFrom, false)
-    const to = dateToEpoch(tsTo, true)
-    return documents.filter((d) => {
-      if (
-        q &&
-        !(d.filename || '').toLowerCase().includes(q) &&
-        !(d.source || '').toLowerCase().includes(q)
-      )
-        return false
-      if (lang && (d.lang || '') !== lang) return false
-      if (ext && (d.ext || '') !== ext) return false
-      if (from !== undefined && d.ingested_at < from) return false
-      if (to !== undefined && d.ingested_at > to) return false
-      return true
-    })
-  }, [documents, nameQ, lang, ext, tsFrom, tsTo])
-
-  // 过滤条件变化时回到第 1 页 + 清空选择（避免选中项已被过滤掉）
-  useEffect(() => {
-    setOffset(0)
-    setSelected(new Set())
-  }, [nameQ, lang, ext, tsFrom, tsTo])
-
-  // 文档列表刷新（删除/入库后）时清空选择，避免残留已不存在的 doc_id
   useEffect(() => {
     setSelected(new Set())
-  }, [documents])
+  }, [documents, page])
 
-  // 选择作用于"过滤后"的全部文档（跨分页），便于"过滤→全选→批量删"
-  const filteredIds = filteredDocs.map((d) => d.doc_id)
-  const allSelected = filteredIds.length > 0 && filteredIds.every((id) => selected.has(id))
+  const pageIds = documents.map((d) => d.doc_id)
+  const allSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id))
   const toggleAll = () => {
-    setSelected(allSelected ? new Set() : new Set(filteredIds))
+    setSelected(allSelected ? new Set() : new Set(pageIds))
   }
   const toggleOne = (id: string) => {
     setSelected((prev) => {
@@ -198,6 +160,8 @@ export function DocumentList({
       return next
     })
   }
+  const [batchOpen, setBatchOpen] = useState(false)
+
   const confirmBatchDelete = async () => {
     await onDeleteMany?.([...selected])
     setSelected(new Set())
@@ -206,38 +170,26 @@ export function DocumentList({
 
   const hasFilter = Boolean(nameQ || lang || ext || tsFrom || tsTo)
   const clearFilters = () => {
-    setNameQ('')
-    setLang('')
-    setExt('')
-    setTsFrom('')
-    setTsTo('')
+    patch({
+      nameQ: '',
+      lang: '',
+      ext: '',
+      tsFrom: '',
+      tsTo: '',
+      page: 1,
+    })
   }
 
-  const sortedDocs = useMemo(
-    // Array.prototype.sort 是稳定排序 (ES2019+)，同键值时保持原顺序
-    () => [...filteredDocs].sort((a, b) => compareDocs(a, b, sortKey, sortDir)),
-    [filteredDocs, sortKey, sortDir],
-  )
-
-  // 列表可能因删除 / 刷新变短：用 clamp 后的 offset 取当前页，避免停在空页
-  const total = sortedDocs.length
-  const maxOffset = Math.max(0, Math.floor((total - 1) / pageSize) * pageSize)
-  const safeOffset = Math.min(offset, maxOffset)
-  const pagedDocs = sortedDocs.slice(safeOffset, safeOffset + pageSize)
-
   const handleSort = (col: SortColumn) => {
-    setOffset(0)
     if (col.key === sortKey) {
-      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+      patch({ sortDir: sortDir === 'asc' ? 'desc' : 'asc' })
     } else {
-      setSortKey(col.key)
-      setSortDir(col.defaultDir)
+      patch({ sortKey: col.key, sortDir: col.defaultDir })
     }
   }
 
   const changePageSize = (n: number) => {
-    setPageSize(n)
-    setOffset(0)
+    patch({ pageSize: n, page: 1 })
   }
 
   const confirmDelete = async () => {
@@ -261,7 +213,7 @@ export function DocumentList({
     )
   }
 
-  if (documents.length === 0) {
+  if (!loading && total === 0 && !hasFilter) {
     return (
       <div className="p-8 text-center text-sm text-muted-foreground">
         暂无文档；拖一个上来试试
@@ -277,42 +229,28 @@ export function DocumentList({
       <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
         <input
           value={nameQ}
-          onChange={(e) => setNameQ(e.target.value)}
+          onChange={(e) => patch({ nameQ: e.target.value })}
           placeholder="文件名关键词"
           className={cn(inputCls, 'w-44')}
         />
-        <select
+        <input
           value={lang}
-          onChange={(e) => setLang(e.target.value)}
-          className={inputCls}
-          aria-label="按语言过滤"
-        >
-          <option value="">全部语言</option>
-          {langOptions.map((v) => (
-            <option key={v} value={v}>
-              {v}
-            </option>
-          ))}
-        </select>
-        <select
+          onChange={(e) => patch({ lang: e.target.value })}
+          placeholder="语言"
+          className={cn(inputCls, 'w-24')}
+        />
+        <input
           value={ext}
-          onChange={(e) => setExt(e.target.value)}
-          className={inputCls}
-          aria-label="按扩展名过滤"
-        >
-          <option value="">全部类型</option>
-          {extOptions.map((v) => (
-            <option key={v} value={v}>
-              {v}
-            </option>
-          ))}
-        </select>
+          onChange={(e) => patch({ ext: e.target.value })}
+          placeholder="扩展名 .md"
+          className={cn(inputCls, 'w-28')}
+        />
         <label className="flex items-center gap-1 text-xs text-muted-foreground">
           入库
           <input
             type="date"
             value={tsFrom}
-            onChange={(e) => setTsFrom(e.target.value)}
+            onChange={(e) => patch({ tsFrom: e.target.value })}
             className={inputCls}
             aria-label="入库时间起"
           />
@@ -320,7 +258,7 @@ export function DocumentList({
           <input
             type="date"
             value={tsTo}
-            onChange={(e) => setTsTo(e.target.value)}
+            onChange={(e) => patch({ tsTo: e.target.value })}
             className={inputCls}
             aria-label="入库时间止"
           />
@@ -363,7 +301,7 @@ export function DocumentList({
         </div>
       )}
 
-      {sortedDocs.length === 0 ? (
+      {documents.length === 0 && !loading ? (
         <div className="p-8 text-center text-sm text-muted-foreground">
           无匹配文档
         </div>
@@ -378,7 +316,7 @@ export function DocumentList({
                 type="checkbox"
                 checked={allSelected}
                 onChange={toggleAll}
-                aria-label="全选（过滤后全部）"
+                aria-label="全选本页"
                 className="h-4 w-4 cursor-pointer accent-primary align-middle"
               />
             </th>
@@ -428,7 +366,7 @@ export function DocumentList({
           </tr>
         </thead>
         <tbody>
-          {pagedDocs.map((d) => (
+          {documents.map((d) => (
             <tr
               key={d.doc_id}
               className={cn(
@@ -521,9 +459,9 @@ export function DocumentList({
 
       <Pager
         total={total}
-        offset={safeOffset}
+        offset={offset}
         pageSize={pageSize}
-        onOffset={setOffset}
+        onOffset={(o) => onQueryChange({ page: Math.floor(o / pageSize) + 1 })}
         onPageSize={changePageSize}
       />
         </>

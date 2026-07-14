@@ -18,6 +18,7 @@ import type {
   KBDeleteResponse,
   KBDocument,
   KBDocumentListResponse,
+  KBDocumentsQuery,
 } from '@/types/kb'
 import type {
   MCPReloadResponse,
@@ -328,10 +329,23 @@ export async function getKBCollections(refresh = false): Promise<KBCollectionLis
   return (await res.json()) as KBCollectionListResponse
 }
 
-export async function listKBDocuments(model: string): Promise<KBDocument[]> {
-  const res = await apiFetch(`/api/kb/documents?model=${encodeURIComponent(model)}`)
+export async function listKBDocuments(
+  model: string,
+  query: KBDocumentsQuery = {},
+): Promise<KBDocumentListResponse> {
+  const params = new URLSearchParams({ model })
+  if (query.page != null) params.set('page', String(query.page))
+  if (query.pageSize != null) params.set('page_size', String(query.pageSize))
+  if (query.sortBy) params.set('sort_by', query.sortBy)
+  if (query.desc != null) params.set('desc', query.desc ? 'true' : 'false')
+  if (query.filenameQ) params.set('filename_q', query.filenameQ)
+  if (query.lang) params.set('lang', query.lang)
+  if (query.ext) params.set('ext', query.ext)
+  if (query.tsFrom != null) params.set('ts_from', String(query.tsFrom))
+  if (query.tsTo != null) params.set('ts_to', String(query.tsTo))
+  const res = await apiFetch(`/api/kb/documents?${params.toString()}`)
   await _ensureOk(res)
-  return ((await res.json()) as KBDocumentListResponse).documents
+  return (await res.json()) as KBDocumentListResponse
 }
 
 // 上传 + 入库：SSE 流式，progress 事件回调 onProgress，最终返回 done 结果。

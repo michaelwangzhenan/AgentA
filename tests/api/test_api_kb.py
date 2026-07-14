@@ -93,26 +93,64 @@ def test_list_collections(
 def test_list_documents_empty(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("src.api.routes.kb.list_kb_documents", lambda model: [])
+    monkeypatch.setattr(
+        "src.api.routes.kb.list_kb_documents_page",
+        lambda model, **kwargs: ([], 0),
+    )
     r = client.get("/api/kb/documents")
     assert r.status_code == 200
-    assert r.json() == {"documents": []}
+    assert r.json() == {
+        "documents": [],
+        "total": 0,
+        "page": 1,
+        "page_size": 20,
+    }
 
 
 def test_list_documents_passes_model(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """?model=zh 应原样透传给 list_kb_documents。"""
+    """?model=zh 应原样透传给 list_kb_documents_page。"""
     seen: dict[str, str] = {}
 
-    def fake_list(model: str) -> list[dict[str, Any]]:
+    def fake_list(model: str, **kwargs: Any) -> tuple[list[dict[str, Any]], int]:
         seen["model"] = model
-        return []
+        return [], 0
 
-    monkeypatch.setattr("src.api.routes.kb.list_kb_documents", fake_list)
+    monkeypatch.setattr("src.api.routes.kb.list_kb_documents_page", fake_list)
     r = client.get("/api/kb/documents?model=zh")
     assert r.status_code == 200
     assert seen["model"] == "zh"
+
+
+def test_list_documents_passes_pagination(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def fake_list(model: str, **kwargs: Any) -> tuple[list[dict[str, Any]], int]:
+        seen.update(kwargs)
+        return [], 42
+
+    monkeypatch.setattr("src.api.routes.kb.list_kb_documents_page", fake_list)
+    r = client.get(
+        "/api/kb/documents?page=2&page_size=50&sort_by=filename&desc=false"
+        "&filename_q=intro&lang=zh&ext=.md&ts_from=100&ts_to=200"
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 42
+    assert body["page"] == 2
+    assert body["page_size"] == 50
+    assert seen["page"] == 2
+    assert seen["page_size"] == 50
+    assert seen["sort_by"] == "filename"
+    assert seen["desc"] is False
+    assert seen["filename_q"] == "intro"
+    assert seen["lang"] == "zh"
+    assert seen["ext"] == ".md"
+    assert seen["ts_from"] == 100.0
+    assert seen["ts_to"] == 200.0
 
 
 def test_unknown_model_alias_returns_400(client: TestClient) -> None:
@@ -159,11 +197,18 @@ def test_list_documents_aggregated(
             "total_chars": 100,
         },
     ]
-    monkeypatch.setattr("src.api.routes.kb.list_kb_documents", lambda model: fake_docs)
+    monkeypatch.setattr(
+        "src.api.routes.kb.list_kb_documents_page",
+        lambda model, **kwargs: (fake_docs, len(fake_docs)),
+    )
 
     r = client.get("/api/kb/documents")
     assert r.status_code == 200
-    docs = r.json()["documents"]
+    body = r.json()
+    docs = body["documents"]
+    assert body["total"] == 3
+    assert body["page"] == 1
+    assert body["page_size"] == 20
     assert len(docs) == 3
     assert docs[0]["doc_id"] == "abc123"
     assert docs[0]["filename"] == "intro.md"

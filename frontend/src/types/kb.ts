@@ -16,6 +16,21 @@ export type KBDocument = {
 
 export type KBDocumentListResponse = {
   documents: KBDocument[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export type KBDocumentsQuery = {
+  page?: number
+  pageSize?: number
+  sortBy?: string
+  desc?: boolean
+  filenameQ?: string
+  lang?: string
+  ext?: string
+  tsFrom?: number
+  tsTo?: number
 }
 
 export type KBCollection = {

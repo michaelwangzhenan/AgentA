@@ -19,7 +19,12 @@ import {
   listKBDocuments,
 } from '@/api/client'
 import type { KBCollection, KBCollectionListResponse, KBDocument } from '@/types/kb'
-import { DocumentList } from '@/components/kb/DocumentList'
+import {
+  DEFAULT_DOCUMENT_LIST_QUERY,
+  DocumentList,
+  documentListQueryToApi,
+  type DocumentListQuery,
+} from '@/components/kb/DocumentList'
 import { GOLDEN_LLM_LABELS, GoldenGenControls } from '@/components/kb/GoldenGenControls'
 import { IngestPanel } from '@/components/kb/IngestPanel'
 import { Button } from '@/components/ui/button'
@@ -269,6 +274,9 @@ function LibraryView({
   showGolden?: boolean
 }) {
   const [documents, setDocuments] = useState<KBDocument[]>([])
+  const [total, setTotal] = useState(0)
+  const [chunkTotal, setChunkTotal] = useState(0)
+  const [listQuery, setListQuery] = useState<DocumentListQuery>(DEFAULT_DOCUMENT_LIST_QUERY)
   const [loading, setLoading] = useState(true)
   const [clearDialogOpen, setClearDialogOpen] = useState(false)
   const [clearing, setClearing] = useState(false)
@@ -276,21 +284,36 @@ function LibraryView({
   const [goldenLlm, setGoldenLlm] = useState('kimi-k2.5')
   const [goldenMaxQ, setGoldenMaxQ] = useState(3)
 
+  useEffect(() => {
+    setListQuery(DEFAULT_DOCUMENT_LIST_QUERY)
+  }, [alias])
+
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      setDocuments(await listKBDocuments(alias))
+      const [listResp, colResp] = await Promise.all([
+        listKBDocuments(alias, documentListQueryToApi(listQuery)),
+        getKBCollections(),
+      ])
+      setDocuments(listResp.documents)
+      setTotal(listResp.total)
+      const col = colResp.collections.find((c) => c.alias === alias)
+      setChunkTotal(col?.chunk_count ?? 0)
     } catch (e) {
       console.error('[KB] 拉列表失败', e)
       toast.error(`拉取列表失败: ${(e as Error).message}`)
     } finally {
       setLoading(false)
     }
-  }, [alias])
+  }, [alias, listQuery])
 
   useEffect(() => {
-    refresh()
+    void refresh()
   }, [refresh])
+
+  const handleQueryChange = useCallback((patch: Partial<DocumentListQuery>) => {
+    setListQuery((q) => ({ ...q, ...patch }))
+  }, [])
 
   const handleDelete = useCallback(
     async (docId: string) => {
@@ -370,8 +393,6 @@ function LibraryView({
 
   const goldenLlmLabel = GOLDEN_LLM_LABELS[goldenLlm] ?? goldenLlm
 
-  const totalChunks = documents.reduce((sum, d) => sum + d.chunks, 0)
-
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2 text-sm">
@@ -389,7 +410,7 @@ function LibraryView({
 
       <div className="rounded-lg border border-border bg-card">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
-          <span className="text-sm font-medium">已入库文档 ({documents.length})</span>
+          <span className="text-sm font-medium">已入库文档 ({total})</span>
           <div className="flex flex-wrap items-center justify-end gap-2">
             {showGolden && (
               <GoldenGenControls
@@ -405,7 +426,7 @@ function LibraryView({
               variant="ghost"
               size="sm"
               className="h-7 gap-1 text-xs text-muted-foreground hover:text-destructive"
-              disabled={documents.length === 0 || clearing}
+              disabled={total === 0 || clearing}
               onClick={() => setClearDialogOpen(true)}
             >
               <Trash2 className="h-3.5 w-3.5" />
@@ -415,7 +436,10 @@ function LibraryView({
         </div>
         <DocumentList
           documents={documents}
+          total={total}
           loading={loading}
+          query={listQuery}
+          onQueryChange={handleQueryChange}
           onDelete={handleDelete}
           onDeleteMany={handleDeleteMany}
           showGolden={showGolden}
@@ -451,8 +475,8 @@ function LibraryView({
           <AlertDialogHeader>
             <AlertDialogTitle>清空库 {alias}？</AlertDialogTitle>
             <AlertDialogDescription>
-              将删除 <b>{alias}</b> 库的 <b>{documents.length}</b> 个文档（共{' '}
-              <b>{totalChunks}</b> chunks），同时清空 <code>web_uploads/</code>{' '}
+              将删除 <b>{alias}</b> 库的 <b>{total}</b> 个文档（共{' '}
+              <b>{chunkTotal}</b> chunks），同时清空 <code>web_uploads/</code>{' '}
               下对应的物理文件。该操作不可恢复。
             </AlertDialogDescription>
           </AlertDialogHeader>

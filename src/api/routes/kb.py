@@ -31,7 +31,7 @@ from src.rag.ingest import (
     delete_all_kb_documents,
     delete_kb_document,
     ingest_one,
-    list_kb_documents,
+    list_kb_documents_page,
 )
 from src.rag.parser import SUPPORTED_EXTENSIONS, is_office_temp_file
 from src.services import ingest_cancel
@@ -126,15 +126,41 @@ def list_collections(
 @router.get("/kb/documents", response_model=KBDocumentListResponse)
 def list_documents(
     model: str | None = Query(None, description="库别名 en/zh/m3/api-m3；缺省用当前默认"),
+    page: int = Query(1, ge=1, description="页码（1 基）"),
+    page_size: int = Query(20, ge=1, le=200, description="每页条数"),
+    sort_by: str | None = Query(
+        "ingested_at",
+        description="排序列：filename / lang / chunks / total_chars / mtime / ingested_at",
+    ),
+    desc: bool = Query(True, description="是否降序"),
+    filename_q: str | None = Query(None, description="文件名 / source 子串过滤"),
+    lang: str | None = Query(None, description="语种精确匹配"),
+    ext: str | None = Query(None, description="扩展名精确匹配，如 .md"),
+    ts_from: float | None = Query(None, description="入库时间下界（unix 秒）"),
+    ts_to: float | None = Query(None, description="入库时间上界（unix 秒）"),
     _: dict = Depends(get_current_user),
 ) -> KBDocumentListResponse:
-    """列出指定库内已入库的所有文档（按上传时间倒序），附每文档的 golden 候选计数。"""
+    """分页列出指定库内文档（默认按入库时间倒序），附 golden 候选计数。"""
     model = _validate_alias(model or config.DEFAULT_EMBEDDING_ALIAS)
-    docs = list_kb_documents(model=model)
+    docs, total = list_kb_documents_page(
+        model=model,
+        page=page,
+        page_size=page_size,
+        sort_by=sort_by or "ingested_at",
+        desc=desc,
+        filename_q=filename_q,
+        lang=lang,
+        ext=ext,
+        ts_from=ts_from,
+        ts_to=ts_to,
+    )
     from src.stores.golden_store import get_shared_store
-    dc = get_shared_store().doc_counts()  # {doc_id: {total, pending}}
+    dc = get_shared_store().doc_counts()
     return KBDocumentListResponse(
-        documents=[_md_to_kbdoc(d, dc.get(d["doc_id"])) for d in docs]
+        documents=[_md_to_kbdoc(d, dc.get(d["doc_id"])) for d in docs],
+        total=total,
+        page=page,
+        page_size=page_size,
     )
 
 

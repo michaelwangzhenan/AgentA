@@ -21,6 +21,9 @@ class KBDocument(BaseModel):
 
 class KBDocumentListResponse(BaseModel):
     documents: list[KBDocument]
+    total: int = Field(0, description="满足筛选条件的文档总数")
+    page: int = Field(1, description="当前页码（1 基）")
+    page_size: int = Field(20, description="每页条数")
 
 
 class KBCollection(BaseModel):

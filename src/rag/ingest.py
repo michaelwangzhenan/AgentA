@@ -223,9 +223,10 @@ def _ingest_from_chunk_spool(
 
     batch: list[dict] = []
     done = 0
+    total_chars = 0
 
     def flush_batch() -> None:
-        nonlocal batch, done, bm25_error
+        nonlocal batch, done, bm25_error, total_chars
         if not batch:
             return
         _raise_if_cancelled(cancel_cb)
@@ -261,6 +262,7 @@ def _ingest_from_chunk_spool(
             except Exception as exc:
                 bm25_error = exc
         done += len(batch)
+        total_chars += sum(len(item["text"]) for item in batch)
         if progress_cb:
             progress_cb("embed", done, total_chunks)
         batch = []
@@ -307,6 +309,18 @@ def _ingest_from_chunk_spool(
         total_chunks,
         lang,
         heading_chunks,
+    )
+    _sync_kb_doc_index(
+        collection_name,
+        doc_id=doc_id,
+        filename=file_path.name,
+        source=rel_path,
+        ext=ext,
+        lang=lang,
+        mtime=mtime,
+        ingested_at=ingested_at,
+        chunks=total_chunks,
+        total_chars=total_chars,
     )
     return {"doc_id": doc_id, "chunks": total_chunks, "status": "ingested"}
 
@@ -959,6 +973,56 @@ def get_kb_document_text(model: str, doc_id: str) -> str | None:
     return "\n\n".join(text for _, text in pairs)
 
 
+def _sync_kb_doc_index(
+    collection_name: str,
+    *,
+    doc_id: str,
+    filename: str,
+    source: str,
+    ext: str,
+    lang: str,
+    mtime: float,
+    ingested_at: float,
+    chunks: int,
+    total_chars: int,
+) -> None:
+    try:
+        from src.stores.kb_doc_index import get_kb_doc_index
+
+        get_kb_doc_index().upsert(
+            collection_name,
+            doc_id=doc_id,
+            filename=filename,
+            source=source,
+            ext=ext,
+            lang=lang,
+            mtime=mtime,
+            ingested_at=ingested_at,
+            chunks=chunks,
+            total_chars=total_chars,
+        )
+    except Exception as exc:
+        logger.warning("KB 文档索引更新失败 doc_id=%s: %s", doc_id, exc)
+
+
+def _remove_kb_doc_index(collection_name: str, doc_id: str) -> None:
+    try:
+        from src.stores.kb_doc_index import get_kb_doc_index
+
+        get_kb_doc_index().delete_doc(collection_name, doc_id)
+    except Exception as exc:
+        logger.warning("KB 文档索引删除失败 doc_id=%s: %s", doc_id, exc)
+
+
+def _clear_kb_doc_index(collection_name: str) -> None:
+    try:
+        from src.stores.kb_doc_index import get_kb_doc_index
+
+        get_kb_doc_index().clear_collection(collection_name)
+    except Exception as exc:
+        logger.warning("KB 文档索引清空失败 collection=%s: %s", collection_name, exc)
+
+
 def list_kb_documents(model: str = config.DEFAULT_EMBEDDING_ALIAS) -> list[dict]:
     """聚合指定 collection 内所有 chunks 的 metadata，按 doc_id 分组返回文档级清单。
 
@@ -985,6 +1049,90 @@ def list_kb_documents(model: str = config.DEFAULT_EMBEDDING_ALIAS) -> list[dict]
 
     # 按 ingested_at 倒序（最近入库的在前）；缺失值（老数据）排在最后
     return sorted(grouped.values(), key=lambda x: x["ingested_at"], reverse=True)
+
+
+def list_kb_documents_page(
+    model: str = config.DEFAULT_EMBEDDING_ALIAS,
+    *,
+    page: int = 1,
+    page_size: int = 20,
+    sort_by: str = "ingested_at",
+    desc: bool = True,
+    filename_q: str | None = None,
+    lang: str | None = None,
+    ext: str | None = None,
+    ts_from: float | None = None,
+    ts_to: float | None = None,
+) -> tuple[list[dict], int]:
+    """从文档级索引分页列出；索引为空时回落 Chroma 全量扫描（兼容未回填老库）。"""
+    _, collection_name = config.resolve_embedding(model)
+    from src.stores.kb_doc_index import get_kb_doc_index
+
+    store = get_kb_doc_index()
+    docs, total = store.list_page(
+        collection_name,
+        page=page,
+        page_size=page_size,
+        sort_by=sort_by,
+        desc=desc,
+        filename_q=filename_q,
+        lang=lang,
+        ext=ext,
+        ts_from=ts_from,
+        ts_to=ts_to,
+    )
+    if total > 0 or store.collection_stats(collection_name)[0] > 0:
+        return docs, total
+
+    # 未回填：回落全量扫描后客户端式分页（仅过渡期）
+    all_docs = list_kb_documents(model=model)
+    if filename_q:
+        q = filename_q.lower()
+        all_docs = [
+            d for d in all_docs
+            if q in (d.get("filename") or "").lower()
+            or q in (d.get("source") or "").lower()
+        ]
+    if lang:
+        all_docs = [d for d in all_docs if (d.get("lang") or "") == lang]
+    if ext:
+        all_docs = [d for d in all_docs if (d.get("ext") or "") == ext]
+    if ts_from is not None:
+        all_docs = [d for d in all_docs if float(d.get("ingested_at") or 0) >= ts_from]
+    if ts_to is not None:
+        all_docs = [d for d in all_docs if float(d.get("ingested_at") or 0) <= ts_to]
+    key = sort_by if sort_by in ("filename", "lang", "chunks", "total_chars", "mtime", "ingested_at") else "ingested_at"
+
+    def _sort_val(d: dict) -> Any:
+        if key in ("filename", "lang"):
+            return (d.get(key) or "").lower()
+        return float(d.get(key) or 0)
+
+    all_docs.sort(key=_sort_val, reverse=desc)
+    total = len(all_docs)
+    start = (max(1, page) - 1) * max(1, min(page_size, 200))
+    end = start + max(1, min(page_size, 200))
+    return all_docs[start:end], total
+
+
+def backfill_kb_doc_index(model: str = config.DEFAULT_EMBEDDING_ALIAS) -> int:
+    """从 Chroma metadata 一次性回填某库的文档级索引。返回写入文档数。"""
+    _, collection_name = config.resolve_embedding(model)
+    grouped: dict[str, dict] = {}
+    client = _kb_chroma_client()
+    try:
+        collection = client.get_collection(name=collection_name)
+    except Exception:
+        return 0
+    for md in _iter_chunk_metadatas(collection):
+        _merge_doc_row(grouped, md)
+    rows = sorted(grouped.values(), key=lambda x: x["ingested_at"], reverse=True)
+    from src.stores.kb_doc_index import get_kb_doc_index
+
+    n = get_kb_doc_index().replace_collection(collection_name, rows)
+    _invalidate_kb_stats(collection_name)
+    logger.info("KB 文档索引已回填 collection=%s → %d 文档", collection_name, n)
+    return n
 
 
 # count_kb_documents 的进程内缓存：collection_name -> (doc_count, chunk_count)。
@@ -1017,6 +1165,14 @@ def count_kb_documents(
         return 0, 0
 
     chunk_count = collection.count()
+    from src.stores.kb_doc_index import get_kb_doc_index
+
+    doc_count, chunk_sum = get_kb_doc_index().collection_stats(collection_name)
+    if doc_count > 0:
+        stats = (doc_count, chunk_sum if chunk_sum > 0 else chunk_count)
+        _KB_STATS_CACHE[collection_name] = stats
+        return stats
+
     doc_ids: set[str] = set()
     for md in _iter_chunk_metadatas(collection):
         did = md.get("doc_id")
@@ -1090,6 +1246,7 @@ def delete_kb_document(
 
     _invalidate_semantic_cache()
     _invalidate_kb_stats(collection_name)
+    _remove_kb_doc_index(collection_name, doc_id)
     return True, chunks_removed
 
 
@@ -1164,6 +1321,7 @@ def delete_all_kb_documents(
 
     _invalidate_semantic_cache()
     _invalidate_kb_stats(collection_name)
+    _clear_kb_doc_index(collection_name)
     return {
         "docs_removed": docs_removed,
         "chunks_removed": chunks_removed,
