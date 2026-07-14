@@ -402,6 +402,8 @@ export async function ingestKBFileStream(
           onProgress?.({ phase: ev.phase, done: ev.done, total: ev.total })
         } else if (ev.type === 'done') {
           result = ev as IngestResult
+        } else if (ev.type === 'cancelled') {
+          throw new DOMException('Aborted', 'AbortError')
         } else if (ev.type === 'error') {
           errMsg = ev.message
         }

@@ -686,7 +686,7 @@ class TestActivateSkill:
         agent = Agent(skills={"writer": info}, verbose=False)
         result = agent.activate_skill("writer", "# 写作规范\n内容")
         assert result is True
-        assert '<skill_content name="writer">' in agent.system_prompt
+        assert '<skill_content name="writer"' in agent.system_prompt
         assert "# 写作规范" in agent.system_prompt
 
     def test_activate_skill_removes_from_skill_bodies(self) -> None:
@@ -702,13 +702,13 @@ class TestActivateSkill:
         info = self._make_skill_info("writer", "写作助手", "正文")
         agent = Agent(skills={"writer": info}, verbose=False)
         assert agent.activate_skill("writer", "正文") is True
-        count_before = agent.system_prompt.count('<skill_content name="writer">')
+        count_before = agent.system_prompt.count('<skill_content name="writer"')
         assert agent.activate_skill("writer", "正文") is False
-        assert agent.system_prompt.count('<skill_content name="writer">') == count_before
+        assert agent.system_prompt.count('<skill_content name="writer"') == count_before
 
     def test_activate_unknown_skill_still_injects(self) -> None:
         """不在初始 skills 中的 name 也能通过 activate_skill 注入（pop 安全忽略）。"""
         agent = Agent(verbose=False)
         result = agent.activate_skill("new_skill", "新内容")
         assert result is True
-        assert '<skill_content name="new_skill">' in agent.system_prompt
+        assert '<skill_content name="new_skill"' in agent.system_prompt

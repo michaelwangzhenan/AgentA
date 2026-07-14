@@ -215,7 +215,9 @@ class ToolCallEngine:
         # DB 写入干净内容（无引导提示），避免污染历史。
         # 先写入 tool 结果再调 plan 审批 hook，保证 PlanAbortedByUser
         # 抛出时 session_store 一致性（assistant_msg 已写入 + tool_msg 已写入）。
-        db_content = result.to_llm_str()
+        # load_skill：DB 存 skill_ref 压缩历史；同轮 messages 仍注入完整正文供本轮推理。
+        llm_content = result.to_llm_str()
+        db_content = llm_content
         if tool_name == "load_skill" and result.status == "ok":
             from src.agent.core.skill_loader import skill_ref_stub
 
@@ -223,7 +225,8 @@ class ToolCallEngine:
             raw_body = ""
             if skill_name:
                 raw_body = self._skill_bodies.get(skill_name, "")
-            db_content = skill_ref_stub(skill_name, raw_body) if skill_name else db_content
+            if skill_name:
+                db_content = skill_ref_stub(skill_name, raw_body)
         db_msg: dict[str, Any] = {
             "role": "tool",
             "tool_call_id": tool_call.id,
@@ -232,7 +235,6 @@ class ToolCallEngine:
         self._session_store.append(self._session_id, db_msg)
 
         # 当前轮 messages 注入含引导提示的版本，引导 LLM 下一步决策
-        llm_content = db_content
         if result.status == "error":
             llm_content += "\n\n[提示] 请换一种方式（换参数或换工具）重试，不要直接回答。"
         elif result.status == "empty" and tool_name == "search_knowledge":

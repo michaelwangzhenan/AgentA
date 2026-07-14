@@ -88,7 +88,16 @@ export function GoldenGenControls({
           value={goldenMaxQ}
           onChange={(e) => {
             const n = parseInt(e.target.value, 10)
-            if (!Number.isNaN(n)) onGoldenMaxQChange(n)
+            if (Number.isNaN(n)) return
+            const clamped = Math.min(opts.max_q_max, Math.max(opts.max_q_min, n))
+            onGoldenMaxQChange(clamped)
+          }}
+          onBlur={() => {
+            const clamped = Math.min(
+              opts.max_q_max,
+              Math.max(opts.max_q_min, goldenMaxQ || opts.max_q_default),
+            )
+            if (clamped !== goldenMaxQ) onGoldenMaxQChange(clamped)
           }}
           disabled={llmDisabled}
           className={`${selectCls} w-14 tabular-nums`}

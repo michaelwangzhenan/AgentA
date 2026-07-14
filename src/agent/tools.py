@@ -878,6 +878,9 @@ def _tool_fetch_url(
         ok 状态的内容会先过 security_filter（scrub + wrap_untrusted(kind="web")）。
     """
     logger.info("[tool] fetch_url: url=%r, max_chars=%d", url, max_chars)
+    # 防止 LLM 传入极大 max_chars 导致解析后内存尖峰（下载仍受 MAX_FETCH_BYTES 限制）
+    _FETCH_URL_MAX_CHARS = 50_000
+    max_chars = max(1, min(int(max_chars), _FETCH_URL_MAX_CHARS))
 
     # SSRF 防御统一入口，拦 file:// / 内网 IP / 解析失败的域名
     from src.agent.core.url_guard import is_url_safe

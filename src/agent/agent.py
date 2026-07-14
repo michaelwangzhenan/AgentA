@@ -17,6 +17,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
+from src.agent.core.citation_builder import CitationBuilder
 from src.agent.core.run_cancel import is_cancelled
 from src.agent.core.event_bus import (
     ALL_EVENT_TYPES,

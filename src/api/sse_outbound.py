@@ -44,13 +44,23 @@ class SseOutbound:
         return self._queue
 
     def close(self) -> None:
-        """停止合并定时器，丢弃未 flush 的缓冲（断开时用）。"""
-        self._closed = True
+        """停止合并定时器；先尽量 flush 缓冲，再标记关闭。"""
         if self._flush_handle is not None:
             self._flush_handle.cancel()
             self._flush_handle = None
+        try:
+            self._flush_pending()
+        except Exception:
+            logger.debug("[sse] close 时 flush 失败", exc_info=True)
+        self._closed = True
         self._token_buf = ""
         self._thinking_buf = ""
+
+    def enqueue_now(self, frame: dict[str, Any]) -> None:
+        """同事件循环线程入队（async 驱动里发 error / 终态前 flush）。"""
+        if self._closed:
+            return
+        self._enqueue(frame)
 
     def enqueue_from_thread(self, frame: dict[str, Any]) -> None:
         if self._closed:
@@ -140,10 +150,16 @@ class SseOutbound:
                 dropped = True
                 continue
             drained.append(item)
-        for item in drained:
+        for idx, item in enumerate(drained):
             try:
                 self._queue.put_nowait(item)
             except asyncio.QueueFull:
+                leftover = drained[idx:]
+                logger.warning(
+                    "[sse] 回灌时队列满，丢弃 %d 条（含 type=%s）",
+                    len(leftover),
+                    leftover[0].get("type") if isinstance(leftover[0], dict) else type(leftover[0]),
+                )
                 break
         return dropped
 

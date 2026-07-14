@@ -6,6 +6,7 @@ import type { IngestProgress, KBCollection } from '@/types/kb'
 import { ACCEPT_EXTENSIONS, DropZone } from '@/components/kb/DropZone'
 import { GoldenGenControls } from '@/components/kb/GoldenGenControls'
 import { Button } from '@/components/ui/button'
+import { generateId } from '@/lib/id'
 import { toast } from '@/lib/toast'
 
 export type IngestPanelProps = {
@@ -154,7 +155,7 @@ export function IngestPanel({
         setChunk(null)
         const ac = new AbortController()
         abortRef.current = ac
-        const ingestId = crypto.randomUUID()
+        const ingestId = generateId()
         ingestIdRef.current = ingestId
         setChunk({ phase: 'upload', done: 0, total: 0 })
         try {

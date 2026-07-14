@@ -245,6 +245,7 @@ async def _ingest_event_stream(
                 cancel_cb=cancel_cb,
             )
             if cancel_event.is_set():
+                q.put_nowait({"type": "cancelled", "filename": safe_name})
                 return
             status, chunks, doc_id = result["status"], result["chunks"], result["doc_id"]
             golden_n = 0
@@ -267,6 +268,7 @@ async def _ingest_event_stream(
                         golden_max_q,
                     )
             if cancel_event.is_set():
+                q.put_nowait({"type": "cancelled", "filename": safe_name})
                 return
             q.put_nowait({
                 "type": "done",
@@ -280,9 +282,11 @@ async def _ingest_event_stream(
             })
         except IngestCancelled:
             logger.info("[KB] 入库已取消: %s", safe_name)
+            q.put_nowait({"type": "cancelled", "filename": safe_name})
         except Exception as exc:  # noqa: BLE001 — 任何入库异常都作为 error 事件回传
             if cancel_event.is_set():
                 logger.info("[KB] 入库已取消（异常路径）: %s", safe_name)
+                q.put_nowait({"type": "cancelled", "filename": safe_name})
                 return
             logger.exception("[KB] ingest 失败: %s", safe_name)
             q.put_nowait({"type": "error", "message": str(exc)})
@@ -302,23 +306,25 @@ async def _ingest_event_stream(
                     _mark_cancelled()
                     break
                 continue
+            except asyncio.CancelledError:
+                _mark_cancelled()
+                raise
             try:
                 yield await _sse_line(ev)
             except (asyncio.CancelledError, ConnectionError, BrokenPipeError):
                 _mark_cancelled()
                 break
-            if ev["type"] in ("done", "error"):
+            if ev["type"] in ("done", "error", "cancelled"):
                 break
     finally:
+        # 先等任务结束再 unregister，避免 cancel API 打到已注销的 ingest_id
+        if not task.done():
+            _mark_cancelled()
+            try:
+                await asyncio.wait_for(task, timeout=60.0)
+            except asyncio.TimeoutError:
+                logger.warning("[KB] 取消后 ingest 线程未及时结束: %s", safe_name)
         ingest_cancel.unregister(ingest_id)
-        if cancel_event.is_set():
-            if not task.done():
-                try:
-                    await asyncio.wait_for(task, timeout=60.0)
-                except asyncio.TimeoutError:
-                    logger.warning("[KB] 取消后 ingest 线程未及时结束: %s", safe_name)
-        elif not task.done():
-            await task
 
 
 @router.post("/kb/upload/cancel", response_model=KBCancelUploadResponse)

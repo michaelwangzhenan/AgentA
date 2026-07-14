@@ -416,9 +416,6 @@ async def chat_stream(
         if et == "error" and _state["suppress"]:
             _state["held_errors"].append(frame)
             return
-        if et == "error" and _state["suppress"]:
-            _state["held_errors"].append(frame)
-            return
         outbound.enqueue_from_thread(frame)
 
     def _run_with(model: str) -> None:
@@ -460,8 +457,8 @@ async def chat_stream(
         except Exception as exc:
             logger.exception("[/api/chat/stream] agent.run 抛异常")
             for f in _state["held_errors"]:
-                await queue.put(f)
-            await queue.put({
+                outbound.enqueue_now(f)
+            outbound.enqueue_now({
                 "type": "error",
                 "payload": {"message": str(exc), "recoverable": False, "phase": "run"},
             })
@@ -477,7 +474,8 @@ async def chat_stream(
             if used_model == decision.model_id:
                 _record_route_saving(user["id"], decision, usage_holder.get("usage"))
             _maybe_store_cache(cache_on, usage_holder, req.message, user["id"], used_model)
-            _maybe_store_cache(cache_on, usage_holder, req.message, user["id"], used_model)
+            # flush 合并缓冲后再发 sentinel，避免尾部 token 被 close 丢掉
+            outbound._flush_pending()
             await queue.put(_STREAM_SENTINEL)
 
     run_task = asyncio.create_task(_drive_agent())

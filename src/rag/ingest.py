@@ -66,10 +66,17 @@ def _rollback_doc_chunks(
     doc_id: str,
     *,
     bm25_save: bool = True,
+    only_ids: list[str] | None = None,
 ) -> None:
-    """取消入库时清掉该文档已写入的部分 chunks，避免半成品残留。"""
-    existing = collection.get(where={"doc_id": doc_id}, include=[])
-    ids = existing.get("ids") or []
+    """取消/失败时清掉本次新写入的 chunks，保留重入库前的旧块。
+
+    only_ids 有值时只删这些 id（先写后删路径）；否则按 doc_id 全删（兼容旧调用）。
+    """
+    if only_ids is not None:
+        ids = list(only_ids)
+    else:
+        existing = collection.get(where={"doc_id": doc_id}, include=[])
+        ids = existing.get("ids") or []
     if ids:
         collection.delete(ids=ids)
         logger.info("  取消入库，已回滚 %d 块: doc_id=%s", len(ids), doc_id)
@@ -77,9 +84,51 @@ def _rollback_doc_chunks(
         try:
             from src.rag.bm25_index import get_index
 
-            get_index(collection_name).delete_by_doc_id(doc_id)
+            idx = get_index(collection_name)
+            if only_ids is not None:
+                idx.delete_ids(ids)
+            else:
+                idx.delete_by_doc_id(doc_id)
+            # Web 路径通常不中途 commit；内存删掉本次写入即可与磁盘旧索引对齐。
+            # CLI（bm25_save=True）若曾脏写内存，回滚后写盘，避免半成品落盘。
+            if bm25_save:
+                from src.rag.bm25_index import commit_index
+
+                commit_index(collection_name)
         except Exception as exc:
             logger.warning("  取消入库 BM25 回滚失败（已忽略）: %s", exc)
+
+
+def _purge_doc_data(
+    collection,
+    collection_name: str,
+    doc_id: str,
+    existing_ids: list[str],
+) -> None:
+    """空文档 / 零分块：清掉该文档在 Chroma、BM25、文档索引中的旧数据。"""
+    if existing_ids:
+        collection.delete(ids=existing_ids)
+        logger.info("  空内容，已清除旧块 %d 条: doc_id=%s", len(existing_ids), doc_id)
+    if config.BM25_ENABLED:
+        try:
+            from src.rag.bm25_index import commit_index, get_index
+
+            get_index(collection_name).delete_by_doc_id(doc_id)
+            commit_index(collection_name)
+        except Exception as exc:
+            logger.warning("  空内容 BM25 清理失败（已忽略）: %s", exc)
+    _remove_kb_doc_index(collection_name, doc_id)
+
+
+def _make_chunk_id(doc_id: str, chunk_index: int, *, revision: str | None = None) -> str:
+    """用 doc_id + 块序号生成稳定唯一 chunk ID；revision 用于重入库 staging，避免覆盖旧块。"""
+    raw = (
+        f"{doc_id}::{revision}::{chunk_index}"
+        if revision
+        else f"{doc_id}::{chunk_index}"
+    )
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
 
 from src.rag.chroma_client import get_chroma_client
 
@@ -105,12 +154,6 @@ def _doc_id_from_relpath(rel_path: str) -> str:
     """基于（POSIX 化的）相对路径生成稳定 doc_id（SHA1 前 16 位）。"""
     norm = rel_path.replace("\\", "/")
     return hashlib.sha1(norm.encode("utf-8")).hexdigest()[:16]
-
-
-def _make_chunk_id(doc_id: str, chunk_index: int) -> str:
-    """用 doc_id + 块序号生成稳定唯一 chunk ID。"""
-    raw = f"{doc_id}::{chunk_index}"
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 
 def _content_sha1(text: str) -> str:
@@ -204,11 +247,21 @@ def _ingest_from_chunk_spool(
     truncated: bool = False,
     bm25_save: bool = True,
     cancel_cb: CancelCb | None = None,
+    existing_ids: list[str] | None = None,
 ) -> dict:
-    """从 jsonl 分块临时文件分批嵌入写入 Chroma / BM25。"""
+    """从 jsonl 分块临时文件分批嵌入写入 Chroma / BM25。
+
+    先写新块（带 revision 的新 id），成功后再删旧块，取消/失败只回滚本次写入。
+    """
+    import uuid
+
     ingested_at = time.time()
     if progress_cb:
         progress_cb("split", 0, total_chunks)
+
+    old_ids = list(existing_ids or [])
+    # 重入库用新 revision，避免覆盖旧 chunk id；首次入库无旧块时用稳定 id（无 revision）。
+    revision = uuid.uuid4().hex[:8] if old_ids else None
 
     bm25 = None
     bm25_error: Exception | None = None
@@ -217,20 +270,22 @@ def _ingest_from_chunk_spool(
             from src.rag.bm25_index import get_index
 
             bm25 = get_index(collection_name)
-            bm25.delete_by_doc_id(doc_id)
         except Exception as exc:
             bm25_error = exc
 
     batch: list[dict] = []
     done = 0
     total_chars = 0
+    written_ids: list[str] = []
 
     def flush_batch() -> None:
         nonlocal batch, done, bm25_error, total_chars
         if not batch:
             return
         _raise_if_cancelled(cancel_cb)
-        ids = [_make_chunk_id(doc_id, item["index"]) for item in batch]
+        ids = [
+            _make_chunk_id(doc_id, item["index"], revision=revision) for item in batch
+        ]
         documents = [item["text"] for item in batch]
         metadatas: list[dict] = []
         for item in batch:
@@ -249,12 +304,15 @@ def _ingest_from_chunk_spool(
                 "line_start": item["line_start"],
                 "line_end": item["line_end"],
             }
+            if revision:
+                md["ingest_revision"] = revision
             if item.get("heading_path"):
                 md["heading_path"] = " > ".join(item["heading_path"])
             if item.get("page_no") is not None:
                 md["page_no"] = int(item["page_no"])
             metadatas.append(md)
         collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
+        written_ids.extend(ids)
         _raise_if_cancelled(cancel_cb)
         if bm25 is not None and bm25_error is None:
             try:
@@ -266,6 +324,15 @@ def _ingest_from_chunk_spool(
         if progress_cb:
             progress_cb("embed", done, total_chunks)
         batch = []
+
+    def _fail_rollback() -> None:
+        _rollback_doc_chunks(
+            collection,
+            collection_name,
+            doc_id,
+            bm25_save=bm25_save,
+            only_ids=list(written_ids),
+        )
 
     try:
         with probe.track("embed"):
@@ -279,10 +346,23 @@ def _ingest_from_chunk_spool(
                         flush_batch()
                 flush_batch()
     except IngestCancelled:
-        _rollback_doc_chunks(
-            collection, collection_name, doc_id, bm25_save=bm25_save,
-        )
+        _fail_rollback()
         raise
+    except Exception:
+        _fail_rollback()
+        raise
+
+    # 新块全部写完后再删旧块
+    if old_ids:
+        stale = [i for i in old_ids if i not in set(written_ids)]
+        if stale:
+            collection.delete(ids=stale)
+            logger.info("  清除旧数据: %s → 删除 %d 条", rel_path, len(stale))
+            if bm25 is not None and bm25_error is None:
+                try:
+                    bm25.delete_ids(stale)
+                except Exception as exc:
+                    bm25_error = exc
 
     with probe.track("bm25"):
         if bm25_save and bm25 is not None and bm25_error is None:
@@ -351,20 +431,25 @@ def _ingest_docx_file(
     try:
         with parsed_docx_temp(file_path) as parsed_path:
             with probe.track("parse"):
-                if parsed_path.stat().st_size == 0:
-                    logger.warning("  跳过（内容为空）: %s", rel_path)
-                    return {"doc_id": doc_id, "chunks": 0, "status": "empty"}
-
-                content_hash = _file_content_sha1(parsed_path)
-                with parsed_path.open("r", encoding="utf-8") as f:
-                    lang = _detect_lang(f.read(2000))
-
                 existing = collection.get(
                     where={"doc_id": doc_id},
                     include=["metadatas"],
                 )
                 existing_ids = existing.get("ids") or []
                 existing_metas = existing.get("metadatas") or []
+
+                if parsed_path.stat().st_size == 0:
+                    logger.warning("  跳过（内容为空）: %s", rel_path)
+                    if existing_ids:
+                        _purge_doc_data(
+                            collection, collection_name, doc_id, existing_ids,
+                        )
+                    return {"doc_id": doc_id, "chunks": 0, "status": "empty"}
+
+                content_hash = _file_content_sha1(parsed_path)
+                with parsed_path.open("r", encoding="utf-8") as f:
+                    lang = _detect_lang(f.read(2000))
+
                 if existing_ids and existing_metas:
                     prev_hash = existing_metas[0].get("content_sha1")
                     if prev_hash == content_hash:
@@ -384,11 +469,9 @@ def _ingest_docx_file(
 
         if total_chunks == 0:
             logger.warning("  跳过（分块结果为空）: %s", rel_path)
+            if existing_ids:
+                _purge_doc_data(collection, collection_name, doc_id, existing_ids)
             return {"doc_id": doc_id, "chunks": 0, "status": "empty"}
-
-        if existing_ids:
-            collection.delete(ids=existing_ids)
-            logger.info("  清除旧数据: %s → 删除 %d 条", rel_path, len(existing_ids))
 
         try:
             mtime = file_path.stat().st_mtime
@@ -413,6 +496,7 @@ def _ingest_docx_file(
             truncated=truncated,
             bm25_save=bm25_save,
             cancel_cb=cancel_cb,
+            existing_ids=existing_ids,
         )
     finally:
         chunk_path.unlink(missing_ok=True)
@@ -524,8 +608,16 @@ def _ingest_one_file(
     try:
         with probe.track("parse"):
             text = parse_file(file_path)
+            existing = collection.get(
+                where={"doc_id": doc_id},
+                include=["metadatas"],
+            )
+            existing_ids = existing.get("ids") or []
+            existing_metas = existing.get("metadatas") or []
             if not text.strip():
                 logger.warning("  跳过（内容为空）: %s", rel_path)
+                if existing_ids:
+                    _purge_doc_data(collection, collection_name, doc_id, existing_ids)
                 return {"doc_id": doc_id, "chunks": 0, "status": "empty"}
             parsed_temp.write(text)
             parsed_temp.close()
@@ -535,12 +627,6 @@ def _ingest_one_file(
         with parsed_path.open("r", encoding="utf-8") as f:
             lang = _detect_lang(f.read(2000))
 
-        existing = collection.get(
-            where={"doc_id": doc_id},
-            include=["metadatas"],
-        )
-        existing_ids = existing.get("ids") or []
-        existing_metas = existing.get("metadatas") or []
         if existing_ids and existing_metas:
             prev_hash = existing_metas[0].get("content_sha1")
             if prev_hash == content_hash:
@@ -558,11 +644,9 @@ def _ingest_one_file(
 
         if total_chunks == 0:
             logger.warning("  跳过（分块结果为空）: %s", rel_path)
+            if existing_ids:
+                _purge_doc_data(collection, collection_name, doc_id, existing_ids)
             return {"doc_id": doc_id, "chunks": 0, "status": "empty"}
-
-        if existing_ids:
-            collection.delete(ids=existing_ids)
-            logger.info("  清除旧数据: %s → 删除 %d 条", rel_path, len(existing_ids))
 
         try:
             mtime = file_path.stat().st_mtime
@@ -588,6 +672,7 @@ def _ingest_one_file(
             truncated=truncated,
             bm25_save=bm25_save,
             cancel_cb=cancel_cb,
+            existing_ids=existing_ids,
         )
     finally:
         parsed_path.unlink(missing_ok=True)
@@ -782,6 +867,9 @@ def ingest_all(
             logger.error("  失败: %s — %s", file_path.name, e)
 
     _commit_bm25_after_ingest(collection_name)
+    if total_chunks > 0:
+        _invalidate_semantic_cache()
+        _invalidate_kb_stats(collection_name)
 
     logger.info(
         "入库完成：新增/更新 %d 块，跳过未变 %d 个文件，collection 当前总量: %d 块",
@@ -1281,15 +1369,24 @@ def delete_all_kb_documents(
     except Exception as e:
         logger.warning("KB 清空 Chroma collection 失败（已忽略继续）: %s", e)
 
-    # 2. 删 BM25 索引文件 + 清进程缓存（否则 retriever 仍持有旧索引实例）
+    # 2. 删 BM25 索引文件 + sidecar + 清进程缓存（否则 retriever 仍持有旧索引实例）
     if config.BM25_ENABLED:
         try:
-            from src.rag.bm25_index import drop_index, get_index_path
+            from src.rag.bm25_index import (
+                drop_index,
+                get_chunks_list_path,
+                get_index_path,
+                get_manifest_path,
+            )
 
-            bm25_path = get_index_path(collection_name)
-            if bm25_path.exists():
-                bm25_path.unlink()
-                logger.info("KB 清空 BM25 索引: %s", bm25_path)
+            for path in (
+                get_index_path(collection_name),
+                get_manifest_path(collection_name),
+                get_chunks_list_path(collection_name),
+            ):
+                if path.exists():
+                    path.unlink()
+                    logger.info("KB 清空 BM25 产物: %s", path)
             drop_index(collection_name)
         except Exception as e:
             logger.warning("KB 清空 BM25 索引失败: %s", e)

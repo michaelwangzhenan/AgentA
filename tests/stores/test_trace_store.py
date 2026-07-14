@@ -92,6 +92,22 @@ def test_overview_large_dataset_uses_sql_not_fetchall(
     assert ov["latency_p95_ms"] >= ov["latency_p50_ms"]
 
 
+def test_record_trace_replace_clears_old_spans(store: TraceStore) -> None:
+    store.record_trace(
+        _trace("same"),
+        [{"stage": "llm", "name": "a", "duration_ms": 1}],
+    )
+    store.record_trace(
+        _trace("same", total_ms=50.0),
+        [{"stage": "tool", "name": "b", "duration_ms": 2}],
+    )
+    got = store.get_trace("same")
+    assert got is not None
+    assert len(got["spans"]) == 1
+    assert got["spans"][0]["stage"] == "tool"
+    assert got["total_ms"] == 50.0
+
+
 def test_series_grouped_by_day(store: TraceStore) -> None:
     store.record_trace(_trace("t1", total_ms=100.0), [])
     store.record_trace(_trace("t2", total_ms=300.0), [])

@@ -115,6 +115,10 @@ class TraceStore:
                     str(t.get("error_phase") or ""),
                 ),
             )
+            self._conn.execute(
+                "DELETE FROM trace_spans WHERE trace_id = ?",
+                (str(t["trace_id"]),),
+            )
             for i, sp in enumerate(spans):
                 self._conn.execute(
                     "INSERT INTO trace_spans"
