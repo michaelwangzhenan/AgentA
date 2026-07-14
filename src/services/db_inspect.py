@@ -353,7 +353,7 @@ def bm25_docs(
         return None
     # 默认按 id 稳定排序，保证未排序时翻页顺序确定
     rows = [
-        {"id": cid, "document": d.document or "", "metadata": dict(d.metadata or {}), "tokens": len(d.tokens or [])}
+        {"id": cid, "document": "", "metadata": dict(d.metadata or {}), "tokens": d.doc_len}
         for cid, d in sorted(idx.docs.items())
     ]
     rows = filter_sort_rows(
@@ -370,18 +370,28 @@ def bm25_docs(
 
 
 def bm25_doc(collection: str, doc_id: str) -> dict | None:
-    """L3：单个文档块全文 + metadata + tokens 规模。不存在返回 None。"""
+    """L3：单个文档块 metadata + tokens 规模。正文从 Chroma 回表。不存在返回 None。"""
     idx = _load_bm25(collection)
     if idx is None:
         return None
     d = idx.docs.get(doc_id)
     if d is None:
         return None
+    document = ""
+    try:
+        client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
+        coll = client.get_collection(name=collection)
+        got = coll.get(ids=[doc_id], include=["documents"])
+        docs = got.get("documents") or []
+        if docs and docs[0]:
+            document = docs[0]
+    except Exception:
+        document = d.document or ""
     return {
         "id": doc_id,
-        "document": d.document or "",
+        "document": document,
         "metadata": dict(d.metadata or {}),
-        "tokens": len(d.tokens or []),
+        "tokens": d.doc_len,
     }
 
 

@@ -16,6 +16,7 @@ CLI 用法（三个原语：读 / 写 / 抹）：
     python tools/cli/rag_cli.py ingest -d ./datasets/data_zh -m zh
     python tools/cli/rag_cli.py clear                 抹：一键清空全部 collection + BM25（需 yes 确认）
     python tools/cli/rag_cli.py clear -m m3           抹：只清空指定 alias（与 ingest -m 对齐）
+    python tools/cli/rag_cli.py bm25-rebuild -m m3    从 Chroma 重建 BM25 索引（修不一致）
 
 模型别名（详见 src/config.py EMBEDDING_MODELS）：
     en  →  all-MiniLM-L6-v2     collection=kb_en   英文/多语言
@@ -32,6 +33,7 @@ CLI 用法（三个原语：读 / 写 / 抹）：
               带 -m alias 时只 drop 该 collection，并自动清理磁盘上不再被任何 collection 引用的
               孤儿 UUID 目录（包括刚 drop 掉的那个 vector segment）。均需输入 yes 二次确认。
               想做"全量重建"就：clear → ingest，两步显式。
+    bm25-rebuild  从 Chroma 分批扫描 chunk，重建 bm25_<collection>.pkl；Chroma 与 BM25 不一致时用。
 
 设计说明：
     - sidecar JSON 仅在本脚本读写，src/rag 产品代码不感知。换言之 main.py 跑起来
@@ -364,6 +366,26 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+# ── bm25-rebuild ──────────────────────────────────────────────────────────────
+def _cmd_bm25_rebuild(args: argparse.Namespace) -> int:
+    """从 Chroma 全量重建 BM25 索引（不重新 embed）。"""
+    alias, _model_name, coll_name = _resolve_alias_or_die(args.model)
+    if not config.BM25_ENABLED:
+        print("BM25_ENABLED=false，无需重建。", file=sys.stderr)
+        return 1
+
+    print(f"⏳ 从 Chroma 重建 BM25: alias={alias} collection={coll_name}")
+    from src.rag.bm25_index import rebuild_bm25_from_chroma
+
+    try:
+        n = rebuild_bm25_from_chroma(coll_name)
+    except Exception as e:
+        print(f"❌ 重建失败: {e}", file=sys.stderr)
+        return 1
+    print(f"✅ 已写入 {n} 个 chunk 到 bm25_{coll_name}.pkl")
+    return 0
+
+
 # ── clear ─────────────────────────────────────────────────────────────────────
 def _drop_collection_and_bm25(client, coll_name: str) -> tuple[bool, bool]:
     """
@@ -641,7 +663,7 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=epilog,
     )
-    sub = parser.add_subparsers(dest="cmd", metavar="{status,ingest,clear}")
+    sub = parser.add_subparsers(dest="cmd", metavar="{status,ingest,bm25-rebuild,clear}")
 
     # status
     p_status = sub.add_parser(
@@ -678,6 +700,22 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p_ing.set_defaults(func=_cmd_ingest)
+
+    # bm25-rebuild
+    p_bm25 = sub.add_parser(
+        "bm25-rebuild",
+        help="从 Chroma 重建 BM25 索引（不重新 embed）。",
+        description=(
+            "分批扫描指定 alias 的 Chroma collection，重建 bm25_<collection>.pkl。"
+            "适用于入库中断导致 Chroma 与 BM25 不一致的场景。"
+        ),
+    )
+    p_bm25.add_argument(
+        "-m", "--model",
+        default=config.DEFAULT_EMBEDDING_ALIAS,
+        help=f"库别名（默认 {config.DEFAULT_EMBEDDING_ALIAS}）",
+    )
+    p_bm25.set_defaults(func=_cmd_bm25_rebuild)
 
     # clear
     p_clr = sub.add_parser(

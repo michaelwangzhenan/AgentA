@@ -292,13 +292,27 @@ def _query_bm25(
     if not raw:
         return []
 
+    chunk_ids = [doc.id for doc, _ in raw]
+    doc_texts: dict[str, str] = {}
+    try:
+        client = _get_chroma_client()
+        collection = client.get_collection(name=collection_name)
+        got = collection.get(ids=chunk_ids, include=["documents"])
+        ids_out = got.get("ids") or []
+        documents = got.get("documents") or []
+        for i, cid in enumerate(ids_out):
+            if i < len(documents) and documents[i]:
+                doc_texts[str(cid)] = documents[i]
+    except Exception as e:
+        logger.warning("[BM25] 回表取正文失败 %s: %s", collection_name, e)
+
     hits: list[Hit] = []
     for doc, score in raw:
         meta = doc.metadata or {}
         source = str(meta.get("source") or meta.get("filename") or "unknown")
         hits.append(Hit(
             source=source,
-            document=doc.document,
+            document=doc_texts.get(doc.id, doc.document or ""),
             distance=0.0,           # BM25 无向量距离概念，留 0 保持类型一致
             collection=collection_name,
             score=float(score),     # 临时存 BM25 raw score，融合后会被 RRF 分覆盖

@@ -117,6 +117,8 @@ def _ingest_docx_file(
     collection,
     collection_name: str,
     progress_cb: ProgressCb | None,
+    *,
+    bm25_save: bool = True,
 ) -> dict:
     """隔离解析 DOCX，并按标题区段增量分块、分批写入。"""
     logger.info("Parse 解析（隔离）: %s", rel_path)
@@ -252,11 +254,11 @@ def _ingest_docx_file(
                     flush_batch()
             flush_batch()
 
-        if bm25 is not None and bm25_error is None:
+        if bm25_save and bm25 is not None and bm25_error is None:
             try:
-                from src.rag.bm25_index import get_index_path, save_index
+                from src.rag.bm25_index import commit_index
 
-                save_index(bm25, get_index_path(collection_name))
+                commit_index(collection_name)
                 logger.info("  BM25 索引已更新: %s → %d 块", rel_path, total_chunks)
             except Exception as exc:
                 bm25_error = exc
@@ -327,6 +329,8 @@ def _ingest_one_file(
     collection,
     collection_name: str,
     progress_cb: ProgressCb | None = None,
+    *,
+    bm25_save: bool = True,
 ) -> dict:
     """处理单个文件入库；返回 {doc_id, chunks, status}。
 
@@ -353,6 +357,7 @@ def _ingest_one_file(
             collection,
             collection_name,
             progress_cb,
+            bm25_save=bm25_save,
         )
 
     logger.info("Parse 解析: %s", rel_path)
@@ -441,16 +446,14 @@ def _ingest_one_file(
     # 同步写入 BM25 倒排索引（如启用）；与 Chroma 共享 ids 保证融合时可对齐
     if config.BM25_ENABLED:
         try:
-            from src.rag.bm25_index import get_index, get_index_path, save_index
+            from src.rag.bm25_index import commit_index, get_index
 
-            # 用进程级共享索引（与 retriever.get_index 同一实例），改完即对检索可见；
-            # 不会出现"已写盘但检索端仍读旧缓存索引"的陈旧问题。
             bm25 = get_index(collection_name)
-            # 替换该 doc_id 下所有旧 chunk（先删后写）
             bm25.delete_by_doc_id(doc_id)
             bm25.upsert(ids=ids, documents=documents, metadatas=metadatas)
-            save_index(bm25, get_index_path(collection_name))
-            logger.info("  BM25 索引已更新: %s → %d 块", rel_path, len(documents))
+            if bm25_save:
+                commit_index(collection_name)
+                logger.info("  BM25 索引已更新: %s → %d 块", rel_path, len(documents))
         except Exception as e:  # 失败不影响 dense 入库主流程
             logger.warning("  BM25 索引更新失败（已跳过）: %s — %s", rel_path, e)
 
@@ -508,7 +511,16 @@ def ingest_one(
 
     client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
     collection = _open_collection(client, model_name, collection_name, use_api=use_api)
-    result = _ingest_one_file(fp, docs_path, collection, collection_name, progress_cb)
+    result = _ingest_one_file(
+        fp, docs_path, collection, collection_name, progress_cb, bm25_save=False,
+    )
+    if config.BM25_ENABLED and result.get("status") == "ingested":
+        try:
+            from src.rag.bm25_index import commit_index
+
+            commit_index(collection_name)
+        except Exception as e:
+            logger.warning("BM25 索引写入失败（已忽略）: %s", e)
     # KB 内容变了，语义缓存里依赖旧 KB 的答案可能过期 → 全量作废（软失败旁路）
     if result.get("status") == "ingested":
         _invalidate_semantic_cache()
@@ -576,13 +588,24 @@ def ingest_all(
     skipped_unchanged = 0
     for file_path in all_files:
         try:
-            result = _ingest_one_file(file_path, docs_path, collection, collection_name)
+            result = _ingest_one_file(
+                file_path, docs_path, collection, collection_name, bm25_save=False,
+            )
             if result["status"] == "ingested":
                 total_chunks += result["chunks"]
             elif result["status"] == "skipped_unchanged":
                 skipped_unchanged += 1
         except Exception as e:
             logger.error("  失败: %s — %s", file_path.name, e)
+
+    if config.BM25_ENABLED:
+        try:
+            from src.rag.bm25_index import commit_index
+
+            commit_index(collection_name)
+            logger.info("BM25 索引已写入: %s", collection_name)
+        except Exception as e:
+            logger.warning("BM25 索引写入失败（已忽略）: %s", e)
 
     logger.info(
         "入库完成：新增/更新 %d 块，跳过未变 %d 个文件，collection 当前总量: %d 块",
@@ -772,11 +795,11 @@ def delete_kb_document(
     # 同步清 BM25 索引（不阻塞主流程）；走共享缓存实例，删完即对检索可见
     if config.BM25_ENABLED:
         try:
-            from src.rag.bm25_index import get_index, get_index_path, save_index
+            from src.rag.bm25_index import commit_index, get_index
 
             bm25 = get_index(collection_name)
             if bm25.delete_by_doc_id(doc_id):
-                save_index(bm25, get_index_path(collection_name))
+                commit_index(collection_name)
         except Exception as e:
             logger.warning("KB 删除文档 BM25 同步失败 doc_id=%s: %s", doc_id, e)
 
