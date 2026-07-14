@@ -171,3 +171,32 @@ def test_restore_ok(client, tmp_path, monkeypatch):
     assert r.status_code == 200
     assert r.json()["restored"] == 1
     assert (root / "sub" / "f.txt").read_text(encoding="utf-8") == "hello"
+
+
+def test_restore_upload_too_large_413(client, monkeypatch):
+    monkeypatch.setattr(backup_route.config, "BACKUP_MAX_UPLOAD_MB", 1)
+    data = b"x" * (2 * 1024 * 1024)
+    r = client.post(
+        "/api/admin/backup/restore",
+        files={"file": ("b.zip", data, "application/zip")},
+    )
+    assert r.status_code == 413
+
+
+def test_restore_zip_bomb_rejected_400(client, tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    root.mkdir()
+    monkeypatch.setattr(backup_route, "_PROJECT_ROOT", root)
+    monkeypatch.setattr(backup_route.config, "BACKUP_MAX_UPLOAD_MB", 64)
+    monkeypatch.setattr(backup_route.config, "BACKUP_MAX_UNZIP_MB", 1)
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("huge.txt", "x" * (2 * 1024 * 1024))
+    r = client.post(
+        "/api/admin/backup/restore",
+        files={"file": ("b.zip", buf.getvalue(), "application/zip")},
+    )
+    assert r.status_code == 400
+    assert "解压" in r.json()["detail"]

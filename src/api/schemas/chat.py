@@ -2,7 +2,22 @@
 
 from typing import Literal
 
+from fastapi import HTTPException
 from pydantic import BaseModel, Field
+
+import src.config as config
+
+
+def assert_message_within_limit(message: str) -> None:
+    """校验聊天消息 UTF-8 字节数；超限抛 413。"""
+    nbytes = len(message.encode("utf-8"))
+    if nbytes > config.CHAT_MESSAGE_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"消息过长（{nbytes} 字节，上限 {config.CHAT_MESSAGE_MAX_BYTES} 字节）"
+            ),
+        )
 
 
 class ChatRequest(BaseModel):

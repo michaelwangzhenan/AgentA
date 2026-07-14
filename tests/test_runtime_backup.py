@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 import src.services.runtime_backup as rb
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -143,6 +145,27 @@ def test_validate_restore_targets_rejects_traversal(tmp_path):
     assert "bad-up" in bad
     assert "bad-ext" in bad
     assert "ok" not in bad
+
+
+def test_validate_backup_archive_rejects_oversized_zip(tmp_path, monkeypatch):
+    monkeypatch.setattr(rb.config, "BACKUP_MAX_UPLOAD_MB", 1)
+    z = tmp_path / "big.zip"
+    z.write_bytes(b"x" * (2 * 1024 * 1024))
+    with pytest.raises(rb.BackupArchiveError, match="备份文件过大"):
+        rb.validate_backup_archive(z)
+
+
+def test_validate_backup_archive_rejects_zip_bomb(tmp_path, monkeypatch):
+    monkeypatch.setattr(rb.config, "BACKUP_MAX_UPLOAD_MB", 64)
+    monkeypatch.setattr(rb.config, "BACKUP_MAX_UNZIP_MB", 1)
+    monkeypatch.setattr(rb.config, "BACKUP_MAX_COMPRESSION_RATIO", 100)
+    from zipfile import ZipFile
+
+    z = tmp_path / "bomb.zip"
+    with ZipFile(z, "w") as zf:
+        zf.writestr("huge.txt", "x" * (2 * 1024 * 1024))
+    with pytest.raises(rb.BackupArchiveError, match="解压后总大小"):
+        rb.validate_backup_archive(z)
 
 
 def test_cli_help_exits_zero():

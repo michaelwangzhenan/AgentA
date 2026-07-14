@@ -24,7 +24,7 @@ from src.agent.agent_api import AgentAPI
 from src.stores.user_context import use_user
 from src.api.deps import get_agent, get_session_store, get_current_user, get_user_store
 from src.api.routes.auth import effective_llm_prefs
-from src.api.schemas.chat import ChatRequest, ChatResponse
+from src.api.schemas.chat import ChatRequest, ChatResponse, assert_message_within_limit
 from src.llm import model_router
 from src.llm.model_router import RouteDecision
 from src.stores import semantic_cache
@@ -210,6 +210,7 @@ def chat(
     同步路由（不加 async）—— FastAPI 会自动把它扔到 thread pool 跑，不阻塞 event loop。
     """
     _check_session_owner(history, req.session_id, user["id"])
+    assert_message_within_limit(req.message)
     prefs = effective_llm_prefs(users, user["id"])
     session_id = req.session_id or str(uuid.uuid4())
     fresh = _is_fresh_session(history, session_id, user["id"])
@@ -322,6 +323,7 @@ async def chat_stream(
     """
     if not req.message or not req.message.strip():
         raise HTTPException(status_code=422, detail="message must be non-empty")
+    assert_message_within_limit(req.message)
 
     _check_session_owner(history, req.session_id, user["id"])
     prefs = effective_llm_prefs(users, user["id"])

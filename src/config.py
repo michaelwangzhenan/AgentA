@@ -608,6 +608,19 @@ DOCX_PARSE_TIMEOUT_SEC: int = int(os.getenv("DOCX_PARSE_TIMEOUT_SEC", "120"))
 # 同时执行的入库任务上限（Web 上传与 CLI 共用）
 INGEST_MAX_CONCURRENT: int = int(os.getenv("INGEST_MAX_CONCURRENT", "1"))
 
+# fetch_url / Jina Reader 响应体下载上限（字节）
+MAX_FETCH_BYTES: int = int(os.getenv("MAX_FETCH_BYTES", str(4 * 1024 * 1024)))
+# 管理员上传备份 zip 大小上限（MiB）
+BACKUP_MAX_UPLOAD_MB: int = int(os.getenv("BACKUP_MAX_UPLOAD_MB", "256"))
+# 备份 zip 解压后成员总大小上限（MiB），防 zip bomb
+BACKUP_MAX_UNZIP_MB: int = int(os.getenv("BACKUP_MAX_UNZIP_MB", "1024"))
+# 备份 zip 最大压缩比（解压总大小 / 压缩包大小）
+BACKUP_MAX_COMPRESSION_RATIO: int = int(os.getenv("BACKUP_MAX_COMPRESSION_RATIO", "100"))
+# 聊天消息最大字节数（UTF-8），含用户输入与内嵌附件正文
+CHAT_MESSAGE_MAX_BYTES: int = int(os.getenv("CHAT_MESSAGE_MAX_BYTES", str(512 * 1024)))
+# 单条消息附件数量上限
+CHAT_ATTACHMENT_MAX_COUNT: int = int(os.getenv("CHAT_ATTACHMENT_MAX_COUNT", "5"))
+
 # 运行时数据备份目录（tools/cli/backup_cli.py 与 /admin/backup 生成的 zip 落此；含明文密钥，已 gitignore）
 BACKUP_DIR: str = os.getenv("BACKUP_DIR", "./backups")
 

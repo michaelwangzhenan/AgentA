@@ -56,6 +56,12 @@ def test_chat_empty_message_returns_422():
     assert r.status_code == 422
 
 
+def test_chat_message_too_large_returns_413(monkeypatch):
+    monkeypatch.setattr("src.config.CHAT_MESSAGE_MAX_BYTES", 16)
+    r = client.post("/api/chat", json={"message": "这是一段超长的中文消息"})
+    assert r.status_code == 413
+
+
 def test_chat_agent_exception_returns_500():
     mock = _mock_agent(raises=RuntimeError("LLM provider down"))
     app.dependency_overrides[get_agent] = lambda: mock

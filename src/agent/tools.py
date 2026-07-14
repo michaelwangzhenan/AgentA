@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import requests
 from bs4 import BeautifulSoup
+from requests.utils import get_encoding_from_headers
 
 import src.config as _cfg
 from src.rag.retriever import search, format_search_results
@@ -75,6 +76,81 @@ class ToolResult:
                 return f"[结果为空] {self.content}"
             case "error":
                 return f"[工具失败] {self.content}"
+
+
+@dataclass(frozen=True)
+class _FetchedBody:
+    """fetch_url 流式读取后的响应体（避免 requests 默认整包缓冲）。"""
+
+    content: bytes
+    headers: dict[str, str]
+    encoding: str
+
+
+def _read_limited_response_body(response: requests.Response, max_bytes: int) -> bytes | ToolResult:
+    """分块读取响应体，累计超过 max_bytes 时中止。"""
+    cl = response.headers.get("Content-Length")
+    if cl is not None:
+        try:
+            if int(cl) > max_bytes:
+                return ToolResult(
+                    status="error",
+                    content=(
+                        f"响应体过大（Content-Length {cl} 字节，"
+                        f"上限 {max_bytes} 字节）"
+                    ),
+                )
+        except ValueError:
+            pass
+
+    chunks: list[bytes] = []
+    total = 0
+    for chunk in response.iter_content(chunk_size=65536):
+        if not chunk:
+            continue
+        total += len(chunk)
+        if total > max_bytes:
+            return ToolResult(
+                status="error",
+                content=f"响应体超过下载上限（{max_bytes} 字节），URL: {response.url}",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _get_limited(
+    url: str,
+    *,
+    timeout: int,
+    max_bytes: int,
+    headers: dict[str, str] | None = None,
+) -> _FetchedBody | ToolResult:
+    """stream GET 并限制响应体大小。"""
+    try:
+        response = requests.get(
+            url,
+            headers=headers or {},
+            timeout=timeout,
+            stream=True,
+        )
+        response.raise_for_status()
+    except requests.exceptions.Timeout:
+        return ToolResult(status="error", content=f"请求超时（{timeout}s），URL: {url}")
+    except requests.exceptions.HTTPError as e:
+        code = e.response.status_code if e.response is not None else "?"
+        return ToolResult(status="error", content=f"HTTP {code}，URL: {url}")
+    except requests.exceptions.RequestException as e:
+        return ToolResult(status="error", content=f"网络请求失败 — {e}")
+
+    body = _read_limited_response_body(response, max_bytes)
+    if isinstance(body, ToolResult):
+        return body
+    encoding = get_encoding_from_headers(response.headers) or "utf-8"
+    return _FetchedBody(
+        content=body,
+        headers={k: v for k, v in response.headers.items()},
+        encoding=encoding,
+    )
 
 # ── Skills 工具支持 ─────────────────────────────────────────────────────────
 
@@ -672,9 +748,9 @@ def _tool_search_knowledge(
     return ToolResult(status="empty", content="知识库中未找到相关内容。")
 
 
-def _fetch_raw_response(url: str) -> "requests.Response | ToolResult":
+def _fetch_raw_response(url: str) -> _FetchedBody | ToolResult:
     """
-    发送 HTTP GET 请求，返回 Response 对象；任何错误提前返回 ToolResult。
+    发送 HTTP GET 请求，流式读取有限大小的响应体；任何错误提前返回 ToolResult。
     同时校验 Content-Type 和魔术字节，拒绝二进制内容。
     """
     headers = {
@@ -684,35 +760,34 @@ def _fetch_raw_response(url: str) -> "requests.Response | ToolResult":
             "Chrome/120.0.0.0 Safari/537.36"
         )
     }
-    try:
-        response = requests.get(url, headers=headers, timeout=FETCH_URL_TIMEOUT)
-        response.raise_for_status()
-    except requests.exceptions.Timeout:
-        return ToolResult(status="error", content=f"请求超时（{FETCH_URL_TIMEOUT}s），URL: {url}")
-    except requests.exceptions.HTTPError as e:
-        return ToolResult(status="error", content=f"HTTP {e.response.status_code}，URL: {url}")
-    except requests.exceptions.RequestException as e:
-        return ToolResult(status="error", content=f"网络请求失败 — {e}")
+    raw = _get_limited(
+        url,
+        timeout=FETCH_URL_TIMEOUT,
+        max_bytes=_cfg.MAX_FETCH_BYTES,
+        headers=headers,
+    )
+    if isinstance(raw, ToolResult):
+        return raw
 
-    content_type = response.headers.get("Content-Type", "").lower().split(";")[0].strip()
+    content_type = raw.headers.get("Content-Type", "").lower().split(";")[0].strip()
     if not any(content_type.startswith(t) for t in _TEXT_TYPES):
         return ToolResult(
             status="error",
             content=f"不支持下载二进制文件（Content-Type: {content_type}）。请访问对应的 HTML 页面或文档索引。",
         )
-    if any(response.content.startswith(magic) for magic in _BINARY_MAGIC):
+    if any(raw.content.startswith(magic) for magic in _BINARY_MAGIC):
         return ToolResult(
             status="error",
             content="响应内容为二进制文件（如 .zip/.pdf/.png 等），无法提取文本。请访问对应的 HTML 页面。",
         )
-    return response
+    return raw
 
 
-def _extract_text_from_response(response: "requests.Response", max_chars: int) -> ToolResult:
-    """从 HTTP Response 中用 BeautifulSoup 提取正文纯文本，并截断至 max_chars。"""
+def _extract_text_from_response(body: _FetchedBody, max_chars: int) -> ToolResult:
+    """从已限流的响应体中用 BeautifulSoup 提取正文纯文本，并截断至 max_chars。"""
     try:
-        response.encoding = response.apparent_encoding
-        soup = BeautifulSoup(response.text, "lxml")
+        html = body.content.decode(body.encoding, errors="replace")
+        soup = BeautifulSoup(html, "lxml")
         for tag in soup(["script", "style", "nav", "footer", "aside", "header"]):
             tag.decompose()
 
@@ -762,16 +837,16 @@ def _fetch_via_jina(url: str, max_chars: int) -> ToolResult:
     """
     jina_url = f"https://r.jina.ai/{url}"
     logger.info("[tool] fetch_url: SPA detected → Jina Reader fallback: %r", jina_url)
-    try:
-        resp = requests.get(
-            jina_url,
-            headers={"Accept": "text/markdown", "User-Agent": "Mozilla/5.0"},
-            timeout=FETCH_URL_TIMEOUT + JINA_EXTRA_TIMEOUT,
-        )
-        resp.raise_for_status()
-        text = resp.text.strip()
-    except requests.exceptions.RequestException as e:
-        return ToolResult(status="error", content=f"Jina Reader 请求失败 — {e}")
+    raw = _get_limited(
+        jina_url,
+        timeout=FETCH_URL_TIMEOUT + JINA_EXTRA_TIMEOUT,
+        max_bytes=_cfg.MAX_FETCH_BYTES,
+        headers={"Accept": "text/markdown", "User-Agent": "Mozilla/5.0"},
+    )
+    if isinstance(raw, ToolResult):
+        return raw
+
+    text = raw.content.decode(raw.encoding, errors="replace").strip()
 
     if not text:
         return ToolResult(status="empty", content="Jina Reader 返回内容为空。")
@@ -824,7 +899,10 @@ def _tool_fetch_url(
     result = _extract_text_from_response(raw, max_chars)
 
     # SPA fallback：正文过短或含典型 SPA 根挂载点时，改用 Jina Reader
-    if result.status in ("ok", "empty") and _is_likely_spa(result.content, raw.text):
+    if result.status in ("ok", "empty") and _is_likely_spa(
+        result.content,
+        raw.content.decode(raw.encoding, errors="replace"),
+    ):
         result = _fetch_via_jina(url, max_chars)
 
     # fetch_url 返回正文是"非用户主控"外部数据，过 security_filter；

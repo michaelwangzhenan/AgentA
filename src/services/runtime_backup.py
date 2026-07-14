@@ -10,6 +10,7 @@ CLI（`tools/cli/backup_cli.py`）与 API（`/admin/backup/*`）共用本模块�
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 import tempfile
 from datetime import datetime
@@ -21,6 +22,52 @@ import src.config as config
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent  # src/services/x.py → 仓库根
 
 MANIFEST_NAME = "backup-manifest.json"
+
+
+class BackupArchiveError(ValueError):
+    """备份 zip 体积或压缩比校验失败。"""
+
+
+def validate_backup_archive(
+    zip_path: Path,
+    *,
+    max_upload_bytes: int | None = None,
+    max_unzip_bytes: int | None = None,
+    max_compression_ratio: int | None = None,
+) -> None:
+    """校验备份 zip 体积与解压后总大小，防 zip bomb。
+
+    Raises:
+        BackupArchiveError: 超限或压缩比异常。
+        FileNotFoundError: zip 不存在。
+    """
+    if max_upload_bytes is None:
+        max_upload_bytes = config.BACKUP_MAX_UPLOAD_MB * 1024 * 1024
+    if max_unzip_bytes is None:
+        max_unzip_bytes = config.BACKUP_MAX_UNZIP_MB * 1024 * 1024
+    if max_compression_ratio is None:
+        max_compression_ratio = config.BACKUP_MAX_COMPRESSION_RATIO
+
+    compressed = zip_path.stat().st_size
+    if compressed > max_upload_bytes:
+        raise BackupArchiveError(
+            f"备份文件过大（{compressed} 字节，上限 {max_upload_bytes} 字节）"
+        )
+
+    total_uncompressed = 0
+    with ZipFile(zip_path, "r") as zf:
+        for info in zf.infolist():
+            total_uncompressed += info.file_size
+            if total_uncompressed > max_unzip_bytes:
+                raise BackupArchiveError(
+                    f"备份解压后总大小超限（>{max_unzip_bytes} 字节）"
+                )
+
+    if compressed > 0 and total_uncompressed / compressed > max_compression_ratio:
+        raise BackupArchiveError(
+            f"备份压缩比异常（{total_uncompressed / compressed:.0f}:1，"
+            f"上限 {max_compression_ratio}:1）"
+        )
 
 # B 类：运行期 SQLite 的 config 属性名（各自路径可经 .env 覆盖，故从 config 读）
 _DB_CONFIG_ATTRS = (
@@ -223,10 +270,10 @@ def restore_backup(zip_path: Path, root: Path, manifest: dict | None = None) -> 
     n = 0
     with ZipFile(zip_path, "r") as zf:
         for e in manifest["files"]:
-            data = zf.read(e["arc"])
             target = Path(e["restore"]) if e.get("external") else (root / e["restore"])
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(data)
+            with zf.open(e["arc"]) as src, target.open("wb") as dst:
+                shutil.copyfileobj(src, dst)
             n += 1
     return n
 

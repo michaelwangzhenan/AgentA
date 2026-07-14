@@ -45,6 +45,7 @@ import type { SkillItem } from '@/types/resources'
 import type { ChatMode } from '@/types/chat'
 import { cn } from '@/lib/utils'
 import { generateId } from '@/lib/id'
+import { toast } from 'sonner'
 
 export type ComposerHandle = {
   fill: (text: string) => void
@@ -112,6 +113,10 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function messageUtf8Bytes(text: string): number {
+  return new TextEncoder().encode(text).length
 }
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
@@ -190,20 +195,40 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   // ─── 附件 ───────────────────────────────────────────────────────────────
   const addFiles = async (files: FileList | File[]) => {
     const list = Array.from(files)
+    const maxCount = settings.attachmentMaxCount
+    const maxBytes = settings.messageMaxBytes
+    if (attachments.length + list.length > maxCount) {
+      toast.error(`附件最多 ${maxCount} 个`)
+      return
+    }
     const next: Attachment[] = []
     for (const file of list) {
+      if (attachments.length + next.length >= maxCount) {
+        toast.error(`附件最多 ${maxCount} 个`)
+        break
+      }
       const kind = classifyFile(file)
+      if (kind === 'text' && file.size > maxBytes) {
+        toast.error(`文本附件 ${file.name} 超过上限（${formatSize(maxBytes)}）`)
+        continue
+      }
       const att: Attachment = { id: generateId(), file, kind }
       if (kind === 'image') att.previewUrl = URL.createObjectURL(file)
       if (kind === 'text') {
         try {
           att.textContent = await file.text()
+          const bodyBytes = messageUtf8Bytes(att.textContent)
+          if (bodyBytes > maxBytes) {
+            toast.error(`文本附件 ${file.name} 超过上限（${formatSize(maxBytes)}）`)
+            continue
+          }
         } catch {
           att.textContent = ''
         }
       }
       next.push(att)
     }
+    if (!next.length) return
     setAttachments((prev) => [...prev, ...next])
   }
 
@@ -257,10 +282,20 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     if (inFlight) return
     const msg = buildMessage()
     if (!msg) return
+    const nbytes = messageUtf8Bytes(msg)
+    if (nbytes > settings.messageMaxBytes) {
+      toast.error(
+        `消息过长（${formatSize(nbytes)}，上限 ${formatSize(settings.messageMaxBytes)}）`,
+      )
+      return
+    }
     onSend(msg, settings.deepResearch ? 'deep_research' : undefined)
     clearDraft()
     setAttachments((prev) => {
-      prev.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl))
+      prev.forEach((a) => {
+        if (a.previewUrl) URL.revokeObjectURL(a.previewUrl)
+        a.textContent = undefined
+      })
       return []
     })
     const el = textareaRef.current

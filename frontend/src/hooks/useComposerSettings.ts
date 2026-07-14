@@ -27,6 +27,8 @@ export function useComposerSettings() {
   // 深度研究：是否启用（来自全局配置，决定开关是否显示）+ 本会话当前是否开启
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(false)
   const [deepResearch, setDeepResearch] = useState(false)
+  const [messageMaxBytes, setMessageMaxBytes] = useState(512 * 1024)
+  const [attachmentMaxCount, setAttachmentMaxCount] = useState(5)
 
   const load = useCallback(async () => {
     try {
@@ -39,13 +41,16 @@ export function useComposerSettings() {
     } finally {
       setLoading(false)
     }
-    // 深度研究开关是否显示，单独读全局配置（失败则隐藏，安全降级）
     try {
       const cfg = await getConfig()
-      const item = cfg.groups
-        .flatMap((g) => g.items)
-        .find((it) => it.key === 'DEEP_RESEARCH_ENABLED')
-      setDeepResearchEnabled(item?.value === true)
+      const items = cfg.groups.flatMap((g) => g.items)
+      const findNum = (key: string, fallback: number) => {
+        const v = items.find((it) => it.key === key)?.value
+        return typeof v === 'number' && v > 0 ? v : fallback
+      }
+      setDeepResearchEnabled(items.find((it) => it.key === 'DEEP_RESEARCH_ENABLED')?.value === true)
+      setMessageMaxBytes(findNum('CHAT_MESSAGE_MAX_BYTES', 512 * 1024))
+      setAttachmentMaxCount(findNum('CHAT_ATTACHMENT_MAX_COUNT', 5))
     } catch {
       setDeepResearchEnabled(false)
     }
@@ -101,5 +106,7 @@ export function useComposerSettings() {
     deepResearchEnabled,
     deepResearch,
     setDeepResearch,
+    messageMaxBytes,
+    attachmentMaxCount,
   }
 }

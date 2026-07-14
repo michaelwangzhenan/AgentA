@@ -104,11 +104,34 @@ async def restore_backup(file: UploadFile = File(...)) -> RestoreResponse:
     if not (file.filename or "").endswith(".zip"):
         raise HTTPException(status_code=400, detail="请上传 .zip 备份文件")
 
+    max_upload = config.BACKUP_MAX_UPLOAD_MB * 1024 * 1024
+    oversize = False
     with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
-        tmp.write(await file.read())
         tmp_path = Path(tmp.name)
+        total = 0
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_upload:
+                oversize = True
+                break
+            tmp.write(chunk)
+
+    if oversize:
+        tmp_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=413,
+            detail=f"备份文件过大（上限 {config.BACKUP_MAX_UPLOAD_MB} MiB）",
+        )
 
     try:
+        try:
+            rb.validate_backup_archive(tmp_path)
+        except rb.BackupArchiveError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+
         try:
             manifest = rb.read_manifest(tmp_path)
         except Exception as e:  # noqa: BLE001 —— 任何解析失败都视为无效备份
