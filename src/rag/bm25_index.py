@@ -20,11 +20,13 @@ BM25 倒排索引（自实现，零外部依赖）
 from __future__ import annotations
 
 import gc
+import json
 import logging
 import math
 import pickle
 import re
 import threading
+import time
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -342,6 +344,51 @@ def get_index_path(collection_name: str) -> Path:
     return base / f"bm25_{collection_name}.pkl"
 
 
+def get_manifest_path(collection_name: str) -> Path:
+    """BM25 轻量 manifest（L1 列表 / L2 元数据，不含 tf/idf）。"""
+    pkl = get_index_path(collection_name)
+    return pkl.with_name(f"{pkl.stem}.manifest.json")
+
+
+def get_chunks_list_path(collection_name: str) -> Path:
+    """BM25 分块清单 jsonl（id + metadata + tokens），供管理端 L2 列表。"""
+    pkl = get_index_path(collection_name)
+    return pkl.with_name(f"{pkl.stem}.chunks.jsonl")
+
+
+def _write_index_sidecars(idx: BM25Index, pkl_path: Path) -> None:
+    """写盘 pkl 后同步 manifest + chunks.jsonl，管理巡检无需反序列化全索引。"""
+    chunks_path = get_chunks_list_path(idx.collection_name)
+    manifest_path = get_manifest_path(idx.collection_name)
+    chunks_path.parent.mkdir(parents=True, exist_ok=True)
+    chunks_tmp = chunks_path.with_suffix(chunks_path.suffix + ".tmp")
+    with open(chunks_tmp, "w", encoding="utf-8") as f:
+        for chunk_id, doc in sorted(idx.docs.items()):
+            row = {
+                "id": chunk_id,
+                "metadata": dict(doc.metadata or {}),
+                "tokens": doc.doc_len,
+            }
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    chunks_tmp.replace(chunks_path)
+
+    stat = pkl_path.stat()
+    manifest = {
+        "version": 1,
+        "collection": idx.collection_name,
+        "docs": len(idx.docs),
+        "k1": idx.k1,
+        "b": idx.b,
+        "pkl_mtime": stat.st_mtime,
+        "pkl_bytes": stat.st_size,
+        "chunks_file": chunks_path.name,
+    }
+    manifest_tmp = manifest_path.with_suffix(manifest_path.suffix + ".tmp")
+    with open(manifest_tmp, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, ensure_ascii=False, indent=2)
+    manifest_tmp.replace(manifest_path)
+
+
 def save_index(idx: BM25Index, path: Path) -> None:
     """安全持久化：先写临时文件再 rename，避免半写入导致索引损坏。"""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -350,6 +397,7 @@ def save_index(idx: BM25Index, path: Path) -> None:
     with open(tmp, "wb") as f:
         pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
     tmp.replace(path)
+    _write_index_sidecars(idx, path)
 
 
 _index_cache: dict[str, BM25Index] = {}

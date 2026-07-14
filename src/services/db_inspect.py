@@ -6,7 +6,7 @@ CLI（`tools/cli/db_cli.py`）与 API（`/admin/db/*`）共用本模块，保证
 """
 from __future__ import annotations
 
-import pickle
+import json
 import re
 import sqlite3
 from datetime import datetime
@@ -16,7 +16,12 @@ import src.config as config
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent  # src/services/x.py → 仓库根
 
-DOC_PREVIEW_MAX = 400
+# 列表视图正文摘要长度；三级详情 chroma_item / bm25_doc 才返回全文。
+CHROMA_LIST_PREVIEW_MAX = int(getattr(config, "CHROMA_LIST_PREVIEW_MAX", 200))
+# 兼容旧测试 / 外部引用
+DOC_PREVIEW_MAX = CHROMA_LIST_PREVIEW_MAX
+CHROMA_SCAN_CAP = int(getattr(config, "CHROMA_SCAN_CAP", 20000))
+CHROMA_SCAN_BATCH = max(1, int(getattr(config, "CHROMA_SCAN_BATCH", 500)))
 
 # 敏感列名片段：SQLite 行级展示时命中即脱敏（值替换为 ***），避免密钥/口令外泄。
 _SENSITIVE_COL_HINTS = (
@@ -131,29 +136,93 @@ def chroma_collections() -> dict:
     return {"root": str(chroma_root()), "collections": items}
 
 
-# 过滤/排序时一次性拉取的硬上限：避免超大 collection 把整库正文拉进内存卡死。
-# 正文/时间段过滤已在 Chroma 服务端 where 完成，这里只对预过滤后的候选集再做
-# 文件名模糊 + 排序；候选超过 cap 则截断并在响应里标 truncated。
-CHROMA_SCAN_CAP = 20000
+# 过滤/排序时扫描候选的硬上限（见 config.CHROMA_SCAN_CAP）；正文/时间段过滤在 Chroma
+# 服务端 where 完成，这里分批 get 后在内存做文件名 + 排序 + 分页。
 
 
-def _rows_from_get(got: dict) -> list[dict]:
+def _rows_from_get(got: dict, *, list_view: bool = False) -> list[dict]:
+    """把 Chroma get 结果转为行；list_view 时只保留摘要，尽快释放全文。"""
     ids = got.get("ids") or []
     docs = got.get("documents") or []
     metas = got.get("metadatas") or []
-    rows = []
+    rows: list[dict] = []
+    preview_max = CHROMA_LIST_PREVIEW_MAX
     for i, _id in enumerate(ids):
-        rows.append({
-            "id": _id,
-            "document": (docs[i] if i < len(docs) else "") or "",
-            "metadata": metas[i] if i < len(metas) else None,
-        })
+        doc = (docs[i] if i < len(docs) else "") or ""
+        if list_view:
+            rows.append({
+                "id": _id,
+                "preview": truncate(doc, preview_max),
+                "doc_len": len(doc),
+                "metadata": metas[i] if i < len(metas) else None,
+            })
+        else:
+            rows.append({
+                "id": _id,
+                "document": doc,
+                "metadata": metas[i] if i < len(metas) else None,
+            })
     return rows
 
 
 def _chroma_item_view(r: dict) -> dict:
-    doc = r["document"] or ""
-    return {"id": r["id"], "preview": truncate(doc), "doc_len": len(doc), "metadata": r["metadata"]}
+    if "preview" in r:
+        return {
+            "id": r["id"],
+            "preview": r["preview"],
+            "doc_len": r.get("doc_len", len(r.get("preview") or "")),
+            "metadata": r["metadata"],
+        }
+    doc = r.get("document") or ""
+    return {
+        "id": r["id"],
+        "preview": truncate(doc, CHROMA_LIST_PREVIEW_MAX),
+        "doc_len": len(doc),
+        "metadata": r["metadata"],
+    }
+
+
+def _chroma_scan_rows(
+    col,
+    *,
+    where: dict | None,
+    where_document: dict | None,
+    cap: int = CHROMA_SCAN_CAP,
+    batch_size: int = CHROMA_SCAN_BATCH,
+) -> tuple[list[dict], bool]:
+    """按 batch_size 分批 get，累计至多 cap 条列表行（仅摘要 + metadata）。"""
+    rows: list[dict] = []
+    offset = 0
+    while len(rows) < cap:
+        chunk_limit = min(batch_size, cap - len(rows))
+        kwargs: dict = {
+            "include": ["documents", "metadatas"],
+            "limit": chunk_limit,
+            "offset": offset,
+        }
+        if where is not None:
+            kwargs["where"] = where
+        if where_document is not None:
+            kwargs["where_document"] = where_document
+        got = col.get(**kwargs)
+        batch = _rows_from_get(got, list_view=True)
+        if not batch:
+            break
+        rows.extend(batch)
+        offset += len(batch)
+        if len(batch) < chunk_limit:
+            break
+
+    truncated = False
+    if len(rows) >= cap:
+        probe_kwargs: dict = {"limit": 1, "offset": cap, "include": []}
+        if where is not None:
+            probe_kwargs["where"] = where
+        if where_document is not None:
+            probe_kwargs["where_document"] = where_document
+        probe = col.get(**probe_kwargs)
+        truncated = bool(probe.get("ids"))
+    return rows, truncated
 
 
 def filter_sort_rows(
@@ -232,7 +301,7 @@ def chroma_items(
             got = col.get(limit=limit, offset=offset, include=["documents", "metadatas"])
         except Exception as e:
             return {"name": name, "total": total, "items": [], "truncated": False, "error": f"{type(e).__name__}: {e}"}
-        items = [_chroma_item_view(r) for r in _rows_from_get(got)]
+        items = [_chroma_item_view(r) for r in _rows_from_get(got, list_view=True)]
         return {"name": name, "total": total, "items": items, "truncated": False}
 
     # 有过滤/排序：服务端预过滤（正文/时间段）取回 ≤ cap 候选，内存做文件名+排序+分页
@@ -249,22 +318,36 @@ def chroma_items(
         where = {"$and": clauses}
     where_document = {"$contains": body_q} if body_q else None
 
-    get_kwargs: dict = {"include": ["documents", "metadatas"], "limit": CHROMA_SCAN_CAP}
-    if where is not None:
-        get_kwargs["where"] = where
-    if where_document is not None:
-        get_kwargs["where_document"] = where_document
     try:
-        got = col.get(**get_kwargs)
+        rows, truncated = _chroma_scan_rows(
+            col, where=where, where_document=where_document,
+        )
     except Exception as e:
         return {"name": name, "total": 0, "items": [], "truncated": False, "error": f"{type(e).__name__}: {e}"}
 
-    rows = _rows_from_get(got)
-    truncated = len(rows) >= CHROMA_SCAN_CAP
-    rows = filter_sort_rows(rows, filename_q=filename_q, sort_by=sort_by, desc=desc)
-    total = len(rows)
-    page = rows[offset: offset + limit]
-    items = [_chroma_item_view(r) for r in page]
+    # 列表行只有 preview，filter_sort 仅用于文件名 / 排序（正文已在服务端 where）
+    sort_rows = [
+        {
+            "id": r["id"],
+            "document": "",
+            "metadata": r["metadata"],
+            "preview": r["preview"],
+            "doc_len": r["doc_len"],
+        }
+        for r in rows
+    ]
+    sort_rows = filter_sort_rows(sort_rows, filename_q=filename_q, sort_by=sort_by, desc=desc)
+    total = len(sort_rows)
+    page = sort_rows[offset: offset + limit]
+    items = [
+        {
+            "id": r["id"],
+            "preview": r.get("preview") or "",
+            "doc_len": r.get("doc_len", 0),
+            "metadata": r["metadata"],
+        }
+        for r in page
+    ]
     return {"name": name, "total": total, "items": items, "truncated": truncated}
 
 
@@ -299,37 +382,77 @@ def _coll_of(path: Path) -> str:
     return stem[len("bm25_"):] if stem.startswith("bm25_") else stem
 
 
+def _manifest_path_for_pkl(path: Path) -> Path:
+    return path.with_name(f"{path.stem}.manifest.json")
+
+
+def _chunks_path_for_pkl(path: Path) -> Path:
+    return path.with_name(f"{path.stem}.chunks.jsonl")
+
+
+def _read_bm25_manifest(path: Path) -> dict | None:
+    mpath = _manifest_path_for_pkl(path)
+    if not mpath.is_file():
+        return None
+    try:
+        return json.loads(mpath.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _load_bm25_chunk_rows(collection: str, pkl_path: Path) -> list[dict] | None:
+    """从 chunks.jsonl 加载 L2 列表行（不反序列化 pkl）。"""
+    manifest = _read_bm25_manifest(pkl_path)
+    if manifest is None:
+        return None
+    chunks_name = manifest.get("chunks_file") or f"{pkl_path.stem}.chunks.jsonl"
+    chunks_path = pkl_path.parent / str(chunks_name)
+    if not chunks_path.is_file():
+        return None
+    rows: list[dict] = []
+    try:
+        with chunks_path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                item = json.loads(line)
+                rows.append({
+                    "id": item["id"],
+                    "document": "",
+                    "metadata": dict(item.get("metadata") or {}),
+                    "tokens": int(item.get("tokens") or 0),
+                })
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        return None
+    return rows
+
+
 def bm25_indexes() -> dict:
-    """L1：每个 bm25_*.pkl 的规模与加载结果（坏文件报原因）。"""
+    """L1：每个 bm25_*.pkl 的规模（读 manifest，不 load pkl）。"""
     base = bm25_dir()
     items: list[dict] = []
     for path in _bm25_files():
         coll = _coll_of(path)
         row: dict = {
-            "file": path.name, "collection": coll, "bytes": path.stat().st_size,
+            "file": path.name,
+            "collection": coll,
+            "bytes": path.stat().st_size,
             "is_default": coll == config.DEFAULT_COLLECTION,
         }
-        try:
-            with open(path, "rb") as f:
-                pickle.load(f)
-            from src.rag.bm25_index import BM25Index
-            idx = BM25Index.load_or_new(coll, path)
-            row["docs"] = len(idx.docs)
-            row["k1"] = idx.k1
-            row["b"] = idx.b
-        except Exception as e:
-            row["error"] = f"{type(e).__name__}: {e}"
+        manifest = _read_bm25_manifest(path)
+        if manifest is None:
+            row["error"] = "manifest 缺失（请重新入库或重建 BM25 索引）"
+        else:
+            row["docs"] = int(manifest.get("docs") or 0)
+            row["k1"] = manifest.get("k1")
+            row["b"] = manifest.get("b")
         items.append(row)
     return {"dir": str(base), "indexes": items}
 
 
-def _load_bm25(collection: str):
-    from src.rag.bm25_index import BM25Index
-
-    path = bm25_dir() / f"bm25_{collection}.pkl"
-    if not path.exists():
-        return None
-    return BM25Index.load_or_new(collection, path)
+def _bm25_pkl_path(collection: str) -> Path:
+    return bm25_dir() / f"bm25_{collection}.pkl"
 
 
 def bm25_docs(
@@ -344,18 +467,13 @@ def bm25_docs(
     sort_by: str | None = None,
     desc: bool = False,
 ) -> dict | None:
-    """L2：某索引的文档块分页（id + 正文摘要）。索引不存在返回 None。
-
-    索引已全量载入内存，过滤（文件名/正文/入库时间段）+ 排序（文件名/入库时间）全在内存做。
-    """
-    idx = _load_bm25(collection)
-    if idx is None:
+    """L2：某索引的文档块分页（id + metadata 摘要）。读 manifest/chunks.jsonl，不 load pkl。"""
+    pkl_path = _bm25_pkl_path(collection)
+    if not pkl_path.exists():
         return None
-    # 默认按 id 稳定排序，保证未排序时翻页顺序确定
-    rows = [
-        {"id": cid, "document": "", "metadata": dict(d.metadata or {}), "tokens": d.doc_len}
-        for cid, d in sorted(idx.docs.items())
-    ]
+    rows = _load_bm25_chunk_rows(collection, pkl_path)
+    if rows is None:
+        return None
     rows = filter_sort_rows(
         rows, filename_q=filename_q, body_q=body_q,
         ts_from=ts_from, ts_to=ts_to, sort_by=sort_by, desc=desc,
@@ -363,35 +481,69 @@ def bm25_docs(
     total = len(rows)
     page = rows[offset: offset + limit]
     items = [
-        {"id": r["id"], "preview": truncate(r["document"]), "tokens": r["tokens"], "metadata": r["metadata"]}
+        {
+            "id": r["id"],
+            "preview": "",
+            "tokens": r["tokens"],
+            "metadata": r["metadata"],
+        }
         for r in page
     ]
     return {"collection": collection, "total": total, "items": items}
 
 
+def _find_bm25_chunk_row(pkl_path: Path, chunk_id: str) -> dict | None:
+    manifest = _read_bm25_manifest(pkl_path)
+    if manifest is None:
+        return None
+    chunks_name = manifest.get("chunks_file") or f"{pkl_path.stem}.chunks.jsonl"
+    chunks_path = pkl_path.parent / str(chunks_name)
+    if not chunks_path.is_file():
+        return None
+    try:
+        with chunks_path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                item = json.loads(line)
+                if item.get("id") != chunk_id:
+                    continue
+                return {
+                    "id": item["id"],
+                    "metadata": dict(item.get("metadata") or {}),
+                    "tokens": int(item.get("tokens") or 0),
+                }
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        return None
+    return None
+
+
 def bm25_doc(collection: str, doc_id: str) -> dict | None:
     """L3：单个文档块 metadata + tokens 规模。正文从 Chroma 回表。不存在返回 None。"""
-    idx = _load_bm25(collection)
-    if idx is None:
+    pkl_path = _bm25_pkl_path(collection)
+    if not pkl_path.exists():
         return None
-    d = idx.docs.get(doc_id)
-    if d is None:
+    meta_row = _find_bm25_chunk_row(pkl_path, doc_id)
+    if meta_row is None:
         return None
     document = ""
     try:
-        client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
+        import chromadb
+
+        client = chromadb.PersistentClient(path=str(chroma_root()))
         coll = client.get_collection(name=collection)
         got = coll.get(ids=[doc_id], include=["documents"])
         docs = got.get("documents") or []
         if docs and docs[0]:
             document = docs[0]
     except Exception:
-        document = d.document or ""
+        document = ""
     return {
         "id": doc_id,
         "document": document,
-        "metadata": dict(d.metadata or {}),
-        "tokens": d.doc_len,
+        "metadata": meta_row["metadata"],
+        "tokens": meta_row["tokens"],
     }
 
 

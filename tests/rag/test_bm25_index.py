@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import pickle
 from pathlib import Path
 
@@ -58,6 +59,8 @@ def test_save_load_v2_without_document_text(tmp_path: Path, monkeypatch: pytest.
 
     loaded = BM25Index.load_or_new("kb_test", tmp_path / "bm25_kb_test.pkl")
     assert loaded.docs["x1"].document == ""
+    manifest = json.loads((tmp_path / "bm25_kb_test.manifest.json").read_text(encoding="utf-8"))
+    assert manifest["docs"] == 1
     assert loaded.docs["x1"].doc_len > 0
     assert loaded.search("keyword", top_k=1)
 

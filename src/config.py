@@ -366,6 +366,10 @@ ACTIVE_MODEL: str = os.getenv("AGENTA_EVAL_ACTIVE_MODEL") or os.getenv("ACTIVE_M
 
 # ChromaDB 存储路径（仅向量库元数据 + 段目录；BM25 默认另见 BM25_INDEX_DIR）
 CHROMA_DB_PATH: str = os.getenv("CHROMA_DB_PATH", "./db/chroma")
+# 管理巡检：Chroma 筛选扫描候选上限、分批 get 大小、列表正文摘要长度
+CHROMA_SCAN_CAP: int = int(os.getenv("CHROMA_SCAN_CAP", "20000"))
+CHROMA_SCAN_BATCH: int = int(os.getenv("CHROMA_SCAN_BATCH", "500"))
+CHROMA_LIST_PREVIEW_MAX: int = int(os.getenv("CHROMA_LIST_PREVIEW_MAX", "200"))
 
 # 对话历史 SQLite 路径，可通过 .env 中的 MEMORY_DB_PATH 覆盖
 MEMORY_DB_PATH: str = os.getenv("MEMORY_DB_PATH", "./db/sqlite/session.db")
