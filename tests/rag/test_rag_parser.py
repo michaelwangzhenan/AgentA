@@ -26,7 +26,10 @@ class TestSupportedExtensions:
     """测试支持的文件格式集合"""
 
     def test_all_expected_formats_supported(self) -> None:
-        expected = {".md", ".txt", ".html", ".htm", ".pdf", ".docx", ".pptx", ".xlsx"}
+        expected = {
+            ".md", ".txt", ".html", ".htm", ".pdf",
+            ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx",
+        }
         assert expected == SUPPORTED_EXTENSIONS
 
     def test_unsupported_format_raises_value_error(self, tmp_path: Path) -> None:

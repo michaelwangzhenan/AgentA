@@ -364,13 +364,15 @@ def get_index(collection_name: str) -> BM25Index:
         return idx
 
 
-def commit_index(collection_name: str) -> None:
-    """把进程内缓存的 BM25 索引写入磁盘。"""
+def commit_index(collection_name: str, *, release: bool = False) -> None:
+    """把进程内缓存的 BM25 索引写入磁盘；release 为真时写盘后移出进程缓存。"""
     with _cache_lock:
         idx = _index_cache.get(collection_name)
     if idx is None:
         return
     save_index(idx, get_index_path(collection_name))
+    if release:
+        drop_index(collection_name)
 
 
 def drop_index(collection_name: str) -> None:

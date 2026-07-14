@@ -70,6 +70,22 @@ def test_commit_index_writes_disk(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert path.exists()
 
 
+def test_commit_index_release_drops_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "bm25_kb_test.pkl"
+    monkeypatch.setattr("src.rag.bm25_index.get_index_path", lambda coll: path)
+    drop_index("kb_test")
+    idx = BM25Index("kb_test")
+    idx.upsert(["a"], ["hello world"], [{}])
+    monkeypatch.setattr("src.rag.bm25_index._index_cache", {"kb_test": idx})
+    commit_index("kb_test", release=True)
+    from src.rag.bm25_index import _index_cache
+
+    assert path.exists()
+    assert "kb_test" not in _index_cache
+
+
 def test_rebuild_bm25_from_chroma(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     class FakeCollection:
         def count(self) -> int:

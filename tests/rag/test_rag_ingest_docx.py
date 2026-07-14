@@ -6,6 +6,7 @@ import pytest
 
 import src.config as config
 import src.rag.ingest as ingest
+from src.services.ingest_telemetry import IngestProbe
 
 
 class _FakeCollection:
@@ -45,6 +46,7 @@ def test_docx_ingest_writes_embedding_sized_batches(
     monkeypatch.setattr(config, "CHUNK_SIZE", 100)
     monkeypatch.setattr(config, "CHUNK_OVERLAP", 10)
     collection = _FakeCollection()
+    probe = IngestProbe(file_path=source, rel_path="source.docx")
 
     result = ingest._ingest_docx_file(
         source,
@@ -53,6 +55,7 @@ def test_docx_ingest_writes_embedding_sized_batches(
         collection,
         "kb_test",
         None,
+        probe,
     )
 
     assert result == {"doc_id": "doc-id", "chunks": 40, "status": "ingested"}

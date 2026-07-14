@@ -488,6 +488,15 @@ REGISTRY: list[ConfigItem] = [
         max=1800,
     ),
     ConfigItem(
+        key="INGEST_MAX_CONCURRENT",
+        group="web",
+        type=ItemType.INT,
+        brief="入库并发上限",
+        detail="同时执行的入库任务数；多用户或大文件场景建议保持 1，避免内存打满。",
+        min=1,
+        max=8,
+    ),
+    ConfigItem(
         key="BACKUP_DIR",
         group="web",
         type=ItemType.PATH,

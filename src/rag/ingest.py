@@ -51,6 +51,7 @@ ProgressCb = Callable[[str, int, int], None]
 import chromadb
 
 import src.config as config
+from src.services.ingest_telemetry import IngestProbe, ingest_slot, probe_for_docx
 from src.rag.parser import (
     SUPPORTED_EXTENSIONS,
     is_office_temp_file,
@@ -117,11 +118,11 @@ def _ingest_docx_file(
     collection,
     collection_name: str,
     progress_cb: ProgressCb | None,
+    probe: IngestProbe,
     *,
     bm25_save: bool = True,
 ) -> dict:
     """隔离解析 DOCX，并按标题区段增量分块、分批写入。"""
-    logger.info("Parse 解析（隔离）: %s", rel_path)
     if progress_cb:
         progress_cb("parse", 0, 0)
 
@@ -130,53 +131,56 @@ def _ingest_docx_file(
     )
     chunk_path = Path(chunk_temp.name)
     chunk_temp.close()
+    existing_ids: list[str] = []
+    total_chunks = 0
+    heading_chunks = 0
     try:
         with parsed_docx_temp(file_path) as parsed_path:
-            if parsed_path.stat().st_size == 0:
-                logger.warning("  跳过（内容为空）: %s", rel_path)
-                return {"doc_id": doc_id, "chunks": 0, "status": "empty"}
+            with probe.track("parse"):
+                if parsed_path.stat().st_size == 0:
+                    logger.warning("  跳过（内容为空）: %s", rel_path)
+                    return {"doc_id": doc_id, "chunks": 0, "status": "empty"}
 
-            content_hash = _file_content_sha1(parsed_path)
-            with parsed_path.open("r", encoding="utf-8") as f:
-                lang = _detect_lang(f.read(2000))
+                content_hash = _file_content_sha1(parsed_path)
+                with parsed_path.open("r", encoding="utf-8") as f:
+                    lang = _detect_lang(f.read(2000))
 
-            existing = collection.get(
-                where={"doc_id": doc_id},
-                include=["metadatas"],
-            )
-            existing_ids = existing.get("ids") or []
-            existing_metas = existing.get("metadatas") or []
-            if existing_ids and existing_metas:
-                prev_hash = existing_metas[0].get("content_sha1")
-                if prev_hash == content_hash:
-                    logger.info(
-                        "  跳过（内容未变化）: %s → %d 块", rel_path, len(existing_ids)
-                    )
-                    return {
-                        "doc_id": doc_id,
-                        "chunks": len(existing_ids),
-                        "status": "skipped_unchanged",
-                    }
+                existing = collection.get(
+                    where={"doc_id": doc_id},
+                    include=["metadatas"],
+                )
+                existing_ids = existing.get("ids") or []
+                existing_metas = existing.get("metadatas") or []
+                if existing_ids and existing_metas:
+                    prev_hash = existing_metas[0].get("content_sha1")
+                    if prev_hash == content_hash:
+                        logger.info(
+                            "  跳过（内容未变化）: %s → %d 块", rel_path, len(existing_ids)
+                        )
+                        return {
+                            "doc_id": doc_id,
+                            "chunks": len(existing_ids),
+                            "status": "skipped_unchanged",
+                        }
 
-            total_chunks = 0
-            heading_chunks = 0
-            with (
-                parsed_path.open("r", encoding="utf-8") as source,
-                chunk_path.open("w", encoding="utf-8") as spool,
-            ):
-                for chunk in iter_structured_lines(
-                    source, config.CHUNK_SIZE, config.CHUNK_OVERLAP
+            with probe.track("split"):
+                with (
+                    parsed_path.open("r", encoding="utf-8") as source,
+                    chunk_path.open("w", encoding="utf-8") as spool,
                 ):
-                    record = {
-                        "text": chunk.text,
-                        "heading_path": chunk.heading_path,
-                        "line_start": chunk.line_start,
-                        "line_end": chunk.line_end,
-                    }
-                    spool.write(json.dumps(record, ensure_ascii=False) + "\n")
-                    total_chunks += 1
-                    if chunk.heading_path:
-                        heading_chunks += 1
+                    for chunk in iter_structured_lines(
+                        source, config.CHUNK_SIZE, config.CHUNK_OVERLAP
+                    ):
+                        record = {
+                            "text": chunk.text,
+                            "heading_path": chunk.heading_path,
+                            "line_start": chunk.line_start,
+                            "line_end": chunk.line_end,
+                        }
+                        spool.write(json.dumps(record, ensure_ascii=False) + "\n")
+                        total_chunks += 1
+                        if chunk.heading_path:
+                            heading_chunks += 1
 
         if total_chunks == 0:
             logger.warning("  跳过（分块结果为空）: %s", rel_path)
@@ -245,23 +249,25 @@ def _ingest_docx_file(
                 progress_cb("embed", done, total_chunks)
             batch = []
 
-        with chunk_path.open("r", encoding="utf-8") as spool:
-            for index, line in enumerate(spool):
-                item = json.loads(line)
-                item["index"] = index
-                batch.append(item)
-                if len(batch) >= _EMBED_BATCH_SIZE:
-                    flush_batch()
-            flush_batch()
+        with probe.track("embed"):
+            with chunk_path.open("r", encoding="utf-8") as spool:
+                for index, line in enumerate(spool):
+                    item = json.loads(line)
+                    item["index"] = index
+                    batch.append(item)
+                    if len(batch) >= _EMBED_BATCH_SIZE:
+                        flush_batch()
+                flush_batch()
 
-        if bm25_save and bm25 is not None and bm25_error is None:
-            try:
-                from src.rag.bm25_index import commit_index
+        with probe.track("bm25"):
+            if bm25_save and bm25 is not None and bm25_error is None:
+                try:
+                    from src.rag.bm25_index import commit_index
 
-                commit_index(collection_name)
-                logger.info("  BM25 索引已更新: %s → %d 块", rel_path, total_chunks)
-            except Exception as exc:
-                bm25_error = exc
+                    commit_index(collection_name)
+                    logger.info("  BM25 索引已更新: %s → %d 块", rel_path, total_chunks)
+                except Exception as exc:
+                    bm25_error = exc
         if bm25_error is not None:
             logger.warning("  BM25 索引更新失败（已跳过）: %s — %s", rel_path, bm25_error)
 
@@ -329,6 +335,7 @@ def _ingest_one_file(
     collection,
     collection_name: str,
     progress_cb: ProgressCb | None = None,
+    probe: IngestProbe | None = None,
     *,
     bm25_save: bool = True,
 ) -> dict:
@@ -348,6 +355,8 @@ def _ingest_one_file(
     except ValueError:
         rel_path = file_path.name
     doc_id = _doc_id_from_relpath(rel_path)
+    if probe is None:
+        probe = probe_for_docx(file_path, rel_path)
 
     if file_path.suffix.lower() == ".docx":
         return _ingest_docx_file(
@@ -357,13 +366,14 @@ def _ingest_one_file(
             collection,
             collection_name,
             progress_cb,
+            probe,
             bm25_save=bm25_save,
         )
 
-    logger.info("Parse 解析: %s", rel_path)
     if progress_cb:
         progress_cb("parse", 0, 0)
-    text = parse_file(file_path)
+    with probe.track("parse"):
+        text = parse_file(file_path)
 
     if not text.strip():
         logger.warning("  跳过（内容为空）: %s", rel_path)
@@ -387,7 +397,8 @@ def _ingest_one_file(
         collection.delete(ids=existing_ids)
         logger.info("  清除旧数据: %s → 删除 %d 条", rel_path, len(existing_ids))
 
-    structured = split_structured(text, config.CHUNK_SIZE, config.CHUNK_OVERLAP)
+    with probe.track("split"):
+        structured = split_structured(text, config.CHUNK_SIZE, config.CHUNK_OVERLAP)
     if not structured:
         logger.warning("  跳过（分块结果为空）: %s", rel_path)
         return {"doc_id": doc_id, "chunks": 0, "status": "empty"}
@@ -431,31 +442,30 @@ def _ingest_one_file(
     if progress_cb:
         progress_cb("split", 0, total_chunks)
 
-    # 分批 upsert：每批 embedding 后回调一次进度，让前端能显示"第 M/N 块"。
-    # 结果与一次性 upsert 等价（同一批 ids，幂等）。
-    for start in range(0, total_chunks, _EMBED_BATCH_SIZE):
-        end = min(start + _EMBED_BATCH_SIZE, total_chunks)
-        collection.upsert(
-            ids=ids[start:end],
-            documents=documents[start:end],
-            metadatas=metadatas[start:end],  # type: ignore[arg-type]
-        )
-        if progress_cb:
-            progress_cb("embed", end, total_chunks)
+    with probe.track("embed"):
+        for start in range(0, total_chunks, _EMBED_BATCH_SIZE):
+            end = min(start + _EMBED_BATCH_SIZE, total_chunks)
+            collection.upsert(
+                ids=ids[start:end],
+                documents=documents[start:end],
+                metadatas=metadatas[start:end],  # type: ignore[arg-type]
+            )
+            if progress_cb:
+                progress_cb("embed", end, total_chunks)
 
-    # 同步写入 BM25 倒排索引（如启用）；与 Chroma 共享 ids 保证融合时可对齐
-    if config.BM25_ENABLED:
-        try:
-            from src.rag.bm25_index import commit_index, get_index
+    with probe.track("bm25"):
+        if config.BM25_ENABLED:
+            try:
+                from src.rag.bm25_index import commit_index, get_index
 
-            bm25 = get_index(collection_name)
-            bm25.delete_by_doc_id(doc_id)
-            bm25.upsert(ids=ids, documents=documents, metadatas=metadatas)
-            if bm25_save:
-                commit_index(collection_name)
-                logger.info("  BM25 索引已更新: %s → %d 块", rel_path, len(documents))
-        except Exception as e:  # 失败不影响 dense 入库主流程
-            logger.warning("  BM25 索引更新失败（已跳过）: %s — %s", rel_path, e)
+                bm25 = get_index(collection_name)
+                bm25.delete_by_doc_id(doc_id)
+                bm25.upsert(ids=ids, documents=documents, metadatas=metadatas)
+                if bm25_save:
+                    commit_index(collection_name)
+                    logger.info("  BM25 索引已更新: %s → %d 块", rel_path, len(documents))
+            except Exception as e:  # 失败不影响 dense 入库主流程
+                logger.warning("  BM25 索引更新失败（已跳过）: %s — %s", rel_path, e)
 
     page_info = (
         f", pages={sum(1 for c in structured if c.page_no is not None)}"
@@ -511,21 +521,58 @@ def ingest_one(
 
     client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
     collection = _open_collection(client, model_name, collection_name, use_api=use_api)
-    result = _ingest_one_file(
-        fp, docs_path, collection, collection_name, progress_cb, bm25_save=False,
-    )
-    if config.BM25_ENABLED and result.get("status") == "ingested":
+    try:
+        rel_path = fp.relative_to(docs_path).as_posix()
+    except ValueError:
+        rel_path = fp.name
+    probe = probe_for_docx(fp, rel_path)
+    with ingest_slot():
+        probe.file_start()
         try:
-            from src.rag.bm25_index import commit_index
-
-            commit_index(collection_name)
-        except Exception as e:
-            logger.warning("BM25 索引写入失败（已忽略）: %s", e)
-    # KB 内容变了，语义缓存里依赖旧 KB 的答案可能过期 → 全量作废（软失败旁路）
+            result = _ingest_one_file(
+                fp,
+                docs_path,
+                collection,
+                collection_name,
+                progress_cb,
+                probe,
+                bm25_save=False,
+            )
+            probe.file_done(result.get("status", "unknown"), int(result.get("chunks", 0)))
+        except Exception as exc:
+            probe.file_error(str(exc))
+            raise
     if result.get("status") == "ingested":
+        _commit_bm25_after_ingest(collection_name)
         _invalidate_semantic_cache()
         _invalidate_kb_stats(collection_name)
     return result
+
+
+def _commit_bm25_after_ingest(collection_name: str) -> None:
+    """入库结束后写盘 BM25 并释放进程内索引，避免大库长期占内存。"""
+    if not config.BM25_ENABLED:
+        return
+    import gc
+
+    from src.rag.bm25_index import commit_index
+    from src.services.ingest_telemetry import (
+        flush_log_handlers,
+        process_rss_mb,
+        system_avail_mb,
+    )
+
+    try:
+        commit_index(collection_name, release=True)
+        gc.collect()
+        logger.info(
+            "[ingest] BM25 已写盘并释放进程缓存 rss_mb=%d avail_mb=%d",
+            process_rss_mb(),
+            system_avail_mb(),
+        )
+        flush_log_handlers()
+    except Exception as e:
+        logger.warning("BM25 索引写入失败（已忽略）: %s", e)
 
 
 def _invalidate_semantic_cache() -> None:
@@ -588,9 +635,29 @@ def ingest_all(
     skipped_unchanged = 0
     for file_path in all_files:
         try:
-            result = _ingest_one_file(
-                file_path, docs_path, collection, collection_name, bm25_save=False,
-            )
+            try:
+                rel_path = file_path.resolve().relative_to(docs_path).as_posix()
+            except ValueError:
+                rel_path = file_path.name
+            probe = probe_for_docx(file_path, rel_path)
+            with ingest_slot():
+                probe.file_start()
+                try:
+                    result = _ingest_one_file(
+                        file_path,
+                        docs_path,
+                        collection,
+                        collection_name,
+                        probe=probe,
+                        bm25_save=False,
+                    )
+                    probe.file_done(
+                        result.get("status", "unknown"),
+                        int(result.get("chunks", 0)),
+                    )
+                except Exception as exc:
+                    probe.file_error(str(exc))
+                    raise
             if result["status"] == "ingested":
                 total_chunks += result["chunks"]
             elif result["status"] == "skipped_unchanged":
@@ -598,14 +665,7 @@ def ingest_all(
         except Exception as e:
             logger.error("  失败: %s — %s", file_path.name, e)
 
-    if config.BM25_ENABLED:
-        try:
-            from src.rag.bm25_index import commit_index
-
-            commit_index(collection_name)
-            logger.info("BM25 索引已写入: %s", collection_name)
-        except Exception as e:
-            logger.warning("BM25 索引写入失败（已忽略）: %s", e)
+    _commit_bm25_after_ingest(collection_name)
 
     logger.info(
         "入库完成：新增/更新 %d 块，跳过未变 %d 个文件，collection 当前总量: %d 块",

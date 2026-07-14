@@ -2,7 +2,7 @@
 文档解析模块 —— 离线预处理阶段使用
 
 将各种格式的本地文档转换为纯文本字符串，供 ingest.py 后续分块和向量化使用。
-支持格式：.md / .txt / .html / .pdf / .docx / .pptx / .xlsx
+支持格式：.md / .txt / .html / .pdf / .doc / .docx / .ppt / .pptx / .xls / .xlsx
 
 注意：网页 URL 的实时抓取由 agent/tools.py 中的 fetch_url 工具负责，
       本模块只处理本地文件。
@@ -26,7 +26,10 @@ logger = logging.getLogger(__name__)
 
 # 支持的文件扩展名集合
 SUPPORTED_EXTENSIONS: frozenset[str] = frozenset(
-    {".md", ".txt", ".html", ".htm", ".pdf", ".docx", ".pptx", ".xlsx"}
+    {
+        ".md", ".txt", ".html", ".htm", ".pdf",
+        ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx",
+    }
 )
 
 
@@ -270,11 +273,17 @@ def parse_file(file_path: str | Path) -> str:
             raw = _parse_html(path)
         case ".pdf":
             raw = _parse_pdf(path)
+        case ".doc":
+            raw = _parse_doc(path)
         case ".docx":
             with parsed_docx_temp(path) as parsed_path:
                 return parsed_path.read_text(encoding="utf-8")
+        case ".ppt":
+            raw = _parse_ppt(path)
         case ".pptx":
             raw = _parse_pptx(path)
+        case ".xls":
+            raw = _parse_xls(path)
         case ".xlsx":
             raw = _parse_xlsx(path)
         case _:
@@ -342,6 +351,44 @@ def _parse_html(path: Path) -> str:
             prev_blank = True
 
     return "\n".join(result).strip()
+
+
+def _parse_doc(path: Path) -> str:
+    """解析 .doc：OOXML 误标扩展名时走 docx；OLE 格式走 antiword / LibreOffice。"""
+    from src.rag.office_legacy import LegacyOfficeParseError, parse_legacy_doc, sniff_office_word_kind
+
+    kind = sniff_office_word_kind(path)
+    if kind == "docx":
+        logger.info("[parser] .doc 文件头为 ZIP，按 docx 解析: %s", path.name)
+        with parsed_docx_temp(path) as parsed_path:
+            return parsed_path.read_text(encoding="utf-8")
+    if kind != "ole-doc":
+        raise LegacyOfficeParseError(f"无法识别的 Word 文件格式: {path.name}")
+    return parse_legacy_doc(path)
+
+
+def _parse_ppt(path: Path) -> str:
+    """解析 .ppt：OOXML 误标扩展名时走 pptx；OLE 格式走 LibreOffice 转换。"""
+    from src.rag.office_legacy import LegacyOfficeParseError, parse_legacy_ppt, sniff_office_container
+
+    if sniff_office_container(path) == "zip":
+        logger.info("[parser] .ppt 文件头为 ZIP，按 pptx 解析: %s", path.name)
+        return _parse_pptx(path)
+    if sniff_office_container(path) != "ole":
+        raise LegacyOfficeParseError(f"无法识别的 PowerPoint 文件格式: {path.name}")
+    return parse_legacy_ppt(path)
+
+
+def _parse_xls(path: Path) -> str:
+    """解析 .xls：OOXML 误标扩展名时走 xlsx；OLE 格式走 LibreOffice 转换。"""
+    from src.rag.office_legacy import LegacyOfficeParseError, parse_legacy_xls, sniff_office_container
+
+    if sniff_office_container(path) == "zip":
+        logger.info("[parser] .xls 文件头为 ZIP，按 xlsx 解析: %s", path.name)
+        return _parse_xlsx(path)
+    if sniff_office_container(path) != "ole":
+        raise LegacyOfficeParseError(f"无法识别的 Excel 文件格式: {path.name}")
+    return parse_legacy_xls(path)
 
 
 def _parse_pdf(path: Path) -> str:

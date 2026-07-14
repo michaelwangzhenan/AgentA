@@ -605,6 +605,8 @@ DOCX_HARD_MAX_UNZIP_MB: int = int(os.getenv("DOCX_HARD_MAX_UNZIP_MB", "512"))
 DOCX_PARSE_MEMORY_MB: int = int(os.getenv("DOCX_PARSE_MEMORY_MB", "512"))
 # DOCX 隔离解析的执行时间上限（秒）
 DOCX_PARSE_TIMEOUT_SEC: int = int(os.getenv("DOCX_PARSE_TIMEOUT_SEC", "120"))
+# 同时执行的入库任务上限（Web 上传与 CLI 共用）
+INGEST_MAX_CONCURRENT: int = int(os.getenv("INGEST_MAX_CONCURRENT", "1"))
 
 # 运行时数据备份目录（tools/cli/backup_cli.py 与 /admin/backup 生成的 zip 落此；含明文密钥，已 gitignore）
 BACKUP_DIR: str = os.getenv("BACKUP_DIR", "./backups")

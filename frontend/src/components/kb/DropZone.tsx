@@ -9,8 +9,11 @@ export const ACCEPT_EXTENSIONS = [
   '.html',
   '.htm',
   '.pdf',
+  '.doc',
   '.docx',
+  '.ppt',
   '.pptx',
+  '.xls',
   '.xlsx',
 ]
 
