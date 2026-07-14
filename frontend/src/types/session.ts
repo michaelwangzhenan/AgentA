@@ -24,13 +24,16 @@ type BackendToolCall = {
 }
 
 export type SessionMessagesResponse = {
-  // OpenAI messages 格式（含可选 tool_calls / tool_call_id）
   messages: Array<{
+    id?: number
+    user_index?: number
     role: string
     content: string
     tool_calls?: BackendToolCall[]
     tool_call_id?: string
   }>
+  has_more: boolean
+  oldest_id: number | null
 }
 
 /**
@@ -64,11 +67,12 @@ export function backendMessagesToFrontend(
       finalize()
       const { text, attachments } = parseUserMessage(m.content)
       out.push({
-        id: generateId(),
+        id: m.id != null ? String(m.id) : generateId(),
         role: 'user',
         content: text,
         rawContent: m.content,
         attachments,
+        userIndex: typeof m.user_index === 'number' ? m.user_index : undefined,
       })
       continue
     }

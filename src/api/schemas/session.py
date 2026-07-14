@@ -31,11 +31,19 @@ class SessionDeleteResponse(BaseModel):
 
 
 class SessionMessagesResponse(BaseModel):
-    """拉某 session 的完整 messages 历史"""
+    """拉某 session 的消息历史（支持分页）"""
 
     messages: list[dict[str, Any]] = Field(
         ...,
-        description="OpenAI messages 格式（含 tool_calls / tool_call_id 等可选字段）",
+        description="OpenAI messages 格式（含 id / user_index / tool_calls 等可选字段）",
+    )
+    has_more: bool = Field(
+        False,
+        description="是否还有更早的消息（上滚加载时传 oldest_id 为 before_id）",
+    )
+    oldest_id: int | None = Field(
+        None,
+        description="本页最早一条消息的 DB id，作为下一页 before_id 游标",
     )
 
 

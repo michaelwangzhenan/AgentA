@@ -56,6 +56,9 @@ export type MasteryViewProps = {
   onEditResend: (userId: string, newText: string) => void
   onResendUser: (userId: string) => void
   onSwitchVersion: (assistantId: string, index: number) => void
+  hasMoreOlder?: boolean
+  loadingOlder?: boolean
+  onLoadOlder?: () => void | Promise<void>
 }
 
 export function MasteryView(props: MasteryViewProps) {
@@ -343,6 +346,9 @@ export function MasteryView(props: MasteryViewProps) {
                 onEditResend={props.onEditResend}
                 onResendUser={props.onResendUser}
                 onSwitchVersion={props.onSwitchVersion}
+                hasMoreOlder={props.hasMoreOlder}
+                loadingOlder={props.loadingOlder}
+                onLoadOlder={props.onLoadOlder}
                 hideHeader
                 compact
               />

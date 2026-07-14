@@ -286,10 +286,19 @@ export async function deleteSession(id: string): Promise<{ deleted: boolean }> {
   return (await res.json()) as { deleted: boolean }
 }
 
+export const SESSION_MESSAGES_PAGE_SIZE = 60
+
 export async function loadSessionMessages(
   id: string,
+  opts?: { limit?: number; beforeId?: number },
 ): Promise<SessionMessagesResponse> {
-  const res = await apiFetch(`/api/sessions/${encodeURIComponent(id)}/messages`)
+  const params = new URLSearchParams()
+  if (opts?.limit != null) params.set('limit', String(opts.limit))
+  if (opts?.beforeId != null) params.set('before_id', String(opts.beforeId))
+  const qs = params.toString()
+  const res = await apiFetch(
+    `/api/sessions/${encodeURIComponent(id)}/messages${qs ? `?${qs}` : ''}`,
+  )
   await _ensureOk(res)
   return (await res.json()) as SessionMessagesResponse
 }

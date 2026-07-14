@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { loadSessionMessages, streamChat, truncateSession } from '@/api/client'
+import { loadSessionMessages, SESSION_MESSAGES_PAGE_SIZE, streamChat, truncateSession } from '@/api/client'
 import type {
   AssistantMessage,
   AssistantVersion,
@@ -76,8 +76,12 @@ function snapshot(m: AssistantMessage): AssistantVersion {
   }
 }
 
-/** 统计 messages 中某条 user 消息之前有几条 user 消息（= 它的 0 基 user 序号） */
+/** 统计 messages 中某条 user 消息的全局 0 基 user 序号（编辑重发 / 截断用） */
 function userOrdinal(messages: Message[], userId: string): number {
+  const target = messages.find((m) => m.id === userId && m.role === 'user') as
+    | UserMessage
+    | undefined
+  if (target?.userIndex != null) return target.userIndex
   let n = 0
   for (const m of messages) {
     if (m.role === 'user') {
@@ -86,6 +90,16 @@ function userOrdinal(messages: Message[], userId: string): number {
     }
   }
   return -1
+}
+
+function nextUserIndex(messages: Message[]): number {
+  let max = -1
+  for (const m of messages) {
+    if (m.role === 'user' && m.userIndex != null) {
+      max = Math.max(max, m.userIndex)
+    }
+  }
+  return max + 1
 }
 
 type Options = {
@@ -97,7 +111,10 @@ type Options = {
 export function useChat({ sessionId, onSettled }: Options) {
   const [messages, setMessages] = useState<Message[]>([])
   const [inFlight, setInFlight] = useState(false)
+  const [hasMoreOlder, setHasMoreOlder] = useState(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
   const streamCtrlRef = useRef<AbortController | null>(null)
+  const oldestIdRef = useRef<number | null>(null)
   // 始终拿到最新 messages，供 regenerate / editResend 同步读取
   const messagesRef = useRef<Message[]>([])
   useEffect(() => {
@@ -112,22 +129,55 @@ export function useChat({ sessionId, onSettled }: Options) {
     }
     if (!sessionId) {
       setMessages([])
+      setHasMoreOlder(false)
+      oldestIdRef.current = null
       return
     }
     let cancelled = false
+    setHasMoreOlder(false)
+    oldestIdRef.current = null
     ;(async () => {
       try {
-        const resp = await loadSessionMessages(sessionId)
-        if (!cancelled) setMessages(backendMessagesToFrontend(resp.messages))
+        const resp = await loadSessionMessages(sessionId, {
+          limit: SESSION_MESSAGES_PAGE_SIZE,
+        })
+        if (!cancelled) {
+          setMessages(backendMessagesToFrontend(resp.messages))
+          setHasMoreOlder(resp.has_more)
+          oldestIdRef.current = resp.oldest_id
+        }
       } catch (e) {
         console.error('[useChat] 拉 session messages 失败', e)
-        if (!cancelled) setMessages([])
+        if (!cancelled) {
+          setMessages([])
+          setHasMoreOlder(false)
+          oldestIdRef.current = null
+        }
       }
     })()
     return () => {
       cancelled = true
     }
   }, [sessionId])
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!sessionId || !hasMoreOlder || loadingOlder || oldestIdRef.current == null) return
+    setLoadingOlder(true)
+    try {
+      const resp = await loadSessionMessages(sessionId, {
+        limit: SESSION_MESSAGES_PAGE_SIZE,
+        beforeId: oldestIdRef.current,
+      })
+      const older = backendMessagesToFrontend(resp.messages)
+      setMessages((prev) => [...older, ...prev])
+      setHasMoreOlder(resp.has_more)
+      oldestIdRef.current = resp.oldest_id ?? oldestIdRef.current
+    } catch (e) {
+      console.error('[useChat] 加载更早消息失败', e)
+    } finally {
+      setLoadingOlder(false)
+    }
+  }, [sessionId, hasMoreOlder, loadingOlder])
 
   // ─── 流式核心：把一段文本流进指定 assistant 消息 ───────────────────────
   const streamInto = useCallback(
@@ -464,6 +514,7 @@ export function useChat({ sessionId, onSettled }: Options) {
         rawContent: text,
         attachments,
         createdAt: Date.now(),
+        userIndex: nextUserIndex(messagesRef.current),
       }
       const assistantMsg = newAssistantMessage(mode)
       setMessages((prev) => [...prev, userMsg, assistantMsg])
@@ -513,6 +564,7 @@ export function useChat({ sessionId, onSettled }: Options) {
           role: 'user',
           content: newText,
           createdAt: Date.now(),
+          userIndex: ord,
         }
         return [...kept, editedUser, assistantMsg]
       })
@@ -618,6 +670,9 @@ export function useChat({ sessionId, onSettled }: Options) {
   return {
     messages,
     inFlight,
+    hasMoreOlder,
+    loadingOlder,
+    loadOlderMessages,
     send,
     stop,
     editResend,

@@ -252,6 +252,8 @@ export type UserMessage = {
   rawContent?: string
   attachments?: MessageAttachment[]
   createdAt?: number
+  /** 全 session 内 0 基 user 序号（分页加载时由后端回填） */
+  userIndex?: number
 }
 
 export type Message = UserMessage | AssistantMessage

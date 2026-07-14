@@ -480,6 +480,9 @@ SEMANTIC_CACHE_TTL_DAYS: int = int(os.getenv("SEMANTIC_CACHE_TTL_DAYS", "7"))
 # 防止并发把 LLM 配额 / CPU（含 search_knowledge 精排）打满。
 MAX_CONCURRENT_AGENT_RUNS: int = int(os.getenv("MAX_CONCURRENT_AGENT_RUNS", "4"))
 
+# 会话消息 API 单页条数（GET /sessions/{id}/messages 默认 limit）
+SESSION_MESSAGES_PAGE_SIZE: int = int(os.getenv("SESSION_MESSAGES_PAGE_SIZE", "60"))
+
 # SSE 流式出站队列容量；慢客户端时满队列会丢弃可合并的 token/thinking 进度帧
 SSE_QUEUE_MAXSIZE: int = int(os.getenv("SSE_QUEUE_MAXSIZE", "256"))
 # token_chunk / thinking_chunk 合并：累计字符数达到此值立即 flush

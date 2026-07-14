@@ -39,6 +39,8 @@ logger = logging.getLogger(__name__)
 MEMORY_DB_PATH: str = config.MEMORY_DB_PATH
 # session 首条用户消息预览截断长度
 _FIRST_MSG_PREVIEW_LEN: int = 80
+# load_page 单次 limit 硬上限
+_PAGE_MAX: int = 200
 
 
 class SessionStore:
@@ -98,17 +100,25 @@ class SessionStore:
             """)
 
     @staticmethod
-    def _row_to_message(row: sqlite3.Row) -> dict[str, Any]:
+    def _row_to_message(
+        row: sqlite3.Row,
+        *,
+        user_index: int | None = None,
+    ) -> dict[str, Any]:
         """将 SQLite 行对象转换为标准 OpenAI messages 格式的 dict。"""
         msg: dict[str, Any] = {
             "role": row["role"],
             "content": row["content"] if row["content"] else "",
         }
+        if "id" in row.keys():
+            msg["id"] = int(row["id"])
         tool_calls = json.loads(row["tool_calls"])
         if tool_calls:
             msg["tool_calls"] = tool_calls
         if row["tool_call_id"]:
             msg["tool_call_id"] = row["tool_call_id"]
+        if user_index is not None:
+            msg["user_index"] = user_index
         return msg
 
     # ── 核心接口 ──────────────────────────────────────────────────────────────
@@ -218,6 +228,74 @@ class SessionStore:
             ).fetchall()
 
         return [self._row_to_message(row) for row in reversed(rows)]
+
+    def load_page(
+        self,
+        session_id: str,
+        limit: int = 60,
+        before_id: int | None = None,
+        user_id: int | None = None,
+    ) -> dict[str, Any]:
+        """分页加载消息：默认取最近一页；`before_id` 取更早一页。
+
+        Args:
+            session_id: 会话 ID。
+            limit: 单页条数，夹在 1～`_PAGE_MAX`。
+            before_id: 游标：只取 id 严格小于此值的行（不含）。
+            user_id: 归属用户；None 取 current_user_id()。
+
+        Returns:
+            ``messages``（时序升序）、``has_more``、``oldest_id``（本页最早一条的 id，供下页游标）。
+            非本人 session 时三项均为空/false。
+        """
+        uid = user_id if user_id is not None else current_user_id()
+        page_limit = max(1, min(int(limit), _PAGE_MAX))
+        empty: dict[str, Any] = {"messages": [], "has_more": False, "oldest_id": None}
+        with self._lock:
+            if not self._owns_unlocked(session_id, uid):
+                return empty
+            if before_id is not None:
+                rows = self._conn.execute(
+                    """SELECT id, role, content, tool_calls, tool_call_id
+                       FROM messages
+                       WHERE session_id = ? AND id < ?
+                       ORDER BY id DESC
+                       LIMIT ?""",
+                    (session_id, before_id, page_limit),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    """SELECT id, role, content, tool_calls, tool_call_id
+                       FROM messages
+                       WHERE session_id = ?
+                       ORDER BY id DESC
+                       LIMIT ?""",
+                    (session_id, page_limit),
+                ).fetchall()
+            if not rows:
+                return empty
+            oldest_row_id = int(rows[-1]["id"])
+            older = self._conn.execute(
+                "SELECT 1 FROM messages WHERE session_id = ? AND id < ? LIMIT 1",
+                (session_id, oldest_row_id),
+            ).fetchone()
+            has_more = older is not None
+            messages: list[dict[str, Any]] = []
+            for row in reversed(rows):
+                user_index: int | None = None
+                if row["role"] == "user":
+                    cnt_row = self._conn.execute(
+                        """SELECT COUNT(*) FROM messages
+                           WHERE session_id = ? AND role = 'user' AND id <= ?""",
+                        (session_id, row["id"]),
+                    ).fetchone()
+                    user_index = int(cnt_row[0]) - 1
+                messages.append(self._row_to_message(row, user_index=user_index))
+        return {
+            "messages": messages,
+            "has_more": has_more,
+            "oldest_id": oldest_row_id,
+        }
 
     def count_user_messages(self, session_id: str, user_id: int | None = None) -> int:
         """统计某 session 内 role='user' 的消息条数（用于记忆提取的无状态节流判定）。

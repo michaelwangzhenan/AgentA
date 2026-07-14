@@ -15,6 +15,9 @@ export type ChatViewProps = {
   onEditResend: (userId: string, newText: string) => void
   onResendUser: (userId: string) => void
   onSwitchVersion: (assistantId: string, index: number) => void
+  hasMoreOlder?: boolean
+  loadingOlder?: boolean
+  onLoadOlder?: () => void | Promise<void>
   // 嵌入到「学而时习」侧栏时隐藏自带 header（外层已有标题栏）
   hideHeader?: boolean
   // 嵌入窄面板时让气泡占满宽度
@@ -31,6 +34,9 @@ export function ChatView({
   onEditResend,
   onResendUser,
   onSwitchVersion,
+  hasMoreOlder,
+  loadingOlder,
+  onLoadOlder,
   hideHeader = false,
   compact = false,
 }: ChatViewProps) {
@@ -75,7 +81,13 @@ export function ChatView({
       ) : (
         // 有消息：列表 + 沉底 composer
         <>
-          <MessageList messages={messages} cb={cb} />
+          <MessageList
+            messages={messages}
+            cb={cb}
+            hasMoreOlder={hasMoreOlder}
+            loadingOlder={loadingOlder}
+            onLoadOlder={onLoadOlder}
+          />
           {composer}
         </>
       )}

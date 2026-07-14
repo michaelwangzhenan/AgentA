@@ -640,3 +640,37 @@ class TestLoadLastN:
         result_b = store.load_last_n_messages("sb", 2)
         assert all(m["content"].startswith("a") for m in result_a)
         assert all(m["content"].startswith("b") for m in result_b)
+
+
+# ── 单元测试：load_page 分页 ───────────────────────────────────────────────
+
+class TestLoadPage:
+    """测试 load_page() 游标分页与 user_index 回填。"""
+
+    def test_returns_empty_for_nonexistent_session(self, store: SessionStore) -> None:
+        page = store.load_page("no-such", limit=10)
+        assert page == {"messages": [], "has_more": False, "oldest_id": None}
+
+    def test_first_page_tail_matches_load_last_n(self, store: SessionStore) -> None:
+        for i in range(8):
+            store.append("p1", {"role": "user", "content": f"m{i}"})
+        page = store.load_page("p1", limit=3)
+        tail = store.load_last_n_messages("p1", 3)
+        assert [m["content"] for m in page["messages"]] == [m["content"] for m in tail]
+        assert page["has_more"] is True
+        assert page["oldest_id"] is not None
+
+    def test_before_id_loads_older_page(self, store: SessionStore) -> None:
+        for i in range(6):
+            store.append("p2", {"role": "user", "content": f"x{i}"})
+        first = store.load_page("p2", limit=3)
+        second = store.load_page("p2", limit=3, before_id=first["oldest_id"])
+        assert [m["content"] for m in second["messages"]] == ["x0", "x1", "x2"]
+        assert second["has_more"] is False
+
+    def test_user_index_global_not_page_local(self, store: SessionStore) -> None:
+        for i in range(5):
+            store.append("p3", {"role": "user", "content": f"u{i}"})
+        page = store.load_page("p3", limit=2)
+        users = [m for m in page["messages"] if m["role"] == "user"]
+        assert [m["user_index"] for m in users] == [3, 4]

@@ -6,7 +6,9 @@ import logging
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+import src.config as config
 
 from src.api.deps import get_session_store, get_current_user
 from src.api.schemas.session import (
@@ -133,17 +135,34 @@ def truncate_session(
 )
 def get_session_messages(
     session_id: str,
+    limit: int | None = Query(
+        default=None,
+        ge=1,
+        le=200,
+        description="单页条数；缺省取 SESSION_MESSAGES_PAGE_SIZE",
+    ),
+    before_id: int | None = Query(
+        default=None,
+        ge=1,
+        description="游标：只取 id 严格小于此值的更早消息",
+    ),
     store: SessionStore = Depends(get_session_store),
     user: dict = Depends(get_current_user),
 ) -> SessionMessagesResponse:
-    """拉某 session 的完整 messages 历史（OpenAI messages 格式，含 tool_calls）。
+    """拉某 session 的消息历史（OpenAI messages 格式，默认最近一页）。
 
     session 不存在 → 返回空列表（保持幂等）；存在但归属他人 → 404。
     """
     owner = store.get_session_owner(session_id)
     if owner is not None and owner != user["id"]:
         raise HTTPException(status_code=404, detail=f"session not found: {session_id}")
-    # 必须显式传 user_id：本路由不设 current_user contextvar，load() 缺省会回落到
+    page_limit = limit if limit is not None else config.SESSION_MESSAGES_PAGE_SIZE
+    # 必须显式传 user_id：本路由不设 current_user contextvar，load_page 缺省会回落到
     # DEFAULT_USER_ID(1) 再做一次归属校验，非 1 号用户的 session 会被误判为不归属而返回空。
-    messages = store.load(session_id, user_id=user["id"])
-    return SessionMessagesResponse(messages=messages)
+    page = store.load_page(
+        session_id,
+        limit=page_limit,
+        before_id=before_id,
+        user_id=user["id"],
+    )
+    return SessionMessagesResponse(**page)

@@ -53,6 +53,9 @@ function App() {
   const {
     messages,
     inFlight,
+    hasMoreOlder,
+    loadingOlder,
+    loadOlderMessages,
     send,
     stop,
     editResend,
@@ -159,6 +162,9 @@ function App() {
           onEditResend={editResend}
           onResendUser={resendUser}
           onSwitchVersion={switchVersion}
+          hasMoreOlder={hasMoreOlder}
+          loadingOlder={loadingOlder}
+          onLoadOlder={loadOlderMessages}
         />
       )}
       {activeView === 'kb' && (
@@ -193,6 +199,9 @@ function App() {
           onEditResend={editResend}
           onResendUser={resendUser}
           onSwitchVersion={switchVersion}
+          hasMoreOlder={hasMoreOlder}
+          loadingOlder={loadingOlder}
+          onLoadOlder={loadOlderMessages}
         />
       )}
       {activeView === 'usage' && <UsageView />}

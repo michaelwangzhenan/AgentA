@@ -138,7 +138,7 @@ def test_get_messages_empty(client: TestClient, store: SessionStore) -> None:
     created = client.post("/api/sessions").json()
     r = client.get(f"/api/sessions/{created['id']}/messages")
     assert r.status_code == 200
-    assert r.json() == {"messages": []}
+    assert r.json() == {"messages": [], "has_more": False, "oldest_id": None}
 
 
 def test_get_messages_returns_appended(client: TestClient, store: SessionStore) -> None:
@@ -163,7 +163,67 @@ def test_get_messages_nonexistent_session_returns_empty(client: TestClient) -> N
     """语义上 session 不存在 = 没消息；不报 404（前端切到已删的 session 时优雅 fallback）"""
     r = client.get("/api/sessions/not-exist-uuid/messages")
     assert r.status_code == 200
-    assert r.json() == {"messages": []}
+    assert r.json() == {"messages": [], "has_more": False, "oldest_id": None}
+
+
+def test_get_messages_pagination_large_session(
+    client: TestClient, store: SessionStore
+) -> None:
+    """千级消息会话：首屏只返一页，上滚 before_id 可拉更早段。"""
+    sid = client.post("/api/sessions").json()["id"]
+    total = 120
+    for i in range(total):
+        store.append(sid, {"role": "user", "content": f"q{i}"})
+        store.append(sid, {"role": "assistant", "content": f"a{i}"})
+
+    r1 = client.get(f"/api/sessions/{sid}/messages?limit=60")
+    assert r1.status_code == 200
+    body1 = r1.json()
+    assert len(body1["messages"]) == 60
+    assert body1["has_more"] is True
+    assert body1["oldest_id"] is not None
+    assert body1["messages"][0]["content"] == "q90"
+    assert body1["messages"][-1]["content"] == "a119"
+
+    r2 = client.get(
+        f"/api/sessions/{sid}/messages?limit=60&before_id={body1['oldest_id']}"
+    )
+    assert r2.status_code == 200
+    body2 = r2.json()
+    assert len(body2["messages"]) == 60
+    assert body2["has_more"] is True
+    assert body2["messages"][0]["content"] == "q60"
+    assert body2["messages"][-1]["content"] == "a89"
+
+    r3 = client.get(
+        f"/api/sessions/{sid}/messages?limit=60&before_id={body2['oldest_id']}"
+    )
+    body3 = r3.json()
+    assert len(body3["messages"]) == 60
+    assert body3["has_more"] is True
+    assert body3["messages"][0]["content"] == "q30"
+
+    r4 = client.get(
+        f"/api/sessions/{sid}/messages?limit=60&before_id={body3['oldest_id']}"
+    )
+    body4 = r4.json()
+    assert len(body4["messages"]) == 60
+    assert body4["has_more"] is False
+    assert body4["messages"][0]["content"] == "q0"
+    assert body4["messages"][-1]["content"] == "a29"
+
+
+def test_get_messages_user_index_on_user_rows(
+    client: TestClient, store: SessionStore
+) -> None:
+    sid = client.post("/api/sessions").json()["id"]
+    for i in range(3):
+        store.append(sid, {"role": "user", "content": f"u{i}"})
+        store.append(sid, {"role": "assistant", "content": f"a{i}"})
+
+    msgs = client.get(f"/api/sessions/{sid}/messages").json()["messages"]
+    users = [m for m in msgs if m["role"] == "user"]
+    assert [m["user_index"] for m in users] == [0, 1, 2]
 
 
 # ─── POST /api/sessions/{id}/truncate ────────────────────────────────────

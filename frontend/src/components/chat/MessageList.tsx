@@ -5,11 +5,15 @@ import logoUrl from '@/assets/agentA_logo.svg'
 import type { Message } from '@/types/chat'
 
 const STICK_THRESHOLD_PX = 120
+const LOAD_OLDER_THRESHOLD_PX = 80
 const TIME_GAP_MS = 30 * 60 * 1000
 
 type Props = {
   messages: Message[]
   cb: BubbleCallbacks
+  hasMoreOlder?: boolean
+  loadingOlder?: boolean
+  onLoadOlder?: () => void | Promise<void>
 }
 
 function timeLabel(ms: number): string {
@@ -23,16 +27,48 @@ function timeLabel(ms: number): string {
   return `${d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })} ${hhmm}`
 }
 
-export function MessageList({ messages, cb }: Props) {
+export function MessageList({
+  messages,
+  cb,
+  hasMoreOlder = false,
+  loadingOlder = false,
+  onLoadOlder,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [stick, setStick] = useState(true)
+  const scrollRestoreRef = useRef<number | null>(null)
+  const loadOlderBusyRef = useRef(false)
 
   const onScroll = () => {
     const el = containerRef.current
     if (!el) return
     const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
     setStick(fromBottom < STICK_THRESHOLD_PX)
+    if (
+      el.scrollTop < LOAD_OLDER_THRESHOLD_PX &&
+      hasMoreOlder &&
+      !loadingOlder &&
+      onLoadOlder &&
+      !loadOlderBusyRef.current
+    ) {
+      loadOlderBusyRef.current = true
+      scrollRestoreRef.current = el.scrollHeight
+      void Promise.resolve(onLoadOlder()).finally(() => {
+        loadOlderBusyRef.current = false
+      })
+    }
   }
+
+  useEffect(() => {
+    if (scrollRestoreRef.current == null) return
+    const el = containerRef.current
+    if (!el) return
+    const prevHeight = scrollRestoreRef.current
+    scrollRestoreRef.current = null
+    requestAnimationFrame(() => {
+      el.scrollTop += el.scrollHeight - prevHeight
+    })
+  }, [messages])
 
   useEffect(() => {
     if (!stick) return
@@ -61,6 +97,11 @@ export function MessageList({ messages, cb }: Props) {
         className="h-full overflow-y-auto px-4 py-6"
       >
         <div className="mx-auto max-w-4xl space-y-4">
+          {loadingOlder ? (
+            <div className="flex justify-center py-2 text-xs text-muted-foreground">
+              加载更早的消息…
+            </div>
+          ) : null}
           {messages.map((m, i) => {
             const prev = messages[i - 1]
             const showSep =
