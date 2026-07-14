@@ -16,11 +16,13 @@ import threading
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
 import src.config as _cfg
 from src.agent.agent_api import AgentAPI
+from src.agent.core import run_cancel
+from src.api.sse_outbound import SseOutbound
 from src.stores.user_context import use_user
 from src.api.deps import get_agent, get_session_store, get_current_user, get_user_store
 from src.api.routes.auth import effective_llm_prefs
@@ -310,6 +312,7 @@ _SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 @router.post("/chat/stream")
 async def chat_stream(
     req: ChatRequest,
+    request: Request,
     agent: AgentAPI = Depends(get_agent),
     user: dict = Depends(get_current_user),
     history: SessionStore = Depends(get_session_store),
@@ -367,7 +370,14 @@ async def chat_stream(
             return EventSourceResponse(_cached_gen(), headers=_SSE_HEADERS)
 
     loop = asyncio.get_running_loop()
-    queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+    cancel_event = threading.Event()
+    outbound = SseOutbound(
+        loop,
+        maxsize=_cfg.SSE_QUEUE_MAXSIZE,
+        merge_max_chars=_cfg.SSE_TOKEN_MERGE_MAX_CHARS,
+        merge_interval_s=_cfg.SSE_TOKEN_MERGE_INTERVAL_MS / 1000.0,
+    )
+    queue = outbound.queue
     trace_id = str(uuid.uuid4())
 
     usage_holder: dict[str, Any] = {}
@@ -406,18 +416,22 @@ async def chat_stream(
         if et == "error" and _state["suppress"]:
             _state["held_errors"].append(frame)
             return
-        loop.call_soon_threadsafe(queue.put_nowait, frame)
+        if et == "error" and _state["suppress"]:
+            _state["held_errors"].append(frame)
+            return
+        outbound.enqueue_from_thread(frame)
 
     def _run_with(model: str) -> None:
-        with _cfg.use_llm_prefs(model, prefs.thinking_enabled, prefs.thinking_budget):
-            set_session_id(session_id)
-            if is_deep:
-                from src.agent.core.research_engine import ResearchEngine
-                ResearchEngine(history, user["id"]).run(
-                    req.message, session_id=session_id, event_callback=_on_event,
-                )
-            else:
-                agent.run(req.message, session_id=session_id, event_callback=_on_event)
+        with run_cancel.cancel_scope(cancel_event):
+            with _cfg.use_llm_prefs(model, prefs.thinking_enabled, prefs.thinking_budget):
+                set_session_id(session_id)
+                if is_deep:
+                    from src.agent.core.research_engine import ResearchEngine
+                    ResearchEngine(history, user["id"]).run(
+                        req.message, session_id=session_id, event_callback=_on_event,
+                    )
+                else:
+                    agent.run(req.message, session_id=session_id, event_callback=_on_event)
 
     def _sync_run() -> None:
         nonlocal used_model
@@ -463,14 +477,32 @@ async def chat_stream(
             if used_model == decision.model_id:
                 _record_route_saving(user["id"], decision, usage_holder.get("usage"))
             _maybe_store_cache(cache_on, usage_holder, req.message, user["id"], used_model)
+            _maybe_store_cache(cache_on, usage_holder, req.message, user["id"], used_model)
             await queue.put(_STREAM_SENTINEL)
 
     run_task = asyncio.create_task(_drive_agent())
 
+    async def _watch_disconnect() -> None:
+        while not cancel_event.is_set():
+            if await request.is_disconnected():
+                cancel_event.set()
+                logger.info("[/api/chat/stream] 客户端断开，请求协作式取消")
+                return
+            await asyncio.sleep(0.2)
+
+    disconnect_task = asyncio.create_task(_watch_disconnect())
+
     async def _event_gen():
         try:
             while True:
-                item = await queue.get()
+                if cancel_event.is_set() and queue.empty() and run_task.done():
+                    break
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=0.25)
+                except asyncio.TimeoutError:
+                    if cancel_event.is_set() and run_task.done():
+                        break
+                    continue
                 if item is _STREAM_SENTINEL:
                     break
                 yield {
@@ -478,8 +510,12 @@ async def chat_stream(
                     "data": json.dumps(item, ensure_ascii=False),
                 }
         finally:
-            # cancel 仅取消 asyncio 包装层；executor 里同步的 agent.run 不会真停，
-            # 会自然跑完并释放信号量。事件回调是本次 run 的局部 bus，run 结束即失效。
+            cancel_event.set()
+            disconnect_task.cancel()
+            outbound.close()
+            dropped = outbound.drain()
+            if dropped:
+                logger.debug("[/api/chat/stream] 断开后清空队列 %d 条", dropped)
             if not run_task.done():
                 run_task.cancel()
 

@@ -119,10 +119,14 @@ def test_stream_emits_token_and_final_answer():
 
     frames = _parse_sse(body)
     types = [f["data"]["type"] for f in frames if "data" in f and isinstance(f["data"], dict)]
-    assert types == ["token_chunk", "token_chunk", "final_answer"]
-    assert frames[0]["data"]["payload"]["text"] == "hi "
-    assert frames[1]["data"]["payload"]["text"] == "world"
-    assert frames[2]["data"]["payload"]["text"] == "hi world"
+    assert types[-1] == "final_answer"
+    token_frames = [
+        f["data"] for f in frames
+        if f.get("data", {}).get("type") == "token_chunk"
+    ]
+    merged = "".join(f["payload"]["text"] for f in token_frames)
+    assert merged == "hi world"
+    assert frames[-1]["data"]["payload"]["text"] == "hi world"
 
 
 def test_stream_emits_thinking_plan_and_tool_events():
@@ -281,3 +285,28 @@ def test_stream_sanitizes_namedtuple_payload():
         "completion_tokens": 20,
         "total_tokens": 30,
     }
+
+
+def test_stream_final_answer_not_dropped_when_queue_small(monkeypatch):
+    """队列很小时 progress 可丢，final_answer 仍到达客户端。"""
+    import src.config as cfg
+
+    monkeypatch.setattr(cfg, "SSE_QUEUE_MAXSIZE", 2)
+    monkeypatch.setattr(cfg, "SSE_TOKEN_MERGE_INTERVAL_MS", 0)
+    monkeypatch.setattr(cfg, "SSE_TOKEN_MERGE_MAX_CHARS", 0)
+
+    fake = FakeAgent(events_to_emit=[
+        AgentEvent(type="progress", payload={"n": 1}),
+        AgentEvent(type="progress", payload={"n": 2}),
+        AgentEvent(type="progress", payload={"n": 3}),
+        AgentEvent(type="final_answer", payload={"text": "ok", "usage": None}),
+    ])
+    app.dependency_overrides[get_agent] = lambda: fake
+
+    with client.stream("POST", "/api/chat/stream", json={"message": "x"}) as r:
+        body = "".join(chunk for chunk in r.iter_text())
+
+    frames = _parse_sse(body)
+    types = [f["data"]["type"] for f in frames]
+    assert types[-1] == "final_answer"
+    assert frames[-1]["data"]["payload"]["text"] == "ok"

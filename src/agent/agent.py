@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-from src.agent.core.citation_builder import CitationBuilder
+from src.agent.core.run_cancel import is_cancelled
 from src.agent.core.event_bus import (
     ALL_EVENT_TYPES,
     EVENT_ERROR,
@@ -328,6 +328,10 @@ class Agent:
             logger.warning("[Agent] 当前模型不支持工具调用，本轮降级为纯聊天（不启用 tools）")
 
         for iteration in range(1, _cfg.MAX_HARD_CAP_ROUNDS + 1):
+            if is_cancelled():
+                return self._return_client_cancelled(
+                    sid, bus, own_state, _prompt_tokens, _comp_tokens, _llm_rounds,
+                )
             # 每轮按 active plan 步数重算 tool/total 上限（无 plan 退化为 baseline）
             eff_tool_max, eff_total_max = self._compute_effective_caps(messages)
             if iteration > eff_total_max:
@@ -496,6 +500,36 @@ class Agent:
                      "trace": {"llm_rounds": _llm_rounds}},
         ))
         return fallback
+
+    def _return_client_cancelled(
+        self,
+        sid: str,
+        bus: EventBus,
+        own_state: bool,
+        prompt_tokens: int,
+        comp_tokens: int,
+        llm_rounds: list[dict[str, Any]],
+    ) -> str:
+        """客户端断开 SSE 后协作式退出。"""
+        logger.info("[Agent] 客户端已断开，中止 run session=%s", sid)
+        cancel_msg = "对话已中断。"
+        self._session_store.append(sid, {"role": "assistant", "content": cancel_msg})
+        usage = (
+            TokenUsage(prompt_tokens, comp_tokens, prompt_tokens + comp_tokens)
+            if (prompt_tokens or comp_tokens) else None
+        )
+        if own_state:
+            self.last_usage = usage
+        bus.publish(AgentEvent(
+            type=EVENT_FINAL_ANSWER,
+            payload={
+                "text": cancel_msg,
+                "usage": usage,
+                "client_disconnected": True,
+                "trace": {"llm_rounds": llm_rounds},
+            },
+        ))
+        return cancel_msg
 
     def _finalize_pending_plan_steps(
         self, messages: list[dict[str, Any]], bus: EventBus

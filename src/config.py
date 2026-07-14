@@ -480,6 +480,13 @@ SEMANTIC_CACHE_TTL_DAYS: int = int(os.getenv("SEMANTIC_CACHE_TTL_DAYS", "7"))
 # 防止并发把 LLM 配额 / CPU（含 search_knowledge 精排）打满。
 MAX_CONCURRENT_AGENT_RUNS: int = int(os.getenv("MAX_CONCURRENT_AGENT_RUNS", "4"))
 
+# SSE 流式出站队列容量；慢客户端时满队列会丢弃可合并的 token/thinking 进度帧
+SSE_QUEUE_MAXSIZE: int = int(os.getenv("SSE_QUEUE_MAXSIZE", "256"))
+# token_chunk / thinking_chunk 合并：累计字符数达到此值立即 flush
+SSE_TOKEN_MERGE_MAX_CHARS: int = int(os.getenv("SSE_TOKEN_MERGE_MAX_CHARS", "512"))
+# token_chunk / thinking_chunk 合并：距上次 flush 超过此毫秒数则 flush
+SSE_TOKEN_MERGE_INTERVAL_MS: int = int(os.getenv("SSE_TOKEN_MERGE_INTERVAL_MS", "50"))
+
 # ── Deep Research（深度研究）──────────────────────────────────────────────────
 # 一句话换回一篇带引用的调研报告：规划拆子问题 → 并行子代理查 KB+web → 反思补查 → 综述成稿。
 # 定位"重质量不重速度"；走独立 ResearchEngine，不复用普通 chat 主循环。

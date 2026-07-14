@@ -30,7 +30,7 @@ from typing import Any
 
 import src.config as _cfg
 from src.agent.core.agent_commons import TokenUsage
-from src.agent.core.citation_builder import CitationBuilder
+from src.agent.core.run_cancel import is_cancelled
 from src.agent.core.event_bus import (
     ALL_EVENT_TYPES,
     EVENT_ERROR,
@@ -184,14 +184,23 @@ class ResearchEngine:
         }))
         bus.publish(AgentEvent(type=EVENT_RESEARCH_STARTED, payload={"query": query}))
 
+        if (early := self._finish_if_cancelled(session_id, usage, bus)) is not None:
+            return early
+
         # ① 规划
         subquestions = self._plan(query, usage)
         bus.publish(AgentEvent(type=EVENT_RESEARCH_PLAN, payload={
             "subquestions": [{"id": i, "text": q} for i, q in enumerate(subquestions)],
         }))
 
+        if (early := self._finish_if_cancelled(session_id, usage, bus)) is not None:
+            return early
+
         # ② 并行子代理检索
         results = self._run_subagents(subquestions, citation_builder, bus, usage, start_id=0)
+
+        if (early := self._finish_if_cancelled(session_id, usage, bus)) is not None:
+            return early
 
         # ③ 反思补查（可选，最多 1 轮）
         if _cfg.DEEP_RESEARCH_REFLECT_ENABLED:
@@ -201,6 +210,9 @@ class ResearchEngine:
                     followups, citation_builder, bus, usage, start_id=len(results),
                 )
                 results.extend(extra)
+
+        if (early := self._finish_if_cancelled(session_id, usage, bus)) is not None:
+            return early
 
         # ④ 综述成稿（流式）
         bus.publish(AgentEvent(type=EVENT_RESEARCH_SYNTHESIZING, payload={}))
@@ -251,6 +263,8 @@ class ResearchEngine:
         """线程池并行跑子代理；子线程 copy_context 传 user / llm_prefs / session 等 contextvar。"""
         if not questions:
             return []
+        if is_cancelled():
+            return []
         max_parallel = max(1, _cfg.DEEP_RESEARCH_MAX_PARALLEL_SUBAGENTS)
         tasks = list(enumerate(questions, start=start_id))
 
@@ -287,6 +301,13 @@ class ResearchEngine:
 
         try:
             for rnd in range(1, max_rounds + 1):
+                if is_cancelled():
+                    bus.publish(AgentEvent(type=EVENT_RESEARCH_SUBAGENT_END, payload={
+                        "sub_id": sub_id, "status": "failed", "sources": sources,
+                        "note": "客户端已断开",
+                    }))
+                    return {"sub_id": sub_id, "question": question, "status": "failed",
+                            "findings": "", "sources": sources}
                 # 来源达上限（本子代理或全局）→ 本轮不给 tools，逼出小结
                 budget_left = sources < per_cap and not self._total_cap_reached()
                 resp = chat(messages, tools=tools if budget_left else None)
@@ -454,6 +475,28 @@ class ResearchEngine:
         return fallback
 
     # ── 收尾 ────────────────────────────────────────────────────────────────
+
+    def _finish_if_cancelled(
+        self,
+        session_id: str,
+        usage: _Usage,
+        bus: EventBus,
+    ) -> str | None:
+        if not is_cancelled():
+            return None
+        logger.info("[ResearchEngine] 客户端已断开，中止研究 session=%s", session_id)
+        msg = "深度研究已中断。"
+        self._session_store.append(
+            session_id, {"role": "assistant", "content": msg}, user_id=self._user_id,
+        )
+        bus.publish(AgentEvent(type=EVENT_FINAL_ANSWER, payload={
+            "text": msg,
+            "usage": usage.to_token_usage(),
+            "used_tools": True,
+            "personalized": False,
+            "client_disconnected": True,
+        }))
+        return msg
 
     def _finalize(
         self,
