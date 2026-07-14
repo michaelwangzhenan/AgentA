@@ -7,10 +7,16 @@
 """
 
 from pathlib import Path
+import zipfile
 
 import pytest
 
-from src.rag.parser import parse_file, SUPPORTED_EXTENSIONS
+from src.rag.parser import (
+    DocxParseError,
+    SUPPORTED_EXTENSIONS,
+    inspect_docx_uncompressed_size,
+    parse_file,
+)
 
 # 测试文档目录（test_sample.* 实际存放在 datasets/data_en/test/ 下）
 DOCS_DIR = Path(__file__).resolve().parents[2] / "datasets" / "data_en" / "test"
@@ -32,6 +38,19 @@ class TestSupportedExtensions:
     def test_nonexistent_file_raises_file_not_found(self) -> None:
         with pytest.raises(FileNotFoundError):
             parse_file("nonexistent_file_xyz.md")
+
+    def test_office_temp_file_is_rejected(self, tmp_path: Path) -> None:
+        path = tmp_path / "~$draft.docx"
+        path.write_bytes(b"placeholder")
+        with pytest.raises(ValueError, match="Office 临时文件"):
+            parse_file(path)
+
+    def test_docx_uncompressed_limit_is_checked(self, tmp_path: Path) -> None:
+        path = tmp_path / "large.docx"
+        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("word/document.xml", b"x" * 4096)
+        with pytest.raises(DocxParseError, match="解压后过大"):
+            inspect_docx_uncompressed_size(path, max_bytes=1024)
 
 
 class TestParseMarkdown:

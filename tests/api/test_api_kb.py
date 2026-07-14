@@ -260,6 +260,19 @@ def test_upload_unsupported_extension_returns_415(client: TestClient) -> None:
     assert ".exe" in r.json()["detail"]
 
 
+def test_upload_office_temp_file_returns_400(client: TestClient) -> None:
+    files = {
+        "file": (
+            "~$draft.docx",
+            b"temporary",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+    }
+    r = client.post("/api/kb/upload", files=files)
+    assert r.status_code == 400
+    assert "临时文件" in r.json()["detail"]
+
+
 def test_upload_empty_file_returns_422(client: TestClient) -> None:
     files = {"file": ("empty.md", b"", "text/markdown")}
     r = client.post("/api/kb/upload", files=files)

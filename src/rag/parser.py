@@ -10,7 +10,13 @@
 
 import logging
 import re
+import subprocess
+import sys
+import tempfile
+import zipfile
 from collections import Counter
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -20,6 +26,88 @@ logger = logging.getLogger(__name__)
 SUPPORTED_EXTENSIONS: frozenset[str] = frozenset(
     {".md", ".txt", ".html", ".htm", ".pdf", ".docx", ".pptx", ".xlsx"}
 )
+
+
+class DocxParseError(ValueError):
+    """DOCX 安全检查或隔离解析失败。"""
+
+
+def is_office_temp_file(path_or_name: str | Path) -> bool:
+    """判断是否为 Office 自动生成的 ~$ 临时文件。"""
+    return Path(path_or_name).name.startswith("~$")
+
+
+def inspect_docx_uncompressed_size(path: Path, max_bytes: int) -> int:
+    """返回 DOCX 解压总量；超过上限时在加载 XML 前拒绝。"""
+    total = 0
+    try:
+        with zipfile.ZipFile(path) as archive:
+            for info in archive.infolist():
+                total += info.file_size
+                if total > max_bytes:
+                    raise DocxParseError(
+                        "DOCX 解压后过大"
+                        f"（{total / 1024 / 1024:.1f} MiB > {max_bytes / 1024 / 1024:.0f} MiB）"
+                    )
+    except zipfile.BadZipFile as exc:
+        raise DocxParseError(f"DOCX 文件损坏或格式无效: {path.name}") from exc
+    return total
+
+
+@contextmanager
+def parsed_docx_temp(path: Path) -> Iterator[Path]:
+    """在受限子进程中解析 DOCX，返回只含清洗文本的临时文件。"""
+    cfg = _cfg()
+    max_bytes = cfg.DOCX_MAX_UNZIP_MB * 1024 * 1024
+    uncompressed = inspect_docx_uncompressed_size(path, max_bytes)
+    logger.info(
+        "[parser] DOCX 预检通过: %s compressed=%d uncompressed=%d",
+        path.name,
+        path.stat().st_size,
+        uncompressed,
+    )
+
+    temp = tempfile.NamedTemporaryFile(prefix="agenta-docx-", suffix=".txt", delete=False)
+    temp_path = Path(temp.name)
+    temp.close()
+    command = [
+        sys.executable,
+        "-m",
+        "src.rag.docx_worker",
+        str(path),
+        "--memory-mb",
+        str(cfg.DOCX_PARSE_MEMORY_MB),
+    ]
+    project_root = Path(__file__).resolve().parents[2]
+    try:
+        with temp_path.open("wb") as output:
+            process = subprocess.Popen(
+                command,
+                cwd=project_root,
+                stdout=output,
+                stderr=subprocess.PIPE,
+            )
+            try:
+                _, stderr = process.communicate(timeout=cfg.DOCX_PARSE_TIMEOUT_SEC)
+            except subprocess.TimeoutExpired as exc:
+                process.kill()
+                process.communicate()
+                raise DocxParseError(
+                    f"DOCX 解析超时（超过 {cfg.DOCX_PARSE_TIMEOUT_SEC} 秒）: {path.name}"
+                ) from exc
+
+        if process.returncode != 0:
+            detail = (stderr or b"").decode("utf-8", errors="replace").strip()
+            if process.returncode in (-9, 137):
+                detail = detail or f"超过 {cfg.DOCX_PARSE_MEMORY_MB} MiB 内存限制"
+            raise DocxParseError(
+                f"DOCX 隔离解析失败: {path.name}"
+                + (f" — {detail[-500:]}" if detail else "")
+            )
+        logger.info("[parser] DOCX 隔离解析完成: %s text_bytes=%d", path.name, temp_path.stat().st_size)
+        yield temp_path
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 # ── 解析后内容清洗 ────────────────────────────────────────────────────────────
@@ -121,6 +209,9 @@ def parse_file(file_path: str | Path) -> str:
     if not path.exists():
         raise FileNotFoundError(f"文件不存在: {path}")
 
+    if is_office_temp_file(path):
+        raise ValueError(f"跳过 Office 临时文件: {path.name}")
+
     suffix = path.suffix.lower()
 
     if suffix not in SUPPORTED_EXTENSIONS:
@@ -137,7 +228,8 @@ def parse_file(file_path: str | Path) -> str:
         case ".pdf":
             raw = _parse_pdf(path)
         case ".docx":
-            raw = _parse_docx(path)
+            with parsed_docx_temp(path) as parsed_path:
+                return parsed_path.read_text(encoding="utf-8")
         case ".pptx":
             raw = _parse_pptx(path)
         case ".xlsx":

@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 
 # PAGE 标记必须独占一行：[[PAGE:5]]；行尾允许残留空白
@@ -164,44 +165,69 @@ def _heading_breadcrumb(stack: list[tuple[int, str]]) -> str:
     return "\n".join(f"{'#' * level} {title}" for level, title in stack)
 
 
-def split_structured(text: str, chunk_size: int, overlap: int) -> list[Chunk]:
-    """
-    识别 [[PAGE:N]] 与 # / ## / ... 标题行，把文本切成带结构 metadata 的 Chunk 列表。
-
-    流程：
-      1. 逐行扫描，维护 (current_page, heading_stack) 状态。
-      2. 标题行与 PAGE 行作为"分段点"：碰到时 flush 当前 body 为一个 section。
-      3. 标题行同时更新 heading_stack（新 level >= 栈顶 level 的旧标题被弹出）。
-      4. 对每个 section.body 调用 split_text 切成多块；每块前缀注入路径。
-    """
-    if not text or not text.strip():
+def _split_section(
+    stack: list[tuple[int, str]],
+    page_no: int | None,
+    body: list[str],
+    line_start: int,
+    chunk_size: int,
+    overlap: int,
+) -> list[Chunk]:
+    """切分一个标题区段；调用结束后即可释放该区段正文。"""
+    body_text = "\n".join(body).strip()
+    if not body_text:
         return []
+    breadcrumb = _heading_breadcrumb(stack)
+    budget = chunk_size - (len(breadcrumb) + 2 if breadcrumb else 0)
+    budget = max(budget, max(chunk_size // 2, 64))
 
-    lines = text.splitlines()
-    # 每个 section: (heading_stack_snapshot, page_no, body_lines, line_start)
-    sections: list[tuple[list[tuple[int, str]], int | None, list[str], int]] = []
+    chunks: list[Chunk] = []
+    line_cursor = line_start
+    for sub in split_text(body_text, budget, overlap):
+        sub_lines = sub.count("\n") + 1
+        chunks.append(
+            Chunk(
+                text=(breadcrumb + "\n\n" + sub) if breadcrumb else sub,
+                heading_path=[title for _, title in stack],
+                page_no=page_no,
+                line_start=line_cursor,
+                line_end=line_cursor + sub_lines - 1,
+            )
+        )
+        line_cursor += sub_lines
+    return chunks
 
+
+def iter_structured_lines(
+    lines: Iterable[str],
+    chunk_size: int,
+    overlap: int,
+) -> Iterator[Chunk]:
+    """逐行读取结构化文本，按标题区段增量产出分块。"""
     stack: list[tuple[int, str]] = []
     current_page: int | None = None
     body: list[str] = []
     section_start: int = 1
 
-    def flush(start: int) -> None:
-        if any(line.strip() for line in body):
-            sections.append((list(stack), current_page, list(body), start))
+    def flush(start: int) -> list[Chunk]:
+        chunks = _split_section(
+            list(stack), current_page, body, start, chunk_size, overlap
+        )
         body.clear()
+        return chunks
 
-    for idx, line in enumerate(lines, start=1):
+    for idx, raw_line in enumerate(lines, start=1):
+        line = raw_line.rstrip("\r\n")
         m_page = _PAGE_RE.match(line)
         if m_page:
-            flush(section_start)
+            yield from flush(section_start)
             current_page = int(m_page.group(1))
             section_start = idx + 1
             continue
 
         m_h = _HEADING_RE.match(line)
         if m_h:
-            flush(section_start)
+            yield from flush(section_start)
             level = len(m_h.group(1))
             title = m_h.group(2).strip()
             while stack and stack[-1][0] >= level:
@@ -212,33 +238,13 @@ def split_structured(text: str, chunk_size: int, overlap: int) -> list[Chunk]:
 
         body.append(line)
 
-    flush(section_start)
+    yield from flush(section_start)
 
-    chunks: list[Chunk] = []
-    for snap_stack, page_no, body_lines, line_start in sections:
-        body_text = "\n".join(body_lines).strip()
-        if not body_text:
-            continue
-        breadcrumb = _heading_breadcrumb(snap_stack)
-        # 给正文留出 chunk 预算：减去路径及空行长度，但下限 chunk_size/2 防止退化
-        budget = chunk_size - (len(breadcrumb) + 2 if breadcrumb else 0)
-        budget = max(budget, max(chunk_size // 2, 64))
 
-        sub_chunks = split_text(body_text, budget, overlap)
-        line_cursor = line_start
-        for sub in sub_chunks:
-            sub_lines = sub.count("\n") + 1
-            heading_path = [title for (_, title) in snap_stack]
-            final_text = (breadcrumb + "\n\n" + sub) if breadcrumb else sub
-            chunks.append(
-                Chunk(
-                    text=final_text,
-                    heading_path=heading_path,
-                    page_no=page_no,
-                    line_start=line_cursor,
-                    line_end=line_cursor + sub_lines - 1,
-                )
-            )
-            line_cursor += sub_lines
-
-    return chunks
+def split_structured(text: str, chunk_size: int, overlap: int) -> list[Chunk]:
+    """
+    识别 [[PAGE:N]] 与 Markdown 标题，把文本切成带结构 metadata 的 Chunk 列表。
+    """
+    if not text or not text.strip():
+        return []
+    return list(iter_structured_lines(text.splitlines(), chunk_size, overlap))

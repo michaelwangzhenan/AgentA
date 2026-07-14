@@ -31,7 +31,7 @@ from src.rag.ingest import (
     ingest_one,
     list_kb_documents,
 )
-from src.rag.parser import SUPPORTED_EXTENSIONS
+from src.rag.parser import SUPPORTED_EXTENSIONS, is_office_temp_file
 
 logger = logging.getLogger(__name__)
 
@@ -269,6 +269,11 @@ async def upload_document(
     model = _validate_alias(model or config.DEFAULT_EMBEDDING_ALIAS)
     if not file.filename:
         raise HTTPException(status_code=422, detail="filename 不能为空")
+    rel_basename = relpath.replace("\\", "/").rsplit("/", 1)[-1] if relpath else ""
+    if is_office_temp_file(file.filename) or (
+        rel_basename and is_office_temp_file(rel_basename)
+    ):
+        raise HTTPException(status_code=400, detail="Office 临时文件不支持入库")
 
     suffix = Path(file.filename).suffix.lower()
     if suffix not in SUPPORTED_EXTENSIONS:

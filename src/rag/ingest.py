@@ -29,8 +29,10 @@ for _key in ("HF_ENDPOINT", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE"):
         os.environ[_key] = _val
 
 import hashlib
+import json
 import logging
 import shutil
+import tempfile
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -49,8 +51,13 @@ ProgressCb = Callable[[str, int, int], None]
 import chromadb
 
 import src.config as config
-from src.rag.parser import SUPPORTED_EXTENSIONS, parse_file
-from src.rag.splitter import split_structured
+from src.rag.parser import (
+    SUPPORTED_EXTENSIONS,
+    is_office_temp_file,
+    parse_file,
+    parsed_docx_temp,
+)
+from src.rag.splitter import iter_structured_lines, split_structured
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +99,180 @@ def _detect_lang(text: str) -> str:
     if ratio > 0.05:
         return "mixed"
     return "en"
+
+
+def _file_content_sha1(path: Path) -> str:
+    """流式计算文本临时文件的内容哈希，保持 content_sha1 原有语义。"""
+    digest = hashlib.sha1()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _ingest_docx_file(
+    file_path: Path,
+    rel_path: str,
+    doc_id: str,
+    collection,
+    collection_name: str,
+    progress_cb: ProgressCb | None,
+) -> dict:
+    """隔离解析 DOCX，并按标题区段增量分块、分批写入。"""
+    logger.info("Parse 解析（隔离）: %s", rel_path)
+    if progress_cb:
+        progress_cb("parse", 0, 0)
+
+    chunk_temp = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", prefix="agenta-chunks-", suffix=".jsonl", delete=False
+    )
+    chunk_path = Path(chunk_temp.name)
+    chunk_temp.close()
+    try:
+        with parsed_docx_temp(file_path) as parsed_path:
+            if parsed_path.stat().st_size == 0:
+                logger.warning("  跳过（内容为空）: %s", rel_path)
+                return {"doc_id": doc_id, "chunks": 0, "status": "empty"}
+
+            content_hash = _file_content_sha1(parsed_path)
+            with parsed_path.open("r", encoding="utf-8") as f:
+                lang = _detect_lang(f.read(2000))
+
+            existing = collection.get(
+                where={"doc_id": doc_id},
+                include=["metadatas"],
+            )
+            existing_ids = existing.get("ids") or []
+            existing_metas = existing.get("metadatas") or []
+            if existing_ids and existing_metas:
+                prev_hash = existing_metas[0].get("content_sha1")
+                if prev_hash == content_hash:
+                    logger.info(
+                        "  跳过（内容未变化）: %s → %d 块", rel_path, len(existing_ids)
+                    )
+                    return {
+                        "doc_id": doc_id,
+                        "chunks": len(existing_ids),
+                        "status": "skipped_unchanged",
+                    }
+
+            total_chunks = 0
+            heading_chunks = 0
+            with (
+                parsed_path.open("r", encoding="utf-8") as source,
+                chunk_path.open("w", encoding="utf-8") as spool,
+            ):
+                for chunk in iter_structured_lines(
+                    source, config.CHUNK_SIZE, config.CHUNK_OVERLAP
+                ):
+                    record = {
+                        "text": chunk.text,
+                        "heading_path": chunk.heading_path,
+                        "line_start": chunk.line_start,
+                        "line_end": chunk.line_end,
+                    }
+                    spool.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    total_chunks += 1
+                    if chunk.heading_path:
+                        heading_chunks += 1
+
+        if total_chunks == 0:
+            logger.warning("  跳过（分块结果为空）: %s", rel_path)
+            return {"doc_id": doc_id, "chunks": 0, "status": "empty"}
+
+        if existing_ids:
+            collection.delete(ids=existing_ids)
+            logger.info("  清除旧数据: %s → 删除 %d 条", rel_path, len(existing_ids))
+
+        try:
+            mtime = file_path.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        ingested_at = time.time()
+        if progress_cb:
+            progress_cb("split", 0, total_chunks)
+
+        bm25 = None
+        bm25_error: Exception | None = None
+        if config.BM25_ENABLED:
+            try:
+                from src.rag.bm25_index import get_index
+
+                bm25 = get_index(collection_name)
+                bm25.delete_by_doc_id(doc_id)
+            except Exception as exc:
+                bm25_error = exc
+
+        batch: list[dict] = []
+        done = 0
+
+        def flush_batch() -> None:
+            nonlocal batch, done, bm25_error
+            if not batch:
+                return
+            ids = [_make_chunk_id(doc_id, item["index"]) for item in batch]
+            documents = [item["text"] for item in batch]
+            metadatas: list[dict] = []
+            for item in batch:
+                md: dict = {
+                    "doc_id": doc_id,
+                    "source": rel_path,
+                    "filename": file_path.name,
+                    "ext": ".docx",
+                    "lang": lang,
+                    "mtime": mtime,
+                    "ingested_at": ingested_at,
+                    "content_sha1": content_hash,
+                    "char_count": len(item["text"]),
+                    "chunk_index": item["index"],
+                    "chunk_total": total_chunks,
+                    "line_start": item["line_start"],
+                    "line_end": item["line_end"],
+                }
+                if item["heading_path"]:
+                    md["heading_path"] = " > ".join(item["heading_path"])
+                metadatas.append(md)
+            collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
+            if bm25 is not None and bm25_error is None:
+                try:
+                    bm25.upsert(ids=ids, documents=documents, metadatas=metadatas)
+                except Exception as exc:
+                    bm25_error = exc
+            done += len(batch)
+            if progress_cb:
+                progress_cb("embed", done, total_chunks)
+            batch = []
+
+        with chunk_path.open("r", encoding="utf-8") as spool:
+            for index, line in enumerate(spool):
+                item = json.loads(line)
+                item["index"] = index
+                batch.append(item)
+                if len(batch) >= _EMBED_BATCH_SIZE:
+                    flush_batch()
+            flush_batch()
+
+        if bm25 is not None and bm25_error is None:
+            try:
+                from src.rag.bm25_index import get_index_path, save_index
+
+                save_index(bm25, get_index_path(collection_name))
+                logger.info("  BM25 索引已更新: %s → %d 块", rel_path, total_chunks)
+            except Exception as exc:
+                bm25_error = exc
+        if bm25_error is not None:
+            logger.warning("  BM25 索引更新失败（已跳过）: %s — %s", rel_path, bm25_error)
+
+        logger.info(
+            "  入库: %s → %d 块 (lang=%s, headings=%d)",
+            rel_path,
+            total_chunks,
+            lang,
+            heading_chunks,
+        )
+        return {"doc_id": doc_id, "chunks": total_chunks, "status": "ingested"}
+    finally:
+        chunk_path.unlink(missing_ok=True)
 
 
 def _open_collection(client, model_name: str, collection_name: str, use_api: bool | None = None):
@@ -163,6 +344,16 @@ def _ingest_one_file(
     except ValueError:
         rel_path = file_path.name
     doc_id = _doc_id_from_relpath(rel_path)
+
+    if file_path.suffix.lower() == ".docx":
+        return _ingest_docx_file(
+            file_path,
+            rel_path,
+            doc_id,
+            collection,
+            collection_name,
+            progress_cb,
+        )
 
     logger.info("Parse 解析: %s", rel_path)
     if progress_cb:
@@ -305,6 +496,8 @@ def ingest_one(
         raise FileNotFoundError(f"文件不存在: {fp}")
     if fp.suffix.lower() not in SUPPORTED_EXTENSIONS:
         raise ValueError(f"不支持的格式: {fp.suffix}")
+    if is_office_temp_file(fp):
+        raise ValueError(f"跳过 Office 临时文件: {fp.name}")
 
     docs_path = Path(docs_root).resolve() if docs_root else fp.parent
 
@@ -366,7 +559,11 @@ def ingest_all(
 
     all_files = [
         f for f in docs_path.rglob("*")
-        if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
+        if (
+            f.is_file()
+            and f.suffix.lower() in SUPPORTED_EXTENSIONS
+            and not is_office_temp_file(f)
+        )
     ]
 
     if not all_files:

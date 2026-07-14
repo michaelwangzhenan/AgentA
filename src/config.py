@@ -597,6 +597,13 @@ WEB_UPLOAD_DIR: str = os.getenv("WEB_UPLOAD_DIR", "./datasets/web_uploads")
 # Web UI 单次上传文件大小上限（MB），超限返回 413
 WEB_MAX_UPLOAD_MB: int = int(os.getenv("WEB_MAX_UPLOAD_MB", "10"))
 
+# DOCX 压缩包内所有文件解压后的总大小上限（MiB）
+DOCX_MAX_UNZIP_MB: int = int(os.getenv("DOCX_MAX_UNZIP_MB", "64"))
+# DOCX 隔离解析子进程的内存上限（MiB）
+DOCX_PARSE_MEMORY_MB: int = int(os.getenv("DOCX_PARSE_MEMORY_MB", "512"))
+# DOCX 隔离解析的执行时间上限（秒）
+DOCX_PARSE_TIMEOUT_SEC: int = int(os.getenv("DOCX_PARSE_TIMEOUT_SEC", "120"))
+
 # 运行时数据备份目录（tools/cli/backup_cli.py 与 /admin/backup 生成的 zip 落此；含明文密钥，已 gitignore）
 BACKUP_DIR: str = os.getenv("BACKUP_DIR", "./backups")
 
