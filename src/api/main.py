@@ -92,7 +92,15 @@ def _bootstrap_mcp() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     _bootstrap_mcp()
-    yield
+    try:
+        yield
+    finally:
+        try:
+            from src.rag.chroma_client import close_chroma_client
+
+            close_chroma_client()
+        except Exception as exc:
+            logger.warning("[api] Chroma client close 失败：%s", exc)
 
 
 app = FastAPI(

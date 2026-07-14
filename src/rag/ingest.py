@@ -81,7 +81,7 @@ def _rollback_doc_chunks(
         except Exception as exc:
             logger.warning("  取消入库 BM25 回滚失败（已忽略）: %s", exc)
 
-import chromadb
+from src.rag.chroma_client import get_chroma_client
 
 import src.config as config
 from src.services.ingest_telemetry import IngestProbe, ingest_slot, probe_for_docx
@@ -631,7 +631,7 @@ def ingest_one(
     logger.info("Embedding 模型: %s  →  collection: %s (space=%s, 来源=%s)",
                 model_name, collection_name, _HNSW_SPACE, "api" if use_api else "本地")
 
-    client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
+    client = get_chroma_client()
     collection = _open_collection(client, model_name, collection_name, use_api=use_api)
     try:
         rel_path = fp.relative_to(docs_path).as_posix()
@@ -729,7 +729,7 @@ def ingest_all(
     logger.info("Embedding 模型: %s  →  collection: %s (space=%s, 来源=%s)",
                 model_name, collection_name, _HNSW_SPACE, "api" if use_api else "本地")
 
-    client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
+    client = get_chroma_client()
     collection = _open_collection(client, model_name, collection_name, use_api=use_api)
 
     all_files = [
@@ -803,18 +803,7 @@ def _char_count_from_metadata(md: dict) -> int:
 
 
 # KB 列表/统计：复用 Chroma 客户端 + 分批扫 metadata，避免单次 get 全库 OOM。
-_KB_CHROMA_CLIENT: Any = None
-_KB_CHROMA_LOCK = threading.Lock()
 _KB_META_BATCH = 256
-
-
-def _kb_chroma_client() -> Any:
-    global _KB_CHROMA_CLIENT
-    if _KB_CHROMA_CLIENT is None:
-        with _KB_CHROMA_LOCK:
-            if _KB_CHROMA_CLIENT is None:
-                _KB_CHROMA_CLIENT = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
-    return _KB_CHROMA_CLIENT
 
 
 def _iter_chunk_metadatas(collection) -> Iterator[dict]:
@@ -939,7 +928,7 @@ def get_kb_document_text(model: str, doc_id: str) -> str | None:
         return None
 
     _, collection_name = config.resolve_embedding(model)
-    client = _kb_chroma_client()
+    client = get_chroma_client()
     try:
         collection = client.get_collection(name=collection_name)
     except Exception:
@@ -1037,7 +1026,7 @@ def list_kb_documents(model: str = config.DEFAULT_EMBEDDING_ALIAS) -> list[dict]
         扫描按 256 条一批拉 metadata，降低峰值内存。
     """
     _, collection_name = config.resolve_embedding(model)
-    client = _kb_chroma_client()
+    client = get_chroma_client()
     try:
         collection = client.get_collection(name=collection_name)
     except Exception:
@@ -1119,7 +1108,7 @@ def backfill_kb_doc_index(model: str = config.DEFAULT_EMBEDDING_ALIAS) -> int:
     """从 Chroma metadata 一次性回填某库的文档级索引。返回写入文档数。"""
     _, collection_name = config.resolve_embedding(model)
     grouped: dict[str, dict] = {}
-    client = _kb_chroma_client()
+    client = get_chroma_client()
     try:
         collection = client.get_collection(name=collection_name)
     except Exception:
@@ -1158,7 +1147,7 @@ def count_kb_documents(
     if use_cache and collection_name in _KB_STATS_CACHE:
         return _KB_STATS_CACHE[collection_name]
 
-    client = _kb_chroma_client()
+    client = get_chroma_client()
     try:
         collection = client.get_collection(name=collection_name)
     except Exception:
@@ -1203,7 +1192,7 @@ def delete_kb_document(
         web_upload_dir = config.WEB_UPLOAD_DIR
 
     model_name, collection_name = config.resolve_embedding(model)
-    client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
+    client = get_chroma_client()
     try:
         collection = client.get_collection(name=collection_name)
     except Exception:
@@ -1272,7 +1261,7 @@ def delete_all_kb_documents(
         web_upload_dir = config.WEB_UPLOAD_DIR
 
     _, collection_name = config.resolve_embedding(model)
-    client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
+    client = get_chroma_client()
 
     docs_removed = 0
     chunks_removed = 0

@@ -118,18 +118,12 @@ def _embed_query_cached(model_name: str, text: str, use_api: bool) -> tuple[floa
 
 
 # ── ChromaDB 客户端进程级缓存 ─────────────────────────────────────────────────
-_chroma_client: Any = None
-_chroma_client_lock = threading.Lock()
+from src.rag.chroma_client import get_chroma_client
 
 
 def _get_chroma_client() -> Any:
-    """懒加载并复用进程级 `PersistentClient`，避免每次 `search` 都重建（双检锁）。"""
-    global _chroma_client
-    if _chroma_client is None:
-        with _chroma_client_lock:
-            if _chroma_client is None:
-                _chroma_client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
-    return _chroma_client
+    """兼容旧调用方；新代码请直接用 ``get_chroma_client``。"""
+    return get_chroma_client()
 
 
 def warm_up() -> None:

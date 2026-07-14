@@ -110,7 +110,10 @@ def test_rebuild_bm25_from_chroma(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
         def get_collection(self, name: str):
             return FakeCollection()
 
-    monkeypatch.setattr("src.rag.bm25_index.chromadb.PersistentClient", lambda path: FakeClient())
+    from src.rag.chroma_client import close_chroma_client
+
+    close_chroma_client()
+    monkeypatch.setattr("src.rag.bm25_index.get_chroma_client", lambda: FakeClient())
     monkeypatch.setattr(
         "src.rag.bm25_index.get_index_path",
         lambda coll: tmp_path / f"bm25_{coll}.pkl",

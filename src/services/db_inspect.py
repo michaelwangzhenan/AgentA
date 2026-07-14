@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 import src.config as config
+from src.rag.chroma_client import get_chroma_client
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent  # src/services/x.py → 仓库根
 
@@ -94,9 +95,7 @@ def sqlite_db_files() -> list[tuple[str, Path]]:
 # ── Chroma ────────────────────────────────────────────────────────────────────
 
 def _chroma_client():
-    import chromadb
-
-    return chromadb.PersistentClient(path=str(chroma_root()))
+    return get_chroma_client()
 
 
 def _chroma_dim(col) -> int | None:
@@ -529,9 +528,7 @@ def bm25_doc(collection: str, doc_id: str) -> dict | None:
         return None
     document = ""
     try:
-        import chromadb
-
-        client = chromadb.PersistentClient(path=str(chroma_root()))
+        client = get_chroma_client()
         coll = client.get_collection(name=collection)
         got = coll.get(ids=[doc_id], include=["documents"])
         docs = got.get("documents") or []

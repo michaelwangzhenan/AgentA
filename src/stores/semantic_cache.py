@@ -37,9 +37,9 @@ class SemanticCacheStore:
     def _get_collection(self) -> Any:
         with self._lock:
             if self._collection is None:
-                from src.rag.retriever import _get_chroma_client
+                from src.rag.chroma_client import get_chroma_client
 
-                client = _get_chroma_client()
+                client = get_chroma_client()
                 self._collection = client.get_or_create_collection(
                     name=self._collection_name,
                     metadata={"hnsw:space": _HNSW_SPACE},
@@ -137,9 +137,9 @@ class SemanticCacheStore:
     def invalidate_all(self) -> None:
         """清空整个缓存 collection（KB 变更时调用：答案依赖 KB，全量作废最稳）。"""
         with self._lock:
-            from src.rag.retriever import _get_chroma_client
+            from src.rag.chroma_client import get_chroma_client
 
-            client = _get_chroma_client()
+            client = get_chroma_client()
             try:
                 client.delete_collection(name=self._collection_name)
             except Exception:

@@ -202,8 +202,9 @@ def _remove_history_entry(coll: str) -> bool:
 # ── 公共：打开 chroma 客户端 / 解析模型 ───────────────────────────────────────
 def _make_chroma_client():
     """惰性 import，让 -h / status 即使没装 chromadb 也能给出更友好的报错。"""
-    import chromadb
-    return chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
+    from src.rag.chroma_client import get_chroma_client
+
+    return get_chroma_client()
 
 
 def _resolve_alias_or_die(alias: str) -> tuple[str, str, str]:

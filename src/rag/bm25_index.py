@@ -33,9 +33,8 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
-import chromadb
-
 import src.config as config
+from src.rag.chroma_client import get_chroma_client
 
 logger = logging.getLogger(__name__)
 
@@ -515,7 +514,7 @@ def rebuild_bm25_from_chroma(
     batch_size: int = _SCAN_BATCH,
 ) -> int:
     """从 Chroma collection 全量重建 BM25 索引，返回写入的 chunk 数。"""
-    client = chromadb.PersistentClient(path=config.CHROMA_DB_PATH)
+    client = get_chroma_client()
     try:
         collection = client.get_collection(name=collection_name)
     except Exception as exc:
