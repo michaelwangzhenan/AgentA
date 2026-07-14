@@ -617,6 +617,8 @@ DOCX_PARSE_MEMORY_MB: int = int(os.getenv("DOCX_PARSE_MEMORY_MB", "512"))
 DOCX_PARSE_TIMEOUT_SEC: int = int(os.getenv("DOCX_PARSE_TIMEOUT_SEC", "120"))
 # 同时执行的入库任务上限（Web 上传与 CLI 共用）
 INGEST_MAX_CONCURRENT: int = int(os.getenv("INGEST_MAX_CONCURRENT", "1"))
+# 单文档最大分块数；超出后截断并打日志（防超大 TXT/PDF 撑爆内存）
+INGEST_MAX_CHUNKS_PER_DOC: int = int(os.getenv("INGEST_MAX_CHUNKS_PER_DOC", "5000"))
 
 # fetch_url / Jina Reader 响应体下载上限（字节）
 MAX_FETCH_BYTES: int = int(os.getenv("MAX_FETCH_BYTES", str(4 * 1024 * 1024)))

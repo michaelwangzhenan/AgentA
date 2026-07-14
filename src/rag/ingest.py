@@ -91,7 +91,7 @@ from src.rag.parser import (
     parse_file,
     parsed_docx_temp,
 )
-from src.rag.splitter import iter_structured_lines, split_structured
+from src.rag.splitter import iter_structured_lines
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +144,173 @@ def _file_content_sha1(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _split_to_chunk_spool(
+    parsed_path: Path,
+    chunk_path: Path,
+    *,
+    cancel_cb: CancelCb | None = None,
+) -> tuple[int, int, bool]:
+    """把解析后的文本增量分块写入 jsonl 临时文件。
+
+    Returns:
+        (块数, 带标题的块数, 是否因 INGEST_MAX_CHUNKS_PER_DOC 截断)
+    """
+    max_chunks = max(1, int(config.INGEST_MAX_CHUNKS_PER_DOC))
+    total_chunks = 0
+    heading_chunks = 0
+    truncated = False
+    with (
+        parsed_path.open("r", encoding="utf-8") as source,
+        chunk_path.open("w", encoding="utf-8") as spool,
+    ):
+        for chunk in iter_structured_lines(
+            source, config.CHUNK_SIZE, config.CHUNK_OVERLAP
+        ):
+            _raise_if_cancelled(cancel_cb)
+            if total_chunks >= max_chunks:
+                truncated = True
+                break
+            record: dict[str, Any] = {
+                "text": chunk.text,
+                "heading_path": chunk.heading_path,
+                "line_start": chunk.line_start,
+                "line_end": chunk.line_end,
+            }
+            if chunk.page_no is not None:
+                record["page_no"] = chunk.page_no
+            spool.write(json.dumps(record, ensure_ascii=False) + "\n")
+            total_chunks += 1
+            if chunk.heading_path:
+                heading_chunks += 1
+    return total_chunks, heading_chunks, truncated
+
+
+def _ingest_from_chunk_spool(
+    *,
+    file_path: Path,
+    rel_path: str,
+    doc_id: str,
+    ext: str,
+    content_hash: str,
+    lang: str,
+    mtime: float,
+    chunk_path: Path,
+    total_chunks: int,
+    collection,
+    collection_name: str,
+    progress_cb: ProgressCb | None,
+    probe: IngestProbe,
+    heading_chunks: int = 0,
+    truncated: bool = False,
+    bm25_save: bool = True,
+    cancel_cb: CancelCb | None = None,
+) -> dict:
+    """从 jsonl 分块临时文件分批嵌入写入 Chroma / BM25。"""
+    ingested_at = time.time()
+    if progress_cb:
+        progress_cb("split", 0, total_chunks)
+
+    bm25 = None
+    bm25_error: Exception | None = None
+    if config.BM25_ENABLED:
+        try:
+            from src.rag.bm25_index import get_index
+
+            bm25 = get_index(collection_name)
+            bm25.delete_by_doc_id(doc_id)
+        except Exception as exc:
+            bm25_error = exc
+
+    batch: list[dict] = []
+    done = 0
+
+    def flush_batch() -> None:
+        nonlocal batch, done, bm25_error
+        if not batch:
+            return
+        _raise_if_cancelled(cancel_cb)
+        ids = [_make_chunk_id(doc_id, item["index"]) for item in batch]
+        documents = [item["text"] for item in batch]
+        metadatas: list[dict] = []
+        for item in batch:
+            md: dict = {
+                "doc_id": doc_id,
+                "source": rel_path,
+                "filename": file_path.name,
+                "ext": ext,
+                "lang": lang,
+                "mtime": mtime,
+                "ingested_at": ingested_at,
+                "content_sha1": content_hash,
+                "char_count": len(item["text"]),
+                "chunk_index": item["index"],
+                "chunk_total": total_chunks,
+                "line_start": item["line_start"],
+                "line_end": item["line_end"],
+            }
+            if item.get("heading_path"):
+                md["heading_path"] = " > ".join(item["heading_path"])
+            if item.get("page_no") is not None:
+                md["page_no"] = int(item["page_no"])
+            metadatas.append(md)
+        collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
+        _raise_if_cancelled(cancel_cb)
+        if bm25 is not None and bm25_error is None:
+            try:
+                bm25.upsert(ids=ids, documents=documents, metadatas=metadatas)
+            except Exception as exc:
+                bm25_error = exc
+        done += len(batch)
+        if progress_cb:
+            progress_cb("embed", done, total_chunks)
+        batch = []
+
+    try:
+        with probe.track("embed"):
+            with chunk_path.open("r", encoding="utf-8") as spool:
+                for index, line in enumerate(spool):
+                    _raise_if_cancelled(cancel_cb)
+                    item = json.loads(line)
+                    item["index"] = index
+                    batch.append(item)
+                    if len(batch) >= _EMBED_BATCH_SIZE:
+                        flush_batch()
+                flush_batch()
+    except IngestCancelled:
+        _rollback_doc_chunks(
+            collection, collection_name, doc_id, bm25_save=bm25_save,
+        )
+        raise
+
+    with probe.track("bm25"):
+        if bm25_save and bm25 is not None and bm25_error is None:
+            try:
+                from src.rag.bm25_index import commit_index
+
+                commit_index(collection_name)
+                logger.info("  BM25 索引已更新: %s → %d 块", rel_path, total_chunks)
+            except Exception as exc:
+                bm25_error = exc
+    if bm25_error is not None:
+        logger.warning("  BM25 索引更新失败（已跳过）: %s — %s", rel_path, bm25_error)
+
+    if truncated:
+        logger.warning(
+            "  分块数已达上限 %d，后续内容已截断: %s",
+            config.INGEST_MAX_CHUNKS_PER_DOC,
+            rel_path,
+        )
+
+    logger.info(
+        "  入库: %s → %d 块 (lang=%s, headings=%d)",
+        rel_path,
+        total_chunks,
+        lang,
+        heading_chunks,
+    )
+    return {"doc_id": doc_id, "chunks": total_chunks, "status": "ingested"}
+
+
 def _ingest_docx_file(
     file_path: Path,
     rel_path: str,
@@ -167,8 +334,6 @@ def _ingest_docx_file(
     chunk_path = Path(chunk_temp.name)
     chunk_temp.close()
     existing_ids: list[str] = []
-    total_chunks = 0
-    heading_chunks = 0
     try:
         with parsed_docx_temp(file_path) as parsed_path:
             with probe.track("parse"):
@@ -199,23 +364,9 @@ def _ingest_docx_file(
                         }
 
             with probe.track("split"):
-                with (
-                    parsed_path.open("r", encoding="utf-8") as source,
-                    chunk_path.open("w", encoding="utf-8") as spool,
-                ):
-                    for chunk in iter_structured_lines(
-                        source, config.CHUNK_SIZE, config.CHUNK_OVERLAP
-                    ):
-                        record = {
-                            "text": chunk.text,
-                            "heading_path": chunk.heading_path,
-                            "line_start": chunk.line_start,
-                            "line_end": chunk.line_end,
-                        }
-                        spool.write(json.dumps(record, ensure_ascii=False) + "\n")
-                        total_chunks += 1
-                        if chunk.heading_path:
-                            heading_chunks += 1
+                total_chunks, heading_chunks, truncated = _split_to_chunk_spool(
+                    parsed_path, chunk_path, cancel_cb=cancel_cb,
+                )
 
         if total_chunks == 0:
             logger.warning("  跳过（分块结果为空）: %s", rel_path)
@@ -229,100 +380,26 @@ def _ingest_docx_file(
             mtime = file_path.stat().st_mtime
         except OSError:
             mtime = 0.0
-        ingested_at = time.time()
-        if progress_cb:
-            progress_cb("split", 0, total_chunks)
 
-        bm25 = None
-        bm25_error: Exception | None = None
-        if config.BM25_ENABLED:
-            try:
-                from src.rag.bm25_index import get_index
-
-                bm25 = get_index(collection_name)
-                bm25.delete_by_doc_id(doc_id)
-            except Exception as exc:
-                bm25_error = exc
-
-        batch: list[dict] = []
-        done = 0
-
-        def flush_batch() -> None:
-            nonlocal batch, done, bm25_error
-            if not batch:
-                return
-            _raise_if_cancelled(cancel_cb)
-            ids = [_make_chunk_id(doc_id, item["index"]) for item in batch]
-            documents = [item["text"] for item in batch]
-            metadatas: list[dict] = []
-            for item in batch:
-                md: dict = {
-                    "doc_id": doc_id,
-                    "source": rel_path,
-                    "filename": file_path.name,
-                    "ext": ".docx",
-                    "lang": lang,
-                    "mtime": mtime,
-                    "ingested_at": ingested_at,
-                    "content_sha1": content_hash,
-                    "char_count": len(item["text"]),
-                    "chunk_index": item["index"],
-                    "chunk_total": total_chunks,
-                    "line_start": item["line_start"],
-                    "line_end": item["line_end"],
-                }
-                if item["heading_path"]:
-                    md["heading_path"] = " > ".join(item["heading_path"])
-                metadatas.append(md)
-            collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
-            _raise_if_cancelled(cancel_cb)
-            if bm25 is not None and bm25_error is None:
-                try:
-                    bm25.upsert(ids=ids, documents=documents, metadatas=metadatas)
-                except Exception as exc:
-                    bm25_error = exc
-            done += len(batch)
-            if progress_cb:
-                progress_cb("embed", done, total_chunks)
-            batch = []
-
-        try:
-            with probe.track("embed"):
-                with chunk_path.open("r", encoding="utf-8") as spool:
-                    for index, line in enumerate(spool):
-                        _raise_if_cancelled(cancel_cb)
-                        item = json.loads(line)
-                        item["index"] = index
-                        batch.append(item)
-                        if len(batch) >= _EMBED_BATCH_SIZE:
-                            flush_batch()
-                    flush_batch()
-        except IngestCancelled:
-            _rollback_doc_chunks(
-                collection, collection_name, doc_id, bm25_save=bm25_save,
-            )
-            raise
-
-        with probe.track("bm25"):
-            if bm25_save and bm25 is not None and bm25_error is None:
-                try:
-                    from src.rag.bm25_index import commit_index
-
-                    commit_index(collection_name)
-                    logger.info("  BM25 索引已更新: %s → %d 块", rel_path, total_chunks)
-                except Exception as exc:
-                    bm25_error = exc
-        if bm25_error is not None:
-            logger.warning("  BM25 索引更新失败（已跳过）: %s — %s", rel_path, bm25_error)
-
-        logger.info(
-            "  入库: %s → %d 块 (lang=%s, headings=%d)",
-            rel_path,
-            total_chunks,
-            lang,
-            heading_chunks,
+        return _ingest_from_chunk_spool(
+            file_path=file_path,
+            rel_path=rel_path,
+            doc_id=doc_id,
+            ext=".docx",
+            content_hash=content_hash,
+            lang=lang,
+            mtime=mtime,
+            chunk_path=chunk_path,
+            total_chunks=total_chunks,
+            collection=collection,
+            collection_name=collection_name,
+            progress_cb=progress_cb,
+            probe=probe,
+            heading_chunks=heading_chunks,
+            truncated=truncated,
+            bm25_save=bm25_save,
+            cancel_cb=cancel_cb,
         )
-        return {"doc_id": doc_id, "chunks": total_chunks, "status": "ingested"}
     finally:
         chunk_path.unlink(missing_ok=True)
 
@@ -419,124 +496,88 @@ def _ingest_one_file(
     _raise_if_cancelled(cancel_cb)
     if progress_cb:
         progress_cb("parse", 0, 0)
-    with probe.track("parse"):
-        text = parse_file(file_path)
 
-    if not text.strip():
-        logger.warning("  跳过（内容为空）: %s", rel_path)
-        return {"doc_id": doc_id, "chunks": 0, "status": "empty"}
-
-    content_hash = _content_sha1(text)
-
-    # 幂等检测：若该 doc_id 已存在且 content_sha1 未变 → 跳过 reembed
-    existing = collection.get(
-        where={"doc_id": doc_id},
-        include=["metadatas"],
+    parsed_temp = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", prefix="agenta-parsed-", suffix=".txt", delete=False
     )
-    existing_ids = existing.get("ids") or []
-    existing_metas = existing.get("metadatas") or []
-    if existing_ids and existing_metas:
-        prev_hash = existing_metas[0].get("content_sha1")
-        if prev_hash == content_hash:
-            logger.info("  跳过（内容未变化）: %s → %d 块", rel_path, len(existing_ids))
-            return {"doc_id": doc_id, "chunks": len(existing_ids), "status": "skipped_unchanged"}
-        # 内容变了：先删旧 chunks
-        collection.delete(ids=existing_ids)
-        logger.info("  清除旧数据: %s → 删除 %d 条", rel_path, len(existing_ids))
-
-    with probe.track("split"):
-        structured = split_structured(text, config.CHUNK_SIZE, config.CHUNK_OVERLAP)
-    if not structured:
-        logger.warning("  跳过（分块结果为空）: %s", rel_path)
-        return {"doc_id": doc_id, "chunks": 0, "status": "empty"}
-
+    parsed_path = Path(parsed_temp.name)
+    chunk_temp = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", prefix="agenta-chunks-", suffix=".jsonl", delete=False
+    )
+    chunk_path = Path(chunk_temp.name)
+    chunk_temp.close()
+    existing_ids: list[str] = []
     try:
-        mtime = file_path.stat().st_mtime
-    except OSError:
-        mtime = 0.0
-    lang = _detect_lang(text)
-    ext = file_path.suffix.lower()
-    ingested_at = time.time()  # 整个文件的所有 chunks 共享一个入库时间
+        with probe.track("parse"):
+            text = parse_file(file_path)
+            if not text.strip():
+                logger.warning("  跳过（内容为空）: %s", rel_path)
+                return {"doc_id": doc_id, "chunks": 0, "status": "empty"}
+            parsed_temp.write(text)
+            parsed_temp.close()
+            del text
 
-    ids: list[str] = [_make_chunk_id(doc_id, i) for i in range(len(structured))]
-    documents: list[str] = [c.text for c in structured]
-    metadatas: list[dict] = []
-    for i, c in enumerate(structured):
-        # ChromaDB metadata 不接受 None，缺失字段直接不写键
-        md: dict = {
-            "doc_id": doc_id,
-            "source": rel_path,            # 完整相对路径（含子目录），不再用 filename 做去重键
-            "filename": file_path.name,    # 兼容老字段，仅作展示
-            "ext": ext,
-            "lang": lang,
-            "mtime": mtime,
-            "ingested_at": ingested_at,
-            "content_sha1": content_hash,
-            "char_count": len(c.text),     # L2 列表聚合字数用，避免 collection.get(documents)
-            "chunk_index": i,
-            "chunk_total": len(structured),
-            "line_start": int(c.line_start or 0),
-            "line_end": int(c.line_end or 0),
-        }
-        if c.heading_path:
-            # heading_path 用 " > " 拼接，便于在 LLM 工具结果里直接展示给用户
-            md["heading_path"] = " > ".join(c.heading_path)
-        if c.page_no is not None:
-            md["page_no"] = int(c.page_no)
-        metadatas.append(md)
+        content_hash = _file_content_sha1(parsed_path)
+        with parsed_path.open("r", encoding="utf-8") as f:
+            lang = _detect_lang(f.read(2000))
 
-    total_chunks = len(structured)
-    if progress_cb:
-        progress_cb("split", 0, total_chunks)
+        existing = collection.get(
+            where={"doc_id": doc_id},
+            include=["metadatas"],
+        )
+        existing_ids = existing.get("ids") or []
+        existing_metas = existing.get("metadatas") or []
+        if existing_ids and existing_metas:
+            prev_hash = existing_metas[0].get("content_sha1")
+            if prev_hash == content_hash:
+                logger.info("  跳过（内容未变化）: %s → %d 块", rel_path, len(existing_ids))
+                return {
+                    "doc_id": doc_id,
+                    "chunks": len(existing_ids),
+                    "status": "skipped_unchanged",
+                }
 
-    with probe.track("embed"):
-        try:
-            for start in range(0, total_chunks, _EMBED_BATCH_SIZE):
-                _raise_if_cancelled(cancel_cb)
-                end = min(start + _EMBED_BATCH_SIZE, total_chunks)
-                collection.upsert(
-                    ids=ids[start:end],
-                    documents=documents[start:end],
-                    metadatas=metadatas[start:end],  # type: ignore[arg-type]
-                )
-                _raise_if_cancelled(cancel_cb)
-                if progress_cb:
-                    progress_cb("embed", end, total_chunks)
-        except IngestCancelled:
-            _rollback_doc_chunks(
-                collection, collection_name, doc_id, bm25_save=bm25_save,
+        with probe.track("split"):
+            total_chunks, heading_chunks, truncated = _split_to_chunk_spool(
+                parsed_path, chunk_path, cancel_cb=cancel_cb,
             )
-            raise
 
-    with probe.track("bm25"):
-        if config.BM25_ENABLED:
-            try:
-                from src.rag.bm25_index import commit_index, get_index
+        if total_chunks == 0:
+            logger.warning("  跳过（分块结果为空）: %s", rel_path)
+            return {"doc_id": doc_id, "chunks": 0, "status": "empty"}
 
-                bm25 = get_index(collection_name)
-                bm25.delete_by_doc_id(doc_id)
-                bm25.upsert(ids=ids, documents=documents, metadatas=metadatas)
-                if bm25_save:
-                    commit_index(collection_name)
-                    logger.info("  BM25 索引已更新: %s → %d 块", rel_path, len(documents))
-            except Exception as e:  # 失败不影响 dense 入库主流程
-                logger.warning("  BM25 索引更新失败（已跳过）: %s — %s", rel_path, e)
+        if existing_ids:
+            collection.delete(ids=existing_ids)
+            logger.info("  清除旧数据: %s → 删除 %d 条", rel_path, len(existing_ids))
 
-    page_info = (
-        f", pages={sum(1 for c in structured if c.page_no is not None)}"
-        if any(c.page_no is not None for c in structured)
-        else ""
-    )
-    heading_info = (
-        f", headings={sum(1 for c in structured if c.heading_path)}"
-        if any(c.heading_path for c in structured)
-        else ""
-    )
-    logger.info(
-        "  入库: %s → %d 块 (lang=%s%s%s)",
-        rel_path, len(documents), lang, page_info, heading_info,
-    )
-    return {"doc_id": doc_id, "chunks": len(documents), "status": "ingested"}
+        try:
+            mtime = file_path.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        ext = file_path.suffix.lower()
+
+        return _ingest_from_chunk_spool(
+            file_path=file_path,
+            rel_path=rel_path,
+            doc_id=doc_id,
+            ext=ext,
+            content_hash=content_hash,
+            lang=lang,
+            mtime=mtime,
+            chunk_path=chunk_path,
+            total_chunks=total_chunks,
+            collection=collection,
+            collection_name=collection_name,
+            progress_cb=progress_cb,
+            probe=probe,
+            heading_chunks=heading_chunks,
+            truncated=truncated,
+            bm25_save=bm25_save,
+            cancel_cb=cancel_cb,
+        )
+    finally:
+        parsed_path.unlink(missing_ok=True)
+        chunk_path.unlink(missing_ok=True)
 
 
 def ingest_one(
