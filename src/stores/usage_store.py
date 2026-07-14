@@ -281,6 +281,62 @@ class UsageStore:
         ]
         return events, total
 
+    def iter_events_batches(
+        self,
+        start_ts: int,
+        end_ts: int,
+        user_id: int | None = None,
+        model_id: str | None = None,
+        *,
+        batch_size: int = 500,
+        max_rows: int | None = None,
+    ):
+        """按批 yield 事件 dict 列表（时间倒序），供 CSV 流式导出。"""
+        where = "created_at >= ? AND created_at < ?"
+        params: list[Any] = [int(start_ts), int(end_ts)]
+        if user_id is not None:
+            where += " AND user_id = ?"
+            params.append(int(user_id))
+        if model_id:
+            where += " AND model_id = ?"
+            params.append(model_id)
+        batch_size = max(1, int(batch_size))
+        offset = 0
+        exported = 0
+        while True:
+            if max_rows is not None and exported >= max_rows:
+                break
+            limit = batch_size
+            if max_rows is not None:
+                limit = min(limit, max_rows - exported)
+            with self._lock:
+                rows = self._conn.execute(
+                    f"SELECT * FROM usage_events WHERE {where} "
+                    "ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+                    [*params, limit, offset],
+                ).fetchall()
+            if not rows:
+                break
+            batch = [
+                {
+                    "id": int(r["id"]),
+                    "user_id": int(r["user_id"]),
+                    "created_at": int(r["created_at"]),
+                    "model_id": r["model_id"],
+                    "thinking": bool(r["thinking"]),
+                    "prompt_tokens": int(r["prompt_tokens"] or 0),
+                    "completion_tokens": int(r["completion_tokens"] or 0),
+                    "total_tokens": int(r["total_tokens"] or 0),
+                    "session_id": r["session_id"],
+                }
+                for r in rows
+            ]
+            exported += len(batch)
+            yield batch
+            if len(rows) < limit:
+                break
+            offset += len(rows)
+
     # ── 单价覆盖（admin） ──────────────────────────────────────────────────────
 
     def get_pricing_overrides(self) -> dict[str, tuple[float, float]]:

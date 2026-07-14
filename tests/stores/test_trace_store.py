@@ -70,6 +70,28 @@ def test_overview_percentiles_and_error_rate(store: TraceStore) -> None:
     assert 250 <= ov["latency_p50_ms"] <= 350
 
 
+def test_overview_large_dataset_uses_sql_not_fetchall(
+    store: TraceStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """万级 trace 概览仍正确，且走 SQL 聚合 + 采样分位数。"""
+    from src.stores import trace_store as mod
+
+    monkeypatch.setattr(mod, "_TRACE_PERCENTILE_SAMPLE_CAP", 100)
+    monkeypatch.setattr(mod, "_TRACE_PERCENTILE_SAMPLE_SIZE", 50)
+    now = int(time.time())
+    for i in range(150):
+        store.record_trace(
+            _trace(f"bulk-{i}", total_ms=float(100 + i), llm_ms=10.0, tool_ms=5.0, retrieval_ms=2.0),
+            [],
+        )
+    ov = store.overview(now - 3600, now + 3600)
+    assert ov["count"] == 150
+    assert ov["latency_avg_ms"] == pytest.approx(174.5, abs=0.5)
+    assert ov["avg_llm_ms"] == 10.0
+    assert 120 <= ov["latency_p50_ms"] <= 230
+    assert ov["latency_p95_ms"] >= ov["latency_p50_ms"]
+
+
 def test_series_grouped_by_day(store: TraceStore) -> None:
     store.record_trace(_trace("t1", total_ms=100.0), [])
     store.record_trace(_trace("t2", total_ms=300.0), [])

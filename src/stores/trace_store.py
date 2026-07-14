@@ -27,6 +27,10 @@ STAGE_LLM = "llm"
 STAGE_TOOL = "tool"
 STAGE_RETRIEVAL = "retrieval"
 
+# 概览 p50/p95：超过此条数改用随机采样，避免 ORDER BY + OFFSET 扫全表
+_TRACE_PERCENTILE_SAMPLE_CAP = 5000
+_TRACE_PERCENTILE_SAMPLE_SIZE = 2000
+
 # 检索工具名：tool span 命中它时归类到 retrieval 阶段
 _RETRIEVAL_TOOL = "search_knowledge"
 
@@ -183,37 +187,35 @@ class TraceStore:
     def overview(
         self, start_ts: int, end_ts: int, user_id: int | None = None
     ) -> dict[str, Any]:
-        """概览：对话数、错误率、延迟 p50/p95、平均分阶段耗时。"""
-        where = "created_at >= ? AND created_at < ?"
-        params: list[Any] = [int(start_ts), int(end_ts)]
-        if user_id is not None:
-            where += " AND user_id = ?"
-            params.append(int(user_id))
+        """概览：对话数、错误率、延迟 p50/p95、平均分阶段耗时（SQL 聚合，不 fetchall）。"""
+        where, params = _time_where(start_ts, end_ts, user_id)
         with self._lock:
-            rows = self._conn.execute(
-                f"SELECT total_ms, llm_ms, tool_ms, retrieval_ms, status "
+            agg = self._conn.execute(
+                f"SELECT COUNT(*) AS cnt, "
+                f"SUM(CASE WHEN status != 'ok' THEN 1 ELSE 0 END) AS errs, "
+                f"AVG(total_ms) AS avg_total, "
+                f"AVG(llm_ms) AS avg_llm, "
+                f"AVG(tool_ms) AS avg_tool, "
+                f"AVG(retrieval_ms) AS avg_retrieval "
                 f"FROM agent_traces WHERE {where}",
                 params,
-            ).fetchall()
-        count = len(rows)
-        if count == 0:
-            return {
-                "count": 0, "error_count": 0, "error_rate": 0.0,
-                "latency_p50_ms": 0.0, "latency_p95_ms": 0.0, "latency_avg_ms": 0.0,
-                "avg_llm_ms": 0.0, "avg_tool_ms": 0.0, "avg_retrieval_ms": 0.0,
-            }
-        totals = sorted(float(r["total_ms"]) for r in rows)
-        errors = sum(1 for r in rows if r["status"] != "ok")
+            ).fetchone()
+            count = int(agg["cnt"] or 0)
+            if count == 0:
+                return _empty_overview()
+            p50 = _latency_percentile(self._conn, where, params, count, 0.50)
+            p95 = _latency_percentile(self._conn, where, params, count, 0.95)
+        errors = int(agg["errs"] or 0)
         return {
             "count": count,
             "error_count": errors,
             "error_rate": round(errors / count, 4),
-            "latency_p50_ms": round(_percentile(totals, 0.50), 2),
-            "latency_p95_ms": round(_percentile(totals, 0.95), 2),
-            "latency_avg_ms": round(sum(totals) / count, 2),
-            "avg_llm_ms": round(sum(float(r["llm_ms"]) for r in rows) / count, 2),
-            "avg_tool_ms": round(sum(float(r["tool_ms"]) for r in rows) / count, 2),
-            "avg_retrieval_ms": round(sum(float(r["retrieval_ms"]) for r in rows) / count, 2),
+            "latency_p50_ms": round(p50, 2),
+            "latency_p95_ms": round(p95, 2),
+            "latency_avg_ms": round(float(agg["avg_total"] or 0), 2),
+            "avg_llm_ms": round(float(agg["avg_llm"] or 0), 2),
+            "avg_tool_ms": round(float(agg["avg_tool"] or 0), 2),
+            "avg_retrieval_ms": round(float(agg["avg_retrieval"] or 0), 2),
         }
 
     def series(
@@ -292,6 +294,63 @@ class TraceStore:
 
     def __exit__(self, *_: object) -> None:
         self.close()
+
+
+def _time_where(
+    start_ts: int, end_ts: int, user_id: int | None
+) -> tuple[str, list[Any]]:
+    where = "created_at >= ? AND created_at < ?"
+    params: list[Any] = [int(start_ts), int(end_ts)]
+    if user_id is not None:
+        where += " AND user_id = ?"
+        params.append(int(user_id))
+    return where, params
+
+
+def _empty_overview() -> dict[str, Any]:
+    return {
+        "count": 0, "error_count": 0, "error_rate": 0.0,
+        "latency_p50_ms": 0.0, "latency_p95_ms": 0.0, "latency_avg_ms": 0.0,
+        "avg_llm_ms": 0.0, "avg_tool_ms": 0.0, "avg_retrieval_ms": 0.0,
+    }
+
+
+def _latency_percentile(
+    conn: sqlite3.Connection,
+    where: str,
+    params: list[Any],
+    count: int,
+    q: float,
+) -> float:
+    """按 total_ms 算分位数；大行数时随机采样近似。"""
+    if count <= 0:
+        return 0.0
+    if count == 1:
+        row = conn.execute(
+            f"SELECT total_ms FROM agent_traces WHERE {where} LIMIT 1",
+            params,
+        ).fetchone()
+        return float(row["total_ms"] if row else 0.0)
+    if count > _TRACE_PERCENTILE_SAMPLE_CAP:
+        rows = conn.execute(
+            f"SELECT total_ms FROM agent_traces WHERE {where} "
+            "ORDER BY RANDOM() LIMIT ?",
+            [*params, min(_TRACE_PERCENTILE_SAMPLE_SIZE, count)],
+        ).fetchall()
+        return _percentile(sorted(float(r["total_ms"]) for r in rows), q)
+    pos = q * (count - 1)
+    lo = int(pos)
+    hi = min(lo + 1, count - 1)
+    rows = conn.execute(
+        f"SELECT total_ms FROM agent_traces WHERE {where} "
+        "ORDER BY total_ms ASC LIMIT ? OFFSET ?",
+        [*params, hi - lo + 1, lo],
+    ).fetchall()
+    vals = [float(r["total_ms"]) for r in rows]
+    if len(vals) == 1:
+        return vals[0]
+    frac = pos - lo
+    return vals[0] * (1 - frac) + vals[1] * frac
 
 
 def _percentile(sorted_vals: list[float], q: float) -> float:

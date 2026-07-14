@@ -114,6 +114,23 @@ def test_my_events_csv(client: TestClient, usage_store: UsageStore) -> None:
     assert "total_tokens" in r.text
 
 
+def test_my_events_csv_streams_large_export(
+    client: TestClient, usage_store: UsageStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """大批量 CSV 走分批流式，不一次性构造全量字符串。"""
+    import src.api.routes.usage as usage_routes
+
+    monkeypatch.setattr(usage_routes, "_CSV_EXPORT_BATCH", 20)
+    monkeypatch.setattr(usage_routes, "_CSV_EXPORT_MAX_ROWS", 55)
+    for i in range(60):
+        _seed(usage_store, user_id=1, prompt_tokens=10 + i, completion_tokens=1)
+    r = client.get("/api/usage/events.csv?range=30d")
+    assert r.status_code == 200
+    lines = [ln for ln in r.text.strip().splitlines() if ln]
+    # header + 55 data rows（受 max_rows 限制）
+    assert len(lines) == 56
+
+
 # ── 全员视角（admin） ──────────────────────────────────────────────────────────
 
 

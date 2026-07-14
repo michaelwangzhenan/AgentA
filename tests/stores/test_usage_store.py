@@ -219,6 +219,24 @@ def test_cost_of_math() -> None:
     assert cost_of("unknown", 1_000_000, 1_000_000, pricing) == 0.0
 
 
+def test_iter_events_batches_respects_max_rows(store: UsageStore) -> None:
+    now = int(time.time())
+    for i in range(12):
+        store.record(
+            user_id=1,
+            model_id="kimi-k2.5",
+            thinking=False,
+            prompt_tokens=10,
+            completion_tokens=5,
+            created_at=now - i,
+        )
+    batches = list(store.iter_events_batches(
+        now - 3600, now + 3600, user_id=1, batch_size=5, max_rows=7,
+    ))
+    assert sum(len(b) for b in batches) == 7
+    assert all(b[0]["created_at"] >= b[-1]["created_at"] for b in batches if len(b) > 1)
+
+
 # ── record_usage 旁路入口 ─────────────────────────────────────────────────────
 
 

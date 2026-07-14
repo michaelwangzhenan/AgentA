@@ -13,10 +13,12 @@ from __future__ import annotations
 import csv
 import io
 import logging
+from collections.abc import Iterator
 from datetime import datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 import src.config as _cfg
@@ -41,6 +43,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/usage", tags=["usage"])
 
 _VALID_RANGES = ("1d", "7d", "30d", "mtd", "last_month")
+_CSV_EXPORT_MAX_ROWS = 100_000
+_CSV_EXPORT_BATCH = 500
 
 
 def _resolve_range(range_key: str) -> tuple[int, int]:
@@ -191,22 +195,70 @@ def _csv_safe(value: Any) -> Any:
     return value
 
 
-def _events_csv(events: UsageEvents, with_user: bool) -> str:
-    buf = io.StringIO()
-    w = csv.writer(buf)
+def _events_csv_header(currency: str, with_user: bool) -> list[str]:
     header = ["time", "model", "type", "prompt_tokens", "completion_tokens",
-              "total_tokens", f"cost({events.currency})"]
+              "total_tokens", f"cost({currency})"]
     if with_user:
         header.insert(1, "user")
-    w.writerow(header)
-    for e in events.events:
-        t = datetime.fromtimestamp(e.created_at).isoformat(timespec="seconds")
-        row = [t, e.model_label, "thinking" if e.thinking else "normal",
-               e.prompt_tokens, e.completion_tokens, e.total_tokens, e.cost]
-        if with_user:
-            row.insert(1, e.username or "")
-        w.writerow([_csv_safe(c) for c in row])
-    return buf.getvalue()
+    return header
+
+
+def _event_to_csv_row(
+    e: dict[str, Any],
+    pricing: dict[str, tuple[float, float]],
+    *,
+    with_user: bool,
+    usernames: dict[int, str],
+) -> list[Any]:
+    label, _tier = _model_meta(e["model_id"])
+    t = datetime.fromtimestamp(e["created_at"]).isoformat(timespec="seconds")
+    cost = round(
+        cost_of(e["model_id"], e["prompt_tokens"], e["completion_tokens"], pricing),
+        6,
+    )
+    row = [t, label, "thinking" if e["thinking"] else "normal",
+           e["prompt_tokens"], e["completion_tokens"], e["total_tokens"], cost]
+    if with_user:
+        row.insert(1, usernames.get(e["user_id"], f"#{e['user_id']}"))
+    return [_csv_safe(c) for c in row]
+
+
+def _stream_events_csv(
+    store: UsageStore,
+    start: int,
+    end: int,
+    user_id: int | None,
+    model_id: str | None,
+    *,
+    with_user: bool,
+    usernames: dict[int, str] | None = None,
+) -> Iterator[str]:
+    """分批写 CSV 行，避免在内存里堆十万行。"""
+    pricing = merged_pricing(store)
+    usernames = usernames or {}
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(_events_csv_header(_cfg.USAGE_CURRENCY, with_user))
+    yield buf.getvalue()
+    buf.seek(0)
+    buf.truncate(0)
+
+    for batch in store.iter_events_batches(
+        start, end,
+        user_id=user_id,
+        model_id=model_id,
+        batch_size=_CSV_EXPORT_BATCH,
+        max_rows=_CSV_EXPORT_MAX_ROWS,
+    ):
+        for e in batch:
+            w.writerow(_event_to_csv_row(
+                e, pricing, with_user=with_user, usernames=usernames,
+            ))
+        chunk = buf.getvalue()
+        if chunk:
+            yield chunk
+            buf.seek(0)
+            buf.truncate(0)
 
 
 # ── 本人端点 ──────────────────────────────────────────────────────────────────
@@ -257,12 +309,12 @@ def my_events_csv(
     model_id: str | None = Query(None),
     user: dict = Depends(get_current_user),
     store: UsageStore = Depends(get_usage_store),
-) -> Response:
+) -> StreamingResponse:
     start, end = _resolve_range(range)
-    data = _events(store, start, end, user["id"], model_id, limit=100_000, offset=0)
-    csv_text = _events_csv(data, with_user=False)
-    return Response(
-        content=csv_text,
+    return StreamingResponse(
+        _stream_events_csv(
+            store, start, end, user["id"], model_id, with_user=False,
+        ),
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="usage_{range}.csv"'},
     )
@@ -362,15 +414,13 @@ def admin_events_csv(
     _: dict = Depends(require_admin),
     store: UsageStore = Depends(get_usage_store),
     users: UserStore = Depends(get_user_store),
-) -> Response:
+) -> StreamingResponse:
     start, end = _resolve_range(range)
-    data = _events(
-        store, start, end, user_id, model_id, limit=100_000, offset=0,
-        usernames=_username_map(users), with_user=True,
-    )
-    csv_text = _events_csv(data, with_user=True)
-    return Response(
-        content=csv_text,
+    return StreamingResponse(
+        _stream_events_csv(
+            store, start, end, user_id, model_id,
+            with_user=True, usernames=_username_map(users),
+        ),
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="usage_all_{range}.csv"'},
     )
