@@ -2351,6 +2351,8 @@ def _tool_load_skill(name: str, skill_bodies: dict[str, str]) -> ToolResult:
     Returns:
         ToolResult：找到 → status="ok"；未找到 → status="error"。
     """
+    from src.agent.core.skill_loader import format_skill_content
+
     logger.info("[tool] load_skill: name=%r", name)
     body = skill_bodies.get(name)
     if body is None:
@@ -2358,7 +2360,7 @@ def _tool_load_skill(name: str, skill_bodies: dict[str, str]) -> ToolResult:
             status="error",
             content=f"Skill '{name}' 不存在，可用 skills: {list(skill_bodies.keys())}",
         )
-    content = f'<skill_content name="{name}">\n{body}\n</skill_content>'
+    content = format_skill_content(name, body)
     return ToolResult(status="ok", content=content)
 
 

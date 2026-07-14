@@ -131,6 +131,28 @@ def test_delete_nonexistent_session_returns_deleted_false(client: TestClient) ->
     assert r.json() == {"deleted": False}
 
 
+def test_delete_session_clears_learning_plan_loaded(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    from src.stores.learning_plan_store import LearningPlanStore, reset_shared_store_for_testing
+
+    plan_store = LearningPlanStore(str(tmp_path / "plans.db"))
+    reset_shared_store_for_testing(plan_store)
+    try:
+        sid = client.post("/api/sessions").json()["id"]
+        pid = plan_store.create_plan(goal="learn rust")
+        plan_store.mark_loaded(sid, pid)
+        assert plan_store.get_loaded(sid) == pid
+
+        r = client.delete(f"/api/sessions/{sid}")
+        assert r.status_code == 200
+        assert r.json()["deleted"] is True
+        assert plan_store.get_loaded(sid) is None
+    finally:
+        reset_shared_store_for_testing(None)
+        plan_store.close()
+
+
 # ─── GET /api/sessions/{id}/messages ─────────────────────────────────────
 
 

@@ -91,6 +91,12 @@ def _bootstrap_mcp() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    try:
+        from src.stores.semantic_cache import purge_expired_soft
+
+        purge_expired_soft()
+    except Exception as exc:
+        logger.warning("[api] 语义缓存清理失败：%s", exc)
     _bootstrap_mcp()
     try:
         yield

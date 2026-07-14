@@ -90,6 +90,15 @@ def _on_golden_db_path_changed(_old: Any, new: Any) -> None:
         logger.warning("[config] 重置 golden 单例失败: %s", e)
 
 
+def _on_rag_model_changed(_old: Any, _new: Any) -> None:
+    """Embedding / 精排模型相关配置变更后释放旧实例。"""
+    try:
+        from src.rag.retriever import clear_model_caches
+        clear_model_caches()
+    except Exception as e:
+        logger.warning("[config] 释放 RAG 模型缓存失败: %s", e)
+
+
 _HOOKS: dict[str, Callable[[Any, Any], None]] = {
     "LOG_LEVEL": _on_log_level_changed,
     "RAG_GOLDEN_DB_PATH": _on_golden_db_path_changed,
@@ -98,6 +107,10 @@ _HOOKS: dict[str, Callable[[Any, Any], None]] = {
     "MCP_CONFIG_FILE": _on_mcp_changed,
     "THINKING_ENABLED": _on_thinking_changed,
     "THINKING_BUDGET": _on_thinking_changed,
+    "EMBEDDING_MODEL": _on_rag_model_changed,
+    "DEFAULT_EMBEDDING_ALIAS": _on_rag_model_changed,
+    "RAG_ACTIVE_EMBEDDINGS": _on_rag_model_changed,
+    "RERANKER_MODEL": _on_rag_model_changed,
 }
 
 

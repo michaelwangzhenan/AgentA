@@ -254,9 +254,14 @@ class Agent:
         def _token_cb() -> Callable[[str], None] | None:
             return _on_token if bus.subscribers(EVENT_TOKEN_CHUNK) else None
 
+        from src.agent.core.skill_loader import format_skill_content, hydrate_skill_refs
+
         # 加载历史，应用截断策略
         history_mgr = HistoryManager(self._session_store, sid, self.max_history_turns)
-        history = history_mgr.load_truncated()
+        history = hydrate_skill_refs(
+            history_mgr.load_truncated(),
+            self._skill_bodies,
+        )
 
         # 构建 system 消息：base → <user_rules>（静态偏好）→ <user_context>（动态记忆）
         #                  → <active_study_plan>（当前 session 已 `/study load` 的学习计划）
@@ -588,12 +593,15 @@ class Agent:
         Returns:
             True — 首次激活成功；False — 该 Skill 已处于激活状态，不重复注入。
         """
-        tag = f'<skill_content name="{name}">'
+        from src.agent.core.skill_loader import format_skill_content
+
+        tag = f'<skill_content name="{name}"'
         if tag in self.system_prompt:
             return False
         self.system_prompt = (
             self.system_prompt
-            + f"\n\n{tag}\n{body}\n</skill_content>"
+            + "\n\n"
+            + format_skill_content(name, body)
         )
         # 从实例级 _skill_bodies 移除，使 get_tools() 的 enum 不再含此 skill，
         # 避免 LLM 再次调用 load_skill 导致内容重复注入

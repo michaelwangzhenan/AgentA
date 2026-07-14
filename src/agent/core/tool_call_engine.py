@@ -216,6 +216,14 @@ class ToolCallEngine:
         # 先写入 tool 结果再调 plan 审批 hook，保证 PlanAbortedByUser
         # 抛出时 session_store 一致性（assistant_msg 已写入 + tool_msg 已写入）。
         db_content = result.to_llm_str()
+        if tool_name == "load_skill" and result.status == "ok":
+            from src.agent.core.skill_loader import skill_ref_stub
+
+            skill_name = str(tool_args.get("name") or "")
+            raw_body = ""
+            if skill_name:
+                raw_body = self._skill_bodies.get(skill_name, "")
+            db_content = skill_ref_stub(skill_name, raw_body) if skill_name else db_content
         db_msg: dict[str, Any] = {
             "role": "tool",
             "tool_call_id": tool_call.id,

@@ -110,18 +110,23 @@ class SemanticCacheStore:
     ) -> None:
         """写入一条缓存（query 向量 + 答案 + 元数据）。"""
         q = (query or "").strip()
-        if not q or not (answer or "").strip():
+        ans = (answer or "").strip()
+        if not q or not ans:
             return
+        max_chars = int(config.SEMANTIC_CACHE_MAX_ANSWER_CHARS or 0)
+        if max_chars > 0 and len(ans) > max_chars:
+            ans = ans[:max_chars]
         ttl_days = config.SEMANTIC_CACHE_TTL_DAYS if ttl_days is None else ttl_days
         now = int(time.time())
         expires_at = now + max(0, int(ttl_days)) * 86400
         col = self._get_collection()
+        self._trim_before_put(col, int(user_id))
         vec = self._embed(q)
         entry_id = uuid.uuid4().hex
         col.add(
             ids=[entry_id],
             embeddings=[vec],
-            documents=[answer],
+            documents=[ans],
             metadatas=[{
                 "user_id": int(user_id),
                 "query": q[:500],
@@ -131,6 +136,67 @@ class SemanticCacheStore:
             }],
         )
         logger.info("[cache] 写入 id=%s user=%d 过期=%d query=%r", entry_id, user_id, expires_at, q[:60])
+
+    def _trim_before_put(self, col: Any, user_id: int) -> None:
+        """写入前按全局 / 用户上限删最旧条目。"""
+        max_global = int(config.SEMANTIC_CACHE_MAX_GLOBAL or 0)
+        max_user = int(config.SEMANTIC_CACHE_MAX_PER_USER or 0)
+        if max_global > 0:
+            self._trim_collection(col, max_global - 1, user_id=None)
+        if max_user > 0:
+            self._trim_collection(col, max_user - 1, user_id=user_id)
+
+    def _trim_collection(
+        self, col: Any, keep: int, *, user_id: int | None,
+    ) -> None:
+        if keep < 0:
+            keep = 0
+        where = {"user_id": int(user_id)} if user_id is not None else None
+        try:
+            got = col.get(where=where, include=["metadatas"]) if where else col.get(include=["metadatas"])
+        except Exception:
+            return
+        ids = got.get("ids") or []
+        if len(ids) <= keep:
+            return
+        metas = got.get("metadatas") or []
+        pairs = sorted(
+            zip(ids, metas),
+            key=lambda x: int((x[1] or {}).get("created_at") or 0),
+        )
+        to_del = [p[0] for p in pairs[: len(ids) - keep]]
+        if to_del:
+            col.delete(ids=to_del)
+
+    def purge_expired(self) -> int:
+        """批量删除已过期条目；返回删除数。"""
+        col = self._get_collection()
+        now = int(time.time())
+        try:
+            total = int(col.count())
+        except Exception:
+            return 0
+        expired: list[str] = []
+        offset = 0
+        batch = 256
+        while offset < total:
+            try:
+                got = col.get(limit=batch, offset=offset, include=["metadatas"])
+            except Exception:
+                break
+            ids = got.get("ids") or []
+            metas = got.get("metadatas") or []
+            if not ids:
+                break
+            for eid, meta in zip(ids, metas):
+                exp = int((meta or {}).get("expires_at") or 0)
+                if exp and now >= exp:
+                    expired.append(eid)
+            offset += len(ids)
+        if expired:
+            col.delete(ids=expired)
+            logger.info("[cache] 清理过期条目 %d 条", len(expired))
+        return len(expired)
 
     # ── 失效 ────────────────────────────────────────────────────────────────
 
@@ -200,6 +266,17 @@ def store_cached(query: str, answer: str, user_id: int, model_id: str = "") -> N
         get_shared_store().put(query, answer, user_id, model_id=model_id)
     except Exception:
         logger.warning("[cache] store 失败（已忽略，不影响对话）", exc_info=True)
+
+
+def purge_expired_soft() -> int:
+    """启动 / 定时清理过期缓存；出错只记 log。返回删除条数。"""
+    if not config.SEMANTIC_CACHE_ENABLED:
+        return 0
+    try:
+        return get_shared_store().purge_expired()
+    except Exception:
+        logger.warning("[cache] purge_expired 失败（已忽略）", exc_info=True)
+        return 0
 
 
 def invalidate_all_soft() -> None:

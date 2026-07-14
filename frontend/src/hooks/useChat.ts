@@ -17,6 +17,9 @@ import { backendMessagesToFrontend } from '@/types/session'
 import { parseUserMessage } from '@/lib/attachments'
 import { generateId } from '@/lib/id'
 
+const MAX_ASSISTANT_VERSIONS = 5
+const STREAM_FLUSH_MS = 50
+
 function newResearchState(): ResearchState {
   return { phase: 'planning', query: '', subquestions: [], subagents: [], reflect: null }
 }
@@ -68,12 +71,19 @@ function snapshot(m: AssistantMessage): AssistantVersion {
   return {
     content: m.content,
     plan: m.plan,
-    timeline: m.timeline,
+    timeline: [],
     error: m.error,
     model: m.model,
     cached: m.cached,
     downgraded: m.downgraded,
   }
+}
+
+function appendVersion(
+  versions: AssistantVersion[],
+  snap: AssistantVersion,
+): AssistantVersion[] {
+  return [...versions, snap].slice(-MAX_ASSISTANT_VERSIONS)
 }
 
 /** 统计 messages 中某条 user 消息的全局 0 基 user 序号（编辑重发 / 截断用） */
@@ -196,6 +206,23 @@ export function useChat({ sessionId, onSettled }: Options) {
       // 一旦插入工具调用就把 currentThinkingId 清空，下一批 thinking 另起一段。
       let thinkingStart: number | null = null
       let currentThinkingId: string | null = null
+      let contentBuf = ''
+      let flushTimer: ReturnType<typeof setTimeout> | null = null
+
+      const flushContent = () => {
+        if (!contentBuf) return
+        const chunk = contentBuf
+        contentBuf = ''
+        update((m) => ({ ...m, content: m.content + chunk }))
+      }
+
+      const scheduleContentFlush = () => {
+        if (flushTimer != null) return
+        flushTimer = setTimeout(() => {
+          flushTimer = null
+          flushContent()
+        }, STREAM_FLUSH_MS)
+      }
 
       const update = (updater: (m: AssistantMessage) => AssistantMessage) => {
         setMessages((prev) =>
@@ -253,7 +280,8 @@ export function useChat({ sessionId, onSettled }: Options) {
                   break
                 }
                 case 'token_chunk':
-                  update((m) => ({ ...m, content: m.content + ev.payload.text }))
+                  contentBuf += ev.payload.text
+                  scheduleContentFlush()
                   break
                 case 'tool_call_start':
                   // 工具调用切断当前 thinking 段，下一批 thinking 归到下一次循环
@@ -430,6 +458,7 @@ export function useChat({ sessionId, onSettled }: Options) {
                   updateResearch((r) => ({ ...r, phase: 'synthesizing' }))
                   break
                 case 'final_answer':
+                  flushContent()
                   update((m) => ({
                     ...m,
                     // 深度研究：正文流式时是"被检索顺序"的原始编号，final_answer 才是
@@ -450,6 +479,7 @@ export function useChat({ sessionId, onSettled }: Options) {
               }
             },
             onError(err) {
+              flushContent()
               update((m) => ({
                 ...m,
                 error: m.error ?? `连接错误：${err.message}`,
@@ -459,6 +489,7 @@ export function useChat({ sessionId, onSettled }: Options) {
               }))
             },
             onClose() {
+              flushContent()
               update((m) => {
                 const hadRunning = hasRunningTool(m.timeline)
                 const noOutput = !m.content && !m.error
@@ -484,6 +515,8 @@ export function useChat({ sessionId, onSettled }: Options) {
       } catch {
         // onError 已处理
       } finally {
+        if (flushTimer != null) clearTimeout(flushTimer)
+        flushContent()
         if (streamCtrlRef.current === ctrl) streamCtrlRef.current = null
         setInFlight(false)
         // 流式结束后把最终态写入 versions（若该消息处于多版本模式）
@@ -491,7 +524,7 @@ export function useChat({ sessionId, onSettled }: Options) {
           prev.map((m) => {
             if (m.role !== 'assistant' || m.id !== assistantId) return m
             if (!m.versions) return m
-            const versions = [...m.versions, snapshot(m)]
+            const versions = appendVersion(m.versions, snapshot(m))
             return { ...m, versions, versionIndex: versions.length - 1 }
           }),
         )
@@ -606,7 +639,7 @@ export function useChat({ sessionId, onSettled }: Options) {
         const next = prev.slice(0, aIdx + 1) // 丢弃该 assistant 之后的一切
         return next.map((m) => {
           if (m.role !== 'assistant' || m.id !== assistantId) return m
-          const baseVersions = m.versions ?? [snapshot(m)]
+          const baseVersions = (m.versions ?? [snapshot(m)]).slice(-MAX_ASSISTANT_VERSIONS)
           return {
             ...m,
             versions: baseVersions,

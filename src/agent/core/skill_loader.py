@@ -11,6 +11,7 @@ Skills 发现与解析模块
 独立的 `.agenta/skills/disabled.json` 文件里。这样 SKILL.md 可跨 agent 复用。
 """
 
+import hashlib
 import html
 import json
 import logging
@@ -21,6 +22,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
+
+import src.config as config
 
 logger = logging.getLogger(__name__)
 
@@ -658,3 +661,53 @@ def build_skill_catalog(skills: dict[str, SkillInfo]) -> str:
         "当任务与某个 Skill 的描述匹配时，先调用 `load_skill` 工具加载完整指令，再执行任务。\n\n"
         + "\n".join(xml_lines)
     )
+
+
+# ── Skill 注入治理（步骤 10：截断 + 会话存引用）──────────────────────────────
+
+def skill_content_hash(body: str) -> str:
+    return hashlib.sha256((body or "").encode()).hexdigest()[:16]
+
+
+def truncate_skill_body(body: str, max_chars: int | None = None) -> str:
+    cap = config.SKILL_INJECT_MAX_CHARS if max_chars is None else int(max_chars)
+    if cap <= 0 or len(body) <= cap:
+        return body
+    return body[:cap] + f"\n\n...(skill 正文已截断，保留前 {cap} 字符)"
+
+
+def format_skill_content(name: str, body: str) -> str:
+    """组装带 hash 的 skill 注入块（已截断）。"""
+    trimmed = truncate_skill_body(body)
+    h = skill_content_hash(trimmed)
+    return f'<skill_content name="{name}" hash="{h}">\n{trimmed}\n</skill_content>'
+
+
+def skill_ref_stub(name: str, body: str) -> str:
+    """会话持久化用：只存 skill 名 + 正文 hash，不存全文。"""
+    h = skill_content_hash(truncate_skill_body(body))
+    return f'<skill_ref name="{name}" hash="{h}"/>'
+
+
+_SKILL_REF_RE = re.compile(
+    r'<skill_ref\s+name="([^"]+)"\s+hash="([^"]+)"\s*/>',
+)
+
+
+def hydrate_skill_refs(
+    messages: list[dict],
+    skill_bodies: dict[str, str],
+) -> list[dict]:
+    """把历史里的 skill_ref 还原为 skill_content（每轮从内存 catalog 取正文）。"""
+    out: list[dict] = []
+    for m in messages:
+        content = m.get("content") or ""
+        if m.get("role") == "tool" and "<skill_ref" in content:
+            match = _SKILL_REF_RE.search(content)
+            if match:
+                name, _h = match.group(1), match.group(2)
+                body = skill_bodies.get(name)
+                if body is not None:
+                    content = format_skill_content(name, body)
+        out.append({**m, "content": content})
+    return out

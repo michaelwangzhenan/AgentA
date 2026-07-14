@@ -91,7 +91,11 @@ class HistoryManager:
                 while j < len(msgs) and msgs[j].get("role") == "tool":
                     group.append(msgs[j])
                     j += 1
-                if any("<skill_content" in (msg.get("content") or "") for msg in group):
+                if any(
+                    "<skill_content" in (msg.get("content") or "")
+                    or "<skill_ref" in (msg.get("content") or "")
+                    for msg in group
+                ):
                     protected.extend(group)
                 i = j
             else:

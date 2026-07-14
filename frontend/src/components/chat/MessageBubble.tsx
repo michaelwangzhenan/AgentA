@@ -313,7 +313,11 @@ function AssistantBubble({
 
         {body ? (
           <div className="rounded-2xl bg-muted px-4 py-2 text-[15px] text-foreground break-words">
-            <Markdown>{body}</Markdown>
+            {message.streaming ? (
+              <div className="whitespace-pre-wrap">{body}</div>
+            ) : (
+              <Markdown>{body}</Markdown>
+            )}
             {message.streaming ? <StreamingCursor /> : null}
           </div>
         ) : null}

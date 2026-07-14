@@ -126,6 +126,24 @@ def _get_chroma_client() -> Any:
     return get_chroma_client()
 
 
+def clear_model_caches() -> None:
+    """释放 embedding / query 向量 / 精排模型进程内缓存（配置切换时调用）。"""
+    import gc
+
+    with _embedding_fn_lock:
+        _embedding_fn_cache.clear()
+    _embed_query_cached.cache_clear()
+    try:
+        from src.rag import reranker
+
+        with reranker._cross_encoder_lock:
+            reranker._cross_encoder_cache.clear()
+    except Exception:
+        pass
+    gc.collect()
+    logger.info("[Retriever] 已释放本地 embedding / 精排模型缓存")
+
+
 def warm_up() -> None:
     """
     主动触发所有已配置 embedding 模型 + reranker 的加载，避免首次检索时延抖动。

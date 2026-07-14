@@ -105,7 +105,15 @@ def delete_session(
     """硬删 session（级联清 messages + sessions 表）；非本人所有返回 deleted=False。"""
     if not store.owns_session(session_id, user["id"]):
         return SessionDeleteResponse(deleted=False)
-    return SessionDeleteResponse(deleted=store.delete_session(session_id, user_id=user["id"]))
+    deleted = store.delete_session(session_id, user_id=user["id"])
+    if deleted:
+        try:
+            from src.stores.learning_plan_store import get_shared_store as get_plan_store
+
+            get_plan_store().clear_loaded(session_id)
+        except Exception as exc:
+            logger.warning("delete_session: 清理学习计划映射失败 %s: %s", session_id, exc)
+    return SessionDeleteResponse(deleted=deleted)
 
 
 @router.post(

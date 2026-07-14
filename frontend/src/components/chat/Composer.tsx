@@ -144,6 +144,27 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     focus: () => textareaRef.current?.focus(),
   }))
 
+  // 切会话 / 卸载时 revoke 全部图片预览 URL，避免 Object URL 泄漏
+  useEffect(() => {
+    setAttachments((prev) => {
+      for (const a of prev) {
+        if (a.previewUrl) URL.revokeObjectURL(a.previewUrl)
+      }
+      return []
+    })
+  }, [sessionId])
+
+  useEffect(() => {
+    return () => {
+      setAttachments((prev) => {
+        for (const a of prev) {
+          if (a.previewUrl) URL.revokeObjectURL(a.previewUrl)
+        }
+        return []
+      })
+    }
+  }, [])
+
   // 首次加载 skills（slash 菜单用）
   useEffect(() => {
     listSkills()

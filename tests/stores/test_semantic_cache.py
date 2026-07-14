@@ -45,6 +45,19 @@ class FakeCollection:
         if where and "user_id" in where:
             self.entries = [e for e in self.entries if e["meta"]["user_id"] != where["user_id"]]
 
+    def get(self, limit=None, offset=None, where=None, include=None):
+        rows = self.entries
+        if where and "user_id" in where:
+            rows = [e for e in rows if e["meta"]["user_id"] == where["user_id"]]
+        if offset:
+            rows = rows[offset:]
+        if limit is not None:
+            rows = rows[:limit]
+        return {
+            "ids": [e["id"] for e in rows],
+            "metadatas": [e["meta"] for e in rows],
+        }
+
     def count(self):
         return len(self.entries)
 
@@ -111,3 +124,28 @@ def test_lookup_cached_swallows_errors(monkeypatch):
         assert semantic_cache.lookup_cached("q", 1) is None  # 不抛
     finally:
         semantic_cache.reset_shared_store_for_testing(None)
+
+
+def test_put_truncates_answer_and_enforces_user_cap(store, monkeypatch):
+    monkeypatch.setattr(config, "SEMANTIC_CACHE_MAX_ANSWER_CHARS", 10)
+    monkeypatch.setattr(config, "SEMANTIC_CACHE_MAX_PER_USER", 2)
+    monkeypatch.setattr(config, "SEMANTIC_CACHE_MAX_GLOBAL", 0)
+    store.put("q1", "a" * 50, user_id=1)
+    assert len(store._collection.entries[-1]["doc"]) == 10
+    store.put("q2", "b", user_id=1)
+    store.put("q3", "c", user_id=1)
+    assert store._collection.count() == 2
+
+
+def test_purge_expired_batch(store):
+    store.put("q", "a", user_id=1, ttl_days=7)
+    store._collection.entries[-1]["meta"]["expires_at"] = int(time.time()) - 5
+    store.put("q2", "b", user_id=1, ttl_days=7)
+    removed = store.purge_expired()
+    assert removed == 1
+    assert store._collection.count() == 1
+
+
+def test_purge_expired_soft_disabled(monkeypatch):
+    monkeypatch.setattr(config, "SEMANTIC_CACHE_ENABLED", False)
+    assert semantic_cache.purge_expired_soft() == 0

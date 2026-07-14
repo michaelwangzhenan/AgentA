@@ -43,6 +43,8 @@ def _get_cross_encoder() -> "CrossEncoder":  # type: ignore[name-defined]
         ce = _cross_encoder_cache.get(name)
         if ce is None:
             from sentence_transformers import CrossEncoder
+            if _cross_encoder_cache:
+                _cross_encoder_cache.clear()
             logger.info("[Reranker] 加载 CrossEncoder 模型: %s", name)
             ce = CrossEncoder(name)
             _cross_encoder_cache[name] = ce

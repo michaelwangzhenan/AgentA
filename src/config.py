@@ -481,6 +481,12 @@ SEMANTIC_CACHE_COLLECTION: str = os.getenv("SEMANTIC_CACHE_COLLECTION", "semanti
 SEMANTIC_CACHE_THRESHOLD: float = float(os.getenv("SEMANTIC_CACHE_THRESHOLD", "0.95"))
 # 缓存条目过期天数；查询时过滤掉过期条目
 SEMANTIC_CACHE_TTL_DAYS: int = int(os.getenv("SEMANTIC_CACHE_TTL_DAYS", "7"))
+# 每用户缓存条数上限（超出删最旧）；0 表示不限制
+SEMANTIC_CACHE_MAX_PER_USER: int = int(os.getenv("SEMANTIC_CACHE_MAX_PER_USER", "200"))
+# 全局缓存条数上限；0 表示不限制
+SEMANTIC_CACHE_MAX_GLOBAL: int = int(os.getenv("SEMANTIC_CACHE_MAX_GLOBAL", "5000"))
+# 单条缓存答案最大字符数（超出截断后写入）
+SEMANTIC_CACHE_MAX_ANSWER_CHARS: int = int(os.getenv("SEMANTIC_CACHE_MAX_ANSWER_CHARS", "32000"))
 
 # 同时在跑的 agent.run 并发上限（信号量）；超出的请求排队等待，
 # 防止并发把 LLM 配额 / CPU（含 search_knowledge 精排）打满。
@@ -872,6 +878,8 @@ USER_RULES_MAX_CHARS: int = int(os.getenv("USER_RULES_MAX_CHARS", "4000"))
 
 # Skills 禁用列表文件路径（相对项目根；文件不存在视作"未禁用任何 skill"）
 SKILLS_DISABLED_FILE: str = os.getenv("SKILLS_DISABLED_FILE", ".agenta/skills/disabled.json")
+# load_skill / activate_skill 注入正文的最大字符数（超出截断）
+SKILL_INJECT_MAX_CHARS: int = int(os.getenv("SKILL_INJECT_MAX_CHARS", "12000"))
 
 
 # ── 每请求 LLM 偏好覆盖（多用户隔离）─────────────────────────────────────────
