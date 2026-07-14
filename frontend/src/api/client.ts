@@ -336,6 +336,7 @@ export async function ingestKBFileStream(
   file: File,
   model: string,
   relpath: string,
+  ingestId: string,
   onProgress?: (p: IngestProgress) => void,
   signal?: AbortSignal,
   golden?: IngestGoldenOpts,
@@ -344,6 +345,7 @@ export async function ingestKBFileStream(
   form.append('file', file)
   form.append('model', model)
   form.append('relpath', relpath)
+  form.append('ingest_id', ingestId)
   if (golden?.goldenLlm != null) form.append('golden_llm', golden.goldenLlm)
   if (golden?.goldenMaxQ != null) form.append('golden_max_q', String(golden.goldenMaxQ))
   const res = await apiFetch('/api/kb/upload', { method: 'POST', body: form, signal })
@@ -359,6 +361,10 @@ export async function ingestKBFileStream(
   let errMsg: string | null = null
 
   for (;;) {
+    if (signal?.aborted) {
+      await reader.cancel().catch(() => {})
+      throw new DOMException('Aborted', 'AbortError')
+    }
     const { value, done } = await reader.read()
     if (done) break
     buf += decoder.decode(value, { stream: true })
@@ -383,6 +389,14 @@ export async function ingestKBFileStream(
   if (errMsg) throw new Error(errMsg)
   if (!result) throw new Error('上传未返回结果')
   return result
+}
+
+/** 显式取消进行中的单文件入库（abort 经代理时后端未必能感知断开）。 */
+export async function cancelKBUpload(ingestId: string): Promise<void> {
+  const form = new FormData()
+  form.append('ingest_id', ingestId)
+  const res = await apiFetch('/api/kb/upload/cancel', { method: 'POST', body: form })
+  await _ensureOk(res)
 }
 
 export async function deleteKBDocument(

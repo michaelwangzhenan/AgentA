@@ -11,12 +11,13 @@ import json
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 import src.config as config
 from src.api.deps import ROLE_ADMIN, get_current_user
 from src.api.schemas.kb import (
+    KBCancelUploadResponse,
     KBClearAllResponse,
     KBCollection,
     KBCollectionListResponse,
@@ -25,6 +26,7 @@ from src.api.schemas.kb import (
     KBDocumentListResponse,
 )
 from src.rag.ingest import (
+    IngestCancelled,
     count_kb_documents,
     delete_all_kb_documents,
     delete_kb_document,
@@ -32,6 +34,7 @@ from src.rag.ingest import (
     list_kb_documents,
 )
 from src.rag.parser import SUPPORTED_EXTENSIONS, is_office_temp_file
+from src.services import ingest_cancel
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +174,8 @@ def _generate_golden_sync(
 
 
 async def _ingest_event_stream(
+    request: Request,
+    ingest_id: str,
     target_path: Path,
     upload_root: Path,
     model: str,
@@ -182,15 +187,26 @@ async def _ingest_event_stream(
 
     progress_cb 在工作线程里被调用，用 call_soon_threadsafe 把事件投进 asyncio.Queue；
     生成器侧逐条取出转成 `data: {...}` 行。最终发 done / error 后收尾。
+    取消：`/api/kb/upload/cancel` 置位 ingest_id（主路径）；`is_disconnected` / yield 异常兜底。
     """
     loop = asyncio.get_running_loop()
     q: asyncio.Queue = asyncio.Queue()
+    cancel_event = ingest_cancel.register(ingest_id)
 
     def cb(phase: str, done: int, total: int) -> None:
         loop.call_soon_threadsafe(
             q.put_nowait,
             {"type": "progress", "phase": phase, "done": done, "total": total},
         )
+
+    def cancel_cb() -> bool:
+        return cancel_event.is_set()
+
+    def _mark_cancelled() -> None:
+        cancel_event.set()
+
+    async def _sse_line(payload: dict) -> str:
+        return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
     async def run() -> None:
         try:
@@ -200,22 +216,32 @@ async def _ingest_event_stream(
                 docs_root=upload_root,
                 model=model,
                 progress_cb=cb,
+                cancel_cb=cancel_cb,
             )
+            if cancel_event.is_set():
+                return
             status, chunks, doc_id = result["status"], result["chunks"], result["doc_id"]
             golden_n = 0
             from src.rag.golden_options import model_id_for_golden, should_generate_golden
 
-            if status == "ingested" and should_generate_golden(golden_llm):
+            if (
+                status == "ingested"
+                and should_generate_golden(golden_llm)
+                and not cancel_event.is_set()
+            ):
                 q.put_nowait({"type": "progress", "phase": "golden", "done": 0, "total": 0})
-                llm_id = model_id_for_golden(golden_llm)
-                golden_n = await asyncio.to_thread(
-                    _generate_golden_sync,
-                    target_path,
-                    safe_name,
-                    doc_id,
-                    llm_id,
-                    golden_max_q,
-                )
+                if not cancel_event.is_set():
+                    llm_id = model_id_for_golden(golden_llm)
+                    golden_n = await asyncio.to_thread(
+                        _generate_golden_sync,
+                        target_path,
+                        safe_name,
+                        doc_id,
+                        llm_id,
+                        golden_max_q,
+                    )
+            if cancel_event.is_set():
+                return
             q.put_nowait({
                 "type": "done",
                 "doc_id": doc_id,
@@ -226,26 +252,69 @@ async def _ingest_event_stream(
                 "golden_generated": golden_n,
                 "message": _done_message(status, chunks),
             })
+        except IngestCancelled:
+            logger.info("[KB] 入库已取消: %s", safe_name)
         except Exception as exc:  # noqa: BLE001 — 任何入库异常都作为 error 事件回传
+            if cancel_event.is_set():
+                logger.info("[KB] 入库已取消（异常路径）: %s", safe_name)
+                return
             logger.exception("[KB] ingest 失败: %s", safe_name)
             q.put_nowait({"type": "error", "message": str(exc)})
 
     task = asyncio.create_task(run())
     try:
         # 连接建立后立即推一条进度，避免前端长时间停在 0% 且无阶段文案
-        yield f"data: {json.dumps({'type': 'progress', 'phase': 'parse', 'done': 0, 'total': 0}, ensure_ascii=False)}\n\n"
+        yield await _sse_line({"type": "progress", "phase": "parse", "done": 0, "total": 0})
         while True:
-            ev = await q.get()
-            yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+            if await request.is_disconnected():
+                _mark_cancelled()
+                break
+            try:
+                ev = await asyncio.wait_for(q.get(), timeout=0.5)
+            except asyncio.TimeoutError:
+                if await request.is_disconnected():
+                    _mark_cancelled()
+                    break
+                continue
+            try:
+                yield await _sse_line(ev)
+            except (asyncio.CancelledError, ConnectionError, BrokenPipeError):
+                _mark_cancelled()
+                break
             if ev["type"] in ("done", "error"):
                 break
     finally:
-        await task
+        ingest_cancel.unregister(ingest_id)
+        if cancel_event.is_set():
+            if not task.done():
+                try:
+                    await asyncio.wait_for(task, timeout=60.0)
+                except asyncio.TimeoutError:
+                    logger.warning("[KB] 取消后 ingest 线程未及时结束: %s", safe_name)
+        elif not task.done():
+            await task
+
+
+@router.post("/kb/upload/cancel", response_model=KBCancelUploadResponse)
+def cancel_upload(
+    ingest_id: str = Form(...),
+    _: dict = Depends(get_current_user),
+) -> KBCancelUploadResponse:
+    """取消进行中的单文件入库（与 upload 表单的 ingest_id 对应）。"""
+    ingest_id = ingest_id.strip()
+    if not ingest_id:
+        raise HTTPException(status_code=422, detail="ingest_id 不能为空")
+    ok = ingest_cancel.trigger(ingest_id)
+    if ok:
+        logger.info("[KB] 收到取消请求: ingest_id=%s", ingest_id)
+    return KBCancelUploadResponse(cancelled=ok)
 
 
 @router.post("/kb/upload")
 async def upload_document(
+    request: Request,
     file: UploadFile = File(...),
+    ingest_id: str = Form(...),
     model: str | None = Form(None),
     relpath: str = Form(""),
     golden_llm: str | None = Form(None),
@@ -269,6 +338,9 @@ async def upload_document(
       - `{type:"error", message}`
     """
     model = _validate_alias(model or config.DEFAULT_EMBEDDING_ALIAS)
+    ingest_id = ingest_id.strip()
+    if not ingest_id:
+        raise HTTPException(status_code=422, detail="ingest_id 不能为空")
     if not file.filename:
         raise HTTPException(status_code=422, detail="filename 不能为空")
     rel_basename = relpath.replace("\\", "/").rsplit("/", 1)[-1] if relpath else ""
@@ -334,6 +406,8 @@ async def upload_document(
 
     return StreamingResponse(
         _ingest_event_stream(
+            request,
+            ingest_id,
             target_path, upload_root, model, rel_name, llm_choice, max_q,
         ),
         media_type="text/event-stream",

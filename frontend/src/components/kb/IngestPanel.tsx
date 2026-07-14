@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, Folder, FolderUp, Loader2, Play, Trash2, X } from 'lucide-react'
 
-import { ingestKBFileStream } from '@/api/client'
+import { cancelKBUpload, ingestKBFileStream } from '@/api/client'
 import type { IngestProgress, KBCollection } from '@/types/kb'
 import { ACCEPT_EXTENSIONS, DropZone } from '@/components/kb/DropZone'
 import { GoldenGenControls } from '@/components/kb/GoldenGenControls'
@@ -62,6 +62,7 @@ export function IngestPanel({
   // 取消入库：cancelRef 让批次循环在文件间停下；abortRef 中断当前在传的请求
   const cancelRef = useRef(false)
   const abortRef = useRef<AbortController | null>(null)
+  const ingestIdRef = useRef<string | null>(null)
 
   // 默认库加载后回填下拉（用户手动改过则不再覆盖）
   useEffect(() => {
@@ -153,12 +154,15 @@ export function IngestPanel({
         setChunk(null)
         const ac = new AbortController()
         abortRef.current = ac
+        const ingestId = crypto.randomUUID()
+        ingestIdRef.current = ingestId
         setChunk({ phase: 'upload', done: 0, total: 0 })
         try {
           const resp = await ingestKBFileStream(
             file,
             target,
             label,
+            ingestId,
             (p) => setChunk(p),
             ac.signal,
             isAdmin ? { goldenLlm, goldenMaxQ } : undefined,
@@ -209,6 +213,7 @@ export function IngestPanel({
       }
     } finally {
       abortRef.current = null
+      ingestIdRef.current = null
       setRunning(false)
       setCurrent('')
       setChunk(null)
@@ -219,6 +224,8 @@ export function IngestPanel({
   const cancel = () => {
     cancelRef.current = true
     abortRef.current?.abort()
+    const id = ingestIdRef.current
+    if (id) void cancelKBUpload(id).catch(() => {})
   }
 
   // 当前文件的块级阶段文案

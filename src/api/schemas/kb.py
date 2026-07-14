@@ -56,3 +56,9 @@ class KBClearAllResponse(BaseModel):
     docs_removed: int = Field(0, description="删除的文档数")
     chunks_removed: int = Field(0, description="Chroma 中移除的 chunk 总数")
     files_removed: int = Field(0, description="web_uploads 目录中物理删除的文件数")
+
+
+class KBCancelUploadResponse(BaseModel):
+    """POST /api/kb/upload/cancel 返回值"""
+
+    cancelled: bool = Field(..., description="是否找到对应 ingest_id 并已置取消标志")

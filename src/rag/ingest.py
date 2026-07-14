@@ -47,6 +47,39 @@ _EMBED_BATCH_SIZE = 16
 #   phase: "parse" 解析中 / "split" 切分完成 / "embed" 嵌入中
 #   done/total: embed 阶段为已写入 / 总块数；parse 阶段为 0/0
 ProgressCb = Callable[[str, int, int], None]
+# 取消探测：返回 True 时协作式中止入库（Web SSE 客户端断开用）
+CancelCb = Callable[[], bool]
+
+
+class IngestCancelled(Exception):
+    """Web 入库被客户端取消（连接断开或用户点取消）。"""
+
+
+def _raise_if_cancelled(cancel_cb: CancelCb | None) -> None:
+    if cancel_cb is not None and cancel_cb():
+        raise IngestCancelled()
+
+
+def _rollback_doc_chunks(
+    collection,
+    collection_name: str,
+    doc_id: str,
+    *,
+    bm25_save: bool = True,
+) -> None:
+    """取消入库时清掉该文档已写入的部分 chunks，避免半成品残留。"""
+    existing = collection.get(where={"doc_id": doc_id}, include=[])
+    ids = existing.get("ids") or []
+    if ids:
+        collection.delete(ids=ids)
+        logger.info("  取消入库，已回滚 %d 块: doc_id=%s", len(ids), doc_id)
+    if config.BM25_ENABLED:
+        try:
+            from src.rag.bm25_index import get_index
+
+            get_index(collection_name).delete_by_doc_id(doc_id)
+        except Exception as exc:
+            logger.warning("  取消入库 BM25 回滚失败（已忽略）: %s", exc)
 
 import chromadb
 
@@ -121,8 +154,10 @@ def _ingest_docx_file(
     probe: IngestProbe,
     *,
     bm25_save: bool = True,
+    cancel_cb: CancelCb | None = None,
 ) -> dict:
     """隔离解析 DOCX，并按标题区段增量分块、分批写入。"""
+    _raise_if_cancelled(cancel_cb)
     if progress_cb:
         progress_cb("parse", 0, 0)
 
@@ -216,6 +251,7 @@ def _ingest_docx_file(
             nonlocal batch, done, bm25_error
             if not batch:
                 return
+            _raise_if_cancelled(cancel_cb)
             ids = [_make_chunk_id(doc_id, item["index"]) for item in batch]
             documents = [item["text"] for item in batch]
             metadatas: list[dict] = []
@@ -239,6 +275,7 @@ def _ingest_docx_file(
                     md["heading_path"] = " > ".join(item["heading_path"])
                 metadatas.append(md)
             collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
+            _raise_if_cancelled(cancel_cb)
             if bm25 is not None and bm25_error is None:
                 try:
                     bm25.upsert(ids=ids, documents=documents, metadatas=metadatas)
@@ -249,15 +286,22 @@ def _ingest_docx_file(
                 progress_cb("embed", done, total_chunks)
             batch = []
 
-        with probe.track("embed"):
-            with chunk_path.open("r", encoding="utf-8") as spool:
-                for index, line in enumerate(spool):
-                    item = json.loads(line)
-                    item["index"] = index
-                    batch.append(item)
-                    if len(batch) >= _EMBED_BATCH_SIZE:
-                        flush_batch()
-                flush_batch()
+        try:
+            with probe.track("embed"):
+                with chunk_path.open("r", encoding="utf-8") as spool:
+                    for index, line in enumerate(spool):
+                        _raise_if_cancelled(cancel_cb)
+                        item = json.loads(line)
+                        item["index"] = index
+                        batch.append(item)
+                        if len(batch) >= _EMBED_BATCH_SIZE:
+                            flush_batch()
+                    flush_batch()
+        except IngestCancelled:
+            _rollback_doc_chunks(
+                collection, collection_name, doc_id, bm25_save=bm25_save,
+            )
+            raise
 
         with probe.track("bm25"):
             if bm25_save and bm25 is not None and bm25_error is None:
@@ -338,6 +382,7 @@ def _ingest_one_file(
     probe: IngestProbe | None = None,
     *,
     bm25_save: bool = True,
+    cancel_cb: CancelCb | None = None,
 ) -> dict:
     """处理单个文件入库；返回 {doc_id, chunks, status}。
 
@@ -368,8 +413,10 @@ def _ingest_one_file(
             progress_cb,
             probe,
             bm25_save=bm25_save,
+            cancel_cb=cancel_cb,
         )
 
+    _raise_if_cancelled(cancel_cb)
     if progress_cb:
         progress_cb("parse", 0, 0)
     with probe.track("parse"):
@@ -443,15 +490,23 @@ def _ingest_one_file(
         progress_cb("split", 0, total_chunks)
 
     with probe.track("embed"):
-        for start in range(0, total_chunks, _EMBED_BATCH_SIZE):
-            end = min(start + _EMBED_BATCH_SIZE, total_chunks)
-            collection.upsert(
-                ids=ids[start:end],
-                documents=documents[start:end],
-                metadatas=metadatas[start:end],  # type: ignore[arg-type]
+        try:
+            for start in range(0, total_chunks, _EMBED_BATCH_SIZE):
+                _raise_if_cancelled(cancel_cb)
+                end = min(start + _EMBED_BATCH_SIZE, total_chunks)
+                collection.upsert(
+                    ids=ids[start:end],
+                    documents=documents[start:end],
+                    metadatas=metadatas[start:end],  # type: ignore[arg-type]
+                )
+                _raise_if_cancelled(cancel_cb)
+                if progress_cb:
+                    progress_cb("embed", end, total_chunks)
+        except IngestCancelled:
+            _rollback_doc_chunks(
+                collection, collection_name, doc_id, bm25_save=bm25_save,
             )
-            if progress_cb:
-                progress_cb("embed", end, total_chunks)
+            raise
 
     with probe.track("bm25"):
         if config.BM25_ENABLED:
@@ -489,6 +544,7 @@ def ingest_one(
     docs_root: str | Path | None = None,
     model: str = config.DEFAULT_EMBEDDING_ALIAS,
     progress_cb: ProgressCb | None = None,
+    cancel_cb: CancelCb | None = None,
 ) -> dict:
     """单文件入库入口（Web 拖拽上传专用，不扫整个目录）。
 
@@ -500,6 +556,7 @@ def ingest_one(
         docs_root: 用于计算 rel_path（doc_id 派生自 rel_path）。None 则用文件所在目录。
         model: embedding 别名（en / zh / m3）。
         progress_cb: 可选进度回调（parse / split / embed 阶段），Web SSE 用。
+        cancel_cb: 可选取消探测；返回 True 时在批间协作式中止并回滚已写 chunks。
 
     Returns:
         dict: {doc_id, chunks, status}，status ∈ ingested / skipped_unchanged / empty
@@ -537,8 +594,12 @@ def ingest_one(
                 progress_cb,
                 probe,
                 bm25_save=False,
+                cancel_cb=cancel_cb,
             )
             probe.file_done(result.get("status", "unknown"), int(result.get("chunks", 0)))
+        except IngestCancelled:
+            probe.file_error("cancelled")
+            raise
         except Exception as exc:
             probe.file_error(str(exc))
             raise

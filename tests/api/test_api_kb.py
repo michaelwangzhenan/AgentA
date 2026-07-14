@@ -176,13 +176,23 @@ def test_list_documents_aggregated(
 
 # ─── POST /api/kb/upload ─────────────────────────────────────────────────
 
+_TEST_INGEST_ID = "test-ingest-id"
+
+
+def _upload_form(**extra: str) -> dict[str, str]:
+    return {"ingest_id": _TEST_INGEST_ID, **extra}
+
 
 def _stub_successful_ingest(monkeypatch: pytest.MonkeyPatch, chunks: int = 3) -> None:
     """安装 fake ingest_one：模拟"单文件入库成功，返回 N chunks"（含进度回调）。"""
     from src.rag.ingest import _doc_id_from_relpath
 
     def fake_ingest_one(
-        file_path: Any, docs_root: Any, model: str, progress_cb: Any = None
+        file_path: Any,
+        docs_root: Any,
+        model: str,
+        progress_cb: Any = None,
+        cancel_cb: Any = None,
     ) -> dict[str, Any]:
         if progress_cb:
             progress_cb("parse", 0, 0)
@@ -209,7 +219,7 @@ def test_upload_success(
     _stub_successful_ingest(monkeypatch, chunks=5)
 
     files = {"file": ("hello.md", b"# Hello\n\nThis is a test.", "text/markdown")}
-    data = {"golden_llm": "kimi-k2.5", "golden_max_q": "3"}
+    data = _upload_form(golden_llm="kimi-k2.5", golden_max_q="3")
     r = client.post("/api/kb/upload", files=files, data=data)
 
     assert r.status_code == 200
@@ -245,7 +255,7 @@ def test_upload_skips_golden_when_llm_none(
     monkeypatch.setattr("src.api.routes.kb._generate_golden_sync", _no_golden)
 
     files = {"file": ("hello.md", b"# Hello", "text/markdown")}
-    data = {"golden_llm": "none"}
+    data = _upload_form(golden_llm="none")
     r = client.post("/api/kb/upload", files=files, data=data)
     assert r.status_code == 200
     events = _sse_events(r.text)
@@ -255,7 +265,7 @@ def test_upload_skips_golden_when_llm_none(
 
 def test_upload_unsupported_extension_returns_415(client: TestClient) -> None:
     files = {"file": ("payload.exe", b"\x4d\x5a\x90", "application/octet-stream")}
-    r = client.post("/api/kb/upload", files=files)
+    r = client.post("/api/kb/upload", files=files, data=_upload_form())
     assert r.status_code == 415
     assert ".exe" in r.json()["detail"]
 
@@ -268,14 +278,14 @@ def test_upload_office_temp_file_returns_400(client: TestClient) -> None:
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
     }
-    r = client.post("/api/kb/upload", files=files)
+    r = client.post("/api/kb/upload", files=files, data=_upload_form())
     assert r.status_code == 400
     assert "临时文件" in r.json()["detail"]
 
 
 def test_upload_empty_file_returns_422(client: TestClient) -> None:
     files = {"file": ("empty.md", b"", "text/markdown")}
-    r = client.post("/api/kb/upload", files=files)
+    r = client.post("/api/kb/upload", files=files, data=_upload_form())
     assert r.status_code == 422
 
 
@@ -285,7 +295,7 @@ def test_upload_too_large_returns_413(
     monkeypatch.setattr(config, "WEB_MAX_UPLOAD_MB", 1)  # 1 MB 上限
     big = b"x" * (1024 * 1024 + 100)  # 1 MB + 一点点
     files = {"file": ("big.md", big, "text/markdown")}
-    r = client.post("/api/kb/upload", files=files)
+    r = client.post("/api/kb/upload", files=files, data=_upload_form())
     assert r.status_code == 413
 
 
@@ -298,7 +308,7 @@ def test_upload_path_traversal_filename_is_stripped(
     _stub_successful_ingest(monkeypatch, chunks=1)
 
     files = {"file": ("../../../etc/passwd", b"sensitive", "text/markdown")}
-    r = client.post("/api/kb/upload", files=files)
+    r = client.post("/api/kb/upload", files=files, data=_upload_form())
     # 应该被 415 拦掉（.passwd 不在 SUPPORTED_EXTENSIONS）
     assert r.status_code == 415
 
@@ -312,7 +322,7 @@ def test_upload_filename_with_subdir_only_keeps_basename(
     _stub_successful_ingest(monkeypatch, chunks=1)
 
     files = {"file": ("subdir/inner.md", b"content", "text/markdown")}
-    r = client.post("/api/kb/upload", files=files)
+    r = client.post("/api/kb/upload", files=files, data=_upload_form())
     assert r.status_code == 200
     # 未传 relpath → 只取 basename，落到 web_uploads/<alias>/inner.md
     alias_root = _tmp_upload_dir / config.DEFAULT_EMBEDDING_ALIAS
@@ -332,7 +342,7 @@ def test_upload_relpath_preserves_subdir(
     r = client.post(
         "/api/kb/upload",
         files=files,
-        data={"model": "zh", "relpath": "docs/sub/inner.md"},
+        data=_upload_form(model="zh", relpath="docs/sub/inner.md"),
     )
     assert r.status_code == 200
     assert (_tmp_upload_dir / "zh" / "docs" / "sub" / "inner.md").exists()
@@ -350,7 +360,7 @@ def test_upload_relpath_traversal_falls_back_to_basename(
     r = client.post(
         "/api/kb/upload",
         files=files,
-        data={"relpath": "../../etc/inner.md"},
+        data=_upload_form(relpath="../../etc/inner.md"),
     )
     assert r.status_code == 200
     alias_root = _tmp_upload_dir / config.DEFAULT_EMBEDDING_ALIAS
@@ -366,14 +376,18 @@ def test_upload_parse_returns_empty_chunks_zero(
     """ingest_one 返回 status='empty'（parse 空内容）→ chunks=0 + message 说明。"""
 
     def fake_ingest_one(
-        file_path: Any, docs_root: Any, model: str, progress_cb: Any = None
+        file_path: Any,
+        docs_root: Any,
+        model: str,
+        progress_cb: Any = None,
+        cancel_cb: Any = None,
     ) -> dict[str, Any]:
         return {"doc_id": "empty-doc", "chunks": 0, "status": "empty"}
 
     monkeypatch.setattr("src.api.routes.kb.ingest_one", fake_ingest_one)
 
     files = {"file": ("hello.md", b"# Hello", "text/markdown")}
-    r = client.post("/api/kb/upload", files=files)
+    r = client.post("/api/kb/upload", files=files, data=_upload_form())
     assert r.status_code == 200
     done = _final_event(r.text)
     assert done["type"] == "done"
@@ -389,14 +403,18 @@ def test_upload_skipped_unchanged_returns_message(
     """ingest_one 返回 status='skipped_unchanged'（内容未变化）→ skipped 标志 + 提示。"""
 
     def fake_ingest_one(
-        file_path: Any, docs_root: Any, model: str, progress_cb: Any = None
+        file_path: Any,
+        docs_root: Any,
+        model: str,
+        progress_cb: Any = None,
+        cancel_cb: Any = None,
     ) -> dict[str, Any]:
         return {"doc_id": "same-doc", "chunks": 7, "status": "skipped_unchanged"}
 
     monkeypatch.setattr("src.api.routes.kb.ingest_one", fake_ingest_one)
 
     files = {"file": ("hello.md", b"# Hello", "text/markdown")}
-    r = client.post("/api/kb/upload", files=files)
+    r = client.post("/api/kb/upload", files=files, data=_upload_form())
     assert r.status_code == 200
     done = _final_event(r.text)
     assert done["chunks"] == 7
@@ -411,18 +429,90 @@ def test_upload_ingest_exception_emits_error_event(
     """流已开始后入库抛错 → 作为 SSE error 事件回传（HTTP 仍 200）。"""
 
     def boom(
-        file_path: Any, docs_root: Any, model: str, progress_cb: Any = None
+        file_path: Any,
+        docs_root: Any,
+        model: str,
+        progress_cb: Any = None,
+        cancel_cb: Any = None,
     ) -> dict[str, Any]:
         raise RuntimeError("embedding model offline")
 
     monkeypatch.setattr("src.api.routes.kb.ingest_one", boom)
 
     files = {"file": ("hello.md", b"# Hello", "text/markdown")}
-    r = client.post("/api/kb/upload", files=files)
+    r = client.post("/api/kb/upload", files=files, data=_upload_form())
     assert r.status_code == 200
     err = _final_event(r.text)
     assert err["type"] == "error"
     assert "embedding model offline" in err["message"]
+
+
+def test_upload_missing_ingest_id_returns_422(client: TestClient) -> None:
+    files = {"file": ("hello.md", b"# Hello", "text/markdown")}
+    r = client.post("/api/kb/upload", files=files)
+    assert r.status_code == 422
+
+
+def test_upload_cancel_endpoint(client: TestClient) -> None:
+    r = client.post("/api/kb/upload/cancel", data={"ingest_id": "no-such-id"})
+    assert r.status_code == 200
+    assert r.json() == {"cancelled": False}
+
+    from src.services import ingest_cancel
+
+    ev = ingest_cancel.register("active-id")
+    r2 = client.post("/api/kb/upload/cancel", data={"ingest_id": "active-id"})
+    assert r2.status_code == 200
+    assert r2.json() == {"cancelled": True}
+    assert ev.is_set()
+    ingest_cancel.unregister("active-id")
+
+
+def test_upload_cancel_stops_slow_ingest(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """显式 cancel API 应让 fake ingest_one 通过 cancel_cb 协作退出。"""
+    import threading
+    import time
+
+    from src.rag.ingest import IngestCancelled
+
+    started = threading.Event()
+    saw_cancel = threading.Event()
+
+    def slow_ingest(
+        file_path: Any,
+        docs_root: Any,
+        model: str,
+        progress_cb: Any = None,
+        cancel_cb: Any = None,
+    ) -> dict[str, Any]:
+        started.set()
+        while cancel_cb is None or not cancel_cb():
+            time.sleep(0.05)
+        saw_cancel.set()
+        raise IngestCancelled()
+
+    monkeypatch.setattr("src.api.routes.kb.ingest_one", slow_ingest)
+
+    ingest_id = "cancel-me"
+    files = {"file": ("hello.md", b"# Hello", "text/markdown")}
+
+    def _run_upload() -> None:
+        client.post(
+            "/api/kb/upload",
+            files=files,
+            data=_upload_form(ingest_id=ingest_id),
+        )
+
+    t = threading.Thread(target=_run_upload, daemon=True)
+    t.start()
+    assert started.wait(timeout=5)
+    r = client.post("/api/kb/upload/cancel", data={"ingest_id": ingest_id})
+    assert r.json()["cancelled"] is True
+    t.join(timeout=10)
+    assert saw_cancel.is_set()
 
 
 # ─── DELETE /api/kb/documents/{doc_id} ───────────────────────────────────
