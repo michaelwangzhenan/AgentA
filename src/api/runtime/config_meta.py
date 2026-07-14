@@ -226,6 +226,26 @@ REGISTRY: list[ConfigItem] = [
         min=0,
         max=20,
     ),
+    ConfigItem(
+        key="BM25_INDEX_CACHE_MAX",
+        group="rag",
+        section="召回",
+        type=ItemType.INT,
+        brief="BM25 进程缓存上限",
+        detail="进程内最多常驻几个 collection 的 BM25 索引；低内存 VPS 建议 1。",
+        min=1,
+        max=8,
+    ),
+    ConfigItem(
+        key="BM25_INDEX_IDLE_RELEASE_SEC",
+        group="rag",
+        section="召回",
+        type=ItemType.INT,
+        brief="BM25 空闲释放 (秒)",
+        detail="检索结束后索引在进程内保留的最长时间；0 表示检索完成立即释放。",
+        min=0,
+        max=3600,
+    ),
     # —— Query 改写（检索前扩展 query）——
     ConfigItem(
         key="RAG_QUERY_REWRITE_ENABLED",

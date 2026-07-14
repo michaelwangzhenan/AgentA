@@ -277,50 +277,52 @@ def _query_bm25(
     """对指定 collection 的 BM25 索引做关键词召回；索引缺失时静默返回空列表。"""
     if not config.BM25_ENABLED:
         return []
-    try:
-        from src.rag.bm25_index import get_index, get_index_path
+    from src.rag.bm25_index import get_index, get_index_path, pin_index, unpin_index
 
+    pin_index(collection_name)
+    try:
         path = get_index_path(collection_name)
         if not path.exists():
             return []
         idx = get_index(collection_name)
+        raw = idx.search(query, top_k=top_k, where=where)
+        if not raw:
+            return []
+
+        chunk_ids = [doc.id for doc, _ in raw]
+        doc_texts: dict[str, str] = {}
+        try:
+            client = _get_chroma_client()
+            collection = client.get_collection(name=collection_name)
+            got = collection.get(ids=chunk_ids, include=["documents"])
+            ids_out = got.get("ids") or []
+            documents = got.get("documents") or []
+            for i, cid in enumerate(ids_out):
+                if i < len(documents) and documents[i]:
+                    doc_texts[str(cid)] = documents[i]
+        except Exception as e:
+            logger.warning("[BM25] 回表取正文失败 %s: %s", collection_name, e)
+
+        hits: list[Hit] = []
+        for doc, score in raw:
+            meta = doc.metadata or {}
+            source = str(meta.get("source") or meta.get("filename") or "unknown")
+            hits.append(Hit(
+                source=source,
+                document=doc_texts.get(doc.id, doc.document or ""),
+                distance=0.0,
+                collection=collection_name,
+                score=float(score),
+                id=doc.id,
+                retrievers=["bm25"],
+                metadata=dict(meta),
+            ))
+        return hits
     except Exception as e:
         logger.warning("[BM25] 加载 %s 失败: %s", collection_name, e)
         return []
-
-    raw = idx.search(query, top_k=top_k, where=where)
-    if not raw:
-        return []
-
-    chunk_ids = [doc.id for doc, _ in raw]
-    doc_texts: dict[str, str] = {}
-    try:
-        client = _get_chroma_client()
-        collection = client.get_collection(name=collection_name)
-        got = collection.get(ids=chunk_ids, include=["documents"])
-        ids_out = got.get("ids") or []
-        documents = got.get("documents") or []
-        for i, cid in enumerate(ids_out):
-            if i < len(documents) and documents[i]:
-                doc_texts[str(cid)] = documents[i]
-    except Exception as e:
-        logger.warning("[BM25] 回表取正文失败 %s: %s", collection_name, e)
-
-    hits: list[Hit] = []
-    for doc, score in raw:
-        meta = doc.metadata or {}
-        source = str(meta.get("source") or meta.get("filename") or "unknown")
-        hits.append(Hit(
-            source=source,
-            document=doc_texts.get(doc.id, doc.document or ""),
-            distance=0.0,           # BM25 无向量距离概念，留 0 保持类型一致
-            collection=collection_name,
-            score=float(score),     # 临时存 BM25 raw score，融合后会被 RRF 分覆盖
-            id=doc.id,
-            retrievers=["bm25"],
-            metadata=dict(meta),
-        ))
-    return hits
+    finally:
+        unpin_index(collection_name)
 
 
 # ── RRF 融合 ─────────────────────────────────────────────────────────────────

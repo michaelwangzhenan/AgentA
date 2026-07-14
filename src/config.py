@@ -762,6 +762,10 @@ BM25_B: float = float(os.getenv("BM25_B", "0.75"))
 RRF_K: int = int(os.getenv("RRF_K", "60"))
 # BM25 索引目录（bm25_<collection>.pkl）；留空则回落到 CHROMA_DB_PATH 同目录
 BM25_INDEX_DIR: str = os.getenv("BM25_INDEX_DIR", "./db/bm25")
+# 进程内 BM25 索引最多常驻几个 collection（低内存 VPS 建议 1）
+BM25_INDEX_CACHE_MAX: int = int(os.getenv("BM25_INDEX_CACHE_MAX", "1"))
+# 检索 pin 归零后，空闲超过此秒数即从进程缓存释放；0 表示 unpin 后立即释放
+BM25_INDEX_IDLE_RELEASE_SEC: int = int(os.getenv("BM25_INDEX_IDLE_RELEASE_SEC", "60"))
 
 # ── PDF OCR 兜底（Iter-4） ──────────────────────────────────────────────────
 # 当 PDF 文本层提取的"平均每页字符数"低于阈值时，自动尝试 OCR（rapidocr-onnxruntime）。

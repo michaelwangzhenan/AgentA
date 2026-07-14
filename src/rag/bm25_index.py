@@ -19,10 +19,12 @@ BM25 倒排索引（自实现，零外部依赖）
 
 from __future__ import annotations
 
+import gc
 import logging
 import math
 import pickle
 import re
+import threading
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -352,16 +354,100 @@ def save_index(idx: BM25Index, path: Path) -> None:
 
 _index_cache: dict[str, BM25Index] = {}
 _cache_lock = RLock()
+_pin_refs: dict[str, int] = {}
+_idle_timers: dict[str, threading.Timer] = {}
+
+
+def _cancel_idle_timer(collection_name: str) -> None:
+    timer = _idle_timers.pop(collection_name, None)
+    if timer is not None:
+        timer.cancel()
+
+
+def _drop_from_cache(collection_name: str, *, reason: str) -> None:
+    with _cache_lock:
+        if collection_name not in _index_cache:
+            return
+        _cancel_idle_timer(collection_name)
+        _pin_refs.pop(collection_name, None)
+        _index_cache.pop(collection_name, None)
+    logger.info("[BM25] 释放进程缓存 collection=%s (%s)", collection_name, reason)
+    gc.collect()
+
+
+def _evict_lru(*, keep: str) -> None:
+    max_n = max(1, int(config.BM25_INDEX_CACHE_MAX))
+    while len(_index_cache) >= max_n:
+        evicted = False
+        for name in list(_index_cache):
+            if name == keep:
+                continue
+            if _pin_refs.get(name, 0) > 0:
+                continue
+            _drop_from_cache(name, reason="LRU 淘汰")
+            evicted = True
+            break
+        if not evicted:
+            break
+
+
+def _schedule_idle_release(collection_name: str) -> None:
+    idle_sec = int(config.BM25_INDEX_IDLE_RELEASE_SEC)
+    if idle_sec <= 0:
+        _drop_from_cache(collection_name, reason="检索结束立即释放")
+        return
+    _cancel_idle_timer(collection_name)
+
+    def _fire() -> None:
+        _idle_timers.pop(collection_name, None)
+        with _cache_lock:
+            if _pin_refs.get(collection_name, 0) > 0:
+                return
+            if collection_name not in _index_cache:
+                return
+        _drop_from_cache(collection_name, reason=f"空闲 {idle_sec}s")
+
+    timer = threading.Timer(idle_sec, _fire)
+    timer.daemon = True
+    _idle_timers[collection_name] = timer
+    timer.start()
+
+
+def pin_index(collection_name: str) -> None:
+    """检索临界区开始：阻止空闲释放 / LRU 淘汰。"""
+    with _cache_lock:
+        _cancel_idle_timer(collection_name)
+        _pin_refs[collection_name] = _pin_refs.get(collection_name, 0) + 1
+
+
+def unpin_index(collection_name: str) -> None:
+    """检索临界区结束：引用归零后按空闲策略释放。"""
+    with _cache_lock:
+        refs = _pin_refs.get(collection_name, 0)
+        if refs <= 1:
+            _pin_refs.pop(collection_name, None)
+            should_release = collection_name in _index_cache
+        else:
+            _pin_refs[collection_name] = refs - 1
+            should_release = False
+    if should_release:
+        _schedule_idle_release(collection_name)
 
 
 def get_index(collection_name: str) -> BM25Index:
-    """获取（或加载）指定 collection 的 BM25 索引；进程内单实例。"""
+    """获取（或加载）指定 collection 的 BM25 索引；入库路径用，检索请 pin/unpin。"""
     with _cache_lock:
+        _evict_lru(keep=collection_name)
         idx = _index_cache.get(collection_name)
         if idx is None:
             idx = BM25Index.load_or_new(collection_name, get_index_path(collection_name))
             _index_cache[collection_name] = idx
         return idx
+
+
+def drop_index(collection_name: str) -> None:
+    """从进程缓存移除指定 collection 的索引。"""
+    _drop_from_cache(collection_name, reason="显式 drop")
 
 
 def commit_index(collection_name: str, *, release: bool = False) -> None:
@@ -373,12 +459,6 @@ def commit_index(collection_name: str, *, release: bool = False) -> None:
     save_index(idx, get_index_path(collection_name))
     if release:
         drop_index(collection_name)
-
-
-def drop_index(collection_name: str) -> None:
-    """从进程缓存移除指定 collection 的索引。"""
-    with _cache_lock:
-        _index_cache.pop(collection_name, None)
 
 
 def rebuild_bm25_from_chroma(
@@ -415,6 +495,7 @@ def rebuild_bm25_from_chroma(
     path = get_index_path(collection_name)
     save_index(idx, path)
     with _cache_lock:
+        _evict_lru(keep=collection_name)
         _index_cache[collection_name] = idx
     logger.info(
         "[BM25] 已从 Chroma 重建 %s → %d 块，写入 %s",

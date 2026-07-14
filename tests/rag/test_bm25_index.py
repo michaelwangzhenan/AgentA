@@ -11,10 +11,13 @@ from src.rag.bm25_index import (
     BM25Index,
     commit_index,
     drop_index,
+    get_index,
     get_index_path,
+    pin_index,
     rebuild_bm25_from_chroma,
     save_index,
     tokenize,
+    unpin_index,
 )
 
 
@@ -114,3 +117,53 @@ def test_rebuild_bm25_from_chroma(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     assert n == 2
     loaded = BM25Index.load_or_new("kb_m3", tmp_path / "bm25_kb_m3.pkl")
     assert len(loaded.docs) == 2
+
+
+def test_lru_evicts_other_collection(monkeypatch: pytest.MonkeyPatch) -> None:
+    import src.config as cfg
+    from src.rag import bm25_index as mod
+
+    monkeypatch.setattr(cfg, "BM25_INDEX_CACHE_MAX", 1)
+    monkeypatch.setattr(cfg, "BM25_INDEX_IDLE_RELEASE_SEC", 0)
+    mod._index_cache.clear()
+    mod._pin_refs.clear()
+    mod._idle_timers.clear()
+
+    mod._index_cache["kb_a"] = BM25Index("kb_a")
+    get_index("kb_b")
+    assert "kb_a" not in mod._index_cache
+    assert "kb_b" in mod._index_cache
+
+
+def test_unpin_releases_when_idle_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    import src.config as cfg
+    from src.rag import bm25_index as mod
+
+    monkeypatch.setattr(cfg, "BM25_INDEX_IDLE_RELEASE_SEC", 0)
+    mod._index_cache.clear()
+    mod._pin_refs.clear()
+    mod._idle_timers.clear()
+
+    mod._index_cache["kb_x"] = BM25Index("kb_x")
+    pin_index("kb_x")
+    unpin_index("kb_x")
+    assert "kb_x" not in mod._index_cache
+
+
+def test_pin_prevents_lru_eviction(monkeypatch: pytest.MonkeyPatch) -> None:
+    import src.config as cfg
+    from src.rag import bm25_index as mod
+
+    monkeypatch.setattr(cfg, "BM25_INDEX_CACHE_MAX", 1)
+    monkeypatch.setattr(cfg, "BM25_INDEX_IDLE_RELEASE_SEC", 60)
+    mod._index_cache.clear()
+    mod._pin_refs.clear()
+    mod._idle_timers.clear()
+
+    mod._index_cache["kb_a"] = BM25Index("kb_a")
+    pin_index("kb_a")
+    mod._index_cache["kb_b"] = BM25Index("kb_b")
+    mod._evict_lru(keep="kb_b")
+    assert "kb_a" in mod._index_cache
+    assert "kb_b" in mod._index_cache
+    unpin_index("kb_a")
