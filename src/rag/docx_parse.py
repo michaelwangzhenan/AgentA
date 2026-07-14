@@ -93,7 +93,7 @@ def stream_docx_to_stdout(path: Path) -> None:
             sys.stdout.write(f"{'#' * level} {text}\n\n")
         else:
             sys.stdout.write(f"{text}\n\n")
-    sys.stdout.flush()
+        sys.stdout.flush()
 
 
 def parse_docx_streaming(path: Path) -> str:

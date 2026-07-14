@@ -13,6 +13,8 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import zipfile
 from collections import Counter
 from collections.abc import Iterator
@@ -91,11 +93,13 @@ def parsed_docx_temp(path: Path) -> Iterator[Path]:
         "stream" if streaming else "python-docx",
     )
 
+    cfg = _cfg()
     temp = tempfile.NamedTemporaryFile(prefix="agenta-docx-", suffix=".txt", delete=False)
     temp_path = Path(temp.name)
     temp.close()
     command = [
         sys.executable,
+        "-u",
         "-m",
         "src.rag.docx_worker",
         str(path),
@@ -103,7 +107,21 @@ def parsed_docx_temp(path: Path) -> Iterator[Path]:
         str(cfg.DOCX_PARSE_MEMORY_MB),
     ]
     project_root = Path(__file__).resolve().parents[2]
+    stop_heartbeat = threading.Event()
+
+    def _parse_heartbeat() -> None:
+        started = time.monotonic()
+        while not stop_heartbeat.wait(30):
+            logger.info(
+                "[parser] DOCX 解析进行中: %s elapsed=%.0fs mode=%s",
+                path.name,
+                time.monotonic() - started,
+                "stream" if streaming else "python-docx",
+            )
+
+    heartbeat = threading.Thread(target=_parse_heartbeat, daemon=True)
     try:
+        heartbeat.start()
         with temp_path.open("wb") as output:
             process = subprocess.Popen(
                 command,
@@ -131,6 +149,7 @@ def parsed_docx_temp(path: Path) -> Iterator[Path]:
         logger.info("[parser] DOCX 隔离解析完成: %s text_bytes=%d", path.name, temp_path.stat().st_size)
         yield temp_path
     finally:
+        stop_heartbeat.set()
         temp_path.unlink(missing_ok=True)
 
 

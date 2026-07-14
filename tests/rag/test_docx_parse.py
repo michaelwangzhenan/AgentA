@@ -11,6 +11,7 @@ from src.rag.parser import (
     assert_docx_hard_limit,
     docx_needs_streaming,
     measure_docx_uncompressed_size,
+    parsed_docx_temp,
 )
 
 _DOC_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
@@ -75,7 +76,7 @@ class TestDocxStreamingParse:
     ) -> None:
         import src.config as config
 
-        monkeypatch.setattr(config, "DOCX_MAX_UNZIP_MB", 64)
+        monkeypatch.setattr(config, "DOCX_MAX_UNZIP_MB", 16)
         path = tmp_path / "small.docx"
         _write_docx(path, _document(_paragraph("ok")))
         assert docx_needs_streaming(path) is False
@@ -94,3 +95,33 @@ class TestDocxStreamingParse:
         payload = b"x" * 4096
         _write_docx(path, payload)
         assert measure_docx_uncompressed_size(path) == len(payload)
+
+    def test_parsed_docx_temp_reads_cfg_before_subprocess(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """回归：构建子进程命令前必须加载 cfg，不能 NameError。"""
+        import src.config as config
+
+        path = tmp_path / "worker.docx"
+        _write_docx(path, _document(_paragraph("isolated")))
+        captured: list[list[str]] = []
+
+        class _FakeProcess:
+            returncode = 0
+
+            def communicate(self, timeout=None):
+                return b"isolated", b""
+
+        def _fake_popen(cmd, stdout=None, **kwargs):
+            captured.append(cmd)
+            if stdout is not None:
+                stdout.write(b"isolated")
+            return _FakeProcess()
+
+        monkeypatch.setattr("src.rag.parser.subprocess.Popen", _fake_popen)
+        with parsed_docx_temp(path) as parsed:
+            assert parsed.read_bytes() == b"isolated"
+        assert captured
+        cmd = captured[0]
+        assert "--memory-mb" in cmd
+        assert str(config.DOCX_PARSE_MEMORY_MB) in cmd

@@ -4,19 +4,20 @@
 
 .DESCRIPTION
   参数与 tools/dev_server.ps1 保持一致，按 Tab 可补全命令（ValidateSet）。
-  getlog 是例外：直接在本脚本里处理（scp 拉远程日志），不转发、不需要虚拟环境。
+  getlog / sync 是例外：直接在本脚本里处理（scp 与 VPS 互传），不转发、不需要虚拟环境。
 
 .EXAMPLE
   .\i.ps1 start            -> .\tools\dev_server.ps1 start
   .\i.ps1 restart vite     -> .\tools\dev_server.ps1 restart vite
   .\i.ps1 status           -> .\tools\dev_server.ps1 status
   .\i.ps1 getlog           -> scp 拉取远程服务器的 uvicorn.log 到 logs\vps\
+  .\i.ps1 sync             -> scp 推送 git status 中的变更文件到 VPS
 #>
 
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('start', 'stop', 'restart', 'logs', 'status', 'getlog', 'help')]
+    [ValidateSet('start', 'stop', 'restart', 'logs', 'status', 'getlog', 'sync', 'help')]
     [string]$Action = 'help',
 
     [Parameter(Position = 1)]
@@ -29,13 +30,22 @@ $VenvDir   = Join-Path $ScriptDir '.venv'
 $Activate  = Join-Path $VenvDir 'Scripts\Activate.ps1'
 $DevScript = Join-Path $ScriptDir 'tools\dev_server.ps1'
 
+$RemoteHost = 'admin@47.96.93.237'
+$RemoteBase = '/home/admin/AgentA'
+
 # getlog：拉远程日志，跟本地 dev server 管理无关，不需要虚拟环境，直接处理并退出。
 if ($Action -eq 'getlog') {
-    $RemoteHost = 'admin@47.96.93.237'
-    $RemotePath = '/home/admin/AgentA/logs/uvicorn.log'
+    $RemotePath = "$RemoteBase/logs/uvicorn.log"
     $LocalDir = Join-Path $ScriptDir 'logs\vps'
     if (-not (Test-Path $LocalDir)) { New-Item -ItemType Directory -Path $LocalDir | Out-Null }
     scp "${RemoteHost}:${RemotePath}" "$LocalDir\"
+    exit $LASTEXITCODE
+}
+
+# sync：推送 git status 变更到 VPS，不需要虚拟环境。
+if ($Action -eq 'sync') {
+    $SyncScript = Join-Path $ScriptDir 'tools\sync_vps.ps1'
+    & $SyncScript -RemoteHost $RemoteHost -RemoteBase $RemoteBase
     exit $LASTEXITCODE
 }
 

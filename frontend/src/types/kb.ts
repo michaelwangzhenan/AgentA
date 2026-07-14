@@ -35,7 +35,7 @@ export type KBCollectionListResponse = {
 }
 
 // 入库进度阶段：解析 / 切分 / 嵌入 / 出题（golden 生成）
-export type IngestPhase = 'parse' | 'split' | 'embed' | 'golden'
+export type IngestPhase = 'upload' | 'parse' | 'split' | 'embed' | 'golden'
 
 export type IngestProgress = {
   phase: IngestPhase

@@ -153,6 +153,7 @@ export function IngestPanel({
         setChunk(null)
         const ac = new AbortController()
         abortRef.current = ac
+        setChunk({ phase: 'upload', done: 0, total: 0 })
         try {
           const resp = await ingestKBFileStream(
             file,
@@ -223,6 +224,7 @@ export function IngestPanel({
   // 当前文件的块级阶段文案
   const chunkText = (c: IngestProgress): string => {
     if (c.phase === 'parse') return '解析中…'
+    if (c.phase === 'upload') return '上传中…'
     if (c.phase === 'split') return `切分得 ${c.total} 块`
     if (c.phase === 'golden') return '生成评估题候选中…'
     return `嵌入 第 ${c.done}/${c.total} 块`

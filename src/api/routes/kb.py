@@ -232,6 +232,8 @@ async def _ingest_event_stream(
 
     task = asyncio.create_task(run())
     try:
+        # 连接建立后立即推一条进度，避免前端长时间停在 0% 且无阶段文案
+        yield f"data: {json.dumps({'type': 'progress', 'phase': 'parse', 'done': 0, 'total': 0}, ensure_ascii=False)}\n\n"
         while True:
             ev = await q.get()
             yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
@@ -282,24 +284,40 @@ async def upload_document(
             detail=f"不支持的格式 {suffix}；支持: {', '.join(sorted(SUPPORTED_EXTENSIONS))}",
         )
 
-    # 边读边算大小，超限立即拒（避免把整个大文件读进内存）
+  # 流式落盘：收到请求即记日志，边收边写，避免大文件长时间无输出
     max_bytes = config.WEB_MAX_UPLOAD_MB * 1024 * 1024
-    content = await file.read()
-    if len(content) > max_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"文件过大（{len(content) / 1024 / 1024:.1f} MB > {config.WEB_MAX_UPLOAD_MB} MB）",
-        )
-    if len(content) == 0:
-        raise HTTPException(status_code=422, detail="文件为空")
-
-    # 落盘到 web_uploads/<alias>/<relpath>（按库隔离 + 保留相对路径防同名互覆盖）
     upload_root = _alias_upload_root(model)
     target_path = _safe_rel_target(upload_root, relpath, file.filename)
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    target_path.write_bytes(content)
     rel_name = target_path.relative_to(upload_root).as_posix()
-    logger.info("[KB] 文件落盘: %s (%d bytes)", target_path, len(content))
+    logger.info(
+        "[KB] 开始接收上传: %s model=%s relpath=%s",
+        file.filename,
+        model,
+        rel_name,
+    )
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    size = 0
+    with target_path.open("wb") as out:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > max_bytes:
+                out.close()
+                target_path.unlink(missing_ok=True)
+                raise HTTPException(
+                    status_code=413,
+                    detail=(
+                        f"文件过大（{size / 1024 / 1024:.1f} MB > "
+                        f"{config.WEB_MAX_UPLOAD_MB} MB）"
+                    ),
+                )
+            out.write(chunk)
+    if size == 0:
+        target_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail="文件为空")
+    logger.info("[KB] 文件落盘: %s (%d bytes)", target_path, size)
 
     from src.rag.golden_options import (
         GOLDEN_LLM_NONE,
