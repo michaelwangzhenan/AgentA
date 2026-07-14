@@ -597,8 +597,10 @@ WEB_UPLOAD_DIR: str = os.getenv("WEB_UPLOAD_DIR", "./datasets/web_uploads")
 # Web UI 单次上传文件大小上限（MB），超限返回 413
 WEB_MAX_UPLOAD_MB: int = int(os.getenv("WEB_MAX_UPLOAD_MB", "10"))
 
-# DOCX 压缩包内所有文件解压后的总大小上限（MiB）
+# DOCX 解压总量超过此值时改用流式解析（MiB）；不再直接拒绝
 DOCX_MAX_UNZIP_MB: int = int(os.getenv("DOCX_MAX_UNZIP_MB", "64"))
+# DOCX 解压总量硬上限（MiB）；防 zip bomb，超过则拒绝
+DOCX_HARD_MAX_UNZIP_MB: int = int(os.getenv("DOCX_HARD_MAX_UNZIP_MB", "512"))
 # DOCX 隔离解析子进程的内存上限（MiB）
 DOCX_PARSE_MEMORY_MB: int = int(os.getenv("DOCX_PARSE_MEMORY_MB", "512"))
 # DOCX 隔离解析的执行时间上限（秒）

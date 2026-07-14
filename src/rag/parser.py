@@ -37,34 +37,58 @@ def is_office_temp_file(path_or_name: str | Path) -> bool:
     return Path(path_or_name).name.startswith("~$")
 
 
-def inspect_docx_uncompressed_size(path: Path, max_bytes: int) -> int:
-    """返回 DOCX 解压总量；超过上限时在加载 XML 前拒绝。"""
+def measure_docx_uncompressed_size(path: Path) -> int:
+    """返回 DOCX 解压总量（字节），不做拒绝。"""
     total = 0
     try:
         with zipfile.ZipFile(path) as archive:
             for info in archive.infolist():
                 total += info.file_size
-                if total > max_bytes:
-                    raise DocxParseError(
-                        "DOCX 解压后过大"
-                        f"（{total / 1024 / 1024:.1f} MiB > {max_bytes / 1024 / 1024:.0f} MiB）"
-                    )
     except zipfile.BadZipFile as exc:
         raise DocxParseError(f"DOCX 文件损坏或格式无效: {path.name}") from exc
+    return total
+
+
+def inspect_docx_uncompressed_size(path: Path, max_bytes: int) -> int:
+    """兼容旧调用：测量解压总量，超过 max_bytes 时拒绝。"""
+    total = measure_docx_uncompressed_size(path)
+    if total > max_bytes:
+        raise DocxParseError(
+            "DOCX 解压后过大"
+            f"（{total / 1024 / 1024:.1f} MiB > {max_bytes / 1024 / 1024:.0f} MiB）"
+        )
+    return total
+
+
+def docx_needs_streaming(path: Path) -> bool:
+    """解压总量超过 DOCX_MAX_UNZIP_MB 时走流式解析。"""
+    threshold = _cfg().DOCX_MAX_UNZIP_MB * 1024 * 1024
+    return measure_docx_uncompressed_size(path) > threshold
+
+
+def assert_docx_hard_limit(path: Path) -> int:
+    """硬上限检查（防 zip bomb）；通过则返回解压总量。"""
+    hard = _cfg().DOCX_HARD_MAX_UNZIP_MB * 1024 * 1024
+    total = measure_docx_uncompressed_size(path)
+    if total > hard:
+        raise DocxParseError(
+            "DOCX 解压后超过硬上限"
+            f"（{total / 1024 / 1024:.1f} MiB > {hard / 1024 / 1024:.0f} MiB）"
+        )
     return total
 
 
 @contextmanager
 def parsed_docx_temp(path: Path) -> Iterator[Path]:
     """在受限子进程中解析 DOCX，返回只含清洗文本的临时文件。"""
-    cfg = _cfg()
-    max_bytes = cfg.DOCX_MAX_UNZIP_MB * 1024 * 1024
-    uncompressed = inspect_docx_uncompressed_size(path, max_bytes)
+    uncompressed = assert_docx_hard_limit(path)
+    streaming = docx_needs_streaming(path)
     logger.info(
-        "[parser] DOCX 预检通过: %s compressed=%d uncompressed=%d",
+        "[parser] DOCX 预检: %s compressed=%d uncompressed=%d mode=%s",
         path.name,
         path.stat().st_size,
         uncompressed,
+        "stream" if streaming else "python-docx",
     )
 
     temp = tempfile.NamedTemporaryFile(prefix="agenta-docx-", suffix=".txt", delete=False)

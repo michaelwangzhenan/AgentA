@@ -45,7 +45,7 @@ class TestSupportedExtensions:
         with pytest.raises(ValueError, match="Office 临时文件"):
             parse_file(path)
 
-    def test_docx_uncompressed_limit_is_checked(self, tmp_path: Path) -> None:
+    def test_docx_hard_limit_is_checked(self, tmp_path: Path) -> None:
         path = tmp_path / "large.docx"
         with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("word/document.xml", b"x" * 4096)

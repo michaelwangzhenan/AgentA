@@ -97,11 +97,15 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
         _set_memory_limit(args.memory_mb)
-        from src.rag.parser import _clean_extracted_text, _parse_docx
+        from src.rag.docx_parse import stream_docx_to_stdout
+        from src.rag.parser import _clean_extracted_text, _parse_docx, docx_needs_streaming
 
-        text = _clean_extracted_text(_parse_docx(args.path))
-        sys.stdout.write(text)
-        sys.stdout.flush()
+        if docx_needs_streaming(args.path):
+            stream_docx_to_stdout(args.path)
+        else:
+            text = _clean_extracted_text(_parse_docx(args.path))
+            sys.stdout.write(text)
+            sys.stdout.flush()
         return 0
     except BaseException as exc:
         print(f"{type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
