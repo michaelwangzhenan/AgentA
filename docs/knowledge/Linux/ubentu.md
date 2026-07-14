@@ -97,6 +97,9 @@ top                        # 实时看 CPU/内存占用最高的进程（q 退�
 ps aux --sort=-%mem | head -20   # aux 列全进程；--sort=-%mem 按内存降序；head 只取前 20
 ```
 
+
+
+
 配置 2G swap（小内存 VPS 建议，防 OOM 杀 agenta-backend）：
 
 ```bash
