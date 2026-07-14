@@ -1,21 +1,29 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """一次性从 Chroma metadata 回填 KB 文档级索引。
 
 用法：
-    python -m src.rag.kb_doc_backfill
-    python -m src.rag.kb_doc_backfill --model zh
-    python -m src.rag.kb_doc_backfill --all
+    python tools/cli/kb_doc_backfill.py
+    python tools/cli/kb_doc_backfill.py --model zh
+    python tools/cli/kb_doc_backfill.py --all
 """
 from __future__ import annotations
 
 import argparse
 import logging
+import sys
+from pathlib import Path
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-import src.config as config
-from src.rag.ingest import backfill_kb_doc_index
+import src.config as config  # noqa: E402
+from src.rag.ingest import backfill_kb_doc_index  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

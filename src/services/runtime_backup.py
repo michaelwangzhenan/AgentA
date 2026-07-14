@@ -15,7 +15,7 @@ import sqlite3
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from zipfile import ZIP_DEFLATED, ZipFile
+from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
 import src.config as config
 
@@ -55,13 +55,16 @@ def validate_backup_archive(
         )
 
     total_uncompressed = 0
-    with ZipFile(zip_path, "r") as zf:
-        for info in zf.infolist():
-            total_uncompressed += info.file_size
-            if total_uncompressed > max_unzip_bytes:
-                raise BackupArchiveError(
-                    f"备份解压后总大小超限（>{max_unzip_bytes} 字节）"
-                )
+    try:
+        with ZipFile(zip_path, "r") as zf:
+            for info in zf.infolist():
+                total_uncompressed += info.file_size
+                if total_uncompressed > max_unzip_bytes:
+                    raise BackupArchiveError(
+                        f"备份解压后总大小超限（>{max_unzip_bytes} 字节）"
+                    )
+    except BadZipFile as exc:
+        raise BackupArchiveError("无效备份：文件不是有效的 ZIP") from exc
 
     if compressed > 0 and total_uncompressed / compressed > max_compression_ratio:
         raise BackupArchiveError(

@@ -30,6 +30,7 @@ from typing import Any
 
 import src.config as _cfg
 from src.agent.core.agent_commons import TokenUsage
+from src.agent.core.citation_builder import CitationBuilder
 from src.agent.core.run_cancel import is_cancelled
 from src.agent.core.event_bus import (
     ALL_EVENT_TYPES,

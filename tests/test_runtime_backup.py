@@ -155,6 +155,13 @@ def test_validate_backup_archive_rejects_oversized_zip(tmp_path, monkeypatch):
         rb.validate_backup_archive(z)
 
 
+def test_validate_backup_archive_rejects_invalid_zip(tmp_path):
+    z = tmp_path / "invalid.zip"
+    z.write_bytes(b"not a zip")
+    with pytest.raises(rb.BackupArchiveError, match="不是有效的 ZIP"):
+        rb.validate_backup_archive(z)
+
+
 def test_validate_backup_archive_rejects_zip_bomb(tmp_path, monkeypatch):
     monkeypatch.setattr(rb.config, "BACKUP_MAX_UPLOAD_MB", 64)
     monkeypatch.setattr(rb.config, "BACKUP_MAX_UNZIP_MB", 1)

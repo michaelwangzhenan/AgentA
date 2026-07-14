@@ -1158,7 +1158,32 @@ def list_kb_documents_page(
         ts_from=ts_from,
         ts_to=ts_to,
     )
-    if total > 0 or store.collection_stats(collection_name)[0] > 0:
+    idx_docs, idx_chunks = store.collection_stats(collection_name)
+    if idx_docs > 0:
+        # 索引不完整时（例如空索引时只 upsert 了一条）Chroma 仍有更多 chunk，
+        # 自动回填后再读一页，避免旧文档从列表“消失”。
+        try:
+            chroma_n = int(get_chroma_client().get_collection(name=collection_name).count())
+        except Exception:
+            chroma_n = None
+        if chroma_n is not None and chroma_n != idx_chunks:
+            logger.warning(
+                "KB 文档索引疑似不完整 collection=%s index_chunks=%d chroma=%d，自动回填",
+                collection_name, idx_chunks, chroma_n,
+            )
+            backfill_kb_doc_index(model)
+            docs, total = store.list_page(
+                collection_name,
+                page=page,
+                page_size=page_size,
+                sort_by=sort_by,
+                desc=desc,
+                filename_q=filename_q,
+                lang=lang,
+                ext=ext,
+                ts_from=ts_from,
+                ts_to=ts_to,
+            )
         return docs, total
 
     # 未回填：回落全量扫描后客户端式分页（仅过渡期）
@@ -1245,10 +1270,21 @@ def count_kb_documents(
     from src.stores.kb_doc_index import get_kb_doc_index
 
     doc_count, chunk_sum = get_kb_doc_index().collection_stats(collection_name)
-    if doc_count > 0:
+    # 数量一致时直接使用轻量索引；不一致仅修复一次，不进入日常入库路径。
+    if doc_count > 0 and chunk_sum == chunk_count:
         stats = (doc_count, chunk_sum if chunk_sum > 0 else chunk_count)
         _KB_STATS_CACHE[collection_name] = stats
         return stats
+    if doc_count > 0:
+        try:
+            backfill_kb_doc_index(model)
+            doc_count, chunk_sum = get_kb_doc_index().collection_stats(collection_name)
+            if doc_count > 0:
+                stats = (doc_count, chunk_sum if chunk_sum > 0 else chunk_count)
+                _KB_STATS_CACHE[collection_name] = stats
+                return stats
+        except Exception as exc:
+            logger.warning("KB 统计前回填失败 collection=%s: %s", collection_name, exc)
 
     doc_ids: set[str] = set()
     for md in _iter_chunk_metadatas(collection):
