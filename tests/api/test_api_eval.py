@@ -144,6 +144,42 @@ def test_golden_generate_missing_file_404(client: TestClient) -> None:
         json={"model": "en", "source": "nope.md", "doc_id": "x"},
     )
     assert r.status_code == 404
+    assert "向量库无分块" in r.json()["detail"]
+
+
+def test_golden_generate_from_chunks_when_file_missing(
+    client: TestClient, golden: GoldenStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import src.rag.golden_gen as gg
+    import src.rag.ingest as ing
+
+    monkeypatch.setattr(
+        ing,
+        "resolve_golden_input",
+        lambda model, source, doc_id: (None, "来自向量库的正文"),
+    )
+
+    def fake_run_text(text, source, doc_id="", max_q=None, llm_model=None, *, force=False):
+        from src.stores.golden_store import SOURCE_AI, STATUS_PENDING as SP, get_shared_store
+
+        st = get_shared_store()
+        st.create(query="gen-chunk", expected_source_contains=source, source=SOURCE_AI, status=SP, doc_id=doc_id)
+        return 1
+
+    monkeypatch.setattr("src.stores.golden_store.get_shared_store", lambda: golden)
+    monkeypatch.setattr(gg, "run_generation_for_text", fake_run_text)
+
+    r = client.post(
+        "/api/eval/golden/generate",
+        json={
+            "model": "en",
+            "source": "cli-only.docx",
+            "doc_id": "d-cli",
+            "golden_llm": "kimi-k2.5",
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["generated"] == 1
 
 
 def test_golden_generate_ok(

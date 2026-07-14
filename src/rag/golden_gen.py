@@ -221,6 +221,75 @@ def generate_candidates(
     return merged[:total_q]
 
 
+def _write_golden_candidates(
+    text: str,
+    source: str,
+    doc_id: str,
+    max_q: int | None,
+    llm_model: str,
+) -> int:
+    """据正文 LLM 出题并写入 GoldenStore；返回写入条数。"""
+    from src.rag.golden_options import clamp_golden_max_q, compute_golden_max_q
+    from src.stores.golden_store import SOURCE_AI, STATUS_PENDING, get_shared_store
+
+    q = compute_golden_max_q(len(text or ""), clamp_golden_max_q(max_q))
+    candidates = generate_candidates(text, q, llm_model=llm_model, source=source)
+    if not candidates:
+        return 0
+
+    segments = _split_segments(text)
+    n_seg = len(segments) or 1
+    store = get_shared_store()
+    written = 0
+    for c in candidates:
+        try:
+            note = "AI 生成，待审核" if n_seg <= 1 else "AI 生成（多段），待审核"
+            store.create(
+                query=c["query"],
+                expected_keywords=c.get("expected_keywords"),
+                expected_source_contains=source,
+                note=note,
+                source=SOURCE_AI,
+                status=STATUS_PENDING,
+                doc_id=doc_id,
+                golden_type=c.get("type") or "",
+            )
+            written += 1
+        except Exception:  # noqa: BLE001 — 单条失败不影响其它
+            logger.debug("[golden_gen] 写入单条候选失败（已忽略）", exc_info=True)
+    logger.info(
+        "[golden_gen] 文档 %s 自动生成 golden 候选 %d 条（pending，目标 %d）",
+        source,
+        written,
+        q,
+    )
+    return written
+
+
+def run_generation_for_text(
+    text: str,
+    source: str,
+    doc_id: str = "",
+    max_q: int | None = None,
+    llm_model: str | None = None,
+    *,
+    force: bool = False,
+) -> int:
+    """据已有正文 LLM 出题 → 写入 GoldenStore（pending / ai）。返回写入条数。
+
+    全程软失败：任何异常只记日志、返回 0。
+    """
+    if not llm_model and not force:
+        return 0
+    if not llm_model:
+        return 0
+    try:
+        return _write_golden_candidates(text, source, doc_id, max_q, llm_model)
+    except Exception:  # noqa: BLE001 — 后台旁路，绝不抛
+        logger.warning("[golden_gen] 自动生成 golden 失败（已忽略）", exc_info=True)
+        return 0
+
+
 def run_generation_for_file(
     file_path: str | Path,
     source: str,
@@ -236,8 +305,6 @@ def run_generation_for_file(
     max_q 为 UI/env **上限**；实际题数 = min(⌈字数/1K⌉, 上限)。
     llm_model 为 MODEL_CONFIGS 的 model id；force=True 时 llm_model 必填（L2 手动生成）。
     """
-    from src.rag.golden_options import clamp_golden_max_q, compute_golden_max_q
-
     if not llm_model and not force:
         return 0
     if not llm_model:
@@ -246,43 +313,7 @@ def run_generation_for_file(
         from src.rag.parser import parse_file
 
         text = parse_file(Path(file_path))
-        q = compute_golden_max_q(len(text or ""), clamp_golden_max_q(max_q))
-        candidates = generate_candidates(text, q, llm_model=llm_model, source=source)
-        if not candidates:
-            return 0
-        from src.stores.golden_store import (
-            SOURCE_AI,
-            STATUS_PENDING,
-            get_shared_store,
-        )
-
-        segments = _split_segments(text)
-        n_seg = len(segments) or 1
-        store = get_shared_store()
-        written = 0
-        for c in candidates:
-            try:
-                note = "AI 生成，待审核" if n_seg <= 1 else "AI 生成（多段），待审核"
-                store.create(
-                    query=c["query"],
-                    expected_keywords=c.get("expected_keywords"),
-                    expected_source_contains=source,
-                    note=note,
-                    source=SOURCE_AI,
-                    status=STATUS_PENDING,
-                    doc_id=doc_id,
-                    golden_type=c.get("type") or "",
-                )
-                written += 1
-            except Exception:  # noqa: BLE001 — 单条失败不影响其它
-                logger.debug("[golden_gen] 写入单条候选失败（已忽略）", exc_info=True)
-        logger.info(
-            "[golden_gen] 文档 %s 自动生成 golden 候选 %d 条（pending，目标 %d）",
-            source,
-            written,
-            q,
-        )
-        return written
+        return _write_golden_candidates(text, source, doc_id, max_q, llm_model)
     except Exception:  # noqa: BLE001 — 后台旁路，绝不抛
         logger.warning("[golden_gen] 自动生成 golden 失败（已忽略）", exc_info=True)
         return 0

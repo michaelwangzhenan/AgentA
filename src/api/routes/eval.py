@@ -155,28 +155,26 @@ def generate_golden(
     _: dict = Depends(require_admin),
     store: GoldenStore = Depends(get_golden_store),
 ) -> GoldenGenerateResponse:
-    """为某已入库文档手动生成 golden 候选：定位 web_uploads 物理文件 → LLM 出题 → pending。
+    """为某已入库文档手动生成 golden 候选：定位正文来源 → LLM 出题 → pending。
 
+    正文来源优先级：web_uploads 物理文件 → CLI docs_dir → Chroma 分块拼接。
     重生成前先清掉该文档旧的 pending 候选（approved/rejected 保留）。
     """
-    import src.config as config
-    from src.rag.golden_gen import run_generation_for_file
+    from src.rag.golden_gen import run_generation_for_file, run_generation_for_text
     from src.rag.golden_options import (
         clamp_golden_max_q,
         model_id_for_golden,
         resolve_llm_for_manual_generate,
     )
+    from src.rag.ingest import resolve_golden_input
 
-    # 定位物理文件：web_uploads/<model>/<source>，并防路径穿越（须落在该库上传根内）
-    upload_root = (Path(config.WEB_UPLOAD_DIR).resolve() / req.model)
-    target = (upload_root / req.source).resolve()
-    if upload_root not in target.parents and target != upload_root:
-        raise HTTPException(status_code=400, detail="非法文档路径")
-    if not target.is_file():
+    file_path, text = resolve_golden_input(req.model, req.source, req.doc_id)
+    if file_path is None and not text:
         raise HTTPException(
             status_code=404,
-            detail="文档物理文件不存在（仅 Web 上传的文档支持手动生成）",
+            detail="找不到文档正文（物理文件缺失且向量库无分块）",
         )
+
     removed = store.delete_pending_by_doc(req.doc_id) if req.doc_id else 0
     if req.golden_llm is not None:
         from src.rag.golden_options import GOLDEN_LLM_NONE, normalize_golden_llm
@@ -187,14 +185,19 @@ def generate_golden(
         llm_choice = choice
     else:
         llm_choice = resolve_llm_for_manual_generate(None)
-    n = run_generation_for_file(
-        file_path=target,
+
+    llm_model = model_id_for_golden(llm_choice)
+    gen_kwargs = dict(
         source=req.source,
         doc_id=req.doc_id,
         max_q=clamp_golden_max_q(req.golden_max_q),
-        llm_model=model_id_for_golden(llm_choice),
+        llm_model=llm_model,
         force=True,
     )
+    if file_path is not None:
+        n = run_generation_for_file(file_path=file_path, **gen_kwargs)
+    else:
+        n = run_generation_for_text(text=text or "", **gen_kwargs)
     return GoldenGenerateResponse(generated=n, removed_pending=removed)
 
 

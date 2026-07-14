@@ -747,6 +747,116 @@ def _merge_doc_row(grouped: dict[str, dict], md: dict) -> None:
     }
 
 
+def _candidate_docs_dirs(model: str) -> list[Path]:
+    """golden 出题时尝试定位 CLI 入库原文件的目录列表（env + ingest 历史）。"""
+    roots: list[Path] = []
+    seen: set[str] = set()
+
+    def add(path: Path) -> None:
+        resolved = path.resolve()
+        key = str(resolved)
+        if key in seen:
+            return
+        seen.add(key)
+        if resolved.is_dir():
+            roots.append(resolved)
+
+    add(Path(config.DOCS_DIR))
+
+    hist_path = Path(config.CHROMA_DB_PATH).resolve() / "ingest_history.json"
+    if hist_path.is_file():
+        try:
+            import json
+
+            data = json.loads(hist_path.read_text(encoding="utf-8"))
+            _, collection_name = config.resolve_embedding(model)
+            entry = (data.get("collections") or {}).get(collection_name) or {}
+            for raw in entry.get("docs_dirs") or []:
+                add(Path(raw))
+        except Exception:
+            pass
+
+    return roots
+
+
+def _safe_file_under_root(root: Path, relpath: str) -> Path | None:
+    """把相对路径解析到 root 下；越界或不是文件则返回 None。"""
+    root = root.resolve()
+    target = (root / relpath).resolve()
+    if root not in target.parents and target != root:
+        return None
+    return target if target.is_file() else None
+
+
+def resolve_golden_input(
+    model: str,
+    source: str,
+    doc_id: str = "",
+) -> tuple[Path | None, str | None]:
+    """为 golden 出题定位输入：优先物理文件，否则从 Chroma 分块拼正文。
+
+    Returns:
+        (file_path, text)：二者至多一个非空；都为空表示找不到可用内容。
+    """
+    if source:
+        upload_root = Path(config.WEB_UPLOAD_DIR).resolve() / model
+        web_file = _safe_file_under_root(upload_root, source)
+        if web_file is not None:
+            return web_file, None
+
+        for docs_root in _candidate_docs_dirs(model):
+            cli_file = _safe_file_under_root(docs_root, source)
+            if cli_file is not None:
+                return cli_file, None
+
+    if doc_id:
+        text = get_kb_document_text(model, doc_id)
+        if text:
+            return None, text
+
+    return None, None
+
+
+def get_kb_document_text(model: str, doc_id: str) -> str | None:
+    """按 doc_id 从 Chroma 取全部分块正文，按 chunk_index 排序后拼接。"""
+    if not doc_id:
+        return None
+
+    _, collection_name = config.resolve_embedding(model)
+    client = _kb_chroma_client()
+    try:
+        collection = client.get_collection(name=collection_name)
+    except Exception:
+        return None
+
+    got = collection.get(
+        where={"doc_id": doc_id},
+        include=["documents", "metadatas"],
+    )
+    ids = got.get("ids") or []
+    if not ids:
+        return None
+
+    docs = got.get("documents") or []
+    metas = got.get("metadatas") or []
+    pairs: list[tuple[int, str]] = []
+    for md, doc in zip(metas, docs, strict=False):
+        if not doc:
+            continue
+        idx = 0
+        if md:
+            try:
+                idx = int(md.get("chunk_index") or 0)
+            except (TypeError, ValueError):
+                idx = 0
+        pairs.append((idx, doc))
+    if not pairs:
+        return None
+
+    pairs.sort(key=lambda item: item[0])
+    return "\n\n".join(text for _, text in pairs)
+
+
 def list_kb_documents(model: str = config.DEFAULT_EMBEDDING_ALIAS) -> list[dict]:
     """聚合指定 collection 内所有 chunks 的 metadata，按 doc_id 分组返回文档级清单。
 
