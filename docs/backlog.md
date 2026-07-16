@@ -374,6 +374,8 @@ WebUI 支持导出对话。
 
 目标：接入前端路由（如 react-router），路径与 ViewKind 对齐（如 / 聊天、/kb 知识库、/settings 设置）；点标签 navigate 同步 URL，首屏从路径恢复 activeView。nginx 侧一般不用改。跨页跳转（知识库 → 质量看板 Golden）的 query 参数规则一并定好。
 
+## 9.5 Golden 页面显示的列表不完整
+
 
 # 10. 可观测 / LLMOps
 

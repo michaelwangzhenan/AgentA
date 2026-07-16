@@ -16,7 +16,6 @@ import type {
   KBClearAllResponse,
   KBCollectionListResponse,
   KBDeleteResponse,
-  KBDocument,
   KBDocumentListResponse,
   KBDocumentsQuery,
 } from '@/types/kb'

@@ -15,6 +15,7 @@ datasets/data_en/*
 !datasets/data_en/test/
 datasets/data_en/test/*
 !datasets/data_en/test/test_sample.*
+*data.md
 
 # 本地运行期数据（向量库 / SQLite / BM25；默认见 src/config.py，可经 .env 改路径）
 db/
