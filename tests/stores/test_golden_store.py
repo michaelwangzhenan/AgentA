@@ -86,6 +86,13 @@ def test_list_filter_and_counts(store: GoldenStore) -> None:
     assert total == 1 and rows[0]["source"] == SOURCE_AI
 
 
+def test_list_query_contains_filter(store: GoldenStore) -> None:
+    store.create("怎么用 RAG?")
+    store.create("向量数据库入门")
+    rows, total = store.list(query_contains="RAG")
+    assert total == 1 and rows[0]["query"] == "怎么用 RAG?"
+
+
 def test_list_for_eval_only_approved_by_default(store: GoldenStore) -> None:
     store.create("approved-q", ["k"], status=STATUS_APPROVED)
     store.create("pending-q", ["k"], status=STATUS_PENDING)

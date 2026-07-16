@@ -1103,6 +1103,7 @@ export async function getGolden(
     source?: string
     doc_id?: string
     source_contains?: string
+    query_contains?: string
     limit?: number
     offset?: number
   } = {},
@@ -1112,6 +1113,7 @@ export async function getGolden(
   if (opts.source) params.set('source', opts.source)
   if (opts.doc_id) params.set('doc_id', opts.doc_id)
   if (opts.source_contains) params.set('source_contains', opts.source_contains)
+  if (opts.query_contains) params.set('query_contains', opts.query_contains)
   params.set('limit', String(opts.limit ?? 50))
   params.set('offset', String(opts.offset ?? 0))
   const res = await apiFetch(`/api/eval/golden?${params.toString()}`)

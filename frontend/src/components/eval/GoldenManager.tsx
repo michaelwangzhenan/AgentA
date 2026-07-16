@@ -28,11 +28,14 @@ import type { GoldenItem, GoldenList, GoldenStatus } from '@/types/eval'
 // 跨页跳转：知识库 L2 点某文档候选数 → 带 docFilter 过来只看该文档
 export type GoldenDocFilter = { docId: string; label: string; fromAlias?: string }
 
+// 下拉含来源类型 +「问题」；选「问题」时旁侧输入框改筛 query，否则筛来源文件
 const SOURCE_FILTERS: { value: string; label: string }[] = [
   { value: '', label: '全部来源' },
   { value: 'ai', label: 'AI 生成' },
   { value: 'manual', label: '手工' },
+  { value: 'query', label: '问题' },
 ]
+const FILTER_QUERY = 'query'
 
 const STATUS_FILTERS: { value: string; label: string }[] = [
   { value: '', label: '全部' },
@@ -52,7 +55,8 @@ const STATUS_TEXT: Record<GoldenStatus, string> = {
   rejected: '已拒绝',
 }
 
-const PAGE_SIZE = 50
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const
+const DEFAULT_PAGE_SIZE = 10
 
 export function GoldenManager({
   docFilter,
@@ -65,8 +69,10 @@ export function GoldenManager({
 } = {}) {
   const [status, setStatus] = useState('')
   const [source, setSource] = useState('')
-  const [fileQ, setFileQ] = useState('')          // 来源文件搜索（输入框即时值）
-  const [fileQApplied, setFileQApplied] = useState('') // 防抖后真正用于查询的值
+  const [textQ, setTextQ] = useState('')          // 旁侧输入框即时值
+  const [textQApplied, setTextQApplied] = useState('') // 防抖后真正用于查询的值
+  const [offset, setOffset] = useState(0)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [data, setData] = useState<GoldenList | null>(null)
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
@@ -86,35 +92,48 @@ export function GoldenManager({
   const [localDoc, setLocalDoc] = useState<GoldenDocFilter | undefined>(docFilter)
   useEffect(() => {
     setLocalDoc(docFilter)
+    setOffset(0)
   }, [docFilter])
   const docId = localDoc?.docId
+  const isQueryFilter = source === FILTER_QUERY
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      setData(await getGolden({
+      const result = await getGolden({
         status: status || undefined,
-        source: source || undefined,
+        source: !isQueryFilter && source ? source : undefined,
         doc_id: docId || undefined,
-        source_contains: fileQApplied || undefined,
-        limit: PAGE_SIZE,
-      }))
+        source_contains: !isQueryFilter && textQApplied ? textQApplied : undefined,
+        query_contains: isQueryFilter && textQApplied ? textQApplied : undefined,
+        limit: pageSize,
+        offset,
+      })
+      // 删除后当前页可能已无数据，收紧 offset 再拉一次
+      if (result.total > 0 && offset >= result.total) {
+        setOffset(Math.floor((result.total - 1) / pageSize) * pageSize)
+        return
+      }
+      setData(result)
       setSelected(new Set())
     } catch (e) {
       toast.error((e as Error).message)
     } finally {
       setLoading(false)
     }
-  }, [status, source, docId, fileQApplied])
+  }, [status, source, docId, textQApplied, isQueryFilter, offset, pageSize])
 
   useEffect(() => {
     void refresh()
   }, [refresh])
 
-  // 来源文件搜索防抖（300ms）：输入停顿后才触发查询
+  // 旁侧输入框防抖（300ms）：输入停顿后才触发查询，同时回第一页
   useEffect(() => {
-    const t = setTimeout(() => setFileQApplied(fileQ.trim()), 300)
+    const t = setTimeout(() => {
+      setOffset(0)
+      setTextQApplied(textQ.trim())
+    }, 300)
     return () => clearTimeout(t)
-  }, [fileQ])
+  }, [textQ])
 
   const items = data?.items ?? []
   const allSelected = items.length > 0 && items.every((it) => selected.has(it.id))
@@ -244,7 +263,10 @@ export function GoldenManager({
           {STATUS_FILTERS.map((f) => (
             <button
               key={f.value}
-              onClick={() => setStatus(f.value)}
+              onClick={() => {
+                setOffset(0)
+                setStatus(f.value)
+              }}
               className={cn(
                 'rounded px-2.5 py-1 text-xs transition-colors',
                 status === f.value
@@ -259,18 +281,23 @@ export function GoldenManager({
         </div>
         <select
           value={source}
-          onChange={(e) => setSource(e.target.value)}
+          onChange={(e) => {
+            setOffset(0)
+            setTextQ('')
+            setTextQApplied('')
+            setSource(e.target.value)
+          }}
           className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
         >
           {SOURCE_FILTERS.map((f) => (
-            <option key={f.value} value={f.value}>{f.label}</option>
+            <option key={f.value || '_all'} value={f.value}>{f.label}</option>
           ))}
         </select>
         <input
           type="text"
-          value={fileQ}
-          onChange={(e) => setFileQ(e.target.value)}
-          placeholder="按来源文件筛选…"
+          value={textQ}
+          onChange={(e) => setTextQ(e.target.value)}
+          placeholder={isQueryFilter ? '按问题筛选…' : '按来源文件筛选…'}
           className="w-44 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
         />
         <div className="ml-auto flex items-center gap-2">
@@ -308,6 +335,7 @@ export function GoldenManager({
               className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
               title="清除筛选"
               onClick={() => {
+                setOffset(0)
                 setLocalDoc(undefined)
                 onClearDocFilter?.()
               }}
@@ -372,6 +400,20 @@ export function GoldenManager({
             </Button>
           </div>
         </div>
+      )}
+
+      {data && !loading && (
+        <Pager
+          total={data.total}
+          offset={offset}
+          pageSize={pageSize}
+          onOffset={setOffset}
+          onPageSize={(n) => {
+            setPageSize(n)
+            setOffset(0)
+          }}
+          className="mb-3"
+        />
       )}
 
       <div className="overflow-hidden rounded-md border border-border">
@@ -538,6 +580,100 @@ export function GoldenManager({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  )
+}
+
+// 分页导航栏（对齐 DatabaseView SqliteRows）
+function Pager({
+  total,
+  offset,
+  pageSize,
+  onOffset,
+  onPageSize,
+  className,
+}: {
+  total: number
+  offset: number
+  pageSize: number
+  onOffset: (offset: number) => void
+  onPageSize: (n: number) => void
+  className?: string
+}) {
+  const [jump, setJump] = useState('')
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const page = Math.floor(offset / pageSize) + 1
+  const from = total === 0 ? 0 : offset + 1
+  const to = Math.min(offset + pageSize, total)
+
+  const go = () => {
+    const n = parseInt(jump, 10)
+    if (!Number.isNaN(n)) {
+      const clamped = Math.min(Math.max(1, n), totalPages)
+      onOffset((clamped - 1) * pageSize)
+    }
+    setJump('')
+  }
+
+  return (
+    <div className={cn('flex flex-wrap items-center gap-3 text-sm text-muted-foreground', className)}>
+      <button
+        type="button"
+        onClick={() => onOffset(Math.max(0, offset - pageSize))}
+        disabled={offset <= 0}
+        className="rounded-md border border-border px-2 py-1 disabled:opacity-40 hover:bg-muted/50"
+      >
+        上一页
+      </button>
+      <span>
+        {from}–{to} / {total}
+      </span>
+      <button
+        type="button"
+        onClick={() => onOffset(offset + pageSize)}
+        disabled={to >= total}
+        className="rounded-md border border-border px-2 py-1 disabled:opacity-40 hover:bg-muted/50"
+      >
+        下一页
+      </button>
+      <span>
+        第 {page}/{totalPages} 页
+      </span>
+      <span className="flex items-center gap-1">
+        跳至
+        <input
+          value={jump}
+          inputMode="numeric"
+          onChange={(e) => setJump(e.target.value.replace(/[^0-9]/g, ''))}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') go()
+          }}
+          placeholder={String(page)}
+          className="w-14 rounded-md border border-border bg-background px-1.5 py-1 text-center text-foreground"
+        />
+        <button
+          type="button"
+          onClick={go}
+          className="rounded-md border border-border px-2 py-1 hover:bg-muted/50"
+        >
+          跳转
+        </button>
+      </span>
+      <label className="ml-auto flex items-center gap-1.5">
+        每页
+        <select
+          value={pageSize}
+          onChange={(e) => onPageSize(Number(e.target.value))}
+          className="rounded-md border border-border bg-background px-1.5 py-1 text-foreground"
+        >
+          {PAGE_SIZE_OPTIONS.map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+        条
+      </label>
     </div>
   )
 }

@@ -225,6 +225,7 @@ class GoldenStore:
         source: str | None = None,
         doc_id: str | None = None,
         source_contains: str | None = None,
+        query_contains: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -243,6 +244,9 @@ class GoldenStore:
         if source_contains:  # 按来源文件名/路径子串过滤（expected_source_contains）
             where += " AND expected_source_contains LIKE ?"
             params.append(f"%{source_contains}%")
+        if query_contains:  # 按问题子串过滤（query）
+            where += " AND query LIKE ?"
+            params.append(f"%{query_contains}%")
         with self._lock:
             total = int(
                 self._conn.execute(

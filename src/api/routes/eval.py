@@ -102,15 +102,17 @@ def list_golden(
     source: str | None = Query(None),
     doc_id: str | None = Query(None, description="按关联 KB 文档筛选（来源文档）"),
     source_contains: str | None = Query(None, description="按来源文件名/路径子串过滤"),
+    query_contains: str | None = Query(None, description="按问题子串过滤"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     _: dict = Depends(require_admin),
     store: GoldenStore = Depends(get_golden_store),
 ) -> GoldenList:
-    """列出 RAG golden（可按状态 / 来源 / 文档 / 来源文件过滤）+ 各状态计数。"""
+    """列出 RAG golden（可按状态 / 来源 / 文档 / 来源文件 / 问题过滤）+ 各状态计数。"""
     rows, total = store.list(
         status=status, source=source, doc_id=doc_id,
-        source_contains=source_contains, limit=limit, offset=offset,
+        source_contains=source_contains, query_contains=query_contains,
+        limit=limit, offset=offset,
     )
     return GoldenList(
         items=[_to_golden_item(r) for r in rows],

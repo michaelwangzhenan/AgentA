@@ -105,6 +105,15 @@ def test_golden_source_contains_filter(client: TestClient, golden: GoldenStore) 
     assert body["items"][0]["query"] == "q-readme"
 
 
+def test_golden_query_contains_filter(client: TestClient, golden: GoldenStore) -> None:
+    golden.create("怎么用 RAG?")
+    golden.create("向量数据库入门")
+    r = client.get("/api/eval/golden?query_contains=RAG")
+    body = r.json()
+    assert body["total"] == 1
+    assert body["items"][0]["query"] == "怎么用 RAG?"
+
+
 def test_golden_export(client: TestClient, golden: GoldenStore) -> None:
     golden.create("q1")
     golden.create("q2")
