@@ -43,28 +43,20 @@ import { toast } from '@/lib/toast'
 import { useAuth } from '@/lib/auth'
 
 export function KnowledgeBaseView({
+  alias: aliasProp,
+  onOpenLibrary,
+  onBackToLibraries,
   onOpenGolden,
   onGotoGolden,
-  returnToAlias,
-  onReturnConsumed,
 }: {
+  alias?: string
+  onOpenLibrary: (alias: string) => void
+  onBackToLibraries: () => void
   onOpenGolden?: (docId: string, label: string, alias: string) => void
   onGotoGolden?: () => void
-  returnToAlias?: string | null
-  onReturnConsumed?: () => void
-} = {}) {
-  // golden 是 admin 维护的评估集：普通用户完全隐藏 golden 相关入口
+}) {
   const { isAdmin } = useAuth()
-  // null = 第一层（库列表 L1）；否则进第二层（该库的文档列表 L2）
-  const [alias, setAlias] = useState<string | null>(null)
-
-  // 从 Golden 管理"返回"过来：直接打开该库 L2（一次性，消费后通知父组件清空）
-  useEffect(() => {
-    if (returnToAlias) {
-      setAlias(returnToAlias)
-      onReturnConsumed?.()
-    }
-  }, [returnToAlias, onReturnConsumed])
+  const alias = aliasProp ?? null
 
   return (
     <div className="flex h-full flex-1 flex-col overflow-hidden">
@@ -79,14 +71,14 @@ export function KnowledgeBaseView({
         <div className="max-w-6xl space-y-6">
           {alias === null ? (
             <L1View
-              onOpen={setAlias}
+              onOpen={onOpenLibrary}
               onGotoGolden={isAdmin ? onGotoGolden : undefined}
               isAdmin={isAdmin}
             />
           ) : (
             <LibraryView
               alias={alias}
-              onBack={() => setAlias(null)}
+              onBack={onBackToLibraries}
               showGolden={isAdmin}
               onOpenGolden={isAdmin ? onOpenGolden : undefined}
             />

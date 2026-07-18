@@ -1,5 +1,6 @@
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   BarChart3,
   BookOpen,
@@ -52,6 +53,7 @@ import { ThemeToggle } from '@/components/settings/ThemeToggle'
 import { cn } from '@/lib/utils'
 
 import type { Session } from '@/types/session'
+import { pathForView, viewKindFromPathname } from '@/routes/paths'
 
 const RECENTS_COLLAPSED_KEY = 'agenta:sidebar:recentsCollapsed'
 const SIDEBAR_WIDTH_KEY = 'agenta:sidebar:width'
@@ -69,14 +71,13 @@ export type ViewKind =
   | 'mastery'
   | 'usage'
   | 'quality'
-  | 'dbshow'
+  | 'database'
   | 'backup'
   | 'settings'
 
 export type SidebarProps = {
   sessions: Session[]
   activeId: string | null
-  activeView: ViewKind
   username: string
   isAdmin: boolean
   onLogout: () => void
@@ -84,14 +85,12 @@ export type SidebarProps = {
   onCreate: () => void
   onRename: (id: string, title: string) => Promise<void> | void
   onDelete: (id: string) => Promise<void> | void
-  onSwitchView: (view: ViewKind) => void
 }
 
 export function Sidebar(props: SidebarProps) {
   const {
     sessions,
     activeId,
-    activeView,
     username,
     isAdmin,
     onLogout,
@@ -99,8 +98,15 @@ export function Sidebar(props: SidebarProps) {
     onCreate,
     onRename,
     onDelete,
-    onSwitchView,
   } = props
+
+  const location = useLocation()
+  const navigate = useNavigate()
+  const activeView = viewKindFromPathname(location.pathname)
+
+  const goToView = (view: ViewKind) => {
+    navigate(pathForView(view, activeId))
+  }
 
   const [renameTarget, setRenameTarget] = useState<Session | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -215,13 +221,10 @@ export function Sidebar(props: SidebarProps) {
   }
 
   const handleSelectSession = (id: string) => {
-    // 切到具体 session 时同时切回 chat view
-    if (activeView !== 'chat') onSwitchView('chat')
     onSelect(id)
   }
 
   const handleCreateAndSwitch = () => {
-    if (activeView !== 'chat') onSwitchView('chat')
     onCreate()
   }
 
@@ -247,32 +250,32 @@ export function Sidebar(props: SidebarProps) {
           icon={<MessageSquare className="h-4 w-4" />}
           label="聊天"
           active={activeView === 'chat'}
-          onClick={() => onSwitchView('chat')}
+          onClick={() => goToView('chat')}
         />
         <ViewNavButton
           icon={<BookOpen className="h-4 w-4" />}
           label="知识库"
           active={activeView === 'kb'}
-          onClick={() => onSwitchView('kb')}
+          onClick={() => goToView('kb')}
         />
         <ViewNavButton
           icon={<Brain className="h-4 w-4" />}
           label="记忆"
           active={activeView === 'memory'}
-          onClick={() => onSwitchView('memory')}
+          onClick={() => goToView('memory')}
         />
         <ViewNavButton
           icon={<ScrollText className="h-4 w-4" />}
           label="Rules"
           active={activeView === 'rules'}
-          onClick={() => onSwitchView('rules')}
+          onClick={() => goToView('rules')}
         />
         {isAdmin && (
           <ViewNavButton
             icon={<Sparkles className="h-4 w-4" />}
             label="Skills"
             active={activeView === 'skills'}
-            onClick={() => onSwitchView('skills')}
+            onClick={() => goToView('skills')}
           />
         )}
         {isAdmin && (
@@ -280,33 +283,33 @@ export function Sidebar(props: SidebarProps) {
             icon={<Plug className="h-4 w-4" />}
             label="MCP"
             active={activeView === 'mcp'}
-            onClick={() => onSwitchView('mcp')}
+            onClick={() => goToView('mcp')}
           />
         )}
         <ViewNavButton
           icon={<GraduationCap className="h-4 w-4" />}
           label="学而时习"
           active={activeView === 'mastery'}
-          onClick={() => onSwitchView('mastery')}
+          onClick={() => goToView('mastery')}
         />
         <ViewNavButton
           icon={<BarChart3 className="h-4 w-4" />}
           label="用量看板"
           active={activeView === 'usage'}
-          onClick={() => onSwitchView('usage')}
+          onClick={() => goToView('usage')}
         />
         <ViewNavButton
           icon={<GaugeCircle className="h-4 w-4" />}
           label="质量看板"
           active={activeView === 'quality'}
-          onClick={() => onSwitchView('quality')}
+          onClick={() => goToView('quality')}
         />
         {isAdmin && (
           <ViewNavButton
             icon={<Database className="h-4 w-4" />}
             label="数据库"
-            active={activeView === 'dbshow'}
-            onClick={() => onSwitchView('dbshow')}
+            active={activeView === 'database'}
+            onClick={() => goToView('database')}
           />
         )}
         {isAdmin && (
@@ -314,7 +317,7 @@ export function Sidebar(props: SidebarProps) {
             icon={<HardDriveDownload className="h-4 w-4" />}
             label="备份与恢复"
             active={activeView === 'backup'}
-            onClick={() => onSwitchView('backup')}
+            onClick={() => goToView('backup')}
           />
         )}
       </div>
@@ -408,7 +411,7 @@ export function Sidebar(props: SidebarProps) {
             <ChevronDown className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" side="top" className="w-44">
-            <DropdownMenuItem onClick={() => onSwitchView('settings')}>
+            <DropdownMenuItem onClick={() => goToView('settings')}>
               <Settings className="mr-2 h-4 w-4" />
               设置
             </DropdownMenuItem>

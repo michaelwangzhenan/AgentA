@@ -27,7 +27,7 @@ import type { Message } from '@/types/chat'
 import type { Session } from '@/types/session'
 import { cn } from '@/lib/utils'
 
-type MasteryTab = 'plans' | 'quizzes' | 'srs'
+import type { MasteryTab } from '@/routes/paths'
 
 const TABS: { key: MasteryTab; label: string; icon: typeof CalendarRange }[] = [
   { key: 'plans', label: '学习计划', icon: CalendarRange },
@@ -44,10 +44,13 @@ const DEFAULT_CHAT_WIDTH = 400
 
 // 与 ChatView 一致的聊天 props（从 App 的 useChat 透传下来）+ session 切换
 export type MasteryViewProps = {
+  tab: MasteryTab
   sessionId: string | null
   sessions: Session[]
   messages: Message[]
   inFlight: boolean
+  expandChatFromUrl?: boolean
+  onTabChange: (tab: MasteryTab) => void
   onSelectSession: (id: string) => void
   onCreateSession: () => void
   onSend: (text: string) => void
@@ -62,8 +65,7 @@ export type MasteryViewProps = {
 }
 
 export function MasteryView(props: MasteryViewProps) {
-  const { inFlight, sessions, sessionId } = props
-  const [tab, setTab] = useState<MasteryTab>('plans')
+  const { inFlight, sessions, sessionId, tab, expandChatFromUrl, onTabChange } = props
   const [introDismissed, setIntroDismissed] = useState<boolean>(() => {
     try {
       return localStorage.getItem(INTRO_DISMISSED_KEY) === '1'
@@ -98,6 +100,12 @@ export function MasteryView(props: MasteryViewProps) {
     }
     prevInFlight.current = inFlight
   }, [inFlight])
+
+  useEffect(() => {
+    if (expandChatFromUrl) {
+      setChatOpen(true)
+    }
+  }, [expandChatFromUrl])
 
   // ─── 拖拽调整聊天面板宽度 ───────────────────────────────────────────────
   const draggingRef = useRef(false)
@@ -246,7 +254,7 @@ export function MasteryView(props: MasteryViewProps) {
               {TABS.map(({ key, label, icon: Icon }) => (
                 <button
                   key={key}
-                  onClick={() => setTab(key)}
+                  onClick={() => onTabChange(key)}
                   className={cn(
                     'flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors',
                     tab === key

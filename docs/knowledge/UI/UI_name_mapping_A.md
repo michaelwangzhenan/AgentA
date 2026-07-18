@@ -111,7 +111,7 @@
 | 070 | 学而时习页 | Mastery View | 学而时习、学习页 | 页面可见 |
 | 071 | 用量看板页 | Usage View | 用量页、用量看板 | 页面可见 |
 | 072 | 质量看板页 | Quality View | 质量页、评估看板 | 页面可见 |
-| 073 | 数据库页 | DB Show View | 数据库、dbshow | 页面可见 |
+| 073 | 数据库页 | Database View | 数据库、database | 页面可见 |
 | 074 | 备份与恢复页 | Backup View | 备份页 | 页面可见 |
 | 075 | 设置页 | Settings Page | 设置、个人设置 | 页面可见 |
 | 076 | 登录页 | Login View | 登录界面、注册页 | 页面可见 |

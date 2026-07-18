@@ -51,7 +51,7 @@ import type {
 } from '@/types/dbAdmin'
 import type { UserInfo } from '@/types/auth'
 
-type Tab = 'chroma' | 'bm25' | 'sqlite' | 'maintenance'
+import type { DatabaseTab } from '@/routes/paths'
 
 // 后端 limit 上限 200，候选项不超过它
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 200] as const
@@ -59,9 +59,14 @@ const DEFAULT_PAGE_SIZE = 10
 // 与后端 db_inspect.CHROMA_SCAN_CAP 对齐，仅用于 truncated 提示文案
 const CHROMA_SCAN_CAP_HINT = 20000
 
-export function DatabaseView() {
-  const [tab, setTab] = useState<Tab>('chroma')
-  const tabs: { value: Tab; label: string; icon: LucideIcon }[] = [
+export function DatabaseView({
+  tab,
+  onTabChange,
+}: {
+  tab: DatabaseTab
+  onTabChange: (tab: DatabaseTab) => void
+}) {
+  const tabs: { value: DatabaseTab; label: string; icon: LucideIcon }[] = [
     { value: 'chroma', label: 'Chroma', icon: Boxes },
     { value: 'bm25', label: 'BM25', icon: Search },
     { value: 'sqlite', label: 'SQLite', icon: Database },
@@ -80,7 +85,7 @@ export function DatabaseView() {
               <li key={t.value}>
                 <button
                   type="button"
-                  onClick={() => setTab(t.value)}
+                  onClick={() => onTabChange(t.value)}
                   className={cn(
                     'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors',
                     tab === t.value

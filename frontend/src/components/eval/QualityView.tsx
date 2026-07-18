@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { Activity, ClipboardCheck, ShieldAlert, Star } from 'lucide-react'
 
@@ -9,34 +8,25 @@ import { TraceDashboard } from './TraceDashboard'
 import { GoldenManager, type GoldenDocFilter } from './GoldenManager'
 import { OfflineEvalView } from './OfflineEvalView'
 import { RuntimeMonitor } from './SecurityPanel'
+import type { QualityTab } from '@/routes/paths'
 
-type Tab = 'trace' | 'security_runtime' | 'offline' | 'golden'
+type TabDef = { value: QualityTab; label: string; icon: LucideIcon }
 
 export function QualityView({
-  goldenJump,
-  goldenTabSignal,
-  onGoldenJumpConsumed,
+  tab,
+  goldenFilter,
+  onTabChange,
+  onClearGoldenFilter,
   onBackToKb,
 }: {
-  goldenJump?: GoldenDocFilter | null
-  goldenTabSignal?: number
-  onGoldenJumpConsumed?: () => void
+  tab: QualityTab
+  goldenFilter?: GoldenDocFilter
+  onTabChange: (tab: QualityTab) => void
+  onClearGoldenFilter?: () => void
   onBackToKb?: () => void
-} = {}) {
+}) {
   const { isAdmin } = useAuth()
-  const [tab, setTab] = useState<Tab>('trace')
 
-  // 知识库跳转过来：自动切到 Golden 管理 tab
-  useEffect(() => {
-    if (goldenJump) setTab('golden')
-  }, [goldenJump])
-
-  // 入库完成 toast 点"去 Golden 管理"：切到 Golden tab（无文档筛选）
-  useEffect(() => {
-    if (goldenTabSignal) setTab('golden')
-  }, [goldenTabSignal])
-
-  type TabDef = { value: Tab; label: string; icon: LucideIcon }
   const tabs: TabDef[] = [
     { value: 'trace', label: '会话监控', icon: Activity },
     ...(isAdmin
@@ -56,14 +46,13 @@ export function QualityView({
       subtitle="在线 trace 可观测 + RAG golden 管理 + 离线评估"
     >
       <div className="flex min-h-0 flex-1 gap-4">
-        {/* 左侧竖向导航（同设置页样式） */}
         <nav className="sticky top-0 w-32 shrink-0 self-start">
           <ul className="space-y-0.5">
             {tabs.map((t) => (
               <li key={t.value}>
                 <button
                   type="button"
-                  onClick={() => setTab(t.value)}
+                  onClick={() => onTabChange(t.value)}
                   className={cn(
                     'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors',
                     active === t.value
@@ -79,16 +68,15 @@ export function QualityView({
           </ul>
         </nav>
 
-        {/* 右侧内容 */}
         <div className="min-w-0 flex-1">
           {active === 'trace' && <TraceDashboard />}
           {active === 'security_runtime' && isAdmin && <RuntimeMonitor />}
           {active === 'offline' && isAdmin && <OfflineEvalView />}
           {active === 'golden' && isAdmin && (
             <GoldenManager
-              docFilter={goldenJump ?? undefined}
-              onClearDocFilter={onGoldenJumpConsumed}
-              onBackToKb={goldenJump ? onBackToKb : undefined}
+              docFilter={goldenFilter}
+              onClearDocFilter={onClearGoldenFilter}
+              onBackToKb={goldenFilter ? onBackToKb : undefined}
             />
           )}
         </div>

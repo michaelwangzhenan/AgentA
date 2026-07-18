@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { PiggyBank, Tag, TrendingDown, User, Users } from 'lucide-react'
 
@@ -8,15 +7,19 @@ import { ResourcePage } from '@/components/resources/ResourcePage'
 import { UsageDashboard } from './UsageDashboard'
 import { PricingConfig } from './PricingConfig'
 import { SavingsPanel } from './SavingsPanel'
+import type { UsageTab } from '@/routes/paths'
 
-type Tab = 'mine' | 'savings' | 'all' | 'savings_all' | 'pricing'
+type TabDef = { value: UsageTab; label: string; icon: LucideIcon }
 
-export function UsageView() {
+export function UsageView({
+  tab,
+  onTabChange,
+}: {
+  tab: UsageTab
+  onTabChange: (tab: UsageTab) => void
+}) {
   const { isAdmin } = useAuth()
-  const [tab, setTab] = useState<Tab>('mine')
 
-  // 同类相邻：两个「用量」挨着、两个「降本」挨着，最后单价配置
-  type TabDef = { value: Tab; label: string; icon: LucideIcon }
   const tabs: TabDef[] = [
     { value: 'mine', label: '我的用量', icon: User },
     ...(isAdmin ? [{ value: 'all', label: '全员用量', icon: Users } as TabDef] : []),
@@ -29,20 +32,18 @@ export function UsageView() {
       : []),
   ]
 
-  // admin 关闭后兜底（理论上 isAdmin 不会动态变）
   const active = tabs.some((t) => t.value === tab) ? tab : 'mine'
 
   return (
     <ResourcePage title="用量" subtitle="Token 使用与成本估算（每用户独立）">
       <div className="flex min-h-0 flex-1 gap-4">
-        {/* 左侧竖向导航（同质量看板样式） */}
         <nav className="sticky top-0 w-32 shrink-0 self-start">
           <ul className="space-y-0.5">
             {tabs.map((t) => (
               <li key={t.value}>
                 <button
                   type="button"
-                  onClick={() => setTab(t.value)}
+                  onClick={() => onTabChange(t.value)}
                   className={cn(
                     'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors',
                     active === t.value
@@ -58,7 +59,6 @@ export function UsageView() {
           </ul>
         </nav>
 
-        {/* 右侧内容 */}
         <div className="min-w-0 flex-1">
           {active === 'mine' && <UsageDashboard scope="mine" />}
           {active === 'savings' && <SavingsPanel scope="mine" />}

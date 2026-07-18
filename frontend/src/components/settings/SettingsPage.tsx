@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { KeyRound, KeySquare, SlidersHorizontal, User, Users, UserX } from 'lucide-react'
 
 import { ProfileSettings } from '@/components/settings/ProfileSettings'
@@ -50,9 +49,14 @@ const NAV_GROUPS: NavGroup[] = [
 ]
 
 /** 设置整页：占满主区域。左侧按“账户 / 系统 / 危险区域”分组导航（按权限过滤），右侧内容。 */
-export function SettingsPage() {
+export function SettingsPage({
+  section,
+  onSectionChange,
+}: {
+  section: Section
+  onSectionChange: (section: Section) => void
+}) {
   const { isAdmin } = useAuth()
-  const [section, setSection] = useState<Section>('profile')
 
   const groups = NAV_GROUPS.map((g) => ({
     ...g,
@@ -81,7 +85,7 @@ export function SettingsPage() {
                     <li key={it.id}>
                       <button
                         type="button"
-                        onClick={() => setSection(it.id)}
+                        onClick={() => onSectionChange(it.id)}
                         className={cn(
                           'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors',
                           active

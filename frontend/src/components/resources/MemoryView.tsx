@@ -170,7 +170,8 @@ export function MemoryView() {
                   </span>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="whitespace-pre-wrap break-words text-sm text-foreground/90">
+                  <div className="whitespace-pre-wrap break-all text-sm text-foreground/90">
+             
                     {it.text}
                   </div>
                   <div className="mt-1 text-[10px] text-muted-foreground">
