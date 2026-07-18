@@ -5,11 +5,20 @@ B.学基础知识 -> 60 天
 C.继续开发AgentA -> 15 天
 D.开新项目
 
-0. 打造成面试网站
+
 1. 可观测性
 2. Context Engineering
 3. Eval 硬化
 4. LangGraph
+
+# clean code
+## 两套写法不统一
+import src.config as config
+import src.config as _cfg
+
+## 语义缓存
+
+
 
 # 1. RAG / 知识库
 
@@ -366,13 +375,7 @@ logo?
 
 WebUI 支持导出对话。
 
-## 9.4. 侧边栏 URL 路由
 
-起因：侧边栏切换标签（聊天 / 知识库 / 设置等）只改 React 状态 activeView，不更新浏览器地址栏；用户无法收藏直链、刷新后回到默认聊天页、后退键也不能在标签间切换。
-
-现状：App.tsx 用 useState<ViewKind>('chat') + 条件渲染，无 react-router；Sidebar 点标签只调 setActiveView。nginx 已配 try_files $uri /index.html（见部署文档 i1.1_3_deploy.md 第 9.3 节），但前端启动时不读 location.pathname，手动访问 /kb 仍显示聊天页。
-
-目标：接入前端路由（如 react-router），路径与 ViewKind 对齐（如 / 聊天、/kb 知识库、/settings 设置）；点标签 navigate 同步 URL，首屏从路径恢复 activeView。nginx 侧一般不用改。跨页跳转（知识库 → 质量看板 Golden）的 query 参数规则一并定好。
 
 ## 9.5 Golden 页面显示的列表不完整
 

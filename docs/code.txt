@@ -1,0 +1,6 @@
+
+main() # src\api\run.py
+  -> build_uvicorn_log_config()
+  -> uvicorn.run( "src.api.main:app",...)
+    -> app = FastAPI
+

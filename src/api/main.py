@@ -1,7 +1,8 @@
-"""FastAPI app 入口：挂载路由 + 开发期 CORS 中间件。
+"""FastAPI 应用定义：挂载路由、生命周期、开发期 CORS 中间件。
 
-启动方式：
-    uvicorn src.api.main:app --reload --port 8000
+本模块导出 app 对象，供 uvicorn 加载；进程启动走 src.api.run（本地与 VPS 共用）：
+    python -m src.api.run
+tools/dev_server.ps1 与 systemd agenta-backend 均调上述命令。
 """
 
 # .env 必须在 import src.config 之前加载；否则模块顶层的 os.getenv 拿到默认值
@@ -18,9 +19,9 @@ from contextlib import asynccontextmanager  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
-# 经 src.api.run 启动时，uvicorn 已用 build_uvicorn_log_config 把 root 挂上文件 handler，
-# 这里检测到 root 已有 handler 就不再重配（否则会冲掉文件 handler）；只有在被直接
-# `uvicorn src.api.main:app` 拉起（root 无 handler）时，才补一套终端 logging 兜底。
+# 经 python -m src.api.run 启动时，uvicorn 已用 build_uvicorn_log_config 把 root 挂上文件 handler，
+# 这里检测到 root 已有 handler 就不再重配（否则会冲掉文件 handler）；只有被直接
+# uvicorn src.api.main:app 拉起（root 无 handler）时，才补一套终端 logging 兜底。
 from src.services import log_setup  # noqa: E402
 
 if not logging.getLogger().handlers:
@@ -33,10 +34,10 @@ from src.api.runtime import api_keys as _api_keys  # noqa: E402
 from src.api.runtime import config_overrides as _config_overrides  # noqa: E402
 
 # 加载 .agenta/config_overrides.json，覆盖 _cfg 模块属性。
-# 必须在 _bootstrap_mcp / 路由首次读 _cfg 之前 —— 这里是 import-time，
-# uvicorn 启动 lifespan 时已经生效。
+# 必须在 _bootstrap_mcp 执行前，以及所有路由第一次读取 _cfg（配置）前，完成配置项的覆盖加载。
 _config_overrides.apply_overrides()
-# 加载 .agenta/api_keys.json，把 admin 在 UI 配的 key 覆盖到 PROVIDER_CONFIGS / 标量
+
+# 加载 .agenta/api_keys.json，把 admin 在 UI 配的 key 覆盖到 PROVIDER_CONFIGS
 _api_keys.apply_overrides()
 
 from src.api.routes import (  # noqa: E402

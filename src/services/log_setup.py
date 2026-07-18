@@ -1,11 +1,10 @@
-"""统一日志配置：CLI 与 UI 两个入口共用的格式 / 级别 / 上下文注入。
+"""
+统一日志配置：
+CLI（main.py）和 UI 后端（src/api/main.py + src/api/run.py）两个入口共用的格式/级别/上下文注入
 
-为什么单独抽一个模块：CLI（`main.py`）和 UI 后端（`src/api/main.py` + `src/api/run.py`）
-原本各配一套 logging，格式、级别、降噪规则容易飘。这里集中提供：
-
-- `TaggedFormatter`：业务日志加 `[APP]` 前缀、uvicorn 访问日志加 `[ACCESS]` 前缀，统一带日期
-- `ContextFilter` + contextvar：把 `session_id` / `request_id` 注入每条日志
-- `setup_cli_logging()` / `build_uvicorn_log_config()`：两个入口各自的配置出口
+- TaggedFormatter：业务日志加 [APP] 前缀、uvicorn 访问日志加 [ACCESS] 前缀，统一带日期
+- ContextFilter + contextvar：把 session_id / request_id 注入每条日志
+- setup_cli_logging() / build_uvicorn_log_config()：两个入口各自的配置出口
 """
 
 from __future__ import annotations
@@ -43,7 +42,7 @@ def get_session_id() -> str:
 
 
 class ContextFilter(logging.Filter):
-    """给每条日志补 `session_id` / `request_id` 字段（缺省 '-'），供 formatter 使用。
+    """给每条日志补 session_id / request_id 字段（缺省 '-'），供 formatter 使用。
 
     attach 到 handler 上即可，所有经过该 handler 的记录（含 uvicorn 自身的）都会拿到字段，
     避免 formatter 引用未定义字段时抛 KeyError。
@@ -58,7 +57,7 @@ class ContextFilter(logging.Filter):
 
 
 class TaggedFormatter(logging.Formatter):
-    """按来源选格式：`uvicorn.access` 走 `[ACCESS]`，其余走 `[APP]`。
+    """按来源选格式：uvicorn.access 走 [ACCESS]，其余走 [APP]。
 
     一个 formatter 同时覆盖两类，使它们能共用同一个文件 handler（避免两个 handler
     写同一文件时滚动改名互相打架）。
@@ -92,7 +91,7 @@ def quiet_noisy_loggers() -> None:
 def setup_cli_logging(level_name: str | None = None) -> None:
     """配置 CLI 进程的 root logger。
 
-    需在 `sys.stderr` 被 `_Tee` 包装之后调用，这样 handler 绑定到 tee、日志才能进文件。
+    需在 sys.stderr 被 _Tee 包装之后调用，这样 handler 绑定到 tee、日志才能进文件。
     """
     level, _, ok = resolve_level(level_name)
     if not ok:
@@ -117,10 +116,10 @@ def build_uvicorn_log_config(
     max_bytes: int,
     backup_count: int,
 ) -> dict:
-    """构造传给 `uvicorn.run(log_config=...)` 的 dictConfig。
+    """构造传给 uvicorn.run(log_config=...) 的 dictConfig。
 
-    uvicorn 自身 / 访问日志 / root（含 `src.*` 业务日志）全挂到同一个
-    RotatingFileHandler：单写者按大小滚动（F8）、保留 backup（F3）、统一带前缀与时间（F2/F7）。
+    uvicorn 自身 / 访问日志 / root（含 src.* 业务日志）全挂到同一个
+    RotatingFileHandler：按大小滚动、保留备份、统一带前缀与时间
     """
     resolved, _, _ = resolve_level(level)
     return {

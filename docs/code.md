@@ -17,7 +17,7 @@
 
 ## 1.2. 两条主调用链
 
-#### 生产路径（Agent 在线检索）：
+生产路径（Agent 在线检索）
 
 ```
 Agent 工具调用
@@ -30,7 +30,7 @@ Agent 工具调用
                  └─ src/rag/reranker.py · rerank(...)               ← Cross-Encoder 精排
 ```
 
-#### 评估路径（离线 ablation）：
+评估路径（离线 ablation）
 
 ```
 python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v]
@@ -44,13 +44,13 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 
 ## 1.3. 推荐阅读顺序
 
-#### 先读主线，掌握"用户 query 进来后到底走了哪几步"：
+先读主线
 
 1. src/rag/retriever.py · search() —— 整个 RAG 的"主函数"，看明白它就掌握了 80% 的检索逻辑。重点关注其中的阶段化日志（[search] 前缀），它是流程的天然导览。
 2. src/rag/reranker.py · rerank() —— 短小，看完能理解 sigmoid 归一化与 score 字段语义。
 3. src/rag/query_rewriter.py · expand_queries() —— 三轴改写如何各自降级、如何合并去重。
 
-#### 再按需要往下钻：
+再按需要往下钻
 
 - 想优化召回质量 / 阈值 → retriever.py 的 dense 阈值过滤与 RRF 段
 - 想加新文档格式 → parser.py 的 parse_file() 与各 _parse_* 私有函数
@@ -104,7 +104,7 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 
 ## 2.2. 三条主调用链
 
-#### 生产路径（Python ReAct，默认实现 IMP_METHOD=PYTHON）：
+生产路径（Python ReAct，默认实现 IMP_METHOD=PYTHON）：
 
 ```
 src/agent/agent.py · Agent.run(user_input)
@@ -130,7 +130,7 @@ src/agent/agent.py · Agent.run(user_input)
             └─ MemoryManager.try_extract(user_input, reply)   ← 节流自动提取
 ```
 
-#### AutoGPT 三阶段路径（IMP_METHOD=AUTOGPT）：
+AutoGPT 三阶段路径（IMP_METHOD=AUTOGPT）：
 
 ```
 src/agent/autogpt_agent.py · AutoGPTAgent.run(user_input)
@@ -141,7 +141,7 @@ src/agent/autogpt_agent.py · AutoGPTAgent.run(user_input)
   └─ [Persist] 仅写 user + 最终 assistant（不写中间 task / tool message）
 ```
 
-#### 评估路径（离线）：
+评估路径（离线）：
 
 ```
 python -m tools.agent_eval.<feature>.eval_*
@@ -153,14 +153,14 @@ python -m tools.agent_eval.<feature>.eval_*
 
 ## 2.3. 推荐阅读顺序
 
-#### 先读主线，掌握"用户问题进来后 Agent 走了哪几步"：
+先读主线
 
 1. src/agent/agent.py · Agent.run() —— Agent 的"主函数"，看明白即掌握 80% 推理逻辑。重点看：四层 system 拼接 → for iteration 主循环 → tool_calls 分支与 final_answer 分支的分叉点。
 2. src/agent/core/tool_call_engine.py · ToolCallEngine.process() —— 工具调用一轮的"小循环"：执行 tool → 包 <untrusted_*> → 写历史 → 叠加发 plan_* 事件，主循环把每轮 tool_calls 都委托给它。
 3. src/agent/core/event_bus.py · EventBus.publish() —— 短，看完能理解 10 类事件如何扇出到表现层（CLI / Chainlit）以及异常如何隔离。
 4. src/agent/tools.py · execute_tool() —— 路由总线：所有业务 tool 在此 dispatch；按需深入某个 _tool_* 私有函数。
 
-#### 再按需要往下钻：
+再按需要往下钻
 
 - 想理解 plan-execute → tool_call_engine.py · _maybe_publish_plan_events() + core/plan_manager.py · reconstruct_from_messages()
 - 想调 thinking budget → core/thinking_policy.py · effective_budget()（LOW / MED / HIGH 阈值）
@@ -281,7 +281,7 @@ graph TD
 
 前端从浏览器打开网页到渲染出界面，也有一条启动链（跟后端 3.7.2 节「启动 → 收 HTTP → 路由」对称）：
 
-1. 浏览器加载 index.html：里面有个空容器 <div id="root">，以及一行 <script src="/src/main.tsx">（开发期由 Vite 提供，见 3.1 节的 Vite）。
+1. 浏览器加载 index.html：里面有个空容器 `<div id="root">`，以及一行 `<script src="/src/main.tsx">`（开发期由 Vite 提供，见 3.1 节的 Vite）。
 2. main.tsx 是入口：它不画界面，只做「挂载」——找到 #root，把 React 组件树渲染进去：
 
 ```tsx
@@ -348,9 +348,9 @@ sequenceDiagram
 
 ### 3.4.1. 画界面：组件 + JSX + 样式
 
-#### 1. 组件与界面
+1. 组件与界面
 
-组件 = 返回界面的函数。函数名大写开头，return 里那段「像 HTML」的就是界面；定义好后就能当标签用（<ChatView ... />）。下面是 components/chat/ChatView.tsx 的骨架：
+组件 = 返回界面的函数。函数名大写开头，return 里那段「像 HTML」的就是界面；定义好后就能当标签用（`<ChatView ... />`）。下面是 components/chat/ChatView.tsx 的骨架：
 
 ```tsx
 // frontend/src/components/chat/ChatView.tsx（节选）
@@ -379,10 +379,10 @@ export function ChatView({ messages, onSend /* ... */ }: ChatViewProps) {
 
 | 规则 | 说明 | 项目里的真实写法 |
 | ---------------------- | ---------------------- | ----------------------------------------------------------- |
-| 用 {} 插值 | 标签里插变量 / 表达式 | <span>{timeLabel(m.createdAt!)}</span>（MessageList.tsx） |
-| className 不是 class | JSX 里类名属性叫 className | <h1 className="text-base font-semibold">（ChatView.tsx） |
-| 只能有一个根节点 | 多个并列用 <>…</> 包起来 | <><MessageList … />{composer}</>（ChatView.tsx） |
-| 标签必须闭合 | 无内容标签自闭合 | <MessageBubble message={m} cb={cb} />（MessageList.tsx） |
+| 用 {} 插值 | 标签里插变量 / 表达式 | `<span>{timeLabel(m.createdAt!)}</span>`（MessageList.tsx） |
+| className 不是 class | JSX 里类名属性叫 className | `<h1 className="text-base font-semibold">`（ChatView.tsx） |
+| 只能有一个根节点 | 多个并列用 <>…</> 包起来 | `<><MessageList … />{composer}</>`（ChatView.tsx） |
+| 标签必须闭合 | 无内容标签自闭合 | `<MessageBubble message={m} cb={cb} />`（MessageList.tsx） |
 
 
 3. className + Tailwind = 控制样式（最常改的就在这，详见 3.4 节）。MessageList.tsx 里「回到最新」按钮的样式：
@@ -502,9 +502,9 @@ const copy = async () => {
 
 | 写法 | 含义 | 项目里的真实写法 |
 | ---------------------------------------- | --------------- | -------------------------------------------------------------------------- |
-| {ok && <X/>} | ok 为真才显示 X | {!hideHeader && (<header>…</header>)}（ChatView.tsx） |
-| {ok ? <A/> : <B/>} | 真显示 A，假显示 B | {messages.length === 0 ? (<空状态/>) : (<消息列表/>)}（ChatView.tsx） |
-| {list.map((x) => <X key={x.id} .../>)} | 把数组每一项渲染成一个组件 | {messages.map((m) => <MessageBubble key={m.id} … />)}（MessageList.tsx） |
+| `{ok && <X/>}` | ok 为真才显示 X | `{!hideHeader && (<header>…</header>)}`（ChatView.tsx） |
+| `{ok ? <A/> : <B/>}` | 真显示 A，假显示 B | `{messages.length === 0 ? (<空状态/>) : (<消息列表/>)}`（ChatView.tsx） |
+| `{list.map((x) => <X key={x.id} .../>)}` | 把数组每一项渲染成一个组件 | `{messages.map((m) => <MessageBubble key={m.id} … />)}`（MessageList.tsx） |
 
 
 列表渲染必须给每项一个唯一 key（如 key={m.id}）：React 靠它分辨哪项变了，漏写会告警并可能出 bug。
@@ -784,7 +784,7 @@ graph LR
 
 后端从「敲启动命令」到「请求被分发给 chat」，经历三步：启动建 app、uvicorn 收 HTTP、按路径匹配到处理函数。
 
-#### 1）启动run.py 用 uvicorn 加载 main:app
+ 1）启动 run.py 用 uvicorn 加载 main:app
 
 main.py 自己不会「跑起来」——它只定义了一个 app 对象，真正启动它的是 ASGI 服务器 uvicorn。启动命令 python -m src.api.run 里核心就一句：
 
@@ -797,7 +797,7 @@ uvicorn.run("src.api.main:app", host="127.0.0.1", port=8000, reload=True, ...)
 
 > ASGI（Asynchronous Server Gateway Interface，异步服务器网关接口）：Python 异步 Web 里「服务器 ↔ 应用」的对接约定。uvicorn 是服务器、FastAPI app 是应用，两者按 ASGI 对接。
 
-#### 2）收 HTTPuvicorn 负责，FastAPI 不碰 socket
+ 2）收 HTTPuvicorn 负责，FastAPI 不碰 socket
 
 - uvicorn 在 127.0.0.1:8000 监听端口：accept 连接、解析 HTTP 报文这些脏活都归它。
 - 每来一个请求，uvicorn 把它转成 ASGI scope（含 method / path / headers），再调用 app（FastAPI app 本质是个 ASGI 可调用对象）。
@@ -805,7 +805,7 @@ uvicorn.run("src.api.main:app", host="127.0.0.1", port=8000, reload=True, ...)
 
 分工记住：uvicorn = 收发 HTTP 的服务器；FastAPI app = 拿到请求后做路由 / 鉴权 / 业务的应用。
 
-#### 中间件 是夹在「收到请求」和「路由函数」之间的一层，每个请求进、每个响应出都会穿过它，适合做「所有请求都要做一遍」的通用事（日志、鉴权、CORS 等）。它是洋葱式包裹：请求进去时一层层穿进、响应出来时再一层层穿出，所以调用路由前后都能动手。本项目有两个（都在 main.py）：
+ 中间件 是夹在「收到请求」和「路由函数」之间的一层，每个请求进、每个响应出都会穿过它，适合做「所有请求都要做一遍」的通用事（日志、鉴权、CORS 等）。它是洋葱式包裹：请求进去时一层层穿进、响应出来时再一层层穿出，所以调用路由前后都能动手。本项目有两个（都在 main.py）：
 
 
 | 中间件 | 干什么 |
@@ -816,7 +816,7 @@ uvicorn.run("src.api.main:app", host="127.0.0.1", port=8000, reload=True, ...)
 
 > CORS（Cross-Origin Resource Sharing, 跨域资源共享）：浏览器安全规则——网页默认只能访问「同源」（协议 + 域名 + 端口都相同）的后端；跨源要后端用 CORS 头明确放行。
 
-#### 3）路由注册（启动时）+ 匹配（请求时）
+ 3）路由注册（启动时）+ 匹配（请求时）
 
 注册——main.py 启动时把 chat 路由挂上、加 /api 前缀：
 
@@ -857,10 +857,10 @@ graph LR
 ```mermaid
 graph TD
  A["① 路由匹配<br/>POST /api/chat/stream"] --> B["② 校验请求体<br/>ChatRequest（Pydantic）"]
- B --> C["③ 鉴权<br/>Depends(get_current_user) 读 cookie → 认人"]
- C --> D["④ 注入依赖<br/>Depends(get_agent) 等拿到单例"]
- D --> E["⑤ 业务编排<br/>选模型 / 查缓存 / 跑 Agent（见 §3.5.3）"]
- E --> F["⑥ 调下层<br/>agent.run → 工具 search_knowledge → §1 RAG"]
+ B --> C["③ 鉴权<br/>Depends(get_current_user) <br/>读 cookie → 认人"]
+ C --> D["④ 注入依赖<br/>Depends(get_agent) 等<br/>拿到单例"]
+ D --> E["⑤ 业务编排<br/>选模型 / 查缓存 <br/>/ 跑 Agent（见 §3.6.3）"]
+ E --> F["⑥ 调下层<br/>agent.run → <br/>工具 search_knowledge <br/>→ §1 RAG"]
  F --> G["⑦ 返回<br/>SSE 逐帧推回前端"]
 ```
 
@@ -935,7 +935,7 @@ def require_admin(user: dict = Depends(get_current_user)) -> dict:
 
 进阶看懂代码
 
-- useChat 详解：messages 结构、版本切换 / 编辑重发 / 重新生成逻辑（流式如何累积成消息见 3.5.3 节）
+- useChat 详解：messages 结构、版本切换 / 编辑重发 / 重新生成逻辑（流式如何累积成消息见 3.6.3 节）
 - 一条消息的数据结构（types/chat.ts）：思考 / 工具 / plan / 附件各字段含义
 - 主题与深浅色：index.css 里的色彩变量体系、color-scheme 的作用
 
@@ -1233,10 +1233,10 @@ SRS 复习（学而时习功能之三）提供跨 session 持久化的知识卡�
 
 ### 4.2.1. 主题皮肤（Theme）
 
-多套皮肤 + 深浅色：theme.tsx 给 <html> 挂 .dark / data-theme 标记，index.css 用 CSS 变量定义各主题色，组件只用语义色、换肤零改动。
+多套皮肤 + 深浅色：theme.tsx 给 `<html>` 挂 .dark / data-theme 标记，index.css 用 CSS 变量定义各主题色，组件只用语义色、换肤零改动。
 
 - 主题集（THEMES）：light / dark + 暖色 warm-light / warm-dark + 橙调 amber-light / amber-dark + system（跟随 prefers-color-scheme）。
-- 应用（标记）：theme.tsx 把选中主题翻成 <html> 上的标记——深色加 .dark 类；皮肤设 data-theme="warm-light" 等；内置 light / dark 不带 data-theme。
+- 应用（标记）：theme.tsx 把选中主题翻成 `<html>` 上的标记——深色加 .dark 类；皮肤设 data-theme="warm-light" 等；内置 light / dark 不带 data-theme。
 - 定义（颜色）：index.css 用选择器覆写一套语义色变量（--background / --foreground / --primary…，oklch）：:root=light、.dark=dark、[data-theme="warm-light"]、.dark[data-theme="warm-dark"]（双选择器提特异度盖过通用 .dark）。
 - 组件解耦：组件只用语义色类（bg-background / text-foreground），不写死颜色 → 切主题不动组件代码。
 - 持久化 + 跟随系统：选择存 localStorage（key agenta-theme）刷新保留；system 监听 matchMedia('(prefers-color-scheme: dark)') 实时切。

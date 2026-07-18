@@ -12,9 +12,17 @@ fi
 cd frontend && npm run build && cd ..
 sudo systemctl restart agenta-backend
 sudo systemctl restart nginx
+sudo systemctl status agenta-backend nginx --no-pager
 
 sleep 5
 
-sudo systemctl status agenta-backend nginx --no-pager
-curl -s http://127.0.0.1:8000/api/health; echo
-curl -I http://127.0.0.1/
+# 等后端就绪（最多 30 秒）
+for i in $(seq 1 30); do
+  if curl -sf http://127.0.0.1:8000/api/health >/dev/null; then
+    curl -s http://127.0.0.1:8000/api/health; echo
+    break
+  fi
+  sleep 1
+done
+
+curl -I http://127.0.0.1/ || echo "WARN: nginx 检查失败"

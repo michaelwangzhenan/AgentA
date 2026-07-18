@@ -120,7 +120,7 @@ import type {
   RestoreResponse,
 } from '@/types/backup'
 
-// ─── 401 全局处理 ──────────────────────────────────────────────────────
+// 401 全局处理 ──────────────────────────────────────────────────────
 // 登录态失效时，由 AuthProvider 注册回调把界面切回登录页。
 
 let _onUnauthorized: (() => void) | null = null
@@ -129,10 +129,10 @@ export function setUnauthorizedHandler(fn: (() => void) | null): void {
   _onUnauthorized = fn
 }
 
-// ─── 通用 helper ────────────────────────────────────────────────────────
+// 通用 helper ────────────────────────────────────────────────────────
 
-// 所有 API 请求统一显式带上 cookie 凭证。同源部署靠浏览器默认即可，但显式声明能在
-// 前后端跨域部署时仍带上登录态（与 iter_6 §3.6 设计一致）。
+// 所有 API 请求统一显式带上 cookie 凭证。
+// 同源部署靠浏览器默认即可，但显式声明能在前后端跨域部署时仍带上登录态。
 function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
   return fetch(input, { credentials: 'include', ...init })
 }
@@ -152,7 +152,7 @@ async function _ensureOk(res: Response): Promise<void> {
   throw new Error(detail)
 }
 
-// ─── Step 1：非流式（保留作为 fallback / 调试入口）────────────────────
+// 非流式（保留作为 fallback / 调试入口）────────────────────
 
 export async function postChat(message: string): Promise<ChatResponse> {
   const res = await apiFetch('/api/chat', {
@@ -164,7 +164,7 @@ export async function postChat(message: string): Promise<ChatResponse> {
   return (await res.json()) as ChatResponse
 }
 
-// ─── Step 2：SSE 流式 ─────────────────────────────────────────────────
+// SSE 流式 ─────────────────────────────────────────────────
 
 export type StreamHandlers = {
   onEvent: (event: AgentStreamEvent) => void
@@ -250,7 +250,7 @@ export async function streamChat(
   }
 }
 
-// ─── Step 3：Session 管理 ──────────────────────────────────────────────
+// Session 管理 ──────────────────────────────────────────────
 
 export async function listSessions(): Promise<Session[]> {
   const res = await apiFetch('/api/sessions')
@@ -320,7 +320,7 @@ export async function truncateSession(
   return (await res.json()) as { deleted: number }
 }
 
-// ─── Step 4：Knowledge Base ────────────────────────────────────────────
+// Knowledge Base ────────────────────────────────────────────
 
 export async function getKBCollections(refresh = false): Promise<KBCollectionListResponse> {
   const res = await apiFetch(`/api/kb/collections${refresh ? '?refresh=true' : ''}`)
@@ -444,7 +444,7 @@ export async function clearAllKBDocuments(model: string): Promise<KBClearAllResp
   return (await res.json()) as KBClearAllResponse
 }
 
-// ─── Step 5：User Memory / Rules / Skills / MCP ───────────────────────
+// User Memory / Rules / Skills / MCP ───────────────────────
 
 export async function listMemories(): Promise<MemoryItem[]> {
   const res = await apiFetch('/api/memory')
@@ -648,7 +648,7 @@ export async function reloadMCPServers(): Promise<MCPReloadResponse> {
   return (await res.json()) as MCPReloadResponse
 }
 
-// ─── Step 6：System Config ─────────────────────────────────────────────
+// System Config ─────────────────────────────────────────────
 
 export async function getConfig(): Promise<ConfigResponse> {
   const res = await apiFetch('/api/config')
@@ -715,7 +715,7 @@ export async function resetApiKey(id: string): Promise<ApiKeyView> {
   return (await res.json()) as ApiKeyView
 }
 
-// ─── Step 7：业务面板（plans / quizzes / srs） ─────────────────────────
+// 业务面板（plans / quizzes / srs） ─────────────────────────
 
 export async function listPlans(): Promise<PlanSummary[]> {
   const res = await apiFetch('/api/plans')
@@ -858,7 +858,7 @@ export async function setSRSCardStatus(
   return (await res.json()) as SRSCard
 }
 
-// ─── Step 8：认证（注册 / 登录 / 退出 / 当前用户） ─────────────────────
+// 认证（注册 / 登录 / 退出 / 当前用户） ─────────────────────
 
 /** 拉当前登录用户；未登录返回 null（不触发全局 401 跳转）。 */
 export async function getMe(): Promise<UserInfo | null> {
@@ -947,7 +947,7 @@ export async function patchLlmPrefs(update: LlmPrefsUpdate): Promise<LlmPrefs> {
   return (await res.json()) as LlmPrefs
 }
 
-// ─── Step 9：Token 用量统计（iter_11） ─────────────────────────────────────
+// Token 用量统计 ─────────────────────────────────────
 // scope='mine' 走本人端点；scope='all' 走 admin 全员端点（仅 admin 可见）。
 
 type UsageScope = 'mine' | 'all'
@@ -1023,7 +1023,7 @@ export async function putPricing(items: PricingUpdateItem[]): Promise<PricingRes
   return (await res.json()) as PricingResponse
 }
 
-// ─── 降本看板 + 模型路由候选池（iter_14）─────────────────────────────────
+// ─── 降本看板 + 模型路由候选池─────────────────────────────────
 
 export async function getSavingsSummary(
   range: string,
@@ -1059,7 +1059,7 @@ export async function putRoutingPool(modelIds: string[]): Promise<RoutingPoolRes
   return (await res.json()) as RoutingPoolResponse
 }
 
-// ─── 评估 + 可观测（质量看板，iter_14）─────────────────────────────────
+// 评估 + 可观测（质量看板）─────────────────────────────────
 
 export async function getTraceOverview(
   range: string,

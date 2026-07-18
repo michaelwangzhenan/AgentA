@@ -122,6 +122,7 @@ def change_password(
     if result != "ok":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="新密码无效")
     return OkResponse()
+    
 
 
 def effective_llm_prefs(store: UserStore, user_id: int) -> LlmPrefs:
