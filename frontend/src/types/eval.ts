@@ -135,50 +135,6 @@ export type ReportContent = {
   content: string
 }
 
-// 安全红队看板（对齐 src/api/schemas/eval.py 的 SecuritySummary / SecurityTrend）
-
-export type SecurityKindRow = {
-  kind: string
-  total: number
-  attacks: number
-  attack_blocked: number
-  recall: number
-  benigns: number
-  benign_blocked: number
-  fpr: number
-}
-
-export type SecuritySummary = {
-  available: boolean
-  timestamp: string
-  git: string
-  partial: boolean
-  kinds_run: string[]
-  total: number
-  attacks: number
-  attack_blocked: number
-  benigns: number
-  benign_blocked: number
-  recall: number
-  fpr: number
-  recall_threshold: number
-  fpr_threshold: number
-  passed: boolean
-  by_kind: SecurityKindRow[]
-}
-
-export type SecurityTrendPoint = {
-  timestamp: string
-  recall: number
-  fpr: number
-  total: number
-  partial: boolean
-}
-
-export type SecurityTrend = {
-  points: SecurityTrendPoint[]
-}
-
 // 实时安全监控（线上拦截事件，对齐 SecurityRuntimeSummary）
 
 export type SecurityEventRow = {

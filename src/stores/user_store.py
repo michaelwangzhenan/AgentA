@@ -244,7 +244,7 @@ class UserStore:
                 "updated_at = excluded.updated_at",
                 (user_id, content or "", now),
             )
-
+ 
     # ── 账号资料修改 ────────────────────────────────────────────────────────
 
     def update_username(self, user_id: int, new_username: str) -> str:

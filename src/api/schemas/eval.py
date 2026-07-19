@@ -160,50 +160,6 @@ class ReportContent(BaseModel):
     content: str
 
 
-# ── 安全红队看板（读 security-adversarial-*.json sidecar） ────────────────────
-
-class SecurityKindRow(BaseModel):
-    kind: str            # direct | indirect_rag | indirect_web | tool_blocklist | ssrf | info_leak
-    total: int
-    attacks: int
-    attack_blocked: int
-    recall: float
-    benigns: int
-    benign_blocked: int
-    fpr: float
-
-
-class SecuritySummary(BaseModel):
-    available: bool                       # 是否有可用的 sidecar（无则前端提示先跑评估）
-    timestamp: str = ""
-    git: str = ""
-    partial: bool = False                 # 是否只跑了部分类别（如 --no-llm）
-    kinds_run: list[str] = Field(default_factory=list)
-    total: int = 0
-    attacks: int = 0
-    attack_blocked: int = 0
-    benigns: int = 0
-    benign_blocked: int = 0
-    recall: float = 0.0
-    fpr: float = 0.0
-    recall_threshold: float = 0.0
-    fpr_threshold: float = 0.0
-    passed: bool = False
-    by_kind: list[SecurityKindRow] = Field(default_factory=list)
-
-
-class SecurityTrendPoint(BaseModel):
-    timestamp: str
-    recall: float
-    fpr: float
-    total: int
-    partial: bool
-
-
-class SecurityTrend(BaseModel):
-    points: list[SecurityTrendPoint]      # 按时间升序
-
-
 # ── 实时安全监控（线上拦截事件） ─────────────────────────────────────────────
 
 class SecurityEventRow(BaseModel):

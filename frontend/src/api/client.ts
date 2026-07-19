@@ -107,8 +107,6 @@ import type {
   SecurityEventPage,
   SecurityEventsQuery,
   SecurityRuntimeSummary,
-  SecuritySummary,
-  SecurityTrend,
   TraceDetail,
   TraceList,
   TraceOverview,
@@ -1251,18 +1249,6 @@ export async function getReportContent(name: string): Promise<ReportContent> {
   const res = await apiFetch(`/api/eval/reports/content?name=${encodeURIComponent(name)}`)
   await _ensureOk(res)
   return (await res.json()) as ReportContent
-}
-
-export async function getSecuritySummary(): Promise<SecuritySummary> {
-  const res = await apiFetch('/api/eval/security/summary')
-  await _ensureOk(res)
-  return (await res.json()) as SecuritySummary
-}
-
-export async function getSecurityTrend(limit = 30): Promise<SecurityTrend> {
-  const res = await apiFetch(`/api/eval/security/trend?limit=${limit}`)
-  await _ensureOk(res)
-  return (await res.json()) as SecurityTrend
 }
 
 export async function getSecurityRuntimeSummary(
