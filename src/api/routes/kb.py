@@ -1,7 +1,12 @@
-"""Knowledge Base 端点 —— 文档列表 / 拖拽上传 + ingest / 删除文档
+"""
+Knowledge Base 端点：文档列表、上传入库与删除；上传走 multipart，落盘后复用 ingest_all 增量入库。
 
-上传走 multipart/form-data；后端落盘到
-`config.WEB_UPLOAD_DIR` 后调用 `ingest_all` 复用既有幂等增量入库链路。
+- GET /api/kb/collections：列出知识库 collection
+- GET /api/kb/documents：分页列出文档
+- POST /api/kb/upload：上传文件并触发 ingest（支持 SSE 进度）
+- POST /api/kb/upload/cancel：取消进行中的上传
+- DELETE /api/kb/documents/{doc_id}：删除单篇文档
+- DELETE /api/kb/documents：清空全部文档
 """
 
 from __future__ import annotations

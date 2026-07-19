@@ -1,8 +1,10 @@
-"""Quiz 端点：只读查询（list / detail）+ 页面写操作（答题批改 / 归档）。
+"""
+Quiz 端点：测验集查询与页面写操作（答题批改 / 归档；与 LLM quiz 工具同 store）。
 
-跟 LLM `create_quiz` / `grade_quiz` / `query_quiz_history` 工具同 store。
-出题仍走 chat（需大模型生成）；本页只做"答题 + 批改"——选择题本地判分，
-简答复用 tools.py 的 LLM-judge helper（唯一会触发大模型的写操作）。
+- GET /api/quizzes：列出当前用户测验集
+- GET /api/quizzes/{quiz_set_id}：测验集详情（含题目与作答）
+- POST /api/quizzes/{quiz_set_id}/submit：提交作答并批改（简答可走 LLM judge）
+- POST /api/quizzes/{quiz_set_id}/archive：归档测验集
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status

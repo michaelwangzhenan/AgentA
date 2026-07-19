@@ -1,4 +1,13 @@
-"""Session 管理端点 —— 列表 / 创建 / 重命名 / 删除 / 拉历史消息"""
+"""
+Session 端点：会话生命周期管理与消息历史拉取。
+
+- GET /api/sessions：列出当前用户会话
+- POST /api/sessions：新建会话
+- PATCH /api/sessions/{session_id}：重命名会话
+- DELETE /api/sessions/{session_id}：删除会话
+- POST /api/sessions/{session_id}/truncate：从第 N 条 user 消息起截断（编辑重发前置）
+- GET /api/sessions/{session_id}/messages：拉消息历史（游标分页）
+"""
 
 from __future__ import annotations
 

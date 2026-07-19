@@ -1,7 +1,14 @@
-"""SRS（间隔重复）端点：只读查询（due / list / detail）+ 页面写操作（建卡 / 评分 / 状态流转）。
+"""
+SRS 端点：间隔重复复习卡的查询与页面写操作（SM-2 本地评分，与 LLM SRS 工具同 store）。
 
-跟 LLM `query_srs_due` / `review_srs_card` / `add_to_srs` 工具同 store。
-评分走 SM-2 纯函数（`src.agent.core.srs_scheduler`），全程本地计算，不调大模型。
+- GET /api/srs/due：今日待复习卡片
+- GET /api/srs/cards：列出全部卡片
+- GET /api/srs/cards/{card_id}：单卡详情
+- POST /api/srs/cards：手动建卡
+- POST /api/srs/cards/{card_id}/review：评分复习（SM-2 调度）
+- POST /api/srs/cards/{card_id}/suspend：暂停复习
+- POST /api/srs/cards/{card_id}/resume：恢复复习
+- POST /api/srs/cards/{card_id}/archive：归档卡片
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status

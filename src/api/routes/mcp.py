@@ -1,18 +1,14 @@
-"""MCP servers / tools 端点。
+"""
+MCP servers / tools 端点：管理 .agenta/mcp/ 下 server 配置、实时启停与 tool 列表。
 
-| Method | Path | 说明 |
-|---|---|---|
-| GET    | /api/mcp/servers              | 列出 server 状态 + enabled 标志 + 原始 command/args/env |
-| GET    | /api/mcp/tools                | 列出已连接 server 暴露的所有 tool（带 namespace 前缀） |
-| POST   | /api/mcp/servers              | 新建 server（写 config.json + 实时启动） |
-| PUT    | /api/mcp/servers/{name}       | 更新 server（重启该 server 让新配置生效） |
-| POST   | /api/mcp/servers/{name}/rename| 改名（JSON key + disabled 列表迁移；运行中的先 stop 再 start） |
-| DELETE | /api/mcp/servers/{name}       | 删除 server（stop_one + 从 config.json 移除） |
-| POST   | /api/mcp/servers/{name}/toggle| 启用 / 禁用（仅修改 disabled.json + 实时启停 server） |
-| POST   | /api/mcp/reload               | 重读 config.json + disabled.json，按差异 diff 启停 server |
-
-实时生效语义：UI 改动通过 manager.start_one / stop_one / reload 立即作用到运行时；
-**已发给 LLM 的 system prompt 不可撤回**，但 tool 列表在每轮 chat 重新拉取，下一轮立即看到新 tool。
+- GET /api/mcp/servers：列出 server 状态 + enabled 标志 + command/args/env
+- GET /api/mcp/tools：列出已连接 server 暴露的 tool（带 namespace 前缀）
+- POST /api/mcp/servers：新建 server（写 config.json + 实时启动）
+- PUT /api/mcp/servers/{name}：更新 server（重启使新配置生效）
+- POST /api/mcp/servers/{name}/rename：改名（JSON key + disabled 列表迁移）
+- DELETE /api/mcp/servers/{name}：删除 server（stop + 从 config.json 移除）
+- POST /api/mcp/servers/{name}/toggle：启用 / 禁用（改 disabled.json + 实时启停）
+- POST /api/mcp/reload：重读 config + disabled，按差异 diff 启停 server
 """
 
 import logging

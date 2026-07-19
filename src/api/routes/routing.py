@@ -1,8 +1,8 @@
-"""模型路由候选池端点（admin 全局）。
+"""
+模型路由候选池端点，仅 admin：管理 .agenta/routing_pool.json 中的可降级模型池。
 
-候选池 = admin 勾选的"已充值可用"模型，路由只在池内向更便宜的模型降级。
-持久化在 ``.agenta/routing_pool.json``（见 ``src.llm.model_router``）；空 = 未配置，
-路由回落到"provider 已配 api_key"的模型集合。
+- GET /api/routing/pool：读候选池（空表示未配置，回落 provider 已配 key 的模型集合）
+- PUT /api/routing/pool：写候选池
 """
 
 from __future__ import annotations

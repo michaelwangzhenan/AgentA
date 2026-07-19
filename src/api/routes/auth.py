@@ -1,7 +1,15 @@
-"""认证端点：注册 / 登录 / 退出 / 当前用户。
+"""
+认证端点：注册 / 登录 / 退出、账号资料与每用户 LLM 偏好；登录态为服务端 token + HttpOnly cookie。
 
-登录态用服务端 token + HttpOnly cookie。前端经 Vite 代理调 `/api/*`（同源），
-cookie 走 SameSite=Lax 即可，无需跨站配置。
+- POST /api/auth/register：注册并自动登录（匹配 AUTH_ADMIN_USERNAME 者为 admin）
+- POST /api/auth/login：登录，下发 cookie
+- POST /api/auth/logout：退出，删除 token 并清 cookie
+- GET /api/auth/me：当前登录用户信息
+- PATCH /api/auth/username：改当前用户名
+- POST /api/auth/password：改当前密码（需校验旧密码）
+- GET /api/auth/llm-prefs：读当前用户 LLM 偏好（未设字段回落全局默认）
+- PATCH /api/auth/llm-prefs：写当前用户 LLM 偏好
+- DELETE /api/auth/me：注销当前账号 + 级联清理业务数据
 """
 
 from __future__ import annotations

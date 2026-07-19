@@ -1,10 +1,9 @@
-"""API key 配置端点（全程仅 admin）。
+"""
+API key 配置端点，仅 admin：读写 .agenta/api_keys.json 中的 provider key 覆盖项。
 
-- `GET /api/api-keys`：列出可配 key 的脱敏视图（configured / masked / source），永不返回明文
-- `PUT /api/api-keys/{id}`：设置某项 key（空串等于清除 override，恢复 .env 值）
-- `DELETE /api/api-keys/{id}`：清除 override，恢复到启动时 .env 值
-
-存储在 `.agenta/api_keys.json`（gitignore）；运行时即时生效，无需重启 uvicorn。
+- GET /api/api-keys：列出可配 key 的脱敏视图（永不返回明文）
+- PUT /api/api-keys/{key_id}：设置某项 key（空串等于清除 override）
+- DELETE /api/api-keys/{key_id}：清除 override，恢复 .env 初始值
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status

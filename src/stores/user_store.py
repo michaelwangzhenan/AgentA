@@ -1,12 +1,14 @@
-"""多用户账号 / 登录态 / 每用户 rules 的 SQLite 存储层。
+"""多用户账号 / 登录态 / 每用户 rules 与 LLM 偏好的 SQLite 存储层。
 
-独立于业务数据库（session / user_memory 等），单独存 `./db/sqlite/auth.db`。
-密码用标准库 `hashlib.pbkdf2_hmac`（零新依赖）+ 每用户随机 salt 哈希，不存明文。
+独立于业务数据库（session / user_memory 等），单独存 ./db/sqlite/auth.db。
+密码用标准库 hashlib.pbkdf2_hmac（零新依赖）+ 每用户随机 salt 哈希，不存明文。
 
-三张表：
+四张表：
     users(id, username UNIQUE, password_hash, salt, role, created_at)
-    auth_sessions(token, user_id, created_at, expires_at)   -- cookie 里存 token
-    user_rules(user_id PK, content, updated_at)             -- 每用户偏好规则
+    auth_sessions(token, user_id, created_at, expires_at)  -- cookie 里存 token
+    user_rules(user_id PK, content, updated_at)  -- 每用户偏好规则
+    user_settings(user_id PK, active_model, thinking_enabled, thinking_budget, updated_at)
+        -- 每用户 LLM 偏好；字段为空表示用全局默认
 """
 
 from __future__ import annotations
@@ -45,7 +47,7 @@ def _hash_password(password: str, salt: str) -> str:
 
 
 class UserStore:
-    """账号 / 登录态 / 每用户 rules 存储（CRUD 依赖层）。
+    """账号 / 登录态 / 每用户 rules 与 LLM 偏好存储（CRUD 依赖层）。
 
     内置 threading.Lock，可被多线程安全读写。
     """
@@ -308,7 +310,7 @@ class UserStore:
             )
 
     def delete_user(self, user_id: int) -> bool:
-        """删除账号本身：users + 该用户登录态 + 偏好规则。
+        """删除账号本身：users + 登录态 + 偏好规则 + LLM 偏好。
 
         业务数据（会话 / 记忆 / 计划等）由调用方按需级联清理，不在本方法内。
         """

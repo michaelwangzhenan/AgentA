@@ -1,7 +1,13 @@
-"""学习计划端点：只读查询（list / active / detail）+ 页面写操作（新建 / 改任务 / 激活 / 放弃）。
+"""
+学习计划端点：跨 session 长期学习计划的查询与页面写操作（与 LLM study plan 工具同 store）。
 
-跟 LLM `create_study_plan` / `update_study_progress` / `query_study_status` 工具同 store。
-写端点对应"学而时习"页面内的手动操作；都是纯本地 SQLite 写，不调大模型。
+- GET /api/plans：列出当前用户全部计划
+- GET /api/plans/active：当前激活计划
+- GET /api/plans/{plan_id}：计划详情
+- POST /api/plans：新建计划
+- PATCH /api/plans/{plan_id}/tasks/{task_id}：更新任务状态
+- POST /api/plans/{plan_id}/activate：激活计划
+- POST /api/plans/{plan_id}/abandon：放弃计划
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status

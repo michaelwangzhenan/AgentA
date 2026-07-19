@@ -1,7 +1,8 @@
-"""管理员端点：用户管理（列表 / 删除，含业务数据级联清理）。
+"""
+管理员端点：用户列表与删除，仅 admin 可访问；删号时级联清理该用户的隔离业务数据。
 
-仅 admin 可访问。删用户时连带清理其全部隔离数据（会话 / 记忆 / 计划 / 测验 / SRS），
-共享数据（知识库 / skills / mcp / 系统配置）不属于个人、不清理。
+- GET /api/admin/users：列出所有用户
+- DELETE /api/admin/users/{user_id}：删除用户 + 级联清理会话 / 记忆 / 计划 / 测验 / SRS / 用量 / trace / 语义缓存；禁止删自己或最后一个 admin；共享数据（知识库 / skills / mcp / 系统配置）不清理
 """
 
 from __future__ import annotations

@@ -1,11 +1,21 @@
-"""Token 用量统计端点（iter_11）。
+"""
+Token 用量与成本统计端点：本人视角汇总 / 下钻，admin 全员视角与单价配置。
 
-- 本人视角：`/api/usage/summary|series|events|events.csv`（强制按当前用户过滤）
-- 全员视角（admin）：`/api/usage/admin/*`（按用户分组 / 下钻）
-- 单价：`GET /api/usage/pricing`（登录可读）/ `PUT /api/usage/pricing`（admin 写）
-
-成本按"内置默认 ← admin 覆盖"合并后的单价实时算（详 usage_store.merged_pricing）。
-口径与采集见 docs/iter_11_token.md §3 / §4.1。
+- GET /api/usage/summary：当前用户用量汇总
+- GET /api/usage/series：当前用户时序
+- GET /api/usage/events：当前用户明细（分页）
+- GET /api/usage/events.csv：当前用户明细 CSV 导出
+- GET /api/usage/admin/summary：全员用量汇总（admin）
+- GET /api/usage/admin/series：全员时序（admin）
+- GET /api/usage/admin/users：按用户分组用量（admin）
+- GET /api/usage/admin/events：全员明细（admin）
+- GET /api/usage/admin/events.csv：全员明细 CSV 导出（admin）
+- GET /api/usage/pricing：读模型单价（登录可读）
+- PUT /api/usage/pricing：写模型单价（admin）
+- GET /api/usage/savings：当前用户路由降本汇总
+- GET /api/usage/savings/series：当前用户路由降本时序
+- GET /api/usage/admin/savings：全员路由降本汇总（admin）
+- GET /api/usage/admin/savings/series：全员路由降本时序（admin）
 """
 
 from __future__ import annotations

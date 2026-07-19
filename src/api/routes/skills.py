@@ -1,14 +1,13 @@
-"""Skills 端点。
+"""
+Skills 端点：管理 .agenta/skills/ 目录下 skill 的扫描、增删改、改名、启用禁用与热重载。
 
-| Method | Path | 说明 |
-|---|---|---|
-| GET    | /api/skills              | 列出 .agenta/skills/ 扫描结果（含 body + disabled 列表）|
-| POST   | /api/skills/reload       | 重新扫盘 + 清 Agent 缓存（免重启 uvicorn）|
-| POST   | /api/skills              | 新建 skill（创目录 + 写 SKILL.md + reload）|
-| PUT    | /api/skills/{name}       | 更新 skill（description + body + frontmatter_extra；name 不可改，走 rename）|
-| POST   | /api/skills/{name}/rename| 改名（目录改 + frontmatter name 同步 + disabled list 迁移）|
-| DELETE | /api/skills/{name}       | 删除 skill 目录 + reload |
-| POST   | /api/skills/{name}/toggle| 启用 / 禁用（仅修改 .agenta/skills/disabled.json）|
+- GET /api/skills：列出 .agenta/skills/ 扫描结果（含 body + disabled 列表）
+- POST /api/skills/reload：重新扫盘 + 清 Agent 缓存（免重启 uvicorn）
+- POST /api/skills：新建 skill（创目录 + 写 SKILL.md + reload）
+- PUT /api/skills/{name}：更新 skill（description + body + frontmatter_extra；name 不可改，走 rename）
+- POST /api/skills/{name}/rename：改名（目录改 + frontmatter name 同步 + disabled list 迁移）
+- DELETE /api/skills/{name}：删除 skill 目录 + reload
+- POST /api/skills/{name}/toggle：启用 / 禁用（仅修改 .agenta/skills/disabled.json）
 """
 
 import logging

@@ -1,6 +1,11 @@
-"""User Memory 管理端点（list / create / patch / delete / clear）。
+"""
+User Memory 端点：跨 session 用户长期记忆的增删改查。
 
-UserMemoryStore 内部已有 threading.Lock，多 connection 在 SQLite 文件锁下并发安全。
+- GET /api/memory：列出当前用户全部记忆
+- POST /api/memory：新增一条记忆
+- PATCH /api/memory/{memory_id}：修改一条记忆
+- DELETE /api/memory/{memory_id}：删除一条记忆
+- DELETE /api/memory：清空当前用户全部记忆
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status

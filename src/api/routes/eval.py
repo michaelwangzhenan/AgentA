@@ -1,11 +1,28 @@
-"""评估 + 可观测端点。
+"""
+评估与可观测端点：RAG golden 管理、在线 trace、安全看板、离线评估触发与报告浏览。
 
-- RAG golden 管理（**仅 admin**）：`/eval/golden` 增删改查 + 审核改状态 + 从 JSON 导入
-- 在线 trace 可观测：`/eval/trace/*`（本人视角；admin 可 `scope=all` 看全员）
-- 评估报告浏览（**仅 admin**）：`/eval/reports` 列表 + 单份内容（只读 reports 目录）
-
-trace 数据来自 chat 链路旁路采集（见 src/stores/trace_store.py）；golden 由入库自动
-生成（pending）或人工录入（approved），评估脚本默认只用 approved。
+- GET /api/eval/golden：列出 RAG golden（admin，可过滤）
+- GET /api/eval/golden/export：导出 golden 为 JSON（admin）
+- GET /api/eval/golden/gen-options：AI 生成 golden 的可选项（admin）
+- POST /api/eval/golden/generate：AI 生成 golden 候选（admin）
+- POST /api/eval/golden：手工新增 golden（admin）
+- PUT /api/eval/golden/{golden_id}：更新 golden（admin）
+- DELETE /api/eval/golden/{golden_id}：删除 golden（admin）
+- POST /api/eval/golden/import：从 JSON 导入 golden（admin）
+- GET /api/eval/trace/overview：trace 总览（本人；admin 可 scope=all）
+- GET /api/eval/trace/series：trace 时序
+- GET /api/eval/trace/list：trace 列表
+- GET /api/eval/trace/{trace_id}：单条 trace 详情（含 span 瀑布）
+- GET /api/eval/reports：评估报告列表（admin）
+- GET /api/eval/reports/content：单份报告内容（admin）
+- GET /api/eval/security/summary：红队评估汇总（admin）
+- GET /api/eval/security/trend：红队评估趋势（admin）
+- GET /api/eval/security/runtime/summary：在线安全拦截汇总（admin）
+- GET /api/eval/security/runtime/events：在线安全拦截事件（admin）
+- POST /api/eval/run：触发离线评估子进程（admin）
+- GET /api/eval/run/status：评估任务状态（admin）
+- POST /api/eval/run/cancel：取消评估任务（admin）
+- GET /api/eval/summary：某 eval 任务的通用摘要卡片（admin）
 """
 
 from __future__ import annotations

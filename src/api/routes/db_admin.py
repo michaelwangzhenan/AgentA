@@ -1,9 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""数据库：只读巡检 Chroma / SQLite / BM25 的管理员 API。
+"""
+数据库巡检与维护端点，仅 admin；读逻辑委托 src.services.db_inspect / db_maintain（与 db_cli 共用）。
 
-读逻辑全部委托 src.services.db_inspect（与 tools/cli/db_cli.py CLI 共用）；本文件只负责
-HTTP 封装与 404 处理。全部 GET、只读，依赖 require_admin。
+- GET /api/admin/db/chroma/collections：列出 Chroma collection
+- GET /api/admin/db/chroma/{name}/items：分页浏览 collection 条目
+- GET /api/admin/db/chroma/{name}/items/{item_id}：单条 Chroma 条目详情
+- GET /api/admin/db/bm25/indexes：列出 BM25 索引
+- GET /api/admin/db/bm25/{collection}/docs：分页浏览 BM25 文档
+- GET /api/admin/db/bm25/{collection}/docs/{doc_id}：单条 BM25 文档详情
+- GET /api/admin/db/sqlite/databases：列出 SQLite 库与表
+- GET /api/admin/db/sqlite/{db_key}/{table}：分页浏览 SQLite 表行
+- GET /api/admin/db/maintenance/prune/preview：预览可裁剪数据
+- POST /api/admin/db/maintenance/prune：执行裁剪
+- GET /api/admin/db/maintenance/purge-user/preview：预览某用户可清理数据
+- POST /api/admin/db/maintenance/purge-user：清理某用户数据
+- POST /api/admin/db/maintenance/vacuum：SQLite VACUUM
+- GET /api/admin/db/maintenance/orphan-segments/preview：预览孤儿向量段
+- POST /api/admin/db/maintenance/orphan-segments：清理孤儿向量段
 """
 from __future__ import annotations
 

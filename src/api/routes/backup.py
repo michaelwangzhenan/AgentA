@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""运行时数据备份 / 还原的管理员 API。
+"""
+运行时数据备份与还原端点，仅 admin；逻辑委托 src.services.runtime_backup（与 backup_cli 共用）。
 
-备份 / 还原逻辑全部委托 src.services.runtime_backup（与 tools/cli/backup_cli.py CLI 共用）；本文件只负责
-HTTP 封装、文件名校验与上传还原的安全把关。全部依赖 require_admin。
-
-安全要点：
-- 下载 / 删除的 {name} 强校验为 agenta-backup-<时间戳>.zip，禁路径分隔符 / .. 防穿越；
-- 还原先用 runtime_backup.validate_restore_targets 校验 manifest 目标，拒绝逃出项目根的路径。
+- POST /api/admin/backup/create：按类别打包生成备份 zip
+- GET /api/admin/backup/list：列出已有备份
+- GET /api/admin/backup/download/{name}：下载备份（name 强校验防路径穿越）
+- DELETE /api/admin/backup/{name}：删除备份文件
+- POST /api/admin/backup/restore：上传 zip 还原（先校验 manifest 目标不逃出项目根）
 """
 from __future__ import annotations
 

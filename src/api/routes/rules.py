@@ -1,7 +1,8 @@
-"""每用户偏好 rules 读写端点。
+"""
+每用户偏好 rules 端点：读写 auth.db.user_rules，Agent 每轮对话动态注入 system prompt。
 
-rules 按用户独享，存 `auth.db.user_rules` 表；Agent 每轮对话动态读取当前用户的
-rules 注入 system prompt，改完下一轮即生效，无需重启。
+- GET /api/rules：读当前用户 rules
+- PUT /api/rules：写当前用户 rules（下一轮对话即生效）
 """
 
 from fastapi import APIRouter, Depends, HTTPException

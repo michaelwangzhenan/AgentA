@@ -1,13 +1,11 @@
-"""Config 编辑面板端点。
+"""
+Config 编辑面板端点：读写 .agenta/config_overrides.json 中的运行时配置覆盖项。
 
-- `GET /api/config`：返回分组 + 每项 metadata + 当前值 + 来源（default / override）
-- `PATCH /api/config/{key}`：写入单项；后端校验 → setattr 到 src.config → 持久化到
-  `.agenta/config_overrides.json` → 触发副作用 hook（如 LOG_LEVEL / MCP 重载）
-- `DELETE /api/config/{key}`：清除该项 override，恢复到启动时 initial 值
-- `POST /api/config/reload`：用户手动改了 overrides 文件后，把磁盘内容同步到 `_cfg` +
-  触发变化项的副作用 hook（无需重启 uvicorn）
-
-**API key 等敏感字段不在 registry 中**，永不暴露 / 永不允许修改。
+- GET /api/config/models：按厂商分组的可选模型目录（供前端级联菜单）
+- GET /api/config：返回分组 + 每项 metadata + 当前值 + 来源（default / override）
+- PATCH /api/config/{key}：写入单项 override，校验后 setattr 并触发副作用 hook
+- DELETE /api/config/{key}：清除单项 override，恢复启动时初始值
+- POST /api/config/reload：从磁盘重读 overrides 并同步到运行时（API key 等敏感项不在 registry）
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
