@@ -3,7 +3,7 @@
 # 任一步失败就停，避免半更新状态继续跑。
 set -euo pipefail
 
-cd ~/AgentA
+cd /home/admin/AgentA
 
 PREV_HEAD=$(git rev-parse HEAD)
 git pull
