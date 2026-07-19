@@ -34,7 +34,7 @@ from src.stores.session_store import SessionStore
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
 _DEFAULT_SESSION_TITLE = "New Chat"
@@ -59,7 +59,7 @@ def _row_to_session_info(row: dict[str, Any]) -> SessionInfo:
     )
 
 
-@router.get("/sessions", response_model=SessionListResponse)
+@router.get("", response_model=SessionListResponse)
 def list_sessions(
     store: SessionStore = Depends(get_session_store),
     user: dict = Depends(get_current_user),
@@ -69,7 +69,7 @@ def list_sessions(
     return SessionListResponse(sessions=[_row_to_session_info(r) for r in rows])
 
 
-@router.post("/sessions", response_model=SessionInfo)
+@router.post("", response_model=SessionInfo)
 def create_session(
     req: SessionCreateRequest | None = None,
     store: SessionStore = Depends(get_session_store),
@@ -87,7 +87,7 @@ def create_session(
     raise HTTPException(status_code=500, detail="created session not found in list")
 
 
-@router.patch("/sessions/{session_id}", response_model=SessionInfo)
+@router.patch("/{session_id}", response_model=SessionInfo)
 def rename_session(
     session_id: str,
     req: SessionRenameRequest,
@@ -105,7 +105,7 @@ def rename_session(
     raise HTTPException(status_code=500, detail="renamed session disappeared")
 
 
-@router.delete("/sessions/{session_id}", response_model=SessionDeleteResponse)
+@router.delete("/{session_id}", response_model=SessionDeleteResponse)
 def delete_session(
     session_id: str,
     store: SessionStore = Depends(get_session_store),
@@ -126,7 +126,7 @@ def delete_session(
 
 
 @router.post(
-    "/sessions/{session_id}/truncate",
+    "/{session_id}/truncate",
     response_model=SessionTruncateResponse,
 )
 def truncate_session(
@@ -147,7 +147,7 @@ def truncate_session(
 
 
 @router.get(
-    "/sessions/{session_id}/messages",
+    "/{session_id}/messages",
     response_model=SessionMessagesResponse,
 )
 def get_session_messages(

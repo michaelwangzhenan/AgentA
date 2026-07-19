@@ -43,7 +43,7 @@ from src.services import ingest_cancel
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(prefix="/kb", tags=["kb"])
 
 def _validate_alias(model: str) -> str:
     """校验 embedding 别名：已定义的（en/zh/m3）或云端入库别名 api-m3，否则 400。
@@ -98,7 +98,7 @@ def _md_to_kbdoc(md: dict, golden: dict[str, int] | None = None) -> KBDocument:
     )
 
 
-@router.get("/kb/collections", response_model=KBCollectionListResponse)
+@router.get("/collections", response_model=KBCollectionListResponse)
 def list_collections(
     refresh: bool = Query(False, description="true 则跳过进程内缓存重新统计"),
     _: dict = Depends(get_current_user),
@@ -128,7 +128,7 @@ def list_collections(
     )
 
 
-@router.get("/kb/documents", response_model=KBDocumentListResponse)
+@router.get("/documents", response_model=KBDocumentListResponse)
 def list_documents(
     model: str | None = Query(None, description="库别名 en/zh/m3/api-m3；缺省用当前默认"),
     page: int = Query(1, ge=1, description="页码（1 基）"),
@@ -332,7 +332,7 @@ async def _ingest_event_stream(
         ingest_cancel.unregister(ingest_id)
 
 
-@router.post("/kb/upload/cancel", response_model=KBCancelUploadResponse)
+@router.post("/upload/cancel", response_model=KBCancelUploadResponse)
 def cancel_upload(
     ingest_id: str = Form(...),
     _: dict = Depends(get_current_user),
@@ -347,7 +347,7 @@ def cancel_upload(
     return KBCancelUploadResponse(cancelled=ok)
 
 
-@router.post("/kb/upload")
+@router.post("/upload")
 async def upload_document(
     request: Request,
     file: UploadFile = File(...),
@@ -452,7 +452,7 @@ async def upload_document(
     )
 
 
-@router.delete("/kb/documents/{doc_id}", response_model=KBDeleteResponse)
+@router.delete("/documents/{doc_id}", response_model=KBDeleteResponse)
 def delete_document(
     doc_id: str,
     model: str | None = Query(None, description="库别名 en/zh/m3/api-m3；缺省用当前默认"),
@@ -477,7 +477,7 @@ def delete_document(
     return KBDeleteResponse(deleted=found, chunks_removed=chunks_removed)
 
 
-@router.delete("/kb/documents", response_model=KBClearAllResponse)
+@router.delete("/documents", response_model=KBClearAllResponse)
 def clear_all_documents(
     model: str | None = Query(None, description="库别名 en/zh/m3/api-m3；缺省用当前默认"),
     _: dict = Depends(get_current_user),

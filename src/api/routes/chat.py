@@ -43,7 +43,7 @@ from src.services.log_setup import set_session_id
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 def _check_session_owner(store: SessionStore, session_id: str | None, user_id: int) -> None:
@@ -197,7 +197,7 @@ def _maybe_store_cache(
 
 # ─── 非流式（保留作为 fallback / 测试入口）─────────────────────────
 
-@router.post("/chat", response_model=ChatResponse)
+@router.post("", response_model=ChatResponse)
 def chat(
     req: ChatRequest,
     agent: AgentAPI = Depends(get_agent),
@@ -307,7 +307,7 @@ def _sse_frame(event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
 _SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
 
-@router.post("/chat/stream")
+@router.post("/stream")
 async def chat_stream(
     req: ChatRequest,
     request: Request,
