@@ -2,8 +2,18 @@ import { useEffect, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
 import { LoginView } from '@/components/auth/LoginView'
+import { SiteFooter } from '@/components/layout/SiteFooter'
 import { AppRoutes } from '@/routes/AppRoutes'
 import { useAuth } from '@/lib/auth'
+
+function AppShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex h-screen flex-col bg-background">
+      <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
+      <SiteFooter />
+    </div>
+  )
+}
 
 function App() {
   const { user, loading: authLoading } = useAuth()
@@ -41,17 +51,27 @@ function App() {
 
   if (authLoading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-background text-sm text-muted-foreground">
-        加载中…
-      </div>
+      <AppShell>
+        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+          加载中…
+        </div>
+      </AppShell>
     )
   }
 
   if (!user) {
-    return <LoginView />
+    return (
+      <AppShell>
+        <LoginView />
+      </AppShell>
+    )
   }
 
-  return <AppRoutes />
+  return (
+    <AppShell>
+      <AppRoutes />
+    </AppShell>
+  )
 }
 
 export default App

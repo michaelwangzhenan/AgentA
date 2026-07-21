@@ -203,7 +203,7 @@ export function AppLayout() {
 
   return (
     <AppLayoutProvider value={layoutValue}>
-      <div className="flex h-screen bg-background">
+      <div className="flex h-full bg-background">
         <Sidebar
           sessions={sessions}
           activeId={activeSessionId}

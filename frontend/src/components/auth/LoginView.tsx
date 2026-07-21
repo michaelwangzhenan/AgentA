@@ -52,7 +52,7 @@ export function LoginView() {
   }
 
   return (
-    <div className="flex h-screen items-center justify-center bg-background px-4">
+    <div className="flex h-full items-center justify-center px-4">
       <form
         onSubmit={handleSubmit}
         className="w-full max-w-sm space-y-5 rounded-xl border border-border bg-card p-8 shadow-sm"
