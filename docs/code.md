@@ -6,13 +6,13 @@
 | 路径 | 角色 | 主要入口 |
 | --------------------------- | --------------------------------------------------------------------------- | -------------------------------------------------- |
 | src/rag/parser.py | 多格式 → 纯文本（txt/md/html/pdf/docx/pptx/xlsx + OCR 兜底） | parse_file(path) |
-| src/rag/splitter.py | 结构化分块（识别 Markdown 标题与 PDF 页号作为锚点， 把父级标题路径作为前缀注入 chunk 文本） | split_structured(text, ...) |
+| src/rag/splitter.py | 结构化分块（识别 Markdown 标题与 PDF 页号作为锚点， 把父级标题路径作为前缀注入 chunk 文本） | iter_structured_lines(lines, ...) |
 | src/rag/ingest.py | 入库主流程（遍历目录 → parse → split → 双索引写盘 + 幂等增量） | ingest_all(...) · CLI python -m src.rag.ingest |
 | src/rag/bm25_index.py | BM25 Okapi 自实现（倒排索引 + bigram 中文分词 + pickle 持久化） | get_index(coll) |
 | src/rag/query_rewriter.py | 三轴 query 改写（Multi-Query / HyDE / 翻译轴），LRU 缓存包装 | expand_queries(query) |
 | src/rag/retriever.py | 检索总枢纽：多 query × 多 collection × dense+bm25 → RRF → 阈值 → rerank → dedupe(去重）) | search(query, ..., rerank=None) |
 | src/rag/reranker.py | Cross-Encoder 精排，输出统一 sigmoid 归一化到 [0,1] | rerank(query, hits, top_k) |
-| tools/rag_eval/runner.py | 端到端检索评估（黄金集 → 指标 → Markdown 报告 + .log 伴生文件） | python -m tools.rag_eval.runner |
+| tools/rag_eval/runner.py | 端到c端检索评估（黄金集 → 指标 → Markdown 报告 + .log 伴生文件） | python -m tools.rag_eval.runner |
 
 
 ## 1.2. 两条主调用链
@@ -54,7 +54,7 @@ python -m tools.rag_eval.runner [--no-rewriter] [--no-rerank] [-o report.md] [-v
 
 - 想优化召回质量 / 阈值 → retriever.py 的 dense 阈值过滤与 RRF 段
 - 想加新文档格式 → parser.py 的 parse_file() 与各 _parse_* 私有函数
-- 想调分块策略 → splitter.py · split_structured()
+- 想调分块策略 → splitter.py · iter_structured_lines()
 - 想加 / 改指标 → tools/rag_eval/runner.py · evaluate() 与 _render_markdown()
 - 想理解入库幂等性 → ingest.py · ingest_all() 的 content_sha1 比对逻辑
 

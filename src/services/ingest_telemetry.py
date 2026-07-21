@@ -208,8 +208,8 @@ class IngestProbe:
             raise
 
 
-def probe_for_docx(file_path: Path, rel_path: str) -> IngestProbe:
-    """构造探针并尽量填入 DOCX 解压大小。"""
+def make_ingest_probe(file_path: Path, rel_path: str) -> IngestProbe:
+    """构造入库探针；DOCX 文件会尽量填入解压后大小。"""
     probe = IngestProbe(file_path=file_path, rel_path=rel_path)
     if file_path.suffix.lower() == ".docx":
         try:

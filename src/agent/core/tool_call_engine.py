@@ -2,13 +2,17 @@
 ToolCallEngine —— 工具调用编排（Helper 层）
 
 职责：
-- 把 LLM 返回的 assistant.tool_calls 转成标准 dict（`assistant_message`）
-- 逐个执行 tool_call → 拿到 ToolResult
-- DB 写入"干净内容"（无引导提示），messages 注入"含引导提示"版本
-  · 这种"写历史 vs 进 LLM context"的分支属于业务策略，是 Helper 的核心价值
-- 全程串到 SessionStore（依赖层），不感知 thinking / streaming 等其它 loop 状态
+- 将 LLM 返回的 assistant.tool_calls 转成标准 dict（assistant_message）；
+- thinking 模型的 reasoning_content 仅挂本轮内存 messages，不写入 SessionStore
+- 执行 tool_call 并拿到 ToolResult：非 plan 类工具同轮可并行（有上限），
+  make_plan / update_step / abort_plan 因顺序依赖始终串行
+- 结果落地时区分「写历史」与「进 LLM 上下文」：DB 存干净正文（含 load_skill 的
+  skill_ref 压缩），当前轮 messages 注入引导提示（工具失败重试、search_knowledge 空结果等）
+- 可选接 EventBus（tool 起止 / 进度 / plan 事件）与 CitationBuilder（search_knowledge引用编号）
+- make_plan 成功前可经 approval_fn 让用户确认
+- assistant 与 tool 结果经 SessionStore 持久化，不感知 thinking / streaming 等 loop 状态
 
-被三种 Agent 实现共享：Python / LangChain / AutoGPT。
+Python / AutoGPT 直接调用；LangChain 在 langchain_tools 对齐同等业务策略。
 """
 from __future__ import annotations
 

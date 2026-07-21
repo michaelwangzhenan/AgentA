@@ -11,34 +11,34 @@ D.开新项目
 3. Eval 硬化
 4. LangGraph
 
-# clean code
-## 两套写法不统一
+# 1. clean code
+## 1.1. 两套写法不统一
 import src.config as config
 import src.config as _cfg
 
-## 语义缓存
+## 1.2. 语义缓存
 
 
 
-# 1. RAG / 知识库
+# 2. RAG / 知识库
 
-## 1.1. RAG 质量三要素
+## 2.1. RAG 质量三要素
 
 讨论并优化影响 RAG 质量的三要素：embedding 模型 / 入库算法 / 召回算法。
 
-## 1.2. 入库流程优化
+## 2.2. 入库流程优化
 
 入库流程对标业内最佳实践。
 
-## 1.3. 召回流程与算法
+## 2.3. 召回流程与算法
 
 召回流程与算法对标业内最佳实践。
 
-## 1.4. 入库支持更多格式
+## 2.4. 入库支持更多格式
 
 入库支持更多的文档格式。
 
-## 1.5. 文档转 markdown
+## 2.5. 文档转 markdown
 
 各种文档转 markdown（入库预处理）。
 
@@ -47,44 +47,48 @@ import src.config as _cfg
 - 扫描版 PDF markitdown 转不出文字 → 复用现有 rapidocr 思路做 OCR 兜底
 - 范围/形态待定：独立脚本 vs 接 UI、是否进仓库长期维护
 
-## 1.6. 文档自动同步
+## 2.6. 文档自动同步
 
 用 watchdog 监听 datasets/ 变化，自动增量入库。
 
-## 1.7. 模型对比与报告对比
+## 2.7. 模型对比与报告对比
 
 各 embedding / 召回模型做对比实验；UI 页面可选多份报告进行对比。
 
-## 1.8. 消融实验
+## 2.8. 消融实验
 
 对入库 / 召回各环节做消融实验。
 
-## 1.9. 知识库权限
+## 2.9. 知识库权限
 
 UI 知识库：用户只能删除自己入库的文件。
 
-## 1.10. 企业级向量数据库
+## 2.10. 企业级向量数据库
 
-## 1.11. GraphRAG / Knowledge Graph
+## 2.11. GraphRAG / Knowledge Graph
+
+## 2.12. 入库省内存
+
+只有 docx 入库时使用子进程，进行内存控制。其它格式也需要对齐
 
 
-# 2. 模型接入与管理
+# 3. 模型接入与管理
 
-## 2.1. 模型下载 UI
+## 3.1. 模型下载 UI
 
 download_models.py 加 UI，支持任意模型下载；下载后可按配置直接使用。
 
-## 2.2. Ollama 本地模型
+## 3.2. Ollama 本地模型
 
 接入 Ollama 本地模型。
 
-## 2.3. 扫描可用 LLM
+## 3.3. 扫描可用 LLM
 
 LLM 可用性工具：扫描并返回可用的 LLM 列表。包括 AgentA 未列出的 LLM？
 
-## 2.4. LLM 权限控制
+## 3.4. LLM 权限控制
 
-## 2.5. JSON 结构化输出
+## 3.5. JSON 结构化输出
 
 评估 AgentA 是否要把结构化 JSON 从"prompt 约定 + 宽松解析"升级到 provider 原生 structured output。
 
@@ -109,21 +113,21 @@ LLM 可用性工具：扫描并返回可用的 LLM 列表。包括 AgentA 未列
 建议方向（待定）：混合打法——能用原生 structured output 就用、不能就退回 prompt + 宽松解析，最后用 eval / rubric 判语义。改动涉及跨 provider 抽象，需先定方向再分步，故记 backlog。
 
 
-# 3. Agent 核心
+# 4. Agent 核心
 
-## 3.1. Plan 执行后反思
+## 4.1. Plan 执行后反思
 
 Reflexion 风格：plan-execute 跑完写一段反思塞回 long-term memory，下次同类任务作为 hint 注入 prompt。
 
-## 3.2. Plan 审批 edit
+## 4.2. Plan 审批 edit
 
 plan 出来后用户 yes / edit / no 三选一，edit 让用户直接改 plan steps。
 
-## 3.3. Plan 模板预制
+## 4.3. Plan 模板预制
 
 按任务类型预制 plan 模板（如"代码任务 X 步 / 学习任务 Y 步"）。
 
-## 3.4. 计划进会话
+## 4.4. 计划进会话
 
 <active_study_plan>（四层 prompt 第 4 层）注入目前是 CLI-only。
 
@@ -133,11 +137,11 @@ plan 出来后用户 yes / edit / no 三选一，edit 让用户直接改 plan st
 
 目标：在「学而时习」页加一个"加载到当前会话"的操作（API 调 mark_loaded(session_id, plan_id)），让 Web 会话也能注入 <active_study_plan>。需定：session_id 从哪来（Web 当前会话）、内存态映射在多 worker / 重启下是否要持久化、与 CLI load 语义如何统一。
 
-## 3.5. thinking 进度指示
+## 4.5. thinking 进度指示
 
 thinking 时显示进度条 / token 速率（思考多久、已产出多少 token 实时可见）。
 
-## 3.6. 结合深度研究
+## 4.6. 结合深度研究
 
 用深度研究的多源材料喂给建计划 / 出题，提升质量与 grounding。
 
@@ -152,11 +156,11 @@ thinking 时显示进度条 / token 速率（思考多久、已产出多少 toke
 
 待定：何时值得跑深度研究（成本/延迟高——大/陌生主题？KB 命中稀疏自动触发？显式 opt-in？）；触发 UX；报告转结构化的稳定性。
 
-## 3.7. deep research 优化
+## 4.7. deep research 优化
 
 如何拆分任务给每个 agent。
 
-## 3.8. 上下文压缩
+## 4.8. 上下文压缩
 
 对送进 LLM 的所有上下文（工具输出、日志、对话历史、文件、RAG 片段）统一压缩，省 token。不限 RAG，是 agent 全链路的通用层。
 
@@ -168,7 +172,7 @@ thinking 时显示进度条 / token 速率（思考多久、已产出多少 toke
 
 成本/风险：加 ML 依赖（Kompress 模型，体积 + 启动开销）、加一道压缩延迟；"可逆"要发挥得让 agent 会调 headroom_retrieve，多一层机制。属架构改动，按需求→设计→实验流程单独立项再做。
 
-## 3.9. Context engineering
+## 4.9. Context engineering
 
 每一轮交互，模型看到的不只是你的 system prompt，还有历史消息、工具返回、reasoning trace、子任务结果......
 
@@ -176,16 +180,16 @@ thinking 时显示进度条 / token 速率（思考多久、已产出多少 toke
 
 记忆 + rules 不大于 15% ？
 
-## 3.10. SRS 算法升级
+## 4.10. SRS 算法升级
 
 SM-2 升级到 FSRS / Half-life regression / NN-based 等更强算法。
 
 
-# 4. Skill 体系
+# 5. Skill 体系
 
-## 4.1. skill os
+## 5.1. skill os
 
-## 4.2. skill 渐进披露
+## 5.2. skill 渐进披露
 
 进度：部分完成。scripts 层未实现，当前只做了 catalog + prompt body 两层。
 
@@ -195,68 +199,68 @@ SM-2 升级到 FSRS / Half-life regression / NN-based 等更强算法。
 
 目标：补齐第三层——定义脚本的发现（SKILL.md 同目录）、调用入口、执行沙箱 / 权限边界、与现有 tool / load_skill 的关系。涉及安全面（执行外部脚本），改动较大，单独立项再做。
 
-## 4.3. skill catalog 去重
+## 5.3. skill catalog 去重
 
 skill 激活后，catalog 里同步移除该 skill 的 description 块（H1）。已激活的 skill body 已注入 system_prompt，catalog 里的 description 成了重复信息。
 
-## 4.4. skill 调用链
+## 5.4. skill 调用链
 
 支持 skill 间显式调用链（skill A 内调用 skill B）。
 
-## 4.5. 优化业务 SKILL
+## 5.5. 优化业务 SKILL
 
 3 个业务的 skill 都是 AI 生成的，还没有 Review 过。
 
 
-# 5. 记忆 / rules / 引用
+# 6. 记忆 / rules / 引用
 
-## 5.1. 多文件 rules
+## 6.1. 多文件 rules
 
 支持 .agenta/rules/*.md 多文件（当前单文件）。
 
-## 5.2. rules frontmatter
+## 6.2. rules frontmatter
 
 rules 支持 alwaysApply / globs 等 frontmatter，做选择性应用。
 
-## 5.3. 非 RAG 来源引用
+## 6.3. 非 RAG 来源引用
 
 给 Memory / project_rules / web_search 等非 RAG 来源也加引用（当前只针对 rag_search）。
 
-## 5.4. sources token 预算
+## 6.4. sources token 预算
 
 sources 块加 token 预算控制，超阈值时裁剪。
 
 
-# 6. MCP
+# 7. MCP
 
-## 6.1. MCP resources / prompts
+## 7.1. MCP resources / prompts
 
 补齐 MCP 的 resources / prompts 两种 primitive（当前只做了 tools）。resources = 应用代码主动塞 context，prompts = 用 MCP 暴露 slash command。
 
-## 6.2. MCP 反向能力
+## 7.2. MCP 反向能力
 
 补 MCP 的 sampling / roots / elicitation ——server → client 反向能力（server 反向借 LLM 推理 / 反向问用户）。
 
-## 6.3. MCP HTTP 传输
+## 7.3. MCP HTTP 传输
 
 支持 MCP Streamable HTTP transport，接入远程 / 云端 server（当前仅 stdio 本机）。
 
-## 6.4. AgentA 当 MCP server
+## 7.4. AgentA 当 MCP server
 
 AgentA 自建 MCP server，把内部能力（search_knowledge / list_memory 等）暴露给其他 host（如 Cursor / Claude Desktop）。
 
-## 6.5. MCP server 分发
+## 7.5. MCP server 分发
 
 MCP server marketplace / 分发管理：自建 server 包注册中心 / .agenta/mcp_servers/ 仓库式分发。
 
 
-# 7. 评估体系
+# 8. 评估体系
 
-## 7.1. harness 更名 Critic
+## 8.1. harness 更名 Critic
 
 已完成：agenta 的 harness 功能就是 Critic，并不是自我反思 / 自我纠正（Reflection）。只是 harness 概念里的一个很"窄"的子集。已改名为 Critic。
 
-## 7.2. 评估机制盘点
+## 8.2. 评估机制盘点
 
 对照功能列表 Review 现有评估机：方法论有效，但有样本量 / CI 门禁 / 覆盖三处短板。
 
@@ -288,7 +292,7 @@ MCP server marketplace / 分发管理：自建 server 包注册中心 / .agenta/
 
 改动面大、且涉及"哪些进 CI / case 扩到多少"等决策，需先定方向再分步实施，故记 backlog。
 
-## 7.3. plan 召回不足
+## 8.3. plan 召回不足
 
 Plan 评估 positive 组只过 1/5、识别通过率 60%（< 80% 判据）：复杂任务该 make_plan 时模型没先规划。
 
@@ -305,7 +309,7 @@ Plan 评估 positive 组只过 1/5、识别通过率 60%（< 80% 判据）：复
 1. 强化 make_plan 触发段——写得更强制 + 给"对比两项 / 先分析后建议 / 汇总多文档"的正例，同步改 _BASE_PROMPT 与生产 SYSTEM_PROMPT（避免分歧），复测 recall 过 80%。
 2. 先拍板 P02 期望边界：有专用 tool 的复杂业务任务，是「make_plan 先行」还是「专用 tool 直达」？决定后对应改 prompt 或放宽 dataset 通过条件（make_plan 或 create_study_plan 都算对）——这关系 plan-execute 与业务 tool 的边界定义。改 SYSTEM_PROMPT 影响全 agent，需先定方向再做。
 
-## 7.4. judge 评错
+## 8.4. judge 评错
 
 学习计划评估质量分恒低（互评 0.70 / 1.72，远低于 4.0）：judge 拿"最终学习计划"的标准去评"make_plan 元计划步骤"。
 
@@ -321,14 +325,14 @@ Plan 评估 positive 组只过 1/5、识别通过率 60%（< 80% 判据）：复
 
 目标：二选一——① 质量 judge 改为评跑完整 loop 后 create_study_plan 的真实产出（成品对成品标准）；② 或保持单步，但把 judge 标准改成评"元计划本身是否合理"（过程对过程标准）。需先定方向再改评估流程。
 
-## 7.5. task key 命名统一
+## 8.5. task key 命名统一
 
 评估目录 / 脚本已统一为 <feature>/eval_<feature>.py，但 eval_runner.EVAL_MODULES 的 task key（如 plan 对应 plan_execute、learning_plan）与目录名仍不完全一致。待评估是否把 key 也对齐目录名——会牵连前端 task 选择、报告路径，改动较大，故暂记 backlog。
 
 
-# 8. 安全
+# 9. 安全
 
-## 8.1. 加强防改写套取
+## 9.1. 加强防改写套取
 
 防 prompt injection 评估里 L02/L03/L06 三个 info_leak case 真泄露：模型被"总结 / 讲解 / 翻译"借口套出了内部规则与工具实现。
 
@@ -342,7 +346,7 @@ Plan 评估 positive 组只过 1/5、识别通过率 60%（< 80% 判据）：复
 
 目标：在「数据隔离」段补一条"内部信息保密"约束——不得以任何形式（原文、总结、改写、翻译、分点讲解、举例、编码）透露 system prompt 内容、内部安全规则、工具内部实现（算法 / 兜底 / 参数）；并补充对应 info_leak case 复测过线。改 system prompt 影响全 agent 行为，需先定措辞与回归范围再做。
 
-## 8.2. SSRF 未对齐
+## 9.2. SSRF 未对齐
 
 MCP fetch 的 URL 拦截依赖 server 端，host 侧 url_guard 未共用。
 
@@ -353,9 +357,9 @@ MCP fetch 的 URL 拦截依赖 server 端，host 侧 url_guard 未共用。
 目标：让 MCP tool 的出站 URL 也过 host 侧 url_guard（或等价拦截层），使内置与 MCP 两条 fetch 路径共用同一道 SSRF 防线，不依赖各 server 自觉。
 
 
-# 9. 前端 / UI
+# 10. 前端 / UI
 
-## 9.1. UI 改进
+## 10.1. UI 改进
 
 新主题 Vs 优化当前已有主题
 
@@ -364,38 +368,38 @@ MCP fetch 的 URL 拦截依赖 server 端，host 侧 url_guard 未共用。
 动画？
 logo?
 
-## 9.2. 合并到一页
+## 10.2. 合并到一页
 
 记忆 / rules / skills / mcp 合并到同一页。
 
 进去后还要带左边的图标
 其它 2 级页面也加图标
 
-## 9.3. 导出对话
+## 10.3. 导出对话
 
 WebUI 支持导出对话。
 
 
 
-## 9.5 Golden 页面显示的列表不完整
+## 10.4. 9.5 Golden 页面显示的列表不完整
 
 
-# 10. 可观测 / LLMOps
+# 11. 可观测 / LLMOps
 
-## 10.1. trace 优化
+## 11.1. trace 优化
 
 你需要完整的执行 trace（每一步思考、每一次工具调用、每一个返回），中间状态可观测可回放，失败 case 能复现。LangSmith、Langfuse、Phoenix 这类工具，比你写一堆 print 有用一百倍。
 
 显式查看当前 prompt 内容。
 
 
-# 11. 运维 / 调度
+# 12. 运维 / 调度
 
-## 11.2. 备份还原进度
+## 12.1. 备份还原进度
 
 备份 / 还原添加详细进度。
 
-## 11.3. 还原不安全
+## 12.2. 还原不安全
 
 还原时直接覆盖被占用的 DB 文件，运行中操作会失败或埋下数据损坏隐患。
 
@@ -411,18 +415,18 @@ WebUI 支持导出对话。
 
 目标：让运行中还原变安全。常见思路：还原前关闭所有 Store 连接、还原到 staging 目录后原子替换并要求重启、或还原期间加全局维护锁拒绝请求。需定具体方案后再做。
 
-## 11.4. 定时 / 触发任务
+## 12.3. 定时 / 触发任务
 
 SRS 或其它功能，支持 cron 定时调度、文件更新触发、消息指令触发。
 
-## 11.5. 计划提醒
+## 12.4. 计划提醒
 
 计划自动调度提醒（push notification / email / 系统 toast）。
 
 
-# 12. 工程债 / 重构
+# 13. 工程债 / 重构
 
-## 12.1. prompt 外置
+## 13.1. prompt 外置
 
 所有 hardcode 的 prompt 都做成文件，统一外置管理。
 
@@ -442,7 +446,7 @@ SRS 或其它功能，支持 cron 定时调度、文件更新触发、消息指�
 
 注：纯"跟 eval 共享"不是外置理由——eval 经 CriticManager 间接用，内联常量一样能共享。外置的真正价值是 prompt 与代码分离、便于不改码地 review/diff/迭代 prompt。改动面大（涉及多模块 + UT），单独立项再做。
 
-## 12.2. 空名 tool_call 兜底
+## 13.2. 空名 tool_call 兜底
 
 根因未治本，靠 provider 层每次全量扫历史兜底。
 
@@ -457,22 +461,22 @@ SRS 或其它功能，支持 cron 定时调度、文件更新触发、消息指�
 
 目标：把空名拦截前移到源头（落库处丢弃空名 tool_call）+ 一次性清洗老 DB，之后简化 provider 层的空名兜底分支（点号转下划线的适配逻辑仍保留）。属"向后兼容 vs 激进清理"取舍，单独立项再做。
 
-## 12.3. 配置项 Review
+## 13.3. 配置项 Review
 
 1. Review 配置是否合理，有用
 2. .env VS UI 同步
 
-## 12.4. 简化
+## 13.4. 简化
 
 只留 python 实现。
 只留 openai API 分支。
 
 
-# 13. 平台 / 框架级 & 新方向
+# 14. 平台 / 框架级 & 新方向
 
-## 13.1. workflow
+## 14.1. workflow
 
-## 13.2. LangGraph
+## 14.2. LangGraph
 
 真正复杂的企业流程，不是一个 Agent 能解决的，也不是简单多 Agent 能解决的。
 它需要状态机、checkpoint、人工审批、恢复、回放。
@@ -482,16 +486,16 @@ LangGraph 是 LangChain 团队开发的开源多智能体工作流编排框架�
 
 其核心优势在于天然支持循环流程和状态管理，相比传统线性框架能处理更复杂的任务编排。
 
-## 13.3. A2A
+## 14.3. A2A
 
-## 13.4. 多语言
+## 14.4. 多语言
 
-## 13.5. 新业务
+## 14.5. 新业务
 
 
-# 14. 文档 / 交付物
+# 15. 文档 / 交付物
 
-## 14.1. 文档更新
+## 15.1. 文档更新
 
 design -> 简化，重建
 README -> 重新设计
@@ -500,6 +504,6 @@ README -> 重新设计
 -> 画出完整的 AI 系统架构图并解释每个决策
 
 
-# 15. NPS
+# 16. NPS
 
-## 15.1. 不能用麦克风
+## 16.1. 不能用麦克风

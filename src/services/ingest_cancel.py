@@ -1,7 +1,7 @@
 """Web 入库取消注册表。
 
-前端 fetch abort 经 Vite 代理时，后端 `request.is_disconnected()` 往往感知不到断开；
-用户点「取消」时前端应额外调 `/api/kb/upload/cancel` 置位对应 ingest_id 的 Event。
+前端 fetch abort 经 Vite 代理时，后端 request.is_disconnected() 往往感知不到断开；
+用户点「取消」时前端应额外调 /api/kb/upload/cancel 置位对应 ingest_id 的 Event。
 """
 
 from __future__ import annotations

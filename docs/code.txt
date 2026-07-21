@@ -4,3 +4,77 @@ main() # src\api\run.py
   -> uvicorn.run( "src.api.main:app",...)
     -> app = FastAPI
 
+upload_document # src\api\routes\kb.py
+  -> chunk = await file.read(1024 * 1024) # 流式读取
+  -> _ingest_event_stream
+    -> run
+      -> ingest_one # src\rag\ingest.py
+        -> get_chroma_client # src\rag\chroma_client.py
+        -> _open_collection # 复用 retriever 的进程级缓存
+          -> _get_embedding_fn # src\rag\retriever.py
+            -> embedding_is_api # src\rag\online_api.py
+        -> _ingest_one_file
+          -> make_ingest_probe
+          -> _ingest_docx_file
+            -> parsed_docx_temp
+              -> src.rag.docx_worker.main # src\rag\docx_worker.py
+                -> stream_docx_to_stdout # src\rag\docx_parse.py
+          -> parse_file # src\rag\parser.py
+            -> _parse_xxx # 解析对应格式
+              -> _parse_doc
+                -> parse_legacy_doc # src\rag\office_legacy.py
+            -> _clean_extracted_text # 数据清洗
+          -> _split_to_chunk_spool
+            -> iter_structured_lines # src\rag\splitter.py
+          -> _ingest_from_chunk_spool
+            -> get_index # src\rag\bm25_index.py
+            -> collection.upsert # 向量入库
+            -> bm25.upsert # BM25 入库
+            -> _sync_kb_doc_index # 更新索引
+      -> model_id_for_golden # src\rag\golden_options.py
+      -> _generate_golden_sync 
+        -> run_generation_for_file # src\rag\golden_gen.py
+          -> _write_golden_candidates
+            -> generate_candidates
+              -> _call_llm_for_segment
+                -> chat # src\llm\provider.py
+
+
+
+-
+_make_router # src\agent\langchain_tools.py
+ResearchEngine::_exec_subagent_tool# src\agent\core\research_engine.py
+
+ToolCallEngine::process # 串行
+ToolCallEngine::_run_parallel # 并行
+  -> ToolCallEngine::_exec # src\agent\core\tool_call_engine.py
+    -> execute_tool # src\agent\tools.py
+      -> _tool_search_knowledge
+        -> expand_queries # src\rag\query_rewriter.py
+          -> multi_query
+          -> hyde_query
+          -> translate_query
+        -> search # src\rag\retriever.py
+          -> _query_collection # dense 召回
+            -> _embed_query_cached
+              -> _get_embedding_fn
+                -> fn = online_api.ApiEmbeddingFunction # online 模型
+                -> fn = SentenceTransformerEmbeddingFunction # local 模型
+          -> _query_bm25 # BM25 召回
+            -> BM25Index::pin_index # src\rag\bm25_index.py
+            -> BM25Index::search
+          -> _rrf_fuse # 同 collection 融合
+          -> while len(candidates) < recall_k and iterators: # 跨 collection round-robin 合并
+          -> _keep # 阈值过滤
+          -> rerank # src\rag\reranker.py
+            -> rerank_scores # src\rag\online_api.py
+        -> get_critic_manager().filter_chunks
+        -> 
+
+
+
+
+-
+src.agent.core.event_bus
+
+src.agent.core.event_bus

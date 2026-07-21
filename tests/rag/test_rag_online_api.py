@@ -216,7 +216,7 @@ class TestRetrieverDispatch:
         with patch("src.rag.online_api.embed_texts", return_value=[[0.5, 0.6]]) as m:
             vec = retriever._embed_query_cached("BAAI/bge-m3", "hello", True)
         m.assert_called_once_with(["hello"], "BAAI/bge-m3")
-        assert vec == (0.5, 0.6)
+        assert vec == pytest.approx((0.5, 0.6))
 
     def test_get_embedding_fn_use_api_override_decouples_global(self, monkeypatch) -> None:
         # 全局本地（default 非 api-m3），但入库显式 use_api=True → 仍走云端 ApiEmbeddingFunction

@@ -7,7 +7,7 @@
        逐级回退切分；只把文本切到不超过 size 的"原子单元"，再贪心打包成 chunk，相邻
        chunk 间保留 overlap 字符。无任何分隔符时退化为按字符等步长切分。
 
-    2. split_structured(text, size, overlap)
+    2. iter_structured_lines(lines, size, overlap)
        — 在 split_text 之上识别两类锚点并保留结构信息：
          · "[[PAGE:N]]" 独占一行（由 parser 在 PDF/PPTX 解析时插入）→ 切分点 + page_no 元数据；
          · Markdown 风格的 "#"~"######" 标题行 → 切分点 + heading_path 路径。
@@ -30,7 +30,7 @@ _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 @dataclass
 class Chunk:
     """
-    结构化分块单元，由 split_structured() 产出，供 ingest 写入向量库。
+    结构化分块单元，由 iter_structured_lines() 产出，供 ingest 写入向量库。
 
     Attributes:
         text:         已注入"父级标题路径 + 空行 + 正文"前缀的最终文本，直接用于 embedding。
@@ -239,12 +239,3 @@ def iter_structured_lines(
         body.append(line)
 
     yield from flush(section_start)
-
-
-def split_structured(text: str, chunk_size: int, overlap: int) -> list[Chunk]:
-    """
-    识别 [[PAGE:N]] 与 Markdown 标题，把文本切成带结构 metadata 的 Chunk 列表。
-    """
-    if not text or not text.strip():
-        return []
-    return list(iter_structured_lines(text.splitlines(), chunk_size, overlap))

@@ -28,6 +28,7 @@ for _key in ("HF_ENDPOINT", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE"):
     if _val:
         os.environ[_key] = _val
 
+import argparse
 import hashlib
 import json
 import logging
@@ -133,7 +134,7 @@ def _make_chunk_id(doc_id: str, chunk_index: int, *, revision: str | None = None
 from src.rag.chroma_client import get_chroma_client
 
 import src.config as config
-from src.services.ingest_telemetry import IngestProbe, ingest_slot, probe_for_docx
+from src.services.ingest_telemetry import IngestProbe, ingest_slot, make_ingest_probe
 from src.rag.parser import (
     SUPPORTED_EXTENSIONS,
     is_office_temp_file,
@@ -576,7 +577,7 @@ def _ingest_one_file(
         rel_path = file_path.name
     doc_id = _doc_id_from_relpath(rel_path)
     if probe is None:
-        probe = probe_for_docx(file_path, rel_path)
+        probe = make_ingest_probe(file_path, rel_path)
 
     if file_path.suffix.lower() == ".docx":
         return _ingest_docx_file(
@@ -722,7 +723,7 @@ def ingest_one(
         rel_path = fp.relative_to(docs_path).as_posix()
     except ValueError:
         rel_path = fp.name
-    probe = probe_for_docx(fp, rel_path)
+    probe = make_ingest_probe(fp, rel_path)
     with ingest_slot():
         probe.file_start()
         try:
@@ -793,7 +794,7 @@ def ingest_all(
     """
     扫描 docs_dir，将支持格式的文档写入指定 embedding 对应的 ChromaDB collection。
 
-    流程：逐文件解析 → 分块（split_structured）→ 按 doc_id/content_sha1 幂等
+    流程：逐文件解析 → 分块（iter_structured_lines）→ 按 doc_id/content_sha1 幂等
     （未变跳过，有变先删旧 chunk）→ Chroma upsert（内部调用 embedding function）；
     若 BM25_ENABLED，同步更新该 collection 的 BM25 索引。
 
@@ -840,7 +841,7 @@ def ingest_all(
                 rel_path = file_path.resolve().relative_to(docs_path).as_posix()
             except ValueError:
                 rel_path = file_path.name
-            probe = probe_for_docx(file_path, rel_path)
+            probe = make_ingest_probe(file_path, rel_path)
             with ingest_slot():
                 probe.file_start()
                 try:
@@ -1451,9 +1452,8 @@ def delete_all_kb_documents(
     }
 
 
-def _build_arg_parser() -> "argparse.ArgumentParser":
+def _build_arg_parser() -> argparse.ArgumentParser:
     """构造独立 CLI 入口的 argparse；与文件 docstring 中的示例保持一致。"""
-    import argparse
     p = argparse.ArgumentParser(
         prog="python -m src.rag.ingest",
         description=(

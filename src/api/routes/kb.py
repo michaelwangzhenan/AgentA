@@ -218,7 +218,7 @@ async def _ingest_event_stream(
 
     progress_cb 在工作线程里被调用，用 call_soon_threadsafe 把事件投进 asyncio.Queue；
     生成器侧逐条取出转成 `data: {...}` 行。最终发 done / error 后收尾。
-    取消：`/api/kb/upload/cancel` 置位 ingest_id（主路径）；`is_disconnected` / yield 异常兜底。
+    取消：/api/kb/upload/cancel 置位 ingest_id（主路径）；is_disconnected / yield 异常兜底。
     """
     loop = asyncio.get_running_loop()
     q: asyncio.Queue = asyncio.Queue()

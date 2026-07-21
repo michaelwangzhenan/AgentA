@@ -12,7 +12,7 @@ def test_clear_model_caches_empties_dicts(monkeypatch) -> None:
 
     monkeypatch.setattr(
         "src.rag.retriever._get_embedding_fn",
-        lambda _name: (lambda texts: [[0.1, 0.2]]),
+        lambda _name, use_api=None: (lambda texts: [[0.1, 0.2]]),
     )
     _embed_query_cached("m", "q", False)
     assert _embed_query_cached.cache_info().currsize == 1

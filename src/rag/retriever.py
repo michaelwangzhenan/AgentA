@@ -72,8 +72,8 @@ _embedding_fn_lock = threading.RLock()
 def _get_embedding_fn(model_name: str, use_api: bool | None = None) -> Any:
     """懒加载 embedding function，多次调用复用同一实例；线程安全。
 
-    走云端 → ApiEmbeddingFunction（不加载本地模型），否则 → 本地
-    SentenceTransformerEmbeddingFunction（现状）。
+    走云端 → ApiEmbeddingFunction （不加载本地模型）
+    否则 → 本地 SentenceTransformerEmbeddingFunction（现状）。
 
     use_api：
       - None（默认，检索/缓存用）：按全局 `embedding_is_api(model_name)` 判定；
@@ -108,22 +108,12 @@ def _embed_query_cached(model_name: str, text: str, use_api: bool) -> tuple[floa
     CPU 密集的耗时项。use_api 入 key，切换来源不会命中另一来源的旧向量。
     返回 tuple 以满足 lru_cache 不可变要求。
     """
-    if use_api:
-        _vendor, api_model_id = config.online_api_model(model_name)  # type: ignore[misc]
-        vec = online_api.embed_texts([text], api_model_id)[0]
-    else:
-        fn = _get_embedding_fn(model_name)
-        vec = fn([text])[0]
+    fn = _get_embedding_fn(model_name, use_api=use_api)
+    vec = fn([text])[0]
     return tuple(float(x) for x in vec)
 
 
-# ── ChromaDB 客户端进程级缓存 ─────────────────────────────────────────────────
 from src.rag.chroma_client import get_chroma_client
-
-
-def _get_chroma_client() -> Any:
-    """兼容旧调用方；新代码请直接用 ``get_chroma_client``。"""
-    return get_chroma_client()
 
 
 def clear_model_caches() -> None:
@@ -304,7 +294,7 @@ def _query_bm25(
         chunk_ids = [doc.id for doc, _ in raw]
         doc_texts: dict[str, str] = {}
         try:
-            client = _get_chroma_client()
+            client = get_chroma_client()
             collection = client.get_collection(name=collection_name)
             got = collection.get(ids=chunk_ids, include=["documents"])
             ids_out = got.get("ids") or []
@@ -431,7 +421,7 @@ def search(
         Hit 列表，按融合后/精排后 score 降序，长度 ≤ top_k；空列表表示无命中。
     """
     # 复用进程级 chromadb 客户端（不再每次 search 重建）
-    client = _get_chroma_client()
+    client = get_chroma_client()
 
     # 是否启用 rerank：参数 > 全局 config
     use_rerank = config.rerank_enabled() if rerank is None else bool(rerank)
