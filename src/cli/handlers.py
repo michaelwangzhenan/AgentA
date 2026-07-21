@@ -74,13 +74,13 @@ def save_history(
     """将当前 session 的 user/assistant 对话导出到 history/<filename>.md。"""
     msgs = _conversation_messages(session_store.load(session_id))
     if not msgs:
-        out("📭 当前 session 暂无对话历史，无可导出内容。\n")
+        out("当前 session 暂无对话历史，无可导出内容。\n")
         return
 
     stem = re.sub(r'\.(md|txt)$', '', filename, flags=re.IGNORECASE)
     safe_name = re.sub(r'[^\w\-.]', '_', stem)
     if not safe_name or safe_name.startswith('.'):
-        out(f"❌ 无效文件名：{filename!r}\n")
+        out(f"错误：无效文件名：{filename!r}\n")
         return
 
     history_dir = Path("history")
@@ -107,9 +107,9 @@ def save_history(
 
     try:
         out_path.write_text("\n".join(lines), encoding="utf-8")
-        out(f"💾 对话已导出到 {out_path}（共 {len(msgs)} 条）\n")
+        out(f"对话已导出到 {out_path}（共 {len(msgs)} 条）\n")
     except OSError as e:
-        out(f"❌ 导出失败: {e}\n")
+        out(f"错误：导出失败: {e}\n")
 
 
 def show_history(
@@ -120,9 +120,9 @@ def show_history(
     """展示当前 session 的历史对话摘要（角色 + 内容前 60 字）。"""
     msgs = _conversation_messages(session_store.load(session_id))
     if not msgs:
-        out("📭 当前 session 暂无对话历史。\n")
+        out("当前 session 暂无对话历史。\n")
         return
-    out(f"\n📋 Session {session_id} 历史摘要（共 {len(msgs)} 条）：")
+    out(f"\nSession {session_id} 历史摘要（共 {len(msgs)} 条）：")
     for i, msg in enumerate(msgs, 1):
         role_label = "你" if msg["role"] == "user" else "Agent"
         content = (msg.get("content") or "").replace("\n", " ")
@@ -172,13 +172,13 @@ def list_sessions(
     sessions = session_store.list_sessions(query=query)
     if not sessions:
         if query:
-            out(f"📭 没有匹配 {query!r} 的 session。\n")
+            out(f"没有匹配 {query!r} 的 session。\n")
         else:
-            out("📭 暂无历史 session 记录。\n")
+            out("暂无历史 session 记录。\n")
         return
 
     title_suffix = f"（共 {len(sessions)} 个，过滤 {query!r}）" if query else f"（共 {len(sessions)} 个）"
-    out(f"\n📚 历史 Session 列表{title_suffix}：")
+    out(f"\n历史 Session 列表{title_suffix}：")
     out(f"  {'':<2}{'ID':<10}  {'Create On':<14}  {'msgs':<6}  {'1st Question':<40}")
     out(f"  {'':<2}{'-'*8:<10}  {'-'*14:<14}  {'-'*6:<6}  {'-'*40}")
     for s in sessions:
@@ -239,7 +239,7 @@ def _print_token_usage(agent: "Agent", out: OutputFn = _stdout) -> None:
     """若本次对话有 token 统计则打印，无统计时静默跳过。"""
     if agent.last_usage:
         u = agent.last_usage
-        out(f"  📊 Token：输入 {u.prompt_tokens} + 输出 {u.completion_tokens} = 合计 {u.total_tokens}\n")
+        out(f"  Token：输入 {u.prompt_tokens} + 输出 {u.completion_tokens} = 合计 {u.total_tokens}\n")
 
 
 def _record_cli_usage(agent: "Agent") -> None:
@@ -260,22 +260,22 @@ def _record_cli_usage(agent: "Agent") -> None:
 
 
 # plan step 状态对应的 CLI 渲染图标
-_PLAN_STATUS_ICONS: dict[str, str] = {"success": "✓", "failed": "✗", "skipped": "⏭"}
+_PLAN_STATUS_ICONS: dict[str, str] = {"success": "[完成]", "failed": "[失败]", "skipped": "[跳过]"}
 
 
 def _render_plan_created(payload: dict[str, Any]) -> None:
-    """CLI 渲染 plan_created：📋 + 所有未勾选 step checkbox 一次性打印。"""
+    """CLI 渲染 plan_created：Plan 标题 + 所有待办 step 一次性打印。"""
     steps = payload.get("steps") or []
     if not steps:
         return
-    sys.stdout.write("\n📋 Plan：\n")
+    sys.stdout.write("\nPlan：\n")
     for s in steps:
-        sys.stdout.write(f"  ☐ {s.get('id')}. {s.get('text', '')}\n")
+        sys.stdout.write(f"  [待办] {s.get('id')}. {s.get('text', '')}\n")
     sys.stdout.flush()
 
 
 def _render_plan_step_end(payload: dict[str, Any]) -> None:
-    """CLI 渲染 plan_step_end：✓/✗/⏭ + step_id + 可选 note。"""
+    """CLI 渲染 plan_step_end：[完成]/[失败]/[跳过] + step_id + 可选 note。"""
     icon = _PLAN_STATUS_ICONS.get(str(payload.get("status", "")), "•")
     note = (payload.get("note") or "").strip()
     suffix = f"（{note}）" if note else ""
@@ -293,7 +293,7 @@ def run_query(agent: "Agent", question: str, out: OutputFn = _stdout) -> None:
     # - thinking_round_idx：已开过的 thinking 段轮次，首段 chunk 到来时 += 1
     # - thinking_active：当前是否在 thinking 段（footer 未打 = True）
     # - thinking_at_line_start：下一字符是否在行首（决定是否注入 │ 前缀）
-    # 单轮场景 header / footer 不带编号；≥2 轮才带 `（第 N 轮）`，保持单轮极简。
+    # 单轮场景 header / footer 不带编号；≥2 轮才带（第 N 轮），保持单轮极简。
     thinking_round_idx = 0
     thinking_active = False
     thinking_at_line_start = True
@@ -318,7 +318,7 @@ def run_query(agent: "Agent", question: str, out: OutputFn = _stdout) -> None:
         if not thinking_active:
             thinking_round_idx += 1
             header_suffix = "" if thinking_round_idx == 1 else f"（第 {thinking_round_idx} 轮）"
-            sys.stdout.write(f"\n\U0001f4ad 思考中{header_suffix}...\n")
+            sys.stdout.write(f"\n思考中{header_suffix}...\n")
             thinking_active = True
             thinking_at_line_start = True
         for ch in chunk:
@@ -348,10 +348,10 @@ def run_query(agent: "Agent", question: str, out: OutputFn = _stdout) -> None:
         thinking_at_line_start = True
 
     # 用 AgentAPI 的统一事件入口：按 event.type 派发：
-    # - thinking_chunk: 💭 思考段流式输出（首段打 header，行首加 │，多轮带编号）
+    # - thinking_chunk: 思考段流式输出（首段打 header，行首加 │，多轮带编号）
     # - token_chunk:    流式正文（正文出现前先关闭 thinking 段）
-    # - plan_created:   📋 plan checkbox 整块（先关闭 thinking）
-    # - plan_step_end:  ✓/✗/⏭ 单步状态行（先关闭 thinking）
+    # - plan_created:   Plan 待办列表整块（先关闭 thinking）
+    # - plan_step_end:  [完成]/[失败]/[跳过] 单步状态行（先关闭 thinking）
     # - tool_call_start: CLI 不渲染该事件本身，但作为段切换信号关闭 thinking
     # - plan_step_start: CLI 不渲染（GUI 端用于高亮当前步）
     # - 其它事件:        CLI 这里不渲染
@@ -382,7 +382,7 @@ def run_query(agent: "Agent", question: str, out: OutputFn = _stdout) -> None:
     def _ask_user_plan_approval(payload: dict) -> str:
         _close_thinking_segment()
         steps = payload.get("steps") or []
-        sys.stdout.write("\n📋 plan 待审批：\n")
+        sys.stdout.write("\nplan 待审批：\n")
         for s in steps:
             sys.stdout.write(f"  {s.get('id')}. {s.get('text', '')}\n")
         sys.stdout.flush()
@@ -411,9 +411,9 @@ def run_query(agent: "Agent", question: str, out: OutputFn = _stdout) -> None:
         _print_token_usage(agent, out)
         _record_cli_usage(agent)
     except KeyboardInterrupt:
-        out("\n⚠️  已中断当前回答。\n")
+        out("\n注意：已中断当前回答。\n")
     except Exception as e:
-        out(f"❌ 出错了: {e}\n")
+        out(f"错误：出错了: {e}\n")
     finally:
         # 兜底关闭 thinking 段：覆盖 run 内仅 thinking 无 token / 异常退出 / 中断 三种边界
         _close_thinking_segment()
@@ -432,20 +432,20 @@ def handle_thinking_cfg(
     match think_tokens[0] if think_tokens else "":
         case "on":
             thinking_cfg.enabled = True
-            out(f"💭 Extended Thinking 已开启（budget={thinking_cfg.budget} tokens）。\n")
+            out(f"Extended Thinking 已开启（budget={thinking_cfg.budget} tokens）。\n")
         case "off":
             thinking_cfg.enabled = False
-            out("💭 Extended Thinking 已关闭\n")
+            out("Extended Thinking 已关闭\n")
         case "budget" if len(think_tokens) >= 2:
             try:
                 thinking_cfg.budget = int(think_tokens[1])
-                out(f"💭 Thinking budget 已设置为 {thinking_cfg.budget} tokens\n")
+                out(f"Thinking budget 已设置为 {thinking_cfg.budget} tokens\n")
             except ValueError:
-                out(f"❌ 无效数字：{think_tokens[1]!r}，用法: /thinking budget <整数>\n")
+                out(f"错误：无效数字：{think_tokens[1]!r}，用法: /thinking budget <整数>\n")
         case _:
             status = "开启" if thinking_cfg.enabled else "关闭"
             out(
-                f"💭 Extended Thinking: {status}，budget={thinking_cfg.budget} tokens\n"
+                f"Extended Thinking: {status}，budget={thinking_cfg.budget} tokens\n"
                 f"用法: /thinking on | off | budget <N>\n"
             )
 
@@ -469,7 +469,7 @@ def switch_session(
         新 Agent；session_arg 为空时返回 None。
     """
     if not session_arg:
-        out("⚠️  /session 需要 session id。用 /sessions 查看列表。\n")
+        out("注意：/session 需要 session id。用 /sessions 查看列表。\n")
         return None
 
     agent = make_agent(
@@ -483,7 +483,7 @@ def switch_session(
     )
     history = session_store.load(session_arg)
     msg_count = len([m for m in history if m["role"] != "system"])
-    out(f"✅ 已切换到 Session: {session_arg}（共 {msg_count} 条历史消息）")
+    out(f"已切换到 Session: {session_arg}（共 {msg_count} 条历史消息）")
 
     preview_msgs = [
         m for m in history
@@ -501,7 +501,7 @@ def switch_session(
 
 
 _MEMORY_USAGE = (
-    "⚠️  未知子命令。用法：\n"
+    "注意：未知子命令。用法：\n"
     "    /memory                  展示全部记忆\n"
     "    /memory add <内容...>    手动追加一条记忆（一句自然语言）\n"
     "    /memory edit <id> <内容> 改写指定 id 的记忆\n"
@@ -517,7 +517,7 @@ def _print_memory_list(
 
     输出示例：
 
-        🧠 用户记忆（共 3 条）
+用户记忆（共 3 条）
 
           [ 1] 用户是后端工程师，常用 Python          自动    · 今天 10:23
           [ 5] 回答控制在 200 字以内                  请记住  · 昨天 18:05
@@ -527,10 +527,10 @@ def _print_memory_list(
 
     entries = user_memory.load_all()
     if not entries:
-        out("📭 当前没有任何记忆条目。\n")
+        out("当前没有任何记忆条目。\n")
         return
 
-    out(f"\n🧠 用户记忆（共 {len(entries)} 条）\n")
+    out(f"\n用户记忆（共 {len(entries)} 条）\n")
     for e in entries:
         src_label = SOURCE_LABELS.get(e.get("source", "auto"), e.get("source", "auto"))
         ts = _format_relative_time(e.get("updated_at") or e["created_at"])
@@ -560,48 +560,48 @@ def handle_memory(
     match sub_cmd:
         case "del":
             if not rest:
-                out("⚠️  请指定记忆 ID，例：/memory del 3\n")
+                out("注意：请指定记忆 ID，例：/memory del 3\n")
                 return
             try:
                 mid = int(rest.split()[0])
             except ValueError:
-                out(f"❌ 无效 ID：{rest!r}，应为整数。\n")
+                out(f"错误：无效 ID：{rest!r}，应为整数。\n")
                 return
             deleted = user_memory.delete(mid)
-            out(f"🗑️  记忆 {mid} 已删除。\n" if deleted else f"❌ 记忆 ID {mid} 不存在。\n")
+            out(f"记忆 {mid} 已删除。\n" if deleted else f"错误：记忆 ID {mid} 不存在。\n")
 
         case "clear":
             count = user_memory.clear()
-            out(f"🗑️  已清空全部 {count} 条记忆。\n")
+            out(f"已清空全部 {count} 条记忆。\n")
 
         case "add":
             # add <内容...>；内容是一句自然语言，允许含空格
             if not rest:
-                out("⚠️  用法：/memory add <内容...>（一句自然语言）\n")
+                out("注意：用法：/memory add <内容...>（一句自然语言）\n")
                 return
             new_id = user_memory.add(rest, source="manual")
             if new_id is not None:
-                out(f"✍️  已记录：{rest}\n")
+                out(f"已记录：{rest}\n")
             else:
-                out("❌ 内容清洗后为空，未写入。\n")
+                out("错误：内容清洗后为空，未写入。\n")
 
         case "edit":
             # edit <id> <new text...>；内容允许含空格
             toks = rest.split(maxsplit=1)
             if len(toks) < 2:
-                out("⚠️  用法：/memory edit <id> <新内容>\n")
+                out("注意：用法：/memory edit <id> <新内容>\n")
                 return
             try:
                 mid = int(toks[0])
             except ValueError:
-                out(f"❌ 无效 ID：{toks[0]!r}，应为整数。\n")
+                out(f"错误：无效 ID：{toks[0]!r}，应为整数。\n")
                 return
             new_text = toks[1]
             updated = user_memory.update_text(mid, new_text)
             if updated:
-                out(f"✏️  记忆 {mid} 已更新为：{new_text}\n")
+                out(f"记忆 {mid} 已更新为：{new_text}\n")
             else:
-                out(f"❌ 记忆 ID {mid} 不存在或新内容清洗后为空。\n")
+                out(f"错误：记忆 ID {mid} 不存在或新内容清洗后为空。\n")
 
         case _:
             out(_MEMORY_USAGE)
@@ -610,7 +610,7 @@ def handle_memory(
 # ── /study 命令组 ────────────────────────────────────────────────
 
 _STUDY_USAGE = (
-    "⚠️  未知子命令。用法：\n"
+    "注意：未知子命令。用法：\n"
     "    /study                            列出全部学习计划（不含 abandoned）\n"
     "    /study list                       同上\n"
     "    /study show [plan_id]             查看 active plan / 指定 plan 全貌（含全部任务）\n"
@@ -621,7 +621,7 @@ _STUDY_USAGE = (
     "    /study abandon <plan_id>          放弃指定 plan（标 abandoned，不删除数据）\n"
 )
 
-_TASK_STATUS_ICON: dict[str, str] = {"pending": "☐", "success": "✓", "skipped": "⏭"}
+_TASK_STATUS_ICON: dict[str, str] = {"pending": "[待办]", "success": "[完成]", "skipped": "[跳过]"}
 
 
 def _format_plan_brief(plan: dict[str, Any]) -> str:
@@ -641,9 +641,9 @@ def _print_plan_list(store: LearningPlanStore, out: OutputFn = _stdout) -> None:
     """`/study` / `/study list`：按 active 优先 + 创建时间倒序列出全部 plan。"""
     plans = store.list_plans(include_abandoned=False)
     if not plans:
-        out("📭 暂无学习计划。可在对话中说\"我想 8 周系统学习机器学习\"等让 Agent 帮你新建。\n")
+        out("暂无学习计划。可在对话中说\"我想 8 周系统学习机器学习\"等让 Agent 帮你新建。\n")
         return
-    out(f"\n📚 学习计划列表（共 {len(plans)} 个）：")
+    out(f"\n学习计划列表（共 {len(plans)} 个）：")
     out(f"  {'':<2}{'ID':<6}  {'进度':<8}  {'目标':<40}")
     out(f"  {'':<2}{'-'*4:<6}  {'-'*6:<8}  {'-'*40}")
     for p in plans:
@@ -656,7 +656,7 @@ def _print_plan_detail(plan: dict[str, Any], out: OutputFn = _stdout) -> None:
     active_tag = " [active]" if plan.get("is_active") else ""
     status_tag = f" [{plan['status']}]" if plan["status"] != "active" else ""
     weeks_suffix = f"，共 {plan['weeks']} 周" if plan.get("weeks") else ""
-    out(f"\n📖 plan_id={plan['id']}{active_tag}{status_tag}")
+    out(f"\nplan_id={plan['id']}{active_tag}{status_tag}")
     out(f"   目标：{plan['goal']}{weeks_suffix}")
     tasks = plan.get("tasks", [])
     total = len(tasks)
@@ -682,15 +682,15 @@ def _print_plan_detail(plan: dict[str, Any], out: OutputFn = _stdout) -> None:
 def _parse_plan_id(rest: str, out: OutputFn) -> int | None:
     """从命令参数串解析正整数 plan_id；失败时打印提示并返回 None。"""
     if not rest:
-        out("⚠️  请提供 plan_id。\n")
+        out("注意：请提供 plan_id。\n")
         return None
     try:
         pid = int(rest.split()[0])
     except ValueError:
-        out(f"❌ 无效 plan_id：{rest!r}，应为整数。\n")
+        out(f"错误：无效 plan_id：{rest!r}，应为整数。\n")
         return None
     if pid < 1:
-        out(f"❌ plan_id 必须 ≥ 1，收到 {pid}。\n")
+        out(f"错误：plan_id 必须 ≥ 1，收到 {pid}。\n")
         return None
     return pid
 
@@ -727,7 +727,7 @@ def handle_study(
             if not rest:
                 plan = store.get_active()
                 if plan is None:
-                    out("📭 当前没有 active 学习计划。用 /study list 查看全部，或新建一个。\n")
+                    out("当前没有 active 学习计划。用 /study list 查看全部，或新建一个。\n")
                     return
                 _print_plan_detail(plan, out)
                 return
@@ -736,7 +736,7 @@ def handle_study(
                 return
             plan = store.get_plan_with_tasks(pid)
             if plan is None:
-                out(f"❌ plan_id={pid} 不存在。\n")
+                out(f"错误：plan_id={pid} 不存在。\n")
                 return
             _print_plan_detail(plan, out)
 
@@ -745,16 +745,16 @@ def handle_study(
             if pid is None:
                 return
             if store.switch_active(pid):
-                out(f"✅ 已切换 active plan → plan_id={pid}\n")
+                out(f"已切换 active plan → plan_id={pid}\n")
             else:
-                out(f"❌ 切换失败：plan_id={pid} 不存在或已 abandoned。\n")
+                out(f"错误：切换失败：plan_id={pid} 不存在或已 abandoned。\n")
 
         case "load":
             # /study load [plan_id]：把指定 plan（不传则 active）注入当前 session prompt
             if not rest:
                 active = store.get_active()
                 if active is None:
-                    out("📭 没有 active 学习计划可加载。用 /study list 查看全部，或新建一个；"
+                    out("没有 active 学习计划可加载。用 /study list 查看全部，或新建一个；"
                         "或用 /study load <plan_id> 加载指定 plan。\n")
                     return
                 pid = active["id"]
@@ -764,10 +764,10 @@ def handle_study(
                     return
                 pid = parsed
             if store.mark_loaded(session_id, pid):
-                out(f"📌 已加载 plan_id={pid} 到本会话 system prompt；"
+                out(f"已加载 plan_id={pid} 到本会话 system prompt；"
                     "切 session 后会失效，需重新 load。\n")
             else:
-                out(f"❌ 加载失败：plan_id={pid} 不存在或已 abandoned。\n")
+                out(f"错误：加载失败：plan_id={pid} 不存在或已 abandoned。\n")
 
         case "abandon":
             pid = _parse_plan_id(rest, out)
@@ -775,15 +775,15 @@ def handle_study(
                 return
             plan = store.get_plan(pid)
             if plan is None:
-                out(f"❌ plan_id={pid} 不存在。\n")
+                out(f"错误：plan_id={pid} 不存在。\n")
                 return
             if plan["status"] == "abandoned":
-                out(f"⚠️  plan_id={pid} 已是 abandoned 状态。\n")
+                out(f"注意：plan_id={pid} 已是 abandoned 状态。\n")
                 return
-            confirm = input(f"⚠️  即将放弃 plan_id={pid} \"{plan['goal']}\"（数据保留可后续 show 查看），确认请输入 yes：").strip().lower()
+            confirm = input(f"注意：即将放弃 plan_id={pid} \"{plan['goal']}\"（数据保留可后续 show 查看），确认请输入 yes：").strip().lower()
             if confirm == "yes":
                 store.abandon_plan(pid)
-                out(f"🗑️  plan_id={pid} 已标记 abandoned。\n")
+                out(f"plan_id={pid} 已标记 abandoned。\n")
             else:
                 out("已取消。\n")
 
@@ -794,7 +794,7 @@ def handle_study(
 # ── /quiz 命令组 ─────────────────────────────────────────────────
 
 _QUIZ_USAGE = (
-    "⚠️  未知子命令。用法：\n"
+    "注意：未知子命令。用法：\n"
     "    /quiz                            列出最近的 quiz（不含 archived）\n"
     "    /quiz list [plan <plan_id>]      同上 / 过滤某 plan 的 quiz\n"
     "    /quiz show <quiz_set_id>         查看单个 quiz 详情（含题目 + 批改细节）\n"
@@ -829,12 +829,12 @@ def _print_quiz_list(
     quizzes = store.list_quiz_sets(plan_id=plan_id, limit=eff_limit)
     if not quizzes:
         if plan_id is not None:
-            out(f"📭 plan_id={plan_id} 暂无关联 quiz。\n")
+            out(f"plan_id={plan_id} 暂无关联 quiz。\n")
         else:
-            out("📭 暂无 quiz 历史。可在对话中说\"考考我 X\"等让 Agent 帮你新建。\n")
+            out("暂无 quiz 历史。可在对话中说\"考考我 X\"等让 Agent 帮你新建。\n")
         return
     title_suffix = f"（plan_id={plan_id}）" if plan_id is not None else ""
-    out(f"\n📝 Quiz 列表{title_suffix}（共 {len(quizzes)} 个）：")
+    out(f"\nQuiz 列表{title_suffix}（共 {len(quizzes)} 个）：")
     out(f"  {'ID':<6}  {'状态':<10}  {'题数':<6}  {'总分':<10}  主题")
     out(f"  {'-'*4:<6}  {'-'*8:<10}  {'-'*4:<6}  {'-'*8:<10}  {'-'*40}")
     for q in quizzes:
@@ -850,7 +850,7 @@ def _print_quiz_detail(quiz: dict[str, Any], out: OutputFn = _stdout) -> None:
         plan_suffix = f"，plan_id={quiz['plan_id']}"
         if quiz.get("stage_idx"):
             plan_suffix += f" Stage {quiz['stage_idx']}"
-    out(f"\n📝 quiz_set_id={quiz['id']}{status_tag}")
+    out(f"\nquiz_set_id={quiz['id']}{status_tag}")
     out(f"   主题：{quiz['topic']}{plan_suffix}")
     out(f"   题数：{quiz['num_questions']}")
     if quiz.get("total_score") is not None:
@@ -864,7 +864,7 @@ def _print_quiz_detail(quiz: dict[str, Any], out: OutputFn = _stdout) -> None:
         return
     out("")
     for q in questions:
-        flag = " ⚠️ 自检：批改可能有偏，建议复核" if q.get("critic_flagged") else ""
+        flag = " 【自检】批改可能有偏，建议复核" if q.get("critic_flagged") else ""
         out(f"   ── 第 {q['order_idx']} 题（{q['q_type']}）──{flag}")
         out(f"   {q['stem']}")
         if q["q_type"] in ("mcq_single", "mcq_multi") and q.get("options"):
@@ -884,15 +884,15 @@ def _print_quiz_detail(quiz: dict[str, Any], out: OutputFn = _stdout) -> None:
 def _parse_quiz_id(rest: str, out: OutputFn) -> int | None:
     """从命令参数串解析正整数 quiz_set_id；失败时打印提示并返回 None。"""
     if not rest:
-        out("⚠️  请提供 quiz_set_id。\n")
+        out("注意：请提供 quiz_set_id。\n")
         return None
     try:
         qid = int(rest.split()[0])
     except ValueError:
-        out(f"❌ 无效 quiz_set_id：{rest!r}，应为整数。\n")
+        out(f"错误：无效 quiz_set_id：{rest!r}，应为整数。\n")
         return None
     if qid < 1:
-        out(f"❌ quiz_set_id 必须 ≥ 1，收到 {qid}。\n")
+        out(f"错误：quiz_set_id 必须 ≥ 1，收到 {qid}。\n")
         return None
     return qid
 
@@ -935,7 +935,7 @@ def handle_quiz(
                 return
             quiz = store.get_quiz_with_questions(qid)
             if quiz is None:
-                out(f"❌ quiz_set_id={qid} 不存在。\n")
+                out(f"错误：quiz_set_id={qid} 不存在。\n")
                 return
             _print_quiz_detail(quiz, out)
 
@@ -945,15 +945,15 @@ def handle_quiz(
                 return
             quiz = store.get_quiz_set(qid)
             if quiz is None:
-                out(f"❌ quiz_set_id={qid} 不存在。\n")
+                out(f"错误：quiz_set_id={qid} 不存在。\n")
                 return
             confirm = input(
-                f"⚠️  即将删除 quiz_set_id={qid} \"{quiz['topic']}\""
+                f"注意：即将删除 quiz_set_id={qid} \"{quiz['topic']}\""
                 f"（含 {quiz['num_questions']} 题；不可恢复），确认请输入 yes："
             ).strip().lower()
             if confirm == "yes":
                 store.delete_quiz_set(qid)
-                out(f"🗑️  quiz_set_id={qid} 已删除。\n")
+                out(f"quiz_set_id={qid} 已删除。\n")
             else:
                 out("已取消。\n")
 
@@ -964,7 +964,7 @@ def handle_quiz(
 # ── /srs 命令组 ─────────────────────────────────────────
 
 _SRS_USAGE = (
-    "⚠️  未知子命令。用法：\n"
+    "注意：未知子命令。用法：\n"
     "    /srs                              列出 active + suspended 卡片（默认 limit 20）\n"
     "    /srs list [active|suspended]      按状态过滤\n"
     "    /srs due                          列今天 due 的卡片（next_review_at <= now）\n"
@@ -1006,10 +1006,10 @@ def _print_card_list(
     cards = store.list_cards(status=status, limit=eff_limit)
     if not cards:
         filter_suffix = f"（状态={status}）" if status else ""
-        out(f"📭 暂无 SRS 卡片{filter_suffix}。可在对话中说\"把错题进 SRS / 帮我加一张卡\"等让 Agent 入队。\n")
+        out(f"暂无 SRS 卡片{filter_suffix}。可在对话中说\"把错题进 SRS / 帮我加一张卡\"等让 Agent 入队。\n")
         return
     title_suffix = f"（状态={status}）" if status else ""
-    out(f"\n📚 SRS 卡片列表{title_suffix}（共 {len(cards)} 张）：")
+    out(f"\nSRS 卡片列表{title_suffix}（共 {len(cards)} 张）：")
     out(f"  {'ID':<6}  {'状态':<10}  {'ease':<7}  {'iv':<6}  {'reps':<6}  正面 + 来源")
     out(f"  {'-'*4:<6}  {'-'*8:<10}  {'-'*5:<7}  {'-'*4:<6}  {'-'*4:<6}  {'-'*50}")
     for c in cards:
@@ -1021,9 +1021,9 @@ def _print_due_list(store: SRSStore, out: OutputFn = _stdout) -> None:
     """`/srs due`：列今天 due 的卡片（next_review_at <= now 且 status=active）。"""
     cards = store.list_due()
     if not cards:
-        out("🎉 当前没有 due 卡片。明天再来 / 或新建卡片进队列。\n")
+        out("当前没有 due 卡片。明天再来 / 或新建卡片进队列。\n")
         return
-    out(f"\n📅 当前 due 卡片（{len(cards)} 张）：")
+    out(f"\n当前 due 卡片（{len(cards)} 张）：")
     out(f"  {'ID':<6}  {'状态':<10}  {'ease':<7}  {'iv':<6}  {'reps':<6}  正面 + 来源")
     out(f"  {'-'*4:<6}  {'-'*8:<10}  {'-'*5:<7}  {'-'*4:<6}  {'-'*4:<6}  {'-'*50}")
     for c in cards:
@@ -1035,7 +1035,7 @@ def _print_card_detail(card: dict[str, Any], out: OutputFn = _stdout) -> None:
     """`/srs show <id>`：单卡完整详情。"""
     src = card["source_type"]
     src_suffix = f" ← quiz_question#{card['source_ref']}" if (src == "quiz_question" and card.get("source_ref")) else " ← manual"
-    out(f"\n📚 card_id={card['id']} [{card['status']}]{src_suffix}")
+    out(f"\ncard_id={card['id']} [{card['status']}]{src_suffix}")
     out(f"   ──── 正面 ────")
     out(f"   {card['front']}")
     out(f"   ──── 背面 ────")
@@ -1058,9 +1058,9 @@ def _print_srs_stats(store: SRSStore, out: OutputFn = _stdout) -> None:
     stats = store.stats()
     total = stats["total_active"] + stats["total_suspended"] + stats["total_archived"]
     if total == 0:
-        out("📭 SRS 队列为空。\n")
+        out("SRS 队列为空。\n")
         return
-    out("\n📊 SRS 队列统计：")
+    out("\nSRS 队列统计：")
     out(f"   总 active:    {stats['total_active']:>4} 张")
     out(f"   总 suspended: {stats['total_suspended']:>4} 张")
     out(f"   总 archived:  {stats['total_archived']:>4} 张")
@@ -1073,15 +1073,15 @@ def _print_srs_stats(store: SRSStore, out: OutputFn = _stdout) -> None:
 def _parse_card_id(rest: str, out: OutputFn) -> int | None:
     """从命令参数串解析正整数 card_id；失败时打印提示并返回 None。"""
     if not rest:
-        out("⚠️  请提供 card_id。\n")
+        out("注意：请提供 card_id。\n")
         return None
     try:
         cid = int(rest.split()[0])
     except ValueError:
-        out(f"❌ 无效 card_id：{rest!r}，应为整数。\n")
+        out(f"错误：无效 card_id：{rest!r}，应为整数。\n")
         return None
     if cid < 1:
-        out(f"❌ card_id 必须 ≥ 1，收到 {cid}。\n")
+        out(f"错误：card_id 必须 ≥ 1，收到 {cid}。\n")
         return None
     return cid
 
@@ -1115,7 +1115,7 @@ def handle_srs(
                 if rest_lower in ("active", "suspended", "archived"):
                     status_filter = rest_lower
                 else:
-                    out(f"⚠️  非法状态过滤：{rest!r}，应为 active / suspended / archived 之一。\n")
+                    out(f"注意：非法状态过滤：{rest!r}，应为 active / suspended / archived 之一。\n")
                     return
             _print_card_list(store, status=status_filter, out=out)
 
@@ -1128,7 +1128,7 @@ def handle_srs(
                 return
             card = store.get_card(cid)
             if card is None:
-                out(f"❌ card_id={cid} 不存在。\n")
+                out(f"错误：card_id={cid} 不存在。\n")
                 return
             _print_card_detail(card, out)
 
@@ -1141,16 +1141,16 @@ def handle_srs(
                 return
             card = store.get_card(cid)
             if card is None:
-                out(f"❌ card_id={cid} 不存在。\n")
+                out(f"错误：card_id={cid} 不存在。\n")
                 return
             front_short = (card["front"] or "")[:40] + ("…" if len(card["front"]) > 40 else "")
             confirm = input(
-                f"⚠️  即将删除 card_id={cid}：\"{front_short}\"（硬删不可恢复；推荐用 archive 软删），"
+                f"注意：即将删除 card_id={cid}：\"{front_short}\"（硬删不可恢复；推荐用 archive 软删），"
                 f"确认请输入 yes："
             ).strip().lower()
             if confirm == "yes":
                 store.delete_card(cid)
-                out(f"🗑️  card_id={cid} 已删除。\n")
+                out(f"card_id={cid} 已删除。\n")
             else:
                 out("已取消。\n")
 
@@ -1162,7 +1162,7 @@ def handle_srs(
 
 
 _MCP_USAGE = (
-    "⚠️  未知子命令。用法：\n"
+    "注意：未知子命令。用法：\n"
     "    /mcp                              列 MCP server 状态（同 /mcp list）\n"
     "    /mcp list                         同上\n"
     "    /mcp tools                        列所有 MCP tool（含来源 server）\n"
@@ -1179,11 +1179,11 @@ def _print_mcp_servers(manager: "Any", out: OutputFn = _stdout) -> None:
     out("MCP server 列表：\n")
     for s in statuses:
         badge = {
-            "connected": "🟢",
-            "failed": "🔴",
-            "connecting": "🟡",
-            "closed": "⚫",
-        }.get(s["status"], "❓")
+            "connected": "[已连接]",
+            "failed": "[失败]",
+            "connecting": "[连接中]",
+            "closed": "[关闭]",
+        }.get(s["status"], "[未知]")
         out(
             f"  {badge} {s['name']:<14} {s['status']:<10} "
             f"tools={s['tool_count']:<3} cmd={s['command']}\n"

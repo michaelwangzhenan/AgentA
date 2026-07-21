@@ -548,7 +548,7 @@ class LearningPlanStore:
                 if t["stage_idx"] != current_stage:
                     current_stage = t["stage_idx"]
                     lines.append(f"### Stage {current_stage}")
-                icon = {"pending": "☐", "success": "✓", "skipped": "⏭️"}.get(t["status"], "?")
+                icon = {"pending": "[待办]", "success": "[完成]", "skipped": "[跳过]"}.get(t["status"], "?")
                 note_suffix = f" — {t['note']}" if t["note"] else ""
                 lines.append(f"- {icon} [task_id={t['id']}] {t['title']}{note_suffix}")
 

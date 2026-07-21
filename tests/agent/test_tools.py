@@ -202,7 +202,7 @@ class TestUpdateStepExecute:
             messages=msgs,
         )
         assert result.status == "ok"
-        assert "✓" in result.content
+        assert "已创建" in result.content or "[完成]" in result.content
         assert "step 1" in result.content
         assert "找到 3 个" in result.content
         assert "1/3" in result.content
@@ -231,7 +231,7 @@ class TestUpdateStepExecute:
             messages=msgs,
         )
         assert result.status == "ok"
-        assert "✗" in result.content
+        assert "[失败]" in result.content
         assert "503 错误" in result.content
 
     def test_update_step_skipped(self) -> None:
@@ -241,7 +241,7 @@ class TestUpdateStepExecute:
             "update_step", {"step_id": 1, "status": "skipped"}, messages=msgs,
         )
         assert result.status == "ok"
-        assert "⏭" in result.content
+        assert "[跳过]" in result.content
         assert "skipped" in result.content
 
     def test_update_step_no_active_plan_returns_error(self) -> None:
@@ -283,12 +283,12 @@ class TestAbortPlanExecute:
     def test_abort_plan_with_reason(self) -> None:
         result = execute_tool("abort_plan", {"reason": "多次失败"})
         assert result.status == "ok"
-        assert "🛑" in result.content
+        assert "plan 已中止" in result.content
         assert "多次失败" in result.content
         assert "总结" in result.content
 
     def test_abort_plan_no_reason(self) -> None:
         result = execute_tool("abort_plan", {})
         assert result.status == "ok"
-        assert "🛑" in result.content
+        assert "plan 已中止" in result.content
         assert "总结" in result.content

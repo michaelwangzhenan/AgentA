@@ -498,7 +498,7 @@ def get_shared_manager() -> MCPManager:
 
 
 def reset_shared_manager_for_tests() -> None:
-    """**仅供 UT 调用**：清掉单例，让下个 case 拿到干净 manager。"""
+    """仅供 UT 调用：清掉单例，让下个 case 拿到干净 manager。"""
     global _shared_manager
     with _shared_lock:
         if _shared_manager is not None:

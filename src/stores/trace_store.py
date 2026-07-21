@@ -536,7 +536,7 @@ def record_trace_safe(
     model_id: str,
     thinking: bool,
 ) -> None:
-    """把采集器的 trace 落库；**异常只记日志、绝不抛**（旁路，不影响对话）。"""
+    """把采集器的 trace 落库；异常只记日志、绝不抛（旁路，不影响对话）。"""
     if not config.TRACE_ENABLED:
         return
     try:

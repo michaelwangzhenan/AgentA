@@ -623,20 +623,20 @@ def format_scan_banner(result: ScanResult) -> tuple[str, str]:
     """把 scan_skills 结果渲染成人类可读的两段文本，供 CLI / WebUI 启动时展示。
 
     返回 (success_line, failure_block)：
-      - success_line：单行，"🔧 已加载 Skills（N 个）：name1, name2" 或 "🔧 未发现 Skills"
-      - failure_block：多行 "⚠️ 加载失败 N 个：\\n  ✗ <path>：<reason>"；无失败返回空串
+      - success_line：单行，"已加载 Skills（N 个）：name1, name2" 或 "未发现 Skills"
+      - failure_block：多行 "注意：加载失败 N 个：\\n  失败 <path>：<reason>"；无失败返回空串
     上层按各自 UI 形式拼接（CLI 直接 print，WebUI 包到 message 里）。
     """
     names = list(result.loaded.keys())
     if names:
-        success_line = f"🔧 已加载 Skills（{len(names)} 个）：{', '.join(names)}"
+        success_line = f"已加载 Skills（{len(names)} 个）：{', '.join(names)}"
     else:
-        success_line = "🔧 未发现 Skills"
+        success_line = "未发现 Skills"
     if not result.failed:
         return success_line, ""
-    lines = [f"⚠️ Skills 加载失败 {len(result.failed)} 个："]
+    lines = [f"注意：Skills 加载失败 {len(result.failed)} 个："]
     for f in result.failed:
-        lines.append(f"  ✗ {f.path}：{f.reason}")
+        lines.append(f"  失败 {f.path}：{f.reason}")
     return success_line, "\n".join(lines)
 
 

@@ -128,8 +128,8 @@ class TestGradeQuizCriticIntegration:
                 "quiz_set_id": qid, "user_answers": _all_correct_answers(qids),
             })
         assert res.status == "ok"
-        assert "⚠️" in res.content
-        assert "Agent 自检" in res.content
+        assert "【自检】" in res.content
+        assert "批改可能有偏" in res.content
         assert "给分过高" in res.content
         # DB 落地：第 3 题（short_answer）critic_flagged=True
         questions = store.get_quiz_with_questions(qid)["questions"]
@@ -155,7 +155,7 @@ class TestGradeQuizCriticIntegration:
             res = execute_tool("grade_quiz", {
                 "quiz_set_id": qid, "user_answers": _all_correct_answers(qids),
             })
-        assert "⚠️" not in res.content
+        assert "【自检】" not in res.content
         # DB：第 3 题不应被 flag（failure 软放行）
         q3 = store.get_quiz_with_questions(qid)["questions"][2]
         assert q3["critic_flagged"] is False
@@ -174,7 +174,7 @@ class TestGradeQuizCriticIntegration:
                 "quiz_set_id": qid, "user_answers": _all_correct_answers(qids),
             })
         assert res.status == "ok"
-        assert "⚠️" not in res.content
+        assert "【自检】" not in res.content
 
 
 # ── R1 集成：search_knowledge + filter ───────────────────────────────────────

@@ -58,10 +58,10 @@ class TestPlanRenderers:
             ],
         })
         out = capsys.readouterr().out
-        assert "📋 Plan：" in out
-        assert "☐ 1. 列项目" in out
-        assert "☐ 2. 对比" in out
-        assert "☐ 3. 总结" in out
+        assert "Plan：" in out
+        assert "[待办] 1. 列项目" in out
+        assert "[待办] 2. 对比" in out
+        assert "[待办] 3. 总结" in out
 
     def test_plan_created_empty_steps_noop(self, capsys) -> None:
         _render_plan_created({"steps": []})
@@ -70,19 +70,19 @@ class TestPlanRenderers:
     def test_plan_step_end_success_with_note(self, capsys) -> None:
         _render_plan_step_end({"step_id": 1, "status": "success", "note": "找到 3 个"})
         out = capsys.readouterr().out
-        assert "✓ 第 1 步" in out
+        assert "[完成] 第 1 步" in out
         assert "（找到 3 个）" in out
 
     def test_plan_step_end_failed_without_note(self, capsys) -> None:
         _render_plan_step_end({"step_id": 2, "status": "failed", "note": ""})
         out = capsys.readouterr().out
-        assert "✗ 第 2 步" in out
+        assert "[失败] 第 2 步" in out
         assert "（" not in out  # 无 note 不带括号
 
     def test_plan_step_end_skipped_icon(self, capsys) -> None:
         _render_plan_step_end({"step_id": 3, "status": "skipped"})
         out = capsys.readouterr().out
-        assert "⏭ 第 3 步" in out
+        assert "[跳过] 第 3 步" in out
 
     def test_plan_step_end_unknown_status_falls_back(self, capsys) -> None:
         """未知 status 不应抛异常，用 • 兜底。"""

@@ -127,7 +127,7 @@ class TestStudySwitch:
         lines, out = _make_collector()
         handle_study(store, ["/study", f"switch {p1}"], out=out)
         joined = "\n".join(lines)
-        assert "✅" in joined and f"plan_id={p1}" in joined
+        assert "已切换" in joined and f"plan_id={p1}" in joined
         assert store.get_active()["id"] == p1
 
     def test_switch_unknown_returns_error(self, store: LearningPlanStore) -> None:

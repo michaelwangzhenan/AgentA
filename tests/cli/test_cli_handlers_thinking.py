@@ -64,19 +64,19 @@ class TestSingleRoundMarkers:
         ]
         handlers.run_query(_FakeAgent(script, reply="答案"), "问题")
         out = capsys.readouterr().out
-        assert "💭 思考中..." in out
+        assert "思考中..." in out
         # 单轮 footer 不带编号
         assert "─── 思考结束 ───" in out
         assert "（第 1 轮）" not in out
         # 顺序：header → thinking 内容 → footer → 正文
-        assert out.index("💭 思考中...") < out.index("推理中") < out.index("─── 思考结束 ───") < out.index("答案")
+        assert out.index("思考中...") < out.index("推理中") < out.index("─── 思考结束 ───") < out.index("答案")
 
     def test_no_thinking_event_no_artifact(self, capsys) -> None:
         """关 thinking 时不发 thinking_chunk → CLI 看不到任何 thinking 痕迹。"""
         script = [("token_chunk", {"text": "正常答案"})]
         handlers.run_query(_FakeAgent(script, reply="正常答案"), "问题")
         out = capsys.readouterr().out
-        assert "💭" not in out
+        assert "思考中" not in out
         assert "思考中" not in out
         assert "思考结束" not in out
         assert "│" not in out
@@ -163,16 +163,16 @@ class TestMultiRoundNumbering:
         out = capsys.readouterr().out
 
         # 首轮：不带编号
-        assert "💭 思考中..." in out
+        assert "思考中..." in out
         assert "─── 思考结束 ───" in out
         # 第 2 轮：带编号
-        assert "💭 思考中（第 2 轮）..." in out
+        assert "思考中（第 2 轮）..." in out
         assert "─── 第 2 轮思考结束 ───" in out
         # 顺序：首轮 header → 首轮 footer → 第 2 轮 header → 第 2 轮 footer → 答案
         order = [
-            "💭 思考中...",
+            "思考中...",
             "─── 思考结束 ───",
-            "💭 思考中（第 2 轮）...",
+            "思考中（第 2 轮）...",
             "─── 第 2 轮思考结束 ───",
             "最终答",
         ]
@@ -190,9 +190,9 @@ class TestMultiRoundNumbering:
         ]
         handlers.run_query(_FakeAgent(script, reply="a3"), "问题")
         out = capsys.readouterr().out
-        assert "💭 思考中..." in out  # 首轮
-        assert "💭 思考中（第 2 轮）..." in out
-        assert "💭 思考中（第 3 轮）..." in out
+        assert "思考中..." in out  # 首轮
+        assert "思考中（第 2 轮）..." in out
+        assert "思考中（第 3 轮）..." in out
         assert "─── 第 3 轮思考结束 ───" in out
 
 
@@ -208,7 +208,7 @@ class TestSegmentBreakEvents:
         ]
         handlers.run_query(_FakeAgent(script, reply="完成"), "问题")
         out = capsys.readouterr().out
-        assert out.index("─── 思考结束 ───") < out.index("📋 Plan：")
+        assert out.index("─── 思考结束 ───") < out.index("Plan：")
 
     def test_plan_step_end_closes_thinking(self, capsys) -> None:
         script = [
@@ -218,8 +218,8 @@ class TestSegmentBreakEvents:
         ]
         handlers.run_query(_FakeAgent(script, reply="ok"), "问题")
         out = capsys.readouterr().out
-        # footer 在 ✓ 之前
-        assert out.index("─── 思考结束 ───") < out.index("✓")
+        # footer 在 [完成] 之前
+        assert out.index("─── 思考结束 ───") < out.index("[完成]")
 
     def test_tool_call_start_closes_thinking_silently(self, capsys) -> None:
         """tool_call_start 关闭 thinking，但事件本身 CLI 不渲染（无图标 / 文本）。"""
@@ -245,7 +245,7 @@ class TestFinallyClose:
         script = [("thinking_chunk", {"text": "卡住了"})]
         handlers.run_query(_FakeAgent(script, reply=""), "问题")
         out = capsys.readouterr().out
-        assert "💭 思考中..." in out
+        assert "思考中..." in out
         assert "─── 思考结束 ───" in out
 
     def test_exception_during_run_still_closes_thinking(self, capsys) -> None:
@@ -258,7 +258,7 @@ class TestFinallyClose:
 
         handlers.run_query(_ExplodingAgent([], reply=""), "问题")
         out = capsys.readouterr().out
-        assert "💭 思考中..." in out
+        assert "思考中..." in out
         assert "─── 思考结束 ───" in out
         assert "出错了" in out
 

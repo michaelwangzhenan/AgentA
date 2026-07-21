@@ -268,7 +268,7 @@ class Agent:
         #                  → <active_study_plan>（当前 session 已 `/study load` 的学习计划）
         # 顺序原则：稳定基础在前 / 动态状态在后 —— 后注入的内容更易被 LLM 记住，
         # 学习计划与"下一步"决策强相关，放最末贴近 user 消息。
-        # 注意：学习计划默认**不**注入，必须用户用 CLI `/study load [id]` 显式激活；
+        # 注意：学习计划默认不注入，必须用户用 CLI /study load [id] 显式激活；
         # 对标 Agent Skills 的 load_skill 生命周期。
         memory_mgr = MemoryManager(self._user_memory, self._session_store, sid, chat)
         base_with_rules = self.system_prompt + build_rules_block(_get_active_rules())

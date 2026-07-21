@@ -311,7 +311,7 @@ class TestRenderPlanForPrompt:
         store.update_task_status(pid, tasks[0]["id"], "success")
         store.update_task_status(pid, tasks[1]["id"], "skipped")
         out = store.render_plan_for_prompt(plan_id=pid)
-        assert "✓" in out and "⏭" in out and "☐" in out
+        assert "[完成]" in out and "[跳过]" in out and "[待办]" in out
 
     def test_truncates_when_exceeds_max_chars(self, store: LearningPlanStore) -> None:
         pid = store.create_plan(goal="x" * 100)

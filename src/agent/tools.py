@@ -442,7 +442,7 @@ _PLAN_TOOLS: list[dict[str, Any]] = [
 
 # ── 学习计划业务三 tool JSON Schema ──────────────────────────────────────────
 # 与 _PLAN_TOOLS（单次问答内"用完即弃"的执行计划）相对：本组 tool 操作的是
-# **跨 session 长期持久化的学习计划**（learning_plans / learning_tasks 表）。
+# 跨 session 长期持久化的学习计划（learning_plans / learning_tasks 表）。
 # 触发主路径见 [study-planner skill](../../.agenta/skills/study-planner/SKILL.md)。
 
 _STUDY_PLAN_TOOLS: list[dict[str, Any]] = [
@@ -648,7 +648,7 @@ def _tool_web_search(
         snippet = item.get("snippet", "")
         cleaned_snippet, scrubbed = scrub_injection(snippet)
         any_scrubbed = any_scrubbed or scrubbed
-        flag = " [⚠️ 已清洗]" if scrubbed else ""
+        flag = " [已清洗]" if scrubbed else ""
         # cite_web 时把命中 URL 注册进 CitationBuilder 拿全局编号（让 LLM 在报告里能引 [n]）；
         # 否则沿用旧的局部序号 1..N（普通 chat 行为不变）。link 为空时退回局部序号。
         marker = f"[{i}]"
@@ -916,7 +916,7 @@ def _tool_fetch_url(
         if scrubbed:
             from src.stores.security_event_store import EVENT_SCRUB, record_security_event
             record_security_event(EVENT_SCRUB, "网页抓取")
-        flag = "[⚠️ 已清洗] " if scrubbed else ""
+        flag = "[已清洗] " if scrubbed else ""
         # cite_web 时把本 URL 注册进引用器（与 web_search 同一 url 去重 → 复用编号），
         # 并在正文前标注 [n]，让 LLM 知道这段网页正文对应哪条引用。
         cite_prefix = ""
@@ -953,7 +953,7 @@ def _tool_make_plan(
     return ToolResult(
         status="ok",
         content=(
-            f"📋 已记录 plan，共 {len(cleaned)} 步：\n{plan_block}\n\n"
+            f"已记录 plan，共 {len(cleaned)} 步：\n{plan_block}\n\n"
             "请按 plan 顺序逐步执行：每完成一步调用 update_step 更新状态再继续下一步；"
             "失败步可重试，多次失败考虑 abort_plan。\n"
             f"→ 下一步：第 1 步 — {cleaned[0]}（请调用合适的业务 tool）"
@@ -1001,7 +1001,7 @@ def _tool_update_step(
             ),
         )
 
-    status_icon = {"success": "✓", "failed": "✗", "skipped": "⏭"}[status]
+    status_icon = {"success": "[完成]", "failed": "[失败]", "skipped": "[跳过]"}[status]
     note_suffix = f"（{note.strip()}）" if note and note.strip() else ""
     head = f"{status_icon} step {step_id}「{step.text}」状态：{status}{note_suffix}"
 
@@ -1034,7 +1034,7 @@ def _tool_abort_plan(
     return ToolResult(
         status="ok",
         content=(
-            f"🛑 plan 已中止{reason_suffix}。请基于已收集的信息总结最终答案，"
+            f"plan 已中止{reason_suffix}。请基于已收集的信息总结最终答案，"
             "并向用户说明未完成的部分及原因。"
         ),
     )
@@ -1108,7 +1108,7 @@ def _tool_create_study_plan(
     return ToolResult(
         status="ok",
         content=(
-            f"✓ 已创建学习计划 plan_id={plan_id}：\"{goal.strip()}\"{weeks_suffix}，"
+            f"已创建学习计划 plan_id={plan_id}：\"{goal.strip()}\"{weeks_suffix}，"
             f"含 {added} 个任务，已设为当前 active plan。\n"
             "→ 可向用户简要展示计划概要并提示：完成任务时告诉我，"
             "我会用 update_study_progress 帮你打勾。"
@@ -1156,12 +1156,12 @@ def _tool_update_study_progress(
     # 重新查 plan 给 LLM 进度反馈 + 下一步建议
     plan = store.get_plan_with_tasks(plan_id)
     if plan is None:
-        return ToolResult(status="ok", content=f"✓ 已更新 task_id={task_id} 状态为 {status}。")
+        return ToolResult(status="ok", content=f"已更新 task_id={task_id} 状态为 {status}。")
     tasks = plan.get("tasks", [])
     total = len(tasks)
     done = sum(1 for t in tasks if t["status"] == "success")
     pending = [t for t in tasks if t["status"] == "pending"]
-    icon = {"success": "✓", "skipped": "⏭", "pending": "☐"}[status]
+    icon = {"success": "[完成]", "skipped": "[跳过]", "pending": "[待办]"}[status]
     head = f"{icon} task_id={task_id} → {status}（plan \"{plan['goal']}\"）"
 
     if not pending:
@@ -1170,7 +1170,7 @@ def _tool_update_study_progress(
             store.complete_plan(plan_id)
             return ToolResult(
                 status="ok",
-                content=f"{head}\n\n🎉 plan 全部完成（{done}/{total}），已自动标记 completed。",
+                content=f"{head}\n\nplan 全部完成（{done}/{total}），已自动标记 completed。",
             )
         return ToolResult(
             status="ok",
@@ -1227,7 +1227,7 @@ def _render_plan_summary(plan: dict[str, Any], include_tasks: bool) -> str:
         if t["stage_idx"] != current_stage:
             current_stage = t["stage_idx"]
             lines.append(f"**Stage {current_stage}**")
-        icon = {"pending": "☐", "success": "✓", "skipped": "⏭"}.get(t["status"], "?")
+        icon = {"pending": "[待办]", "success": "[完成]", "skipped": "[跳过]"}.get(t["status"], "?")
         note_suffix = f" — {t['note']}" if t["note"] else ""
         lines.append(f"- {icon} [task_id={t['id']}] {t['title']}{note_suffix}")
     return "\n".join(lines)
@@ -1269,8 +1269,8 @@ def _tool_query_study_status(
 
 
 # ── Quiz 业务三 tool JSON Schema ─────────────────────────────────────────────
-# 与 _STUDY_PLAN_TOOLS（学习计划长期跟踪）相对：本组 tool 操作的是**周期性
-# 自检练习 + 跨 session 复盘**（quiz_sets / quiz_questions 二表）。
+# 与 _STUDY_PLAN_TOOLS（学习计划长期跟踪）相对：本组 tool 操作的是周期性
+# 自检练习 + 跨 session 复盘（quiz_sets / quiz_questions 二表）。
 # 触发主路径见 [quiz-maker skill](../../.agenta/skills/quiz-maker/SKILL.md)。
 
 _QUIZ_TOOLS: list[dict[str, Any]] = [
@@ -1597,7 +1597,7 @@ def _tool_create_quiz(
     return ToolResult(
         status="ok",
         content=(
-            f"✓ 已创建 quiz_set_id={quiz_set_id}：\"{topic_clean}\"{plan_suffix}，"
+            f"已创建 quiz_set_id={quiz_set_id}：\"{topic_clean}\"{plan_suffix}，"
             f"含 {added} 道题。\n"
             "→ 可向用户依次呈现题目（含 ABCD 选项 / 简答提示），并提示：作答时按 "
             "『1.B 2.AC 3. <文字>』格式回复；你之后会用 grade_quiz 自动批改。"
@@ -1683,13 +1683,13 @@ def _tool_grade_quiz(
         critic_block = _run_quiz_critic(quiz_set_id, questions, gradings, store)
 
     head = (
-        f"📝 已批改 quiz_set_id={quiz_set_id}『{quiz['topic']}』：\n"
+        f"已批改 quiz_set_id={quiz_set_id}『{quiz['topic']}』：\n"
         f"  总分 {total_score:.1f}/100（{int(round(total_raw))}/{len(questions)} 题完全正确）"
     )
     if wrong_lines:
         body = "\n\n薄弱点 / 错题（{n} 道）：\n{lines}".format(n=len(wrong_lines), lines="\n".join(wrong_lines))
     else:
-        body = "\n\n🎉 全部正确！"
+        body = "\n\n全部正确！"
     tail = (
         "\n\n→ 可向用户展示总分 + 错题点评（含标答 + 简短考点），"
         "再问是否要『再考一次 / 换主题 / 看错题详情』。"
@@ -1753,7 +1753,7 @@ def _run_quiz_critic(
         reviewed, len(flagged_lines), quiz_set_id,
     )
     return (
-        f"\n\n⚠️ Agent 自检：以下 {len(flagged_lines)} 题批改可能有偏，"
+        f"\n\n【自检】以下 {len(flagged_lines)} 题批改可能有偏，"
         f"建议人工复核：\n" + "\n".join(flagged_lines)
     )
 
@@ -1871,7 +1871,7 @@ def _tool_query_quiz_history(
 
 # ── SRS 主动复习业务 tool 定义 ───────────────────────────────────────────────
 # 与 _QUIZ_TOOLS（周期性自检练习，一次性出题 + 批改）相对：本组 tool 操作的是
-# **跨 session 持久化的 SRS 队列**，按 SM-2 算法按"下次该复习的时刻"调度卡片，
+# 跨 session 持久化的 SRS 队列，按 SM-2 算法按"下次该复习的时刻"调度卡片，
 # 用户用 again / hard / good / easy 4 档自评后自动更新调度状态。
 
 _SRS_TOOLS: list[dict[str, Any]] = [
@@ -2149,7 +2149,7 @@ def _tool_add_to_srs(
         return ToolResult(
             status="ok",
             content=(
-                f"✓ 已新建 manual 卡：card_id={card_id}\n"
+                f"已新建 manual 卡：card_id={card_id}\n"
                 f"  正面：{front.strip()[:60]}\n"
                 f"  立即 due — 用户可用 query_srs_due 查到这张卡开始复习。"
             ),
@@ -2216,7 +2216,7 @@ def _tool_add_to_srs(
         except Exception as e:  # noqa: BLE001
             skipped.append((qid, f"落库失败 — {e}"))
 
-    lines = [f"✓ add_to_srs 完成：新增 {len(added)} 张卡，跳过 {len(skipped)} 张。"]
+    lines = [f"add_to_srs 完成：新增 {len(added)} 张卡，跳过 {len(skipped)} 张。"]
     if added:
         lines.append(f"  新增 card_id: {added}")
     for qid, reason in skipped:
@@ -2243,7 +2243,7 @@ def _tool_query_srs_due(
         return ToolResult(
             status="empty",
             content=(
-                "🎉 当前没有 due 卡片需要复习。可让用户新建 quiz 后把错题进 SRS / 手动加 manual 卡。"
+                "当前没有 due 卡片需要复习。可让用户新建 quiz 后把错题进 SRS / 手动加 manual 卡。"
             ),
         )
     lines = [f"# 当前 due 卡片（{len(cards)} 张）"]
@@ -2313,7 +2313,7 @@ def _tool_review_srs_card(
     return ToolResult(
         status="ok",
         content=(
-            f"✓ card_id={card_id} 已完成 review（rating={rating_enum.value}）：\n"
+            f"card_id={card_id} 已完成 review（rating={rating_enum.value}）：\n"
             f"  新 ease={result.ease_factor:.2f}, interval={result.interval_days}d, "
             f"reps={result.repetitions}, lapses={result.lapses}\n"
             f"  下次复习：{result.next_review_at}\n"
@@ -2329,7 +2329,7 @@ def _tool_query_srs_stats() -> ToolResult:
     if stats["total_active"] == 0 and stats["total_suspended"] == 0 and stats["total_archived"] == 0:
         return ToolResult(
             status="empty",
-            content="📭 SRS 队列为空。可让用户做完 quiz 后把错题进 SRS / 手动加 manual 卡。",
+            content="SRS 队列为空。可让用户做完 quiz 后把错题进 SRS / 手动加 manual 卡。",
         )
     lines = [
         "# SRS 队列统计",
@@ -2374,7 +2374,7 @@ def _execute_mcp_tool(name: str, args: dict[str, Any]) -> ToolResult:
     """把 `<server>.<tool>` 调用转发到 MCPManager，返回值过 security_filter 包装。
 
     包装策略与 fetch_url 同步：仅 ok 状态 wrap kind="tool"；命中 injection 段被剔除时
-    前缀 `[⚠️ 已清洗]`，与 web / doc 一致让 LLM 感知。
+    前缀 [已清洗]，与 web / doc 一致让 LLM 感知。
 
     MCPCallError（未连接 / 超时 / SDK 抛错）统一降级为 `status='error'` 让 ToolCallEngine
     继续引导 LLM 换工具，不向上抛。
@@ -2412,7 +2412,7 @@ def _execute_mcp_tool(name: str, args: dict[str, Any]) -> ToolResult:
     if scrubbed:
         from src.stores.security_event_store import EVENT_SCRUB, record_security_event
         record_security_event(EVENT_SCRUB, f"MCP 工具 {name}")
-    flag = "[⚠️ 已清洗] " if scrubbed else ""
+    flag = "[已清洗] " if scrubbed else ""
     wrapped = wrap_untrusted(f"{flag}{cleaned}", kind="tool")
     return ToolResult(status="ok", content=wrapped)
 

@@ -2,16 +2,16 @@
 ResearchEngine —— Deep Research（深度研究）四阶段编排
 
 一次深度研究是一条四阶段流水线：
-    ① 规划：把研究问题拆成 3~MAX_SUBQUESTIONS 个子问题
-    ② 并行检索：每个子问题派一个独立上下文的受限子代理，并行查 KB + web
-    ③ 反思：汇总发现，判断是否有缺口 / 矛盾，按需补查 ≤2 个子问题（最多 1 轮）
-    ④ 综述：跨子代理结果去重、分章节，流式产出带 `[n]` 引用的 Markdown 报告
+    1. 规划：把研究问题拆成 3~MAX_SUBQUESTIONS 个子问题
+    2. 并行检索：每个子问题派一个独立上下文的受限子代理，并行查 KB + web
+    3. 反思：汇总发现，判断是否有缺口 / 矛盾，按需补查 ≤2 个子问题（最多 1 轮）
+    4. 综述：跨子代理结果去重、分章节，流式产出带 [n] 引用的 Markdown 报告
 
 设计要点（详见 docs/iter_14_enh.md §3.2）：
-- 独立路径：普通 chat 完全不走本引擎；普通 `Agent.run` 行为零改动。
+- 独立路径：普通 chat 完全不走本引擎；普通 Agent.run 行为零改动。
 - 受限子代理：引擎内精简 ReAct loop，只给 3 个检索 tool、独立 in-memory 上下文，
-  **不读不写** SessionStore —— 研究中间过程不污染用户会话历史。
-- 共享引用器：所有子代理共用一个 `CitationBuilder`（线程安全），KB + web 统一 `[n]`。
+  不读不写 SessionStore —— 研究中间过程不污染用户会话历史。
+- 共享引用器：所有子代理共用一个 CitationBuilder（线程安全），KB + web 统一 [n]。
 - 软失败：单子代理异常 / 全空 → 标记失败、记 note，不中断整体，报告里照常说明缺口。
 - 进度可视化：发一组 `research_*` 事件给前端研究面板（不发 `plan_*`）。
 - 收尾对齐 `Agent.run`：流式 token_chunk 推正文、`final_answer` 带聚合 usage，

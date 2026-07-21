@@ -595,7 +595,7 @@ def record_usage(
     usage: Any,
     session_id: str | None = None,
 ) -> None:
-    """把一次 run 的 TokenUsage 落库；**异常只记日志、绝不抛**（旁路，不影响对话）。
+    """把一次 run 的 TokenUsage 落库；异常只记日志、绝不抛（旁路，不影响对话）。
 
     ``usage`` 期望是带 ``prompt_tokens`` / ``completion_tokens`` / ``total_tokens``
     的对象（``TokenUsage`` NamedTuple 或等价）。为 None / 空则跳过（该 run 没消耗 token）。
@@ -632,7 +632,7 @@ def record_saving(
     saved_cost: float,
     total_tokens: int = 0,
 ) -> None:
-    """记录一次降本事件；**异常只记日志、绝不抛**（旁路，不影响对话）。"""
+    """记录一次降本事件；异常只记日志、绝不抛（旁路，不影响对话）。"""
     try:
         get_shared_store().record_saving(
             user_id=user_id, kind=kind, original_model=original_model,
@@ -643,7 +643,7 @@ def record_saving(
 
 
 def record_cache_lookup(user_id: int, hit: bool, saved: float = 0.0) -> None:
-    """记录一次可缓存请求的查缓存结果（命中率分母 + 命中节省）；**异常只记日志、绝不抛**（旁路）。"""
+    """记录一次可缓存请求的查缓存结果（命中率分母 + 命中节省）；异常只记日志、绝不抛（旁路）。"""
     try:
         get_shared_store().record_cache_lookup(user_id=user_id, hit=hit, saved=saved)
     except Exception:

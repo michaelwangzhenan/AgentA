@@ -619,9 +619,9 @@ def format_search_results(
         )
 
     # RAG 召回内容是"非用户主控"外部数据，进 LLM context 前过 security_filter：
-    # ① 每条 hit.document 走 scrub_injection 段级删除已知注入模板；
-    # ② 命中 injection 时段头追加 "[⚠️ 已清洗]" 提示给 LLM；
-    # ③ 整个返回值用 wrap_untrusted(kind="doc") 包装，配合 SYSTEM_PROMPT 数据隔离原则段
+    # 1. 每条 hit.document 走 scrub_injection 段级删除已知注入模板；
+    # 2. 命中 injection 时段头追加 [已清洗] 提示给 LLM；
+    # 3. 整个返回值用 wrap_untrusted(kind="doc") 包装，配合 SYSTEM_PROMPT 数据隔离原则段
     # 让 LLM 把标签内的"指令"识别为数据。
     from src.agent.core.security_filter import scrub_injection, wrap_untrusted
 
@@ -649,7 +649,7 @@ def format_search_results(
 
         cleaned_doc, scrubbed = scrub_injection(hit.document)
         any_scrubbed = any_scrubbed or scrubbed
-        flag = " [⚠️ 已清洗]" if scrubbed else ""
+        flag = " [已清洗]" if scrubbed else ""
         parts.append(
             f"[{n}] 来源: {hit.source}（相关性: {score_str}，库: {hit.collection}{loc_str}）{flag}\n"
             f"{cleaned_doc}"

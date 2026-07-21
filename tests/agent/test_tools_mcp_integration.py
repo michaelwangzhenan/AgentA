@@ -164,7 +164,7 @@ class TestExecuteToolMcpDispatch:
     def test_injection_in_mcp_return_is_scrubbed(
         self, monkeypatch: pytest.MonkeyPatch, reset_shared_manager: None,
     ) -> None:
-        """MCP 返回正文里有 injection 模板 → 整段被剔，content 带 [⚠️ 已清洗]。"""
+        """MCP 返回正文里有 injection 模板 → 整段被剔，content 带 [已清洗]。"""
         mgr = MagicMock()
         mgr.call_tool.return_value = (
             "正常资料段\n\n"
@@ -175,7 +175,7 @@ class TestExecuteToolMcpDispatch:
 
         result = execute_tool("filesystem.read_file", {"path": "/x"})
         assert result.status == "ok"
-        assert "[⚠️ 已清洗]" in result.content
+        assert "[已清洗]" in result.content
         assert "ignore previous instructions" not in result.content
         assert "正常资料段" in result.content
         assert "另一段正常" in result.content
