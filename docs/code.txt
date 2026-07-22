@@ -79,38 +79,19 @@ ToolCallEngine::_run_parallel # 并行
         -> format_search_results
 -
 # 对话
-chat # src\api\routes\chat.py
-  -> get_agent # src\api\deps.py（Depends 注入）
-  -> _check_session_owner
-  -> effective_llm_prefs # src\api\routes\auth.py
-  -> model_router.route # src\llm\model_router.py
-  -> semantic_cache.lookup_cached # 单轮起步命中则跳过 agent
-  -> agent.run # src\agent\agent.py
-    -> HistoryManager::load_truncated # src\agent\core\history_manager.py
-      -> hydrate_skill_refs # src\agent\core\skill_loader.py
-    -> build_rules_block # src\agent\core\rules_loader.py
-    -> MemoryManager::build_system_prompt # src\agent\core\memory_manager.py
-    -> build_active_study_plan_block # src\agent\core\agent_commons.py
-    -> session_store.append # 写入用户消息
-    -> for iteration: # ReAct 循环
-      -> get_tools # src\agent\tools.py
-      -> call_with_thinking / chat # src\llm\provider.py
-        -> claude_provider.chat / openai_provider.chat
-      -> ToolCallEngine::process # 有 tool_calls 时
-        -> execute_tool # src\agent\tools.py
-          -> _tool_search_knowledge # 见上方「召回」
-      -> CitationBuilder::extract_used / render # src\agent\core\citation_builder.py
-      -> MemoryManager::try_extract # 后台提取用户记忆
-      -> bus.publish final_answer # src\agent\core\event_bus.py
-  -> record_usage / record_trace_safe
-  -> _maybe_store_cache # src\stores\semantic_cache.py
 
 chat_stream # src\api\routes\chat.py
-  -> mode=deep_research → ResearchEngine::run # src\agent\core\research_engine.py
-  -> loop.run_in_executor → _sync_run # agent.run 扔线程池
-  -> _on_event → SseOutbound # src\api\sse_outbound.py
-  -> EventSourceResponse # SSE 流式下发
--
-src.agent.core.event_bus
+  -> get_agent # src\api\deps.py（Depends 注入）
+    -> LangChainAgent # src\agent\langchain_agent.py
+    -> AutoGPTAgent # src\agent\autogpt_agent.py
+    -> Agent # src\agent\agent.py
+  -> assert_message_within_limit # src\api\schemas\chat.py
+  -> route # src\llm\model_router.py (auto 选 LLM)
+  -> lookup_cached # src\stores\semantic_cache.py (查语义换成)
+    -> SemanticCacheStore::lookup
+  -> _estimate_cache_saving # 缓存命中，估算节省
+  -> record_cache_lookup # 记录降本信息
+  
 
+-
 src.agent.core.event_bus

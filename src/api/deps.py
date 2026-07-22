@@ -1,16 +1,17 @@
-"""依赖注入：API 层向 Agent core 拿实例的统一入口。
+"""依赖注入：API 路由从这里拿 Agent、各 store、当前用户等进程级单例。
 
-进程级单例，分两类策略：
+Store 获取分两类：
 
-1. **shared singleton**（plan / quiz / srs / mcp）：复用各 store 模块的
-   `get_shared_store()`，跟 LLM 工具共用同一份 connection，无写锁竞争。
-2. **独立 connection**（session_store / user_memory）：API 层用 `lru_cache`
-   各起一份 connection，跟 Agent 内置 store 走两个连接、共用底层 DB 文件。
-   SQLite 文件级锁保证安全，多 connection 串行写不会损坏数据。
+1. 模块级共享（plan / quiz / srs / golden / usage / trace / user / mcp 等）：
+   直接调各 store 的 get_shared_store()，与 LLM 工具共用同一条 SQLite 连接。
+2. 双连接（session_store / user_memory）：
+   本文件用 lru_cache 各维护一份实例；Agent 在 agent_commons / agent.py
+   里另有模块级单例。两边连同一 DB 文件，各实例自带 threading.Lock，
+   SQLite 文件锁兜底，正确性无虞，高并发下偶有 database is locked 重试。
 
-两套并存的历史原因：plan / quiz / srs 的 store 早期就提供了 `get_shared_store()`
-便于 LLM 工具复用；session_store / user_memory 没有，暂不改动以缩小影响面。
-未来可统一为 shared，但代价是 Agent 构造路径也要改。
+历史原因：plan 等 store 早已在模块内提供 get_shared_store()；session / memory
+的单例仍留在 Agent 侧，API 未接入。日后若统一，应把 get_shared_store 下沉
+到 session_store / user_memory 模块，而非让本文件依赖 agent 包。
 """
 
 import logging
@@ -49,20 +50,17 @@ logger = logging.getLogger(__name__)
 
 @lru_cache(maxsize=1)
 def get_agent() -> AgentAPI:
-    """返回进程级单例 Agent。
+    """返回进程级单例 Agent（AgentAPI 契约，调用方不绑定具体实现）。
 
-    用 `lru_cache(maxsize=1)` 实现"首次调用时构造、之后复用"的语义。
-    构造时扫一次 `.agenta/skills/` 注入 Agent，让 LLM 能看到 `## Skills` catalog
-    并可调 `load_skill` 工具。Web UI 通过 `POST /api/skills/reload` 调
-    `get_agent.cache_clear()` 强制重建实例以读到磁盘新内容（trade-off：会重新打开
-    sub-store 连接，但下一轮对话立即看到新 catalog）。
+    lru_cache 懒加载：首次调用构造，之后复用。构造时扫描 .agenta/skills/ 注入
+    catalog，供 load_skill 使用。POST /api/skills/reload 调 cache_clear() 强制重建，
+    下一轮对话即见新 skills；各 store 单例独立维护，不受此次重建影响。
 
-    返回 `AgentAPI` 契约类型，调用方不绑定具体实现。
+    按 IMP_METHOD 选 PYTHON / LANGCHAIN / AUTOGPT，与 CLI make_agent 同源；
+    改 IMP_METHOD 后 config hook 清缓存，下次请求重建。
 
-    按 `IMP_METHOD` 选实现（PYTHON / LANGCHAIN / AUTOGPT），与 CLI 的 `make_agent`
-    同源。改 `IMP_METHOD` 后由 config hook 清本缓存，下一次请求重建生效。
-    注意：LANGCHAIN / AUTOGPT 两套实现未做 per-request 事件隔离，多用户并发会串台，
-    仅适合单用户使用 / 横向对比。
+    LANGCHAIN / AUTOGPT 未做每请求状态隔离，多用户并发可能串台，仅适合单用户
+    或横向对比；生产环境应使用 PYTHON。
     """
     from src.agent.core.skill_loader import scan_skills
     skills_map = scan_skills().loaded or None

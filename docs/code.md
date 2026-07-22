@@ -946,7 +946,7 @@ def require_admin(user: dict = Depends(get_current_user)) -> dict:
 - 改空状态欢迎页的文案和快捷提示
 - 新增一个左侧导航入口 + 对应页面
 
-#### 规范与排错
+规范与排错
 
 - 改完怎么自检：npm run lint、TypeScript 类型报错怎么读
 - 常见报错对照表（白屏 / key 警告 / 类型不匹配）
@@ -1423,7 +1423,7 @@ Golden 管理：维护 RAG 评估的「标准答案集」，可从已入库文�
 - 难度判定：按 MODEL_ROUTING_MODE 用规则 / 小模型分类器估难度（easy / medium / hard）→ 映射到目标档位（tier）。
 - 选模型：池内选不弱于目标档、且不高于用户基准档的最便宜模型；auto 的基准 = 池内最高档，所以只向下降级。
 - 手选 = 不路由：用户锁定具体模型时严格用该模型，不触发路由。
-- 软失败：分类 / 调用出错一律回落基准模型，绝不阻断对话；降级模型遇瞬时错误还会回退基准重试一次（见 chat 编排）。
+- 软失败：分类 / 调用出错一律回落基准模型，不阻断对话；降级模型遇瞬时错误回退基准重试一次。
 - 透明度：final_answer 带 model + downgraded，前端气泡标注实际模型；省下的钱按基准价 − 实际价记入降本看板。
 
 代码：
@@ -1513,3 +1513,141 @@ CLI 与 UI 两入口共用一套日志基建（格式 / 级别 / 上下文 / 滚
 - CLI 入口 : cli/main.py（_Tee + _LogFile 按大小滚动）
 - 启动脚本 : tools/dev_server.ps1（shell 重定向 uvicorn.boot.log / vite.log）
 
+# 5. 并发模型
+
+Web 后端单进程、单 asyncio 事件循环（每个 uvicorn worker 一个）。在这个模型上叠三层：
+- 协程做 HTTP / SSE 编排；
+- 线程池跑同步阻塞活（Agent、LLM、SQLite）；
+- 锁 + 信号量保护进程级单例。CLI 不经这套，基本单线程同步。
+
+## 5.1. 进程里有什么在跑
+
+| 机制 | 用途 | 典型位置 |
+| --- | --- | --- |
+| 协程 | 不阻塞事件循环的 I/O 与编排 | chat_stream、_event_gen、KB 入库 SSE |
+| 线程池 | 同步阻塞工作 | agent.run、sync 路由、run_in_threadpool、asyncio.to_thread |
+| threading.Lock | 多线程安全访问 SQLite 单例 | 各 *Store |
+| BoundedSemaphore | 限制同时跑几个 Agent | chat.py · _AGENT_SEMAPHORE |
+| contextvars | 请求级 user_id、取消事件 | user_context.py、run_cancel.py |
+| 子进程 | 与请求解耦的重任务 | eval_runner.py 离线评估 |
+
+## 5.2. HTTP 层：协程 vs 线程
+
+大多数路由是 def（sessions、auth、plans 等），不是 async def。FastAPI 把它们丢进线程池执行，避免同步 SQLite / 业务逻辑卡住事件循环。
+
+明确的 async 路由很少，只有需要长连接 / 流式推送的：
+
+- POST /api/chat/stream（chat.py）—— SSE 边收边推
+- POST /api/kb/upload 的 SSE 部分（kb.py）—— 入库进度流
+- POST /api/backup/restore（backup.py）—— 大文件上传
+
+其余包括 POST /api/chat（非流式）都是同步路由，整条链路阻塞在线程池线程里。
+
+鉴权依赖 get_current_user 是 async：查 cookie / SQLite 用 run_in_threadpool，set_current_user 必须在 async 上下文里调用（见 5.4）。
+
+## 5.3. 两条 Chat 路径
+
+非流式 POST /api/chat（def chat）：
+
+```
+HTTP → FastAPI 线程池 → with _AGENT_SEMAPHORE, use_user → agent.run（同步，含 LLM / tools / store）→ 返回 JSON
+```
+
+流式 POST /api/chat/stream（async def chat_stream）—— 项目里最完整的协程 + 线程协作：
+
+```
+chat_stream（协程）
+  ├─ create_task(_drive_agent)        # 协程：run_in_executor 等 Agent 跑完，收尾，塞 sentinel
+  ├─ create_task(_watch_disconnect)  # 协程：每 0.2s 查断连，设 cancel_event
+  └─ EventSourceResponse(_event_gen) # 协程：await queue.get() → yield SSE 帧
+
+线程池线程：agent.run → _on_event → SseOutbound.enqueue_from_thread → call_soon_threadsafe → asyncio.Queue
+```
+
+| 角色 | 运行环境 | 做什么 |
+| --- | --- | --- |
+| _event_gen | 协程 | 从 Queue 取事件，推给浏览器 |
+| _drive_agent | 协程 | 等 Agent 跑完，记用量 / trace，发 sentinel 关流 |
+| _watch_disconnect | 协程 | 监听客户端断开 |
+| agent.run | 线程池线程 | 同步 ReAct + 阻塞 LLM |
+| _on_event | 线程池线程 | 回调里把事件桥回事件循环 |
+
+KB 入库 SSE（kb.py）同一套路：asyncio.to_thread(ingest_one) + call_soon_threadsafe + asyncio.Queue。
+
+## 5.4. 鉴权与用户上下文
+
+stores/user_context.py 用 contextvars 维护「当前请求是哪个用户」—— Agent 是进程级单例，tools 调 store 时拿不到 HTTP 请求对象，store 方法不显式传 user_id 时回落到 current_user_id()。
+
+- get_current_user（deps.py）：async 依赖，在事件循环里 set_current_user；DB 查询走 run_in_threadpool。
+- 流式 chat：run_in_executor 不会自动复制 contextvars，线程入口必须再包 use_user(user_id)，否则 store 会落到 DEFAULT_USER_ID。
+- run_cancel（agent/core/run_cancel.py）：cancel_scope 同样用 contextvars 绑定 threading.Event，须在跑 agent 的线程里激活。
+
+## 5.5. Agent 核心：刻意同步
+
+agent.run、LLM chat()、RAG 检索、tool 执行都是同步阻塞代码，不在内层再开协程。设计意图：Agent 逻辑用同步写更清晰；LLM SDK 是阻塞 HTTP；通过「扔到线程池」与 FastAPI 事件循环隔离，而不是把整个 Agent 改成 async。
+
+进程级单例 Agent（deps.get_agent）多请求共用，靠这些不串台：
+
+- session_id / event_callback 作为 per-run 入参传入 run()，不写实例字段
+- _AGENT_SEMAPHORE 限制并发 run 数（MAX_CONCURRENT_AGENT_RUNS）
+- use_user 绑定当前用户
+
+协作式取消：客户端断开 → cancel_event.set() → run_cancel.is_cancelled() 在轮次边界轮询；取消协程不等于立刻杀掉线程，线程可能还在跑直到 Agent 检测到 cancel。_event_gen 的 finally 里也会 cancel run_task、关 outbound。
+
+## 5.6. Store 层：线程安全
+
+所有 SQLite store 同一模式：
+
+- sqlite3.connect(..., check_same_thread=False)：连接可跨线程
+- 每实例一个 threading.Lock：读写串行化
+- 进程级 get_shared_store() 单例：多请求、多线程池线程共享
+
+plan / quiz / srs 等：API 与 LLM 工具共用 get_shared_store() 一条连接。session_store / user_memory：API（deps lru_cache）与 Agent（agent_commons / agent.py）各持一条连接、同一 DB 文件，靠 Lock + SQLite 文件锁兜底（见 deps.py 模块注释）。正确性无虞，高并发下偶有 database is locked 重试。
+
+## 5.7. 其他并发点
+
+- MCP 管理：独立线程 + call_soon_threadsafe（agent/core/mcp_manager.py）
+- 配置覆盖 / API keys：threading.RLock（api/runtime/config_overrides.py、api_keys.py）
+- Chroma 客户端：模块级 threading.Lock（rag/chroma_client.py）
+- 离线评估：subprocess.Popen + 单任务全局锁，与 HTTP 线程 / 协程无关（services/eval_runner.py）
+- CLI：单线程，agent.run 直接调用，不经 asyncio
+
+## 5.8. 流式 chat 串起来
+
+见 3.7.3 节请求流程；下图只强调三协程与线程池的分工：
+
+```mermaid
+graph TD
+  B[浏览器] <--SSE--> GEN[_event_gen 协程]
+  EL[事件循环] --> GEN
+  EL --> DRV[_drive_agent 协程]
+  EL --> DISC[_watch_disconnect 协程]
+  DRV -->|run_in_executor| TP[线程池 agent.run + LLM + tools]
+  TP -->|enqueue_from_thread| Q[asyncio.Queue]
+  Q --> GEN
+  DISC -->|cancel_event| TP
+  TP --> STORES[(Store 单例 + Lock)]
+```
+
+_event_gen 的 finally（chat.py 508–515 行）：只要生成器被启动过就一定会跑——正常收 sentinel、断连、或 yield 异常都会进；缓存命中 early return 不走这条路径。清理：设 cancel_event、取消 disconnect_task、关 outbound、必要时 cancel run_task。
+
+## 5.9. 设计取舍
+
+读并发相关代码时记住这几条：
+
+1. 事件循环只做编排和 SSE，重活在线程池——这是主线，不是全栈 async。
+2. 大部分 API 是同步路由；只有长连接 / 流式才用协程。
+3. Agent 是单例 + 信号量限流，不是每请求 new 一个 Agent。
+4. LANGCHAIN / AUTOGPT 实现仍有实例级可变状态，多用户并发可能串台；生产应用 IMP_METHOD=PYTHON（见 deps.py）。
+5. 子进程只用于 eval，不在请求热路径上。
+
+代码：
+
+- 流式编排 : api/routes/chat.py（_AGENT_SEMAPHORE · chat · chat_stream · _drive_agent · _event_gen）
+- 线程→协程桥 : api/sse_outbound.py（enqueue_from_thread · call_soon_threadsafe）
+- 协作取消 : agent/core/run_cancel.py（cancel_scope · is_cancelled）
+- 用户上下文 : stores/user_context.py（set_current_user · use_user · current_user_id）
+- 依赖与单例 : api/deps.py（get_agent · get_shared_store · get_current_user）
+- KB 入库 SSE : api/routes/kb.py（asyncio.to_thread · _ingest_event_stream）
+- MCP : agent/core/mcp_manager.py
+- 离线 eval : services/eval_runner.py（子进程 + 单任务锁）

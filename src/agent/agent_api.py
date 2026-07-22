@@ -1,21 +1,12 @@
 """
-AgentAPI —— 表现层 ↔ Agent core 的对外契约
+AgentAPI —— 表现层与 Agent core 之间的对外契约。
 
-设计意图：
-- 表现层（CLI / 未来 Web UI / SDK）调用 Agent 只依赖本契约
-- 三种 Agent 实现（Python / LangChain / AutoGPT）通过 duck typing 都满足此 Protocol
-- 任一实现破坏契约会在 `tests/test_agent_protocol.py` 的 `isinstance` 断言上 CI 红出来
-- 用 `typing.Protocol + runtime_checkable` 而非抽象基类 —— 三种 Agent 是并列实现,
-  不存在父类关系；runtime_checkable 让 isinstance 校验可用
+调用方（CLI / Web API / SDK）只依赖本 Protocol，不绑定 Agent / LangChainAgent /AutoGPTAgent 任一具体类。
+三种实现并列、无共同父类，故用 typing.Protocol +runtime_checkable 而非抽象基类；
+契约破坏由 tests/agent/test_agent_protocol.py 的 isinstance 断言在 CI 报错。
 
-命名说明：
-- 此处的 `AgentAPI` 即架构图里"表现层 ↔ Agent core"边界上的那个节点
-- 历史上叫过 `BaseAgent`，但容易与"loop ↔ 公共层"的内部契约混淆，故改名为 `AgentAPI`
-- 文件名 `agent_api.py` 与项目内 `*_agent.py / *_history.py / *_provider.py`
-  命名 pattern 一致，避免与笼统的 `api.py` 混淆
-
-为什么不放 `src/agent/core/`：core/ 是"helper 实现"层（HistoryManager 等），
-`AgentAPI` 是"对外契约"层；放 `src/agent/` 顶层更符合"包入口契约"的语义。
+命名：历史上叫 BaseAgent，易与 loop 层内部契约混淆，故改为 AgentAPI。
+文件放 src/agent/ 顶层而非 core/：core 是 helper 实现层，本文件是包入口契约。
 """
 from __future__ import annotations
 
@@ -28,17 +19,16 @@ from src.agent.core.event_bus import AgentEvent, EventBus
 @runtime_checkable
 class AgentAPI(Protocol):
     """
-    三种 Agent 实现（Python / LangChain / AutoGPT）共享的最小对外契约。
+    三种 Agent 实现共享的最小对外契约。
 
-    实例属性（运行时必须可读）：
-        session_id:    会话 ID（uuid 字符串）
-        last_usage:    最近一次 run() 的 token 统计；从未运行时为 None
-        thinking_cfg:  Extended Thinking 配置（None 表示未启用）
-        events:        `EventBus` 实例 —— 高级订阅者直接 `agent.events.subscribe(...)`
-                       即可订阅特定事件类型；普通用例用 `set_event_callback` 即可
+    可读实例属性：
+        session_id:   会话 ID（uuid 字符串）
+        last_usage:   最近一次 run() 的 token 统计，未运行过为 None
+        thinking_cfg: Extended Thinking 配置，未启用为 None
+        events:       EventBus；按事件类型细粒度订阅用 events.subscribe，
+                      一般场景用 set_event_callback 即可
 
-    Note: 不在此 Protocol 中暴露 `_session_store / _llm / _tools` 等实现内部字段，
-    避免把表现层耦合到具体实现。
+    不暴露 _session_store / _llm / _tools 等内部字段，避免表现层耦合实现细节。
     """
 
     session_id: str

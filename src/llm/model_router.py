@@ -190,10 +190,13 @@ def _difficulty(query: str, mode: str, classifier_model: str) -> tuple[str, str]
 class RouteDecision:
     """一次路由的结果。
 
-    model_id:  实际要用的模型（已解析，绝不是 auto）。
-    baseline:  "不路由时本应使用"的模型，用于估算节省。
-    downgraded: 是否真的降到了更便宜的档位。
-    difficulty / mode / reason: 供日志 / 看板说明。
+    model_id:   本次实际调用的模型 id（已解析，不会是 auto）。
+    baseline:   未做向下路由时应使用的模型：用户手选即该模型，auto 档取候选池内最高档。
+                chat 在路由模型瞬时失败时会回退到 baseline 重试。
+    downgraded: 是否从 baseline 降到了更便宜的模型（model_id != baseline）。
+    difficulty: 问题难度估计（easy / medium / hard）；未走路由判定时为空串。
+    mode:       难度判定方式（rule / classifier / hybrid 等），或 off 表示路由未启用。
+    reason:     人类可读的路由说明，供日志与前端展示。
     """
 
     model_id: str

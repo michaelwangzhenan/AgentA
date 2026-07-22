@@ -316,11 +316,10 @@ async def chat_stream(
     history: SessionStore = Depends(get_session_store),
     users: UserStore = Depends(get_user_store),
 ) -> EventSourceResponse:
-    """SSE 流式聊天：Agent.run 扔 thread pool，事件经 asyncio.Queue 流给 SSE。
+    """SSE 流式聊天：Agent.run 在 executor 线程执行，事件经 Queue 推给客户端。
 
-    帧格式：`event: message` + `data: {"type": "<event_type>", "payload": {...}}`
-    收到 `final_answer` 或 Agent.run 结束（含异常） → 流自动关闭。
-    缓存命中时直接发 token_chunk + final_answer 两帧（payload.cached=True），不跑 agent。
+    每帧 event=message，data 为 JSON（含 type、payload）。运行结束（含异常）后发sentinel 关流。
+    语义缓存命中时只发 token_chunk + final_answer 两帧（payload.cached=True），不启动 Agent。
     """
     if not req.message or not req.message.strip():
         raise HTTPException(status_code=422, detail="message must be non-empty")
@@ -332,7 +331,7 @@ async def chat_stream(
     fresh = _is_fresh_session(history, session_id, user["id"])
 
     # Deep Research：重质量不重速度 —— 跳过语义缓存（多源研究永不可缓存）+ 跳过模型降级
-    # 路由（绝不向下换便宜模型），用用户选定 / 基准模型。
+    # 路由（不向下换便宜模型），用用户选定 / 基准模型。
     is_deep = bool(req.mode == "deep_research" and _cfg.DEEP_RESEARCH_ENABLED)
     if is_deep:
         # 跳过难度分类 / 降级路由（enabled=False 不调分类 LLM），但仍要把 auto 解析成
