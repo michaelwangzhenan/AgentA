@@ -981,6 +981,9 @@ TOOL_ALLOWLIST: str = os.getenv("TOOL_ALLOWLIST", "")
 # 是否启用 plan-execute 用户审批 mode（可选值：true / false）
 # 开启后 LLM 调 make_plan 后 CLI 弹 yes/no 提问；no → 当前 query 中止
 PLAN_PERMISSION_MODE: bool = os.getenv("PLAN_PERMISSION_MODE", "false").lower() == "true"
+# 是否仅允许学习相关问答（可选值：true / false）
+# 开启后非学习话题在进主对话前被拒答，每条消息额外调用 kimi-k2.5 分类
+LEARNING_SCOPE_ONLY: bool = os.getenv("LEARNING_SCOPE_ONLY", "false").lower() == "true"
 
 # ── MCP（Model Context Protocol）接入配置 ────────────────────────
 # 是否启用 MCP 接入（可选值：true / false）

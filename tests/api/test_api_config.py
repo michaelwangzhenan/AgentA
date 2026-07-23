@@ -172,6 +172,15 @@ def test_patch_bool_takes_effect_immediately(client: TestClient) -> None:
     assert _cfg.RAG_QUERY_REWRITE_ENABLED is False
 
 
+def test_patch_learning_scope_only_takes_effect_immediately(client: TestClient) -> None:
+    r = client.patch("/api/config/LEARNING_SCOPE_ONLY", json={"value": True})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["item"]["value"] is True
+    assert body["item"]["source"] == "override"
+    assert _cfg.LEARNING_SCOPE_ONLY is True
+
+
 def test_patch_int_within_range(client: TestClient) -> None:
     r = client.patch("/api/config/RAG_TOP_K", json={"value": 12})
     assert r.status_code == 200

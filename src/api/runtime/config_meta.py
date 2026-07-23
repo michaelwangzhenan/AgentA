@@ -462,6 +462,15 @@ REGISTRY: list[ConfigItem] = [
         detail="LLM 制定 plan 前弹确认；拒绝则中止本次问答。",
         danger=True,
     ),
+    ConfigItem(
+        key="LEARNING_SCOPE_ONLY",
+        group="security",
+        type=ItemType.BOOL,
+        brief="仅学习相关问答",
+        detail="开启后非学习话题将拒答；每条用户问题额外调用一次 kimi-k2.5 分类。",
+        section="内容审核",
+        danger=True,
+    ),
     # ─── Web ──────────────────────────────────────────────────────────────
     ConfigItem(
         key="WEB_UPLOAD_DIR",

@@ -41,8 +41,17 @@ from src.stores.usage_store import (
 from src.stores.user_store import UserStore
 from src.services.log_setup import set_session_id
 from src.services.llm_user_message import final_answer_payload, friendly_llm_error
+from src.services.learning_scope import (
+    CLASSIFIER_MODEL,
+    classify as classify_learning_scope,
+    out_of_scope_reply,
+)
 from src.services.sensitive_word_filter import get_shared_filter
-from src.stores.security_event_store import EVENT_INPUT_FILTER, get_shared_store as get_security_event_store
+from src.stores.security_event_store import (
+    EVENT_INPUT_FILTER,
+    EVENT_LEARNING_SCOPE,
+    get_shared_store as get_security_event_store,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +85,31 @@ def _check_input_filter(message: str, user_id: int) -> str | None:
     except Exception:
         logger.warning("[chat] input_filter 安全事件写入失败（仍拦截）", exc_info=True)
     return _INPUT_FILTER_BLOCKED_DETAIL
+
+
+def _check_learning_scope(message: str, user_id: int) -> str | None:
+    """学习范围检查：范围外返回统一提示文案；范围内或未开启时返回 None。"""
+    if not _cfg.LEARNING_SCOPE_ONLY:
+        return None
+
+    result = classify_learning_scope(message)
+    if result.in_scope:
+        return None
+
+    detail = json.dumps(
+        {
+            "model": CLASSIFIER_MODEL,
+            "in_scope": False,
+            "reason": result.reason,
+            "action": "blocked",
+        },
+        ensure_ascii=False,
+    )
+    try:
+        get_security_event_store().record(EVENT_LEARNING_SCOPE, detail, user_id)
+    except Exception:
+        logger.warning("[chat] learning_scope 安全事件写入失败（仍拦截）", exc_info=True)
+    return out_of_scope_reply(result.reason)
 
 
 def _append_blocked_exchange(
@@ -301,6 +335,15 @@ def chat(
         return ChatResponse(
             reply=blocked, session_id=session_id, model="", input_filtered=True,
         )
+    scope_blocked = _check_learning_scope(req.message, user["id"])
+    if scope_blocked:
+        _append_blocked_exchange(history, session_id, user["id"], req.message, scope_blocked)
+        return ChatResponse(
+            reply=scope_blocked,
+            session_id=session_id,
+            model="",
+            learning_scope_filtered=True,
+        )
     prefs = effective_llm_prefs(users, user["id"])
     fresh = _is_fresh_session(history, session_id, user["id"])
 
@@ -416,6 +459,7 @@ async def chat_stream(
     每帧 event=message，data 为 JSON（含 type、payload）。运行结束（含异常）后发sentinel 关流。
     语义缓存命中时只发 token_chunk + final_answer 两帧（payload.cached=True），不启动 Agent。
     输入过滤命中时同样两帧返回（payload.input_filtered=True），不走 HTTP 错误。
+    问答范围限制命中时两帧返回（payload.learning_scope_filtered=True），不走 HTTP 错误。
     """
     if not req.message or not req.message.strip():
         raise HTTPException(status_code=422, detail="message must be non-empty")
@@ -435,6 +479,23 @@ async def chat_stream(
             )
 
         return EventSourceResponse(_blocked_gen(), headers=_SSE_HEADERS)
+
+    scope_blocked = _check_learning_scope(req.message, user["id"])
+    if scope_blocked:
+        _append_blocked_exchange(history, session_id, user["id"], req.message, scope_blocked)
+
+        async def _scope_blocked_gen():
+            yield _sse_frame("token_chunk", {"text": scope_blocked})
+            yield _sse_frame(
+                "final_answer",
+                {
+                    "text": scope_blocked,
+                    "usage": None,
+                    "learning_scope_filtered": True,
+                },
+            )
+
+        return EventSourceResponse(_scope_blocked_gen(), headers=_SSE_HEADERS)
 
     prefs = effective_llm_prefs(users, user["id"])
     fresh = _is_fresh_session(history, session_id, user["id"])
