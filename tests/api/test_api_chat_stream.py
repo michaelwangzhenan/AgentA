@@ -153,7 +153,7 @@ def test_stream_emits_thinking_plan_and_tool_events():
     ]
 
 
-def test_stream_agent_exception_emits_error_frame():
+def test_stream_agent_exception_emits_friendly_final_answer():
     fake = FakeAgent(run_raises=RuntimeError("provider down"))
     app.dependency_overrides[get_agent] = lambda: fake
 
@@ -162,11 +162,42 @@ def test_stream_agent_exception_emits_error_frame():
         body = "".join(chunk for chunk in r.iter_text())
 
     frames = _parse_sse(body)
-    assert len(frames) >= 1
-    error_frame = frames[-1]["data"]
-    assert error_frame["type"] == "error"
-    assert "provider down" in error_frame["payload"]["message"]
-    assert error_frame["payload"]["recoverable"] is False
+    types = [f["data"]["type"] for f in frames]
+    assert "error" not in types
+    assert types[-1] == "final_answer"
+    final = frames[-1]["data"]["payload"]
+    assert final["provider_error"] is True
+    assert "provider down" not in final["text"]
+    assert types.count("token_chunk") >= 1
+
+
+def test_stream_content_risk_emits_blocked_reply():
+    from src.agent.core.event_bus import AgentEvent
+
+    raw = (
+        "Error code: 400 - {'error': {'message': 'Content Exists Risk', "
+        "'type': 'invalid_request_error'}}"
+    )
+    fake = FakeAgent(
+        events_to_emit=[
+            AgentEvent(
+                type="error",
+                payload={"message": raw, "recoverable": False, "phase": "llm_call"},
+            ),
+        ],
+        run_raises=RuntimeError(raw),
+    )
+    app.dependency_overrides[get_agent] = lambda: fake
+
+    with client.stream("POST", "/api/chat/stream", json={"message": "x"}) as r:
+        assert r.status_code == 200
+        body = "".join(chunk for chunk in r.iter_text())
+
+    frames = _parse_sse(body)
+    types = [f["data"]["type"] for f in frames]
+    assert "error" not in types
+    final = frames[-1]["data"]["payload"]
+    assert final["text"] == "尊敬的用户您好，让我们换个话题再聊聊吧。"
 
 
 def test_stream_missing_message_returns_422():

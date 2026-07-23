@@ -40,6 +40,7 @@ from src.stores.usage_store import (
 )
 from src.stores.user_store import UserStore
 from src.services.log_setup import set_session_id
+from src.services.llm_user_message import final_answer_payload, friendly_llm_error
 from src.services.sensitive_word_filter import get_shared_filter
 from src.stores.security_event_store import EVENT_INPUT_FILTER, get_shared_store as get_security_event_store
 
@@ -86,6 +87,46 @@ def _append_blocked_exchange(
 ) -> None:
     history.append(session_id, {"role": "user", "content": message}, user_id=user_id)
     history.append(session_id, {"role": "assistant", "content": reply}, user_id=user_id)
+
+
+def _append_assistant_reply(
+    history: SessionStore, session_id: str, user_id: int, reply: str
+) -> None:
+    history.append(session_id, {"role": "assistant", "content": reply}, user_id=user_id)
+
+
+def _provider_failure_response(
+    reply: str, session_id: str, model: str = ""
+) -> ChatResponse:
+    return ChatResponse(
+        reply=reply, session_id=session_id, model=model, provider_error=True,
+    )
+
+
+def _enqueue_provider_failure(
+    outbound: SseOutbound,
+    reply: str,
+    *,
+    used_model: str = "",
+    downgraded: bool = False,
+) -> None:
+    payload = final_answer_payload(reply)
+    payload["model"] = used_model
+    payload["downgraded"] = downgraded
+    outbound.enqueue_now({"type": "token_chunk", "payload": {"text": reply}})
+    outbound.enqueue_now({"type": "final_answer", "payload": payload})
+
+
+def _handle_provider_failure(
+    exc: Exception | str,
+    *,
+    history: SessionStore,
+    session_id: str,
+    user_id: int,
+) -> str:
+    friendly = friendly_llm_error(exc)
+    _append_assistant_reply(history, session_id, user_id, friendly)
+    return friendly
 
 
 def _check_session_owner(store: SessionStore, session_id: str | None, user_id: int) -> None:
@@ -311,10 +352,16 @@ def chat(
                 reply, usage_holder, collector = _run_once(used_model)
             except Exception as exc2:
                 logger.exception("[/api/chat] fallback 仍失败")
-                raise HTTPException(status_code=500, detail=f"agent error: {exc2}") from exc2
+                friendly = _handle_provider_failure(
+                    exc2, history=history, session_id=session_id, user_id=user["id"],
+                )
+                return _provider_failure_response(friendly, session_id, used_model)
         else:
             logger.exception("[/api/chat] agent.run 抛异常")
-            raise HTTPException(status_code=500, detail=f"agent error: {exc}") from exc
+            friendly = _handle_provider_failure(
+                exc, history=history, session_id=session_id, user_id=user["id"],
+            )
+            return _provider_failure_response(friendly, session_id, used_model)
 
     usage = usage_holder.get("usage")
     _record_run_usage(user["id"], used_model, prefs.thinking_enabled, usage, session_id)
@@ -446,7 +493,19 @@ async def chat_stream(
         "collector": TraceCollector(),
         "held_errors": [],
         "suppress": fresh and decision.downgraded and _cfg.MODEL_ROUTING_ENABLED,
+        "provider_failure_sent": False,
+        "provider_failure_reply": "",
     }
+
+    def _stream_downgraded() -> bool:
+        return bool(decision.downgraded and used_model == decision.model_id)
+
+    def _emit_provider_failure(reply: str) -> None:
+        _state["provider_failure_sent"] = True
+        _state["provider_failure_reply"] = reply
+        _enqueue_provider_failure(
+            outbound, reply, used_model=used_model, downgraded=_stream_downgraded(),
+        )
 
     def _on_event(event: Any) -> None:
         et = getattr(event, "type", None)
@@ -469,11 +528,15 @@ async def chat_stream(
         # 透明度：在 final_answer 帧带上本次实际应答模型 + 是否被降级，供前端气泡标注
         if et == "final_answer" and isinstance(frame.get("payload"), dict):
             frame["payload"]["model"] = used_model
-            frame["payload"]["downgraded"] = bool(
-                decision.downgraded and used_model == decision.model_id
-            )
-        if et == "error" and _state["suppress"]:
-            _state["held_errors"].append(frame)
+            frame["payload"]["downgraded"] = _stream_downgraded()
+        if et == "error":
+            payload = frame.get("payload") or {}
+            if _state["suppress"]:
+                _state["held_errors"].append(frame)
+                return
+            if payload.get("recoverable"):
+                return
+            _emit_provider_failure(friendly_llm_error(payload.get("message", "")))
             return
         outbound.enqueue_from_thread(frame)
 
@@ -515,12 +578,12 @@ async def chat_stream(
             await loop.run_in_executor(None, _sync_run)
         except Exception as exc:
             logger.exception("[/api/chat/stream] agent.run 抛异常")
-            for f in _state["held_errors"]:
-                outbound.enqueue_now(f)
-            outbound.enqueue_now({
-                "type": "error",
-                "payload": {"message": str(exc), "recoverable": False, "phase": "run"},
-            })
+            if _state["provider_failure_sent"]:
+                friendly = _state["provider_failure_reply"]
+            else:
+                friendly = friendly_llm_error(exc)
+                _emit_provider_failure(friendly)
+            _append_assistant_reply(history, session_id, user["id"], friendly)
         finally:
             _record_run_usage(
                 user["id"], used_model, prefs.thinking_enabled,

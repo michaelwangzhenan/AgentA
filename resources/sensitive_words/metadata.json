@@ -1,7 +1,7 @@
 {
   "upstream": "houbb/sensitive-word-data",
   "upstream_commit": "fe6fc2921836",
-  "generated_at": "2026-07-23T02:45:15Z",
+  "generated_at": "2026-07-23T05:20:40Z",
   "version": "2026.07.23",
   "word_count": 5000
 }

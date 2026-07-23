@@ -62,15 +62,47 @@ def test_chat_message_too_large_returns_413(monkeypatch):
     assert r.status_code == 413
 
 
-def test_chat_agent_exception_returns_500():
+def test_chat_agent_exception_returns_friendly_reply():
     mock = _mock_agent(raises=RuntimeError("LLM provider down"))
     app.dependency_overrides[get_agent] = lambda: mock
 
     r = client.post("/api/chat", json={"message": "hi"})
 
-    assert r.status_code == 500
-    assert "agent error" in r.json()["detail"]
-    assert "LLM provider down" in r.json()["detail"]
+    assert r.status_code == 200
+    body = r.json()
+    assert body["provider_error"] is True
+    assert "切换" in body["reply"] or "稍后重试" in body["reply"]
+    assert "provider down" not in body["reply"]
+    assert "{" not in body["reply"]
+
+
+def test_chat_content_risk_returns_blocked_reply():
+    raw = (
+        "Error code: 400 - {'error': {'message': 'Content Exists Risk', "
+        "'type': 'invalid_request_error'}}"
+    )
+    mock = _mock_agent(raises=RuntimeError(raw))
+    app.dependency_overrides[get_agent] = lambda: mock
+
+    r = client.post("/api/chat", json={"message": "敏感话题"})
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["provider_error"] is True
+    assert body["reply"] == chat_mod._INPUT_FILTER_BLOCKED_DETAIL
+
+
+def test_chat_insufficient_balance_suggests_switch_llm():
+    mock = _mock_agent(raises=RuntimeError("Insufficient balance"))
+    app.dependency_overrides[get_agent] = lambda: mock
+
+    r = client.post("/api/chat", json={"message": "hi"})
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["provider_error"] is True
+    assert "余额" in body["reply"]
+    assert "切换" in body["reply"]
 
 
 def test_chat_with_session_id_passes_it_to_run():
