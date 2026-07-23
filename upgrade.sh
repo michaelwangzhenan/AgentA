@@ -124,31 +124,38 @@ if [ "$WORD_PACK_CHANGED" = true ]; then
   fi
 fi
 
-# nginx 健康检查：HTTPS 部署后 server_name 为域名，裸访 127.0.0.1 会 404
-check_nginx() {
-  if curl -sfI "http://127.0.0.1/" >/dev/null 2>&1; then
-    curl -sI "http://127.0.0.1/" | head -1
+# nginx 健康检查：HTTPS 部署后裸访 127.0.0.1 可能 404；reload / 后端重启后需短暂等待。
+# 优先本机 Host 头探测，避免走公网 HTTPS 的偶发超时。
+check_nginx_once() {
+  local code line conf="/etc/nginx/sites-available/agenta"
+
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1/" 2>/dev/null || true)
+  if [[ "$code" =~ ^[23] ]]; then
+    line=$(curl -sI --max-time 5 "http://127.0.0.1/" 2>/dev/null | head -1)
+    [ -n "$line" ] && echo "$line"
     return 0
   fi
 
-  local conf="/etc/nginx/sites-available/agenta"
   [ -f "$conf" ] || return 1
 
   local name
   while read -r name; do
     [ -z "$name" ] || [ "$name" = "_" ] && continue
     if [[ "$name" =~ ^[0-9.]+$ ]]; then
-      if curl -sfI "http://${name}/" >/dev/null 2>&1; then
-        curl -sI "http://${name}/" | head -1
+      code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://${name}/" 2>/dev/null || true)
+      if [[ "$code" =~ ^[23] ]]; then
+        curl -sI --max-time 5 "http://${name}/" 2>/dev/null | head -1
         return 0
       fi
     else
-      if curl -sfI "https://${name}/" >/dev/null 2>&1; then
-        curl -sI "https://${name}/" | head -1
+      code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -H "Host: ${name}" "http://127.0.0.1/" 2>/dev/null || true)
+      if [[ "$code" =~ ^[23] ]]; then
+        curl -sI --max-time 5 -H "Host: ${name}" "http://127.0.0.1/" 2>/dev/null | head -1
         return 0
       fi
-      if curl -sfI -H "Host: ${name}" "http://127.0.0.1/" >/dev/null 2>&1; then
-        curl -sI -H "Host: ${name}" "http://127.0.0.1/" | head -1
+      code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 "https://${name}/" 2>/dev/null || true)
+      if [[ "$code" =~ ^[23] ]]; then
+        curl -sI --max-time 8 "https://${name}/" 2>/dev/null | head -1
         return 0
       fi
     fi
@@ -157,7 +164,19 @@ check_nginx() {
   return 1
 }
 
-if ! check_nginx; then
-  echo "ERROR: nginx check failed"
+NGINX_OK=false
+NGINX_LINE=""
+for _ in $(seq 1 30); do
+  if NGINX_LINE=$(check_nginx_once); then
+    echo "$NGINX_LINE"
+    NGINX_OK=true
+    break
+  fi
+  sleep 1
+done
+
+if [ "$NGINX_OK" != true ]; then
+  echo "ERROR: nginx check failed after 30s"
+  sudo nginx -t 2>&1 || true
   exit 1
 fi
