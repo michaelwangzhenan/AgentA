@@ -14,13 +14,29 @@ from __future__ import annotations
 import pytest
 
 from src.agent.agent import SYSTEM_PROMPT
+from src.services.llm_user_message import CONTENT_BLOCKED_REPLY
 
 
 # ---------------------------------------------------------------------------
 # 1. 结构性不变量：H2 节点必须存在
 # ---------------------------------------------------------------------------
 class TestSystemPromptStructure:
-    """SYSTEM_PROMPT 的 4 大功能节是基石；任何节缺失都意味着关键约束丢了。"""
+    """SYSTEM_PROMPT 的 5 大功能节是基石；任何节缺失都意味着关键约束丢了。"""
+
+    def test_h2_content_safety_exists(self) -> None:
+        """内容安全节必须存在 —— 模型自审规则缺失则有害内容可能直接输出。"""
+        assert "## 内容安全" in SYSTEM_PROMPT
+
+    def test_content_safety_before_plan_protocol(self) -> None:
+        """内容安全节须排在 Plan 协议之前 —— 回答前先做风险检查。"""
+        safety_idx = SYSTEM_PROMPT.find("## 内容安全")
+        plan_idx = SYSTEM_PROMPT.find("## Plan / Tool 调用协议")
+        assert safety_idx >= 0 and plan_idx >= 0
+        assert safety_idx < plan_idx
+
+    def test_content_safety_blocked_reply_matches_constant(self) -> None:
+        """拒答文案须与输入过滤 / LLM 供应商拦截的统一提示一致。"""
+        assert CONTENT_BLOCKED_REPLY in SYSTEM_PROMPT
 
     def test_h2_plan_tool_protocol_exists(self) -> None:
         """Plan / Tool 决策入口节必须存在 —— 缺失则 LLM 无 plan 协议指引，复杂任务会
