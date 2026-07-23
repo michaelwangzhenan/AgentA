@@ -41,7 +41,14 @@ class TestStore:
 
         s = store.summary(0, int(time.time()) + 10)
         assert s["total"] == 4
-        assert s["by_type"] == {"scrub": 2, "tool": 1, "ssrf": 1, "input_filter": 0}
+        assert s["by_type"] == {
+            "scrub": 2,
+            "tool": 1,
+            "ssrf": 1,
+            "input_filter": 0,
+            "learning_scope": 0,
+            "semantic_review": 0,
+        }
 
     def test_summary_filters_user(self, store: SecurityEventStore) -> None:
         store.record(EVENT_TOOL, "a", user_id=1)
@@ -60,7 +67,14 @@ class TestStore:
     def test_summary_empty_by_type_keys(self, store: SecurityEventStore) -> None:
         s = store.summary(0, int(time.time()) + 10)
         assert s["total"] == 0
-        assert set(s["by_type"].keys()) == {"scrub", "tool", "ssrf", "input_filter"}
+        assert set(s["by_type"].keys()) == {
+            "scrub",
+            "tool",
+            "ssrf",
+            "input_filter",
+            "learning_scope",
+            "semantic_review",
+        }
 
     def test_list_events_filter_sort_paginate(self, store: SecurityEventStore) -> None:
         for i in range(6):

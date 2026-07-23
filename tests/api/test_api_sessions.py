@@ -335,3 +335,21 @@ def test_store_rename_returns_false_when_not_exist(store: SessionStore) -> None:
 def test_store_create_empty_idempotent(store: SessionStore) -> None:
     assert store.create_empty_session("s1") is True
     assert store.create_empty_session("s1") is False
+
+
+def test_store_replace_last_assistant(store: SessionStore) -> None:
+    sid = "s-replace"
+    store.create_empty_session(sid)
+    store.append(sid, {"role": "user", "content": "u0"})
+    store.append(sid, {"role": "assistant", "content": "原始回答"})
+    assert store.replace_last_assistant(sid, "拒答文案") is True
+    msgs = store.load(sid)
+    assert msgs[-1]["role"] == "assistant"
+    assert msgs[-1]["content"] == "拒答文案"
+
+
+def test_store_replace_last_assistant_no_assistant_returns_false(store: SessionStore) -> None:
+    sid = "s-no-assistant"
+    store.create_empty_session(sid)
+    store.append(sid, {"role": "user", "content": "u0"})
+    assert store.replace_last_assistant(sid, "x") is False

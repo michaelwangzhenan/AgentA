@@ -984,6 +984,9 @@ PLAN_PERMISSION_MODE: bool = os.getenv("PLAN_PERMISSION_MODE", "false").lower() 
 # 是否仅允许学习相关问答（可选值：true / false）
 # 开启后非学习话题在进主对话前被拒答，每条消息额外调用 kimi-k2.5 分类
 LEARNING_SCOPE_ONLY: bool = os.getenv("LEARNING_SCOPE_ONLY", "false").lower() == "true"
+# 是否对模型最终回答做语义复核（可选值：true / false）
+# 开启后每条回答额外调用 kimi-k2.5 检查逻辑/事实错误（非敏感词），流式首字延迟增加
+OUTPUT_SEMANTIC_REVIEW: bool = os.getenv("OUTPUT_SEMANTIC_REVIEW", "false").lower() == "true"
 
 # ── MCP（Model Context Protocol）接入配置 ────────────────────────
 # 是否启用 MCP 接入（可选值：true / false）

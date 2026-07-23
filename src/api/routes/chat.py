@@ -40,16 +40,22 @@ from src.stores.usage_store import (
 )
 from src.stores.user_store import UserStore
 from src.services.log_setup import set_session_id
-from src.services.llm_user_message import final_answer_payload, friendly_llm_error
+from src.services.llm_user_message import (
+    CONTENT_BLOCKED_REPLY,
+    final_answer_payload,
+    friendly_llm_error,
+)
 from src.services.learning_scope import (
     CLASSIFIER_MODEL,
     classify as classify_learning_scope,
     out_of_scope_reply,
 )
+from src.services.output_semantic_review import REVIEW_MODEL, review as review_output_semantic
 from src.services.sensitive_word_filter import get_shared_filter
 from src.stores.security_event_store import (
     EVENT_INPUT_FILTER,
     EVENT_LEARNING_SCOPE,
+    EVENT_SEMANTIC_REVIEW,
     get_shared_store as get_security_event_store,
 )
 
@@ -96,6 +102,11 @@ def _check_learning_scope(message: str, user_id: int) -> str | None:
     if result.in_scope:
         return None
 
+    logger.info(
+        "[chat] learning_scope 拦截 user_id=%s reason=%s",
+        user_id,
+        result.reason,
+    )
     detail = json.dumps(
         {
             "model": CLASSIFIER_MODEL,
@@ -110,6 +121,53 @@ def _check_learning_scope(message: str, user_id: int) -> str | None:
     except Exception:
         logger.warning("[chat] learning_scope 安全事件写入失败（仍拦截）", exc_info=True)
     return out_of_scope_reply(result.reason)
+
+
+def _apply_output_semantic_review(
+    user_message: str,
+    assistant_text: str,
+    user_id: int,
+    history: SessionStore,
+    session_id: str,
+) -> tuple[str, bool]:
+    """输出语义复核：unsafe 时覆盖会话 assistant 并返回拒答文案与 filtered 标记。"""
+    if not _cfg.OUTPUT_SEMANTIC_REVIEW:
+        return assistant_text, False
+    if not (assistant_text or "").strip():
+        return assistant_text, False
+
+    result = review_output_semantic(user_message, assistant_text)
+    if result.safe:
+        return assistant_text, False
+
+    logger.info(
+        "[chat] semantic_review 拦截 user_id=%s session=%s category=%s reason=%s",
+        user_id,
+        session_id,
+        result.category or "unknown",
+        result.reason,
+    )
+    detail = json.dumps(
+        {
+            "model": REVIEW_MODEL,
+            "safe": False,
+            "category": result.category or "unknown",
+            "reason": result.reason,
+            "action": "blocked",
+        },
+        ensure_ascii=False,
+    )
+    try:
+        get_security_event_store().record(EVENT_SEMANTIC_REVIEW, detail, user_id)
+    except Exception:
+        logger.warning("[chat] semantic_review 安全事件写入失败（仍拦截）", exc_info=True)
+    if not history.replace_last_assistant(session_id, CONTENT_BLOCKED_REPLY, user_id=user_id):
+        logger.warning(
+            "[chat] semantic_review 覆盖 assistant 失败 session=%s user_id=%s",
+            session_id,
+            user_id,
+        )
+    return CONTENT_BLOCKED_REPLY, True
 
 
 def _append_blocked_exchange(
@@ -147,6 +205,24 @@ def _enqueue_provider_failure(
     payload = final_answer_payload(reply)
     payload["model"] = used_model
     payload["downgraded"] = downgraded
+    outbound.enqueue_now({"type": "token_chunk", "payload": {"text": reply}})
+    outbound.enqueue_now({"type": "final_answer", "payload": payload})
+
+
+def _enqueue_semantic_review_blocked(
+    outbound: SseOutbound,
+    reply: str,
+    *,
+    used_model: str = "",
+    downgraded: bool = False,
+) -> None:
+    payload: dict[str, Any] = {
+        "text": reply,
+        "usage": None,
+        "semantic_review_filtered": True,
+        "model": used_model,
+        "downgraded": downgraded,
+    }
     outbound.enqueue_now({"type": "token_chunk", "payload": {"text": reply}})
     outbound.enqueue_now({"type": "final_answer", "payload": payload})
 
@@ -413,8 +489,19 @@ def chat(
     )
     if used_model == decision.model_id:  # 未 fallback 才记路由节省
         _record_route_saving(user["id"], decision, usage)
+    reply, semantic_filtered = _apply_output_semantic_review(
+        req.message, reply, user["id"], history, session_id,
+    )
+    if semantic_filtered:
+        usage_holder["text"] = reply
     _maybe_store_cache(cache_on, usage_holder, req.message, user["id"], used_model)
-    return ChatResponse(reply=reply, session_id=session_id, model=used_model, cached=False)
+    return ChatResponse(
+        reply=reply,
+        session_id=session_id,
+        model=used_model,
+        cached=False,
+        semantic_review_filtered=semantic_filtered,
+    )
 
 
 # ─── SSE 流式 ────────────────────────────────────────────────────
@@ -460,6 +547,7 @@ async def chat_stream(
     语义缓存命中时只发 token_chunk + final_answer 两帧（payload.cached=True），不启动 Agent。
     输入过滤命中时同样两帧返回（payload.input_filtered=True），不走 HTTP 错误。
     问答范围限制命中时两帧返回（payload.learning_scope_filtered=True），不走 HTTP 错误。
+    输出语义复核开启时缓冲 token/final_answer，审核后再下发或替换为拒答。
     """
     if not req.message or not req.message.strip():
         raise HTTPException(status_code=422, detail="message must be non-empty")
@@ -546,6 +634,7 @@ async def chat_stream(
     )
     queue = outbound.queue
     trace_id = str(uuid.uuid4())
+    review_on = _cfg.OUTPUT_SEMANTIC_REVIEW
 
     usage_holder: dict[str, Any] = {}
     # fallback 期间把第一次尝试的 error 帧暂存，不立即下发；真正失败时才 flush，
@@ -556,6 +645,7 @@ async def chat_stream(
         "suppress": fresh and decision.downgraded and _cfg.MODEL_ROUTING_ENABLED,
         "provider_failure_sent": False,
         "provider_failure_reply": "",
+        "stream_buffer": [],
     }
 
     def _stream_downgraded() -> bool:
@@ -590,6 +680,9 @@ async def chat_stream(
         if et == "final_answer" and isinstance(frame.get("payload"), dict):
             frame["payload"]["model"] = used_model
             frame["payload"]["downgraded"] = _stream_downgraded()
+        if review_on and et in ("token_chunk", "final_answer"):
+            _state["stream_buffer"].append(frame)
+            return
         if et == "error":
             payload = frame.get("payload") or {}
             if _state["suppress"]:
@@ -646,6 +739,29 @@ async def chat_stream(
                 _emit_provider_failure(friendly)
             _append_assistant_reply(history, session_id, user["id"], friendly)
         finally:
+            if (
+                review_on
+                and usage_holder.get("text")
+                and not _state["provider_failure_sent"]
+            ):
+                reviewed, semantic_filtered = _apply_output_semantic_review(
+                    req.message,
+                    str(usage_holder["text"]),
+                    user["id"],
+                    history,
+                    session_id,
+                )
+                if semantic_filtered:
+                    usage_holder["text"] = reviewed
+                    _enqueue_semantic_review_blocked(
+                        outbound,
+                        reviewed,
+                        used_model=used_model,
+                        downgraded=_stream_downgraded(),
+                    )
+                else:
+                    for frame in _state["stream_buffer"]:
+                        outbound.enqueue_now(frame)
             _record_run_usage(
                 user["id"], used_model, prefs.thinking_enabled,
                 usage_holder.get("usage"), session_id,

@@ -471,6 +471,15 @@ REGISTRY: list[ConfigItem] = [
         section="内容审核",
         danger=True,
     ),
+    ConfigItem(
+        key="OUTPUT_SEMANTIC_REVIEW",
+        group="security",
+        type=ItemType.BOOL,
+        brief="输出语义复核",
+        detail="开启后对每条回答用 kimi-k2.5 做语义复核（逻辑/事实错误，非敏感词）；流式首字会变慢。",
+        section="内容审核",
+        danger=True,
+    ),
     # ─── Web ──────────────────────────────────────────────────────────────
     ConfigItem(
         key="WEB_UPLOAD_DIR",

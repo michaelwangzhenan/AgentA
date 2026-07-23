@@ -355,6 +355,32 @@ class SessionStore:
         )
         return cur.rowcount
 
+    def replace_last_assistant(
+        self, session_id: str, content: str, user_id: int | None = None
+    ) -> bool:
+        """覆盖 session 最后一条 assistant 消息的 content。
+
+        Returns:
+            找到并更新返回 True；session 不存在、无 assistant 行或不归属用户返回 False。
+        """
+        uid = user_id if user_id is not None else current_user_id()
+        with self._lock, self._conn:
+            if not self._owns_unlocked(session_id, uid):
+                return False
+            row = self._conn.execute(
+                """SELECT id FROM messages
+                   WHERE session_id = ? AND role = 'assistant'
+                   ORDER BY id DESC LIMIT 1""",
+                (session_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            self._conn.execute(
+                "UPDATE messages SET content = ? WHERE id = ?",
+                (content, row["id"]),
+            )
+        return True
+
     def clear(self, session_id: str, user_id: int | None = None) -> None:
         """
         清空指定 session 的所有消息记录（同时删除 session 元数据）。

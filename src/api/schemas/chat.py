@@ -45,4 +45,7 @@ class ChatResponse(BaseModel):
     learning_scope_filtered: bool = Field(
         False, description="本次回答是否因问答范围限制拦截而生成"
     )
+    semantic_review_filtered: bool = Field(
+        False, description="本次回答是否因输出语义复核拦截而生成"
+    )
     provider_error: bool = Field(False, description="本次回答是否因模型供应商错误而生成的友好提示")

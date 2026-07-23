@@ -6,6 +6,7 @@
     - ssrf ：fetch_url 的 URL 被 SSRF 防御拒绝
     - input_filter：用户输入命中敏感词前置过滤被拦截
     - learning_scope：用户输入不在学习相关范围内被拦截
+    - semantic_review：模型最终回答未通过输出语义复核被替换为拒答
 
 复用 ``usage.db``（与 ``UsageStore`` / ``TraceStore`` 同库不同表）；独立 connection +
 ``threading.Lock``，SQLite 文件级锁保证跨连接并发写安全。
@@ -31,7 +32,15 @@ EVENT_TOOL = "tool"
 EVENT_SSRF = "ssrf"
 EVENT_INPUT_FILTER = "input_filter"
 EVENT_LEARNING_SCOPE = "learning_scope"
-_EVENT_TYPES = (EVENT_SCRUB, EVENT_TOOL, EVENT_SSRF, EVENT_INPUT_FILTER, EVENT_LEARNING_SCOPE)
+EVENT_SEMANTIC_REVIEW = "semantic_review"
+_EVENT_TYPES = (
+    EVENT_SCRUB,
+    EVENT_TOOL,
+    EVENT_SSRF,
+    EVENT_INPUT_FILTER,
+    EVENT_LEARNING_SCOPE,
+    EVENT_SEMANTIC_REVIEW,
+)
 
 
 class SecurityEventStore:

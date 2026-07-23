@@ -48,6 +48,14 @@ def out_of_scope_reply(reason: str | None = None) -> str:
 
 
 _JSON_OBJECT_RE = re.compile(r"\{[^{}]*\}")
+_PREVIEW_LEN = 80
+
+
+def _preview(text: str, limit: int = _PREVIEW_LEN) -> str:
+    s = (text or "").replace("\n", " ").strip()
+    if len(s) <= limit:
+        return s
+    return s[:limit] + "…"
 
 
 @dataclass(frozen=True)
@@ -86,13 +94,20 @@ def parse_classifier_response(text: str) -> ScopeResult | None:
 
 def classify(message: str) -> ScopeResult:
     """调用固定模型二分类；异常时 fail-closed（in_scope=false）。"""
+    preview = _preview(message)
     if not (message or "").strip():
+        logger.info("[learning_scope] 空消息，按范围外拒答 preview=%r", preview)
         return ScopeResult(in_scope=False, reason="empty_message")
 
     if CLASSIFIER_MODEL not in config.MODEL_CONFIGS:
         logger.warning("[learning_scope] 分类模型 %s 未配置", CLASSIFIER_MODEL)
         return ScopeResult(in_scope=False, reason="model_unavailable")
 
+    logger.info(
+        "[learning_scope] 开始分类 model=%s preview=%r",
+        CLASSIFIER_MODEL,
+        preview,
+    )
     try:
         from src.llm.provider import chat
 
@@ -107,9 +122,23 @@ def classify(message: str) -> ScopeResult:
         text = (resp.choices[0].message.content or "").strip()
         parsed = parse_classifier_response(text)
         if parsed is None:
-            logger.warning("[learning_scope] JSON 解析失败: %r", text[:200])
+            logger.warning(
+                "[learning_scope] JSON 解析失败 preview=%r raw=%r",
+                preview,
+                text[:200],
+            )
             return ScopeResult(in_scope=False, reason="parse_error")
+        logger.info(
+            "[learning_scope] 分类完成 in_scope=%s reason=%s preview=%r",
+            parsed.in_scope,
+            parsed.reason,
+            preview,
+        )
         return parsed
     except Exception:
-        logger.warning("[learning_scope] 分类调用失败", exc_info=True)
+        logger.warning(
+            "[learning_scope] 分类调用失败 preview=%r",
+            preview,
+            exc_info=True,
+        )
         return ScopeResult(in_scope=False, reason="api_error")
