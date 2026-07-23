@@ -12,7 +12,6 @@ import {
   getMe,
   login as apiLogin,
   logout as apiLogout,
-  register as apiRegister,
   setUnauthorizedHandler,
 } from '@/api/client'
 import type { UserInfo } from '@/types/auth'
@@ -22,7 +21,6 @@ type AuthState = {
   loading: boolean
   isAdmin: boolean
   login: (username: string, password: string) => Promise<void>
-  register: (username: string, password: string) => Promise<void>
   logout: () => Promise<void>
   refreshUser: () => Promise<void>
 }
@@ -58,10 +56,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(await apiLogin(username, password))
   }, [])
 
-  const register = useCallback(async (username: string, password: string) => {
-    setUser(await apiRegister(username, password))
-  }, [])
-
   const logout = useCallback(async () => {
     try {
       await apiLogout()
@@ -81,11 +75,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       isAdmin: user?.role === 'admin',
       login,
-      register,
       logout,
       refreshUser,
     }),
-    [user, loading, login, register, logout, refreshUser],
+    [user, loading, login, logout, refreshUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

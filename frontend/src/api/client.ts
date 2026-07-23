@@ -856,7 +856,7 @@ export async function setSRSCardStatus(
   return (await res.json()) as SRSCard
 }
 
-// 认证（注册 / 登录 / 退出 / 当前用户） ─────────────────────
+// 认证（登录 / 退出 / 当前用户） ─────────────────────────────
 
 /** 拉当前登录用户；未登录返回 null（不触发全局 401 跳转）。 */
 export async function getMe(): Promise<UserInfo | null> {
@@ -868,16 +868,6 @@ export async function getMe(): Promise<UserInfo | null> {
 
 export async function login(username: string, password: string): Promise<UserInfo> {
   const res = await apiFetch('/api/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
-  })
-  await _ensureOk(res)
-  return ((await res.json()) as AuthResponse).user
-}
-
-export async function register(username: string, password: string): Promise<UserInfo> {
-  const res = await apiFetch('/api/auth/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),

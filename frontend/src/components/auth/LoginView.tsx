@@ -5,50 +5,28 @@ import { Input } from '@/components/ui/input'
 import { useAuth } from '@/lib/auth'
 import logoUrl from '@/assets/agentA_logo.svg'
 
-type Mode = 'login' | 'register'
-
 export function LoginView() {
-  const { login, register } = useAuth()
-  const [mode, setMode] = useState<Mode>('login')
+  const { login } = useAuth()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const canSubmit =
-    username.trim().length > 0 &&
-    password.length > 0 &&
-    (mode === 'login' || confirmPassword.length > 0) &&
-    !submitting
+    username.trim().length > 0 && password.length > 0 && !submitting
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!canSubmit) return
-    if (mode === 'register' && password !== confirmPassword) {
-      setError('两次输入的密码不一致')
-      return
-    }
     setSubmitting(true)
     setError(null)
     try {
-      if (mode === 'login') {
-        await login(username.trim(), password)
-      } else {
-        await register(username.trim(), password)
-      }
+      await login(username.trim(), password)
     } catch (err) {
       setError((err as Error).message)
     } finally {
       setSubmitting(false)
     }
-  }
-
-  const switchMode = () => {
-    setMode((m) => (m === 'login' ? 'register' : 'login'))
-    setPassword('')
-    setConfirmPassword('')
-    setError(null)
   }
 
   return (
@@ -62,9 +40,7 @@ export function LoginView() {
             <img src={logoUrl} alt="AgentA logo" className="h-20 w-20" />
             <h1 className="text-3xl font-semibold">AgentA</h1>
           </div>
-          <p className="text-sm text-muted-foreground">
-            {mode === 'login' ? '登录你的账号' : '注册新账号'}
-          </p>
+          <p className="text-sm text-muted-foreground">登录你的账号</p>
         </div>
 
         <div className="space-y-3">
@@ -91,27 +67,11 @@ export function LoginView() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+              autoComplete="current-password"
               maxLength={128}
               placeholder="请输入密码"
             />
           </div>
-          {mode === 'register' && (
-            <div className="space-y-1">
-              <label className="text-sm font-medium" htmlFor="confirm-password">
-                确认密码
-              </label>
-              <Input
-                id="confirm-password"
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                autoComplete="new-password"
-                maxLength={128}
-                placeholder="请再次输入密码"
-              />
-            </div>
-          )}
         </div>
 
         {error && (
@@ -121,19 +81,8 @@ export function LoginView() {
         )}
 
         <Button type="submit" className="w-full" disabled={!canSubmit}>
-          {submitting ? '处理中…' : mode === 'login' ? '登录' : '注册'}
+          {submitting ? '处理中…' : '登录'}
         </Button>
-
-        <p className="text-center text-sm text-muted-foreground">
-          {mode === 'login' ? '还没有账号？' : '已有账号？'}
-          <button
-            type="button"
-            onClick={switchMode}
-            className="ml-1 font-medium text-primary hover:underline"
-          >
-            {mode === 'login' ? '去注册' : '去登录'}
-          </button>
-        </p>
       </form>
     </div>
   )

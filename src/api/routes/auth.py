@@ -1,7 +1,6 @@
 """
-认证端点：注册 / 登录 / 退出、账号资料与每用户 LLM 偏好；登录态为服务端 token + HttpOnly cookie。
+认证端点：登录 / 退出、账号资料与每用户 LLM 偏好；登录态为服务端 token + HttpOnly cookie。
 
-- POST /api/auth/register：注册并自动登录（匹配 AUTH_ADMIN_USERNAME 者为 admin）
 - POST /api/auth/login：登录，下发 cookie
 - POST /api/auth/logout：退出，删除 token 并清 cookie
 - GET /api/auth/me：当前登录用户信息
@@ -33,7 +32,7 @@ from src.api.schemas.auth import (
     UpdateUsernameRequest,
     UserInfo,
 )
-from src.stores.user_store import ROLE_ADMIN, ROLE_USER, UserStore
+from src.stores.user_store import ROLE_ADMIN, UserStore
 
 logger = logging.getLogger(__name__)
 
@@ -49,25 +48,6 @@ def _set_session_cookie(response: Response, token: str) -> None:
         max_age=_cfg.AUTH_SESSION_TTL_DAYS * 86400,
         path="/",
     )
-
-
-@router.post("/register", response_model=AuthResponse)
-def register(
-    req: AuthRequest,
-    response: Response,
-    store: UserStore = Depends(get_user_store),
-) -> AuthResponse:
-    """注册新用户；用户名占用返回 409。匹配 AUTH_ADMIN_USERNAME 者为 admin。成功即登录。"""
-    # 用户名不区分大小写，admin 判定也忽略大小写
-    is_admin = req.username.strip().lower() == _cfg.AUTH_ADMIN_USERNAME.strip().lower()
-    role = ROLE_ADMIN if is_admin else ROLE_USER
-    user = store.create_user(req.username, req.password, role=role)
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="用户名已被占用")
-    token = store.create_session(user["id"], _cfg.AUTH_SESSION_TTL_DAYS)
-    _set_session_cookie(response, token)
-    logger.info("[auth] 注册并登录: %s (role=%s)", user["username"], user["role"])
-    return AuthResponse(user=UserInfo(**user))
 
 
 @router.post("/login", response_model=AuthResponse)
