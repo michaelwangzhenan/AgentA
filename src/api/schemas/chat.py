@@ -41,3 +41,4 @@ class ChatResponse(BaseModel):
     session_id: str = Field(..., description="当前 Agent 实例的 session id")
     model: str = Field("", description="本次实际应答的模型 id；缓存命中时为空")
     cached: bool = Field(False, description="本次回答是否直接来自语义缓存")
+    input_filtered: bool = Field(False, description="本次回答是否因输入过滤拦截而生成")

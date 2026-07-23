@@ -470,7 +470,7 @@ def security_runtime_events(
     range: str = Query("30d"),
     ts_from: int | None = Query(None, description="覆盖起始（epoch 秒）；不传用 range"),
     ts_to: int | None = Query(None, description="覆盖结束（epoch 秒）；不传用 range"),
-    event_type: str | None = Query(None, description="scrub / tool / ssrf；不传=全部"),
+    event_type: str | None = Query(None, description="scrub / tool / ssrf / input_filter；不传=全部"),
     user_id: int | None = Query(None, description="按用户筛选；不传=全员"),
     sort_by: str = Query("created_at", description="created_at / event_type / user_id"),
     desc: bool = Query(True),

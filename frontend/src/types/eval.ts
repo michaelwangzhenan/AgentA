@@ -138,7 +138,7 @@ export type ReportContent = {
 // 实时安全监控（线上拦截事件，对齐 SecurityRuntimeSummary）
 
 export type SecurityEventRow = {
-  event_type: string // scrub | tool | ssrf
+  event_type: string // scrub | tool | ssrf | input_filter
   detail: string
   user_id: number
   created_at: number

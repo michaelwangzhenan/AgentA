@@ -40,10 +40,52 @@ from src.stores.usage_store import (
 )
 from src.stores.user_store import UserStore
 from src.services.log_setup import set_session_id
+from src.services.sensitive_word_filter import get_shared_filter
+from src.stores.security_event_store import EVENT_INPUT_FILTER, get_shared_store as get_security_event_store
 
 logger = logging.getLogger(__name__)
 
+_INPUT_FILTER_BLOCKED_DETAIL = "尊敬的用户您好，让我们换个话题再聊聊吧。"
+_INPUT_FILTER_UNAVAILABLE_DETAIL = "聊天暂不可用，请稍后再试"
+
 router = APIRouter(prefix="/chat", tags=["chat"])
+
+
+def _check_input_filter(message: str, user_id: int) -> str | None:
+    """敏感词检查：命中返回统一提示文案；未命中返回 None；未就绪抛 503。"""
+    filt = get_shared_filter()
+    if not filt.is_ready:
+        raise HTTPException(status_code=503, detail=_INPUT_FILTER_UNAVAILABLE_DETAIL)
+
+    result = filt.check(message)
+    if not result.hit:
+        return None
+
+    detail = json.dumps(
+        {
+            "word_list_version": result.word_list_version,
+            "word": result.word,
+            "category": result.category,
+            "action": "blocked",
+        },
+        ensure_ascii=False,
+    )
+    try:
+        get_security_event_store().record(EVENT_INPUT_FILTER, detail, user_id)
+    except Exception:
+        logger.warning("[chat] input_filter 安全事件写入失败（仍拦截）", exc_info=True)
+    return _INPUT_FILTER_BLOCKED_DETAIL
+
+
+def _append_blocked_exchange(
+    history: SessionStore,
+    session_id: str,
+    user_id: int,
+    message: str,
+    reply: str,
+) -> None:
+    history.append(session_id, {"role": "user", "content": message}, user_id=user_id)
+    history.append(session_id, {"role": "assistant", "content": reply}, user_id=user_id)
 
 
 def _check_session_owner(store: SessionStore, session_id: str | None, user_id: int) -> None:
@@ -211,8 +253,14 @@ def chat(
     """
     _check_session_owner(history, req.session_id, user["id"])
     assert_message_within_limit(req.message)
-    prefs = effective_llm_prefs(users, user["id"])
+    blocked = _check_input_filter(req.message, user["id"])
     session_id = req.session_id or str(uuid.uuid4())
+    if blocked:
+        _append_blocked_exchange(history, session_id, user["id"], req.message, blocked)
+        return ChatResponse(
+            reply=blocked, session_id=session_id, model="", input_filtered=True,
+        )
+    prefs = effective_llm_prefs(users, user["id"])
     fresh = _is_fresh_session(history, session_id, user["id"])
 
     decision = model_router.route(req.message, prefs.active_model)
@@ -320,14 +368,28 @@ async def chat_stream(
 
     每帧 event=message，data 为 JSON（含 type、payload）。运行结束（含异常）后发sentinel 关流。
     语义缓存命中时只发 token_chunk + final_answer 两帧（payload.cached=True），不启动 Agent。
+    输入过滤命中时同样两帧返回（payload.input_filtered=True），不走 HTTP 错误。
     """
     if not req.message or not req.message.strip():
         raise HTTPException(status_code=422, detail="message must be non-empty")
     assert_message_within_limit(req.message)
+    blocked = _check_input_filter(req.message, user["id"])
 
     _check_session_owner(history, req.session_id, user["id"])
-    prefs = effective_llm_prefs(users, user["id"])
     session_id = req.session_id or str(uuid.uuid4())
+    if blocked:
+        _append_blocked_exchange(history, session_id, user["id"], req.message, blocked)
+
+        async def _blocked_gen():
+            yield _sse_frame("token_chunk", {"text": blocked})
+            yield _sse_frame(
+                "final_answer",
+                {"text": blocked, "usage": None, "input_filtered": True},
+            )
+
+        return EventSourceResponse(_blocked_gen(), headers=_SSE_HEADERS)
+
+    prefs = effective_llm_prefs(users, user["id"])
     fresh = _is_fresh_session(history, session_id, user["id"])
 
     # Deep Research：重质量不重速度 —— 跳过语义缓存（多源研究永不可缓存）+ 跳过模型降级

@@ -3,7 +3,7 @@
   确保虚拟环境已激活，然后把参数透传给 tools/dev_server.ps1。
 
 .DESCRIPTION
-  参数与 tools/dev_server.ps1 保持一致，按 Tab 可补全命令（ValidateSet）。
+  参数与 tools/dev_server.ps1 保持一致；一级命令用 ValidateSet，二级目标（uvicorn/vite）用 ArgumentCompleter。
   getlog / sync / scpto / scpfrom 是例外：直接在本脚本里处理（scp 与 VPS 互传），不转发、不需要虚拟环境。
 
 .EXAMPLE
@@ -23,6 +23,17 @@ param(
     [string]$Action = 'help',
 
     [Parameter(Position = 1)]
+    [ArgumentCompleter({
+        param($CommandName, $ParameterName, $WordToComplete, $CommandAst, $FakeBoundParameters)
+        $action = $FakeBoundParameters['Action']
+        if ($action -in 'start', 'stop', 'restart', 'logs') {
+            'uvicorn', 'vite' |
+                Where-Object { $_ -like "$WordToComplete*" } |
+                ForEach-Object {
+                    [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+                }
+        }
+    })]
     [string]$Arg1 = '',
 
     [Parameter(Position = 2)]

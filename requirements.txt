@@ -57,5 +57,8 @@ uvicorn[standard]
 python-multipart
 sse-starlette
 
+# Sensitive word filter (Aho-Corasick)
+pyahocorasick
+
 # Testing
 pytest

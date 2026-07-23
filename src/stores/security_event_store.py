@@ -4,6 +4,7 @@
     - scrub：外部不可信内容（RAG / web / fetch / MCP）命中注入模板被清洗
     - tool ：工具被名单门（SECURITY_MODE / BLOCKLIST / ALLOWLIST）拦下
     - ssrf ：fetch_url 的 URL 被 SSRF 防御拒绝
+    - input_filter：用户输入命中敏感词前置过滤被拦截
 
 复用 ``usage.db``（与 ``UsageStore`` / ``TraceStore`` 同库不同表）；独立 connection +
 ``threading.Lock``，SQLite 文件级锁保证跨连接并发写安全。
@@ -27,7 +28,8 @@ logger = logging.getLogger(__name__)
 EVENT_SCRUB = "scrub"
 EVENT_TOOL = "tool"
 EVENT_SSRF = "ssrf"
-_EVENT_TYPES = (EVENT_SCRUB, EVENT_TOOL, EVENT_SSRF)
+EVENT_INPUT_FILTER = "input_filter"
+_EVENT_TYPES = (EVENT_SCRUB, EVENT_TOOL, EVENT_SSRF, EVENT_INPUT_FILTER)
 
 
 class SecurityEventStore:

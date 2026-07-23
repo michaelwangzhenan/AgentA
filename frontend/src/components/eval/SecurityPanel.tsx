@@ -40,6 +40,7 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   scrub: '注入清洗',
   tool: '越权调用拦截',
   ssrf: 'SSRF 拦截',
+  input_filter: '输入过滤',
 }
 
 // 实时安全监控页：对话进行中真实发生的拦截（线上实况）。
@@ -86,11 +87,12 @@ export function RuntimeMonitor() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         <StatCard label="总拦截" value={String(data?.total ?? 0)} />
         <StatCard label="注入清洗" value={String(byType.scrub ?? 0)} />
         <StatCard label="越权调用" value={String(byType.tool ?? 0)} />
         <StatCard label="SSRF" value={String(byType.ssrf ?? 0)} />
+        <StatCard label="输入过滤" value={String(byType.input_filter ?? 0)} />
       </div>
 
       <section className="rounded-lg border border-border p-4">
@@ -198,6 +200,7 @@ function RuntimeEventsTable({ users }: { users: UserInfo[] }) {
             <option value="scrub">注入清洗</option>
             <option value="tool">越权调用</option>
             <option value="ssrf">SSRF</option>
+            <option value="input_filter">输入过滤</option>
           </select>
         </label>
         <label className="flex items-center gap-1 text-muted-foreground">

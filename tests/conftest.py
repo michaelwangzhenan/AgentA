@@ -148,6 +148,19 @@ def _isolated_agent_memory(tmp_path, _neutralize_runtime_overrides):
     mem.close()
 
 
+@pytest.fixture(autouse=True)
+def _bootstrap_sensitive_word_filter():
+    """每个测试加载默认词库，避免聊天接口因过滤器未就绪返回 503。
+
+    专测过滤器的用例会在测试体内覆盖本兜底。
+    """
+    from src.services import sensitive_word_filter as _swf
+
+    _swf.bootstrap_filter()
+    yield
+    _swf.reset_shared_filter_for_testing(None)
+
+
 @pytest.fixture
 def ut_llm_model() -> str:
     """integration（真实 LLM）测试用的 model id。

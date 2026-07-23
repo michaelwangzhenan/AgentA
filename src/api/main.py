@@ -98,6 +98,12 @@ async def lifespan(_app: FastAPI):
         purge_expired_soft()
     except Exception as exc:
         logger.warning("[api] 语义缓存清理失败：%s", exc)
+    try:
+        from src.services.sensitive_word_filter import bootstrap_filter
+
+        bootstrap_filter()
+    except Exception as exc:
+        logger.error("[api] 敏感词库加载失败：%s", exc)
     _bootstrap_mcp()
     try:
         yield

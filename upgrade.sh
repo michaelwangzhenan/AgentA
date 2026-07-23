@@ -108,7 +108,40 @@ if [ "$HEALTH_OK" != true ]; then
   exit 1
 fi
 
-if ! curl -sfI http://127.0.0.1/ >/dev/null; then
+# nginx 健康检查：HTTPS 部署后 server_name 为域名，裸访 127.0.0.1 会 404
+check_nginx() {
+  if curl -sfI "http://127.0.0.1/" >/dev/null 2>&1; then
+    curl -sI "http://127.0.0.1/" | head -1
+    return 0
+  fi
+
+  local conf="/etc/nginx/sites-available/agenta"
+  [ -f "$conf" ] || return 1
+
+  local name
+  while read -r name; do
+    [ -z "$name" ] || [ "$name" = "_" ] && continue
+    if [[ "$name" =~ ^[0-9.]+$ ]]; then
+      if curl -sfI "http://${name}/" >/dev/null 2>&1; then
+        curl -sI "http://${name}/" | head -1
+        return 0
+      fi
+    else
+      if curl -sfI "https://${name}/" >/dev/null 2>&1; then
+        curl -sI "https://${name}/" | head -1
+        return 0
+      fi
+      if curl -sfI -H "Host: ${name}" "http://127.0.0.1/" >/dev/null 2>&1; then
+        curl -sI -H "Host: ${name}" "http://127.0.0.1/" | head -1
+        return 0
+      fi
+    fi
+  done < <(grep -h 'server_name' "$conf" | sed -E 's/.*server_name[[:space:]]+([^;]+);/\1/' | tr ' ' '\n' | sort -u)
+
+  return 1
+}
+
+if ! check_nginx; then
   echo "ERROR: nginx check failed"
   exit 1
 fi

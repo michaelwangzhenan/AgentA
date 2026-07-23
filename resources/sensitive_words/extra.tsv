@@ -1,0 +1,4 @@
+# 人工审核后补充的词条（word<TAB>category），build 时始终保留
+# 上游 houbb 词库未收录但业务需要拦截的词写在这里
+六四	politics
+六四事件	politics
