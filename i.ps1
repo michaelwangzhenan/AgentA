@@ -18,8 +18,11 @@
 
 [CmdletBinding()]
 param(
+    [Alias('h')]
+    [switch]$Help,
+
     [Parameter(Position = 0)]
-    [ValidateSet('start', 'stop', 'restart', 'logs', 'status', 'getlog', 'sync', 'scpto', 'scpfrom', 'help')]
+    [ValidateSet('start', 'stop', 'restart', 'logs', 'status', 'getlog', 'sync', 'scpto', 'scpfrom', 'help', '--help')]
     [string]$Action = 'help',
 
     [Parameter(Position = 1)]
@@ -49,8 +52,39 @@ $RemoteHost = 'admin@47.96.93.237'
 $RemoteBase = '/home/admin/AgentA'
 $SshOpts    = @('-o', 'BatchMode=yes')
 
+function Show-IHelp {
+    Write-Host ""
+    Write-Host "i.ps1 - AgentA dev helper (activates .venv, forwards to dev_server.ps1)"
+    Write-Host ""
+    Write-Host "Usage:"
+    Write-Host "  i start                  Start uvicorn (:8000) + vite (:5173) in background"
+    Write-Host "  i stop     [uvicorn|vite] Stop one or both dev servers"
+    Write-Host "  i restart  [uvicorn|vite] Restart one or both dev servers"
+    Write-Host "  i logs     uvicorn|vite   Tail server log (Ctrl+C to stop viewing)"
+    Write-Host "  i status                 Show PID / port / URL"
+    Write-Host "  i getlog                 Fetch remote uvicorn.log to logs\vps\"
+    Write-Host "  i sync                   Push git-changed files to VPS via scp"
+    Write-Host "  i scpto  <local> <remote> Upload a repo file to VPS"
+    Write-Host "  i scpfrom <remote> <local> Download a VPS file into the repo"
+    Write-Host "  i help | -h | --help     Show this help"
+    Write-Host ""
+    Write-Host "Examples:"
+    Write-Host "  i scpto .env .env"
+    Write-Host "  i scpfrom history/admin123_chat.md docs/chat-admin123.md"
+    Write-Host ""
+}
+
+if ($Help -or $Action -in 'help', '--help') {
+    Show-IHelp
+    exit 0
+}
+
 function ConvertTo-UnixRel([string]$RelPath) {
-    return $RelPath.Replace('\', '/').TrimStart('./')
+    $normalized = $RelPath.Replace('\', '/')
+    if ($normalized.StartsWith('./')) {
+        return $normalized.Substring(2)
+    }
+    return $normalized
 }
 
 function Resolve-LocalRepoPath([string]$RelPath) {
@@ -84,21 +118,21 @@ function Ensure-RemoteParent([string]$RemoteRel) {
 function Invoke-ScpTo {
     param([string]$LocalRel, [string]$RemoteRel)
     if (-not $LocalRel -or -not $RemoteRel) {
-        Write-Error '用法: .\i.ps1 scpto <本地相对路径> <远程相对路径>'
+        Write-Error 'Usage: i scpto <local-path> <remote-path>'
         exit 1
     }
     $local = Resolve-LocalRepoPath $LocalRel
     if (-not $local) {
-        Write-Error "本地文件不存在或路径非法: $LocalRel"
+        Write-Error "Local file not found or invalid path: $LocalRel"
         exit 1
     }
     $remoteRel = ConvertTo-UnixRel $RemoteRel
     if (-not (Ensure-RemoteParent $remoteRel)) {
-        Write-Error "远程目录创建失败: $remoteRel"
+        Write-Error "Failed to create remote directory: $remoteRel"
         exit 1
     }
     $remoteDest = "${RemoteHost}:${RemoteBase}/${remoteRel}"
-    Write-Host "上传 $LocalRel -> $remoteDest"
+    Write-Host "Upload $LocalRel -> $remoteDest"
     scp @SshOpts $local $remoteDest
     exit $LASTEXITCODE
 }
@@ -106,7 +140,7 @@ function Invoke-ScpTo {
 function Invoke-ScpFrom {
     param([string]$RemoteRel, [string]$LocalRel)
     if (-not $RemoteRel -or -not $LocalRel) {
-        Write-Error '用法: .\i.ps1 scpfrom <远程相对路径> <本地相对路径>'
+        Write-Error 'Usage: i scpfrom <remote-path> <local-path>'
         exit 1
     }
     $remoteRel = ConvertTo-UnixRel $RemoteRel
@@ -115,16 +149,16 @@ function Invoke-ScpFrom {
     try {
         $localResolved = [System.IO.Path]::GetFullPath($local)
     } catch {
-        Write-Error "本地路径非法: $LocalRel"
+        Write-Error "Invalid local path: $LocalRel"
         exit 1
     }
     if (-not $localResolved.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
-        Write-Error "本地路径必须位于仓库内: $LocalRel"
+        Write-Error "Local path must be inside the repo: $LocalRel"
         exit 1
     }
     Ensure-LocalParent $localResolved
     $remoteSrc = "${RemoteHost}:${RemoteBase}/${remoteRel}"
-    Write-Host "下载 $remoteSrc -> $LocalRel"
+    Write-Host "Download $remoteSrc -> $LocalRel"
     scp @SshOpts $remoteSrc $localResolved
     exit $LASTEXITCODE
 }

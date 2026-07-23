@@ -23,7 +23,7 @@ Push-Location $ScriptDir
 $raw = & git status --porcelain -z 2>&1
 if ($LASTEXITCODE -ne 0) {
     Pop-Location
-    Write-Error "git status 失败: $raw"
+    Write-Error "git status failed: $raw"
     exit 1
 }
 
@@ -43,7 +43,7 @@ for ($i = 0; $i -lt $parts.Count; ) {
     }
     if ($status -match 'D') { continue }
     if (Test-SyncExcluded $path) {
-        Write-Host "跳过: $path"
+        Write-Host "Skipped: $path"
         continue
     }
     if (-not $paths.Contains($path)) { [void]$paths.Add($path) }
@@ -51,18 +51,18 @@ for ($i = 0; $i -lt $parts.Count; ) {
 
 if ($paths.Count -eq 0) {
     Pop-Location
-    Write-Host '没有需要同步的文件。'
+    Write-Host 'No files to sync.'
     exit 0
 }
 
 $dest = $RemoteHost + ':' + $RemoteBase + '/'
-Write-Host ('同步 ' + $paths.Count + ' 个文件到 ' + $dest)
+Write-Host ('Syncing ' + $paths.Count + ' file(s) to ' + $dest)
 $sshOpts = @('-o', 'BatchMode=yes')
 $failed = 0
 foreach ($rel in $paths) {
     $local = Join-Path $ScriptDir $rel
     if (-not (Test-Path -LiteralPath $local)) {
-        Write-Warning "本地不存在，跳过: $rel"
+        Write-Warning "Local file missing, skipped: $rel"
         continue
     }
 
@@ -72,7 +72,7 @@ foreach ($rel in $paths) {
         $mkdirCmd = 'mkdir -p ' + "'" + $RemoteBase + '/' + $parent + "'"
         ssh @sshOpts $RemoteHost $mkdirCmd
         if ($LASTEXITCODE -ne 0) {
-            Write-Warning "远程目录创建失败: $parent"
+            Write-Warning "Failed to create remote directory: $parent"
             $failed++
             continue
         }
@@ -82,15 +82,15 @@ foreach ($rel in $paths) {
     Write-Host ('  -> ' + $unixRel)
     scp -q @sshOpts $local $remoteDest
     if ($LASTEXITCODE -ne 0) {
-        Write-Warning "同步失败: $rel"
+        Write-Warning "Sync failed: $rel"
         $failed++
     }
 }
 Pop-Location
 
 if ($failed -gt 0) {
-    Write-Host ('完成，' + $failed + ' 个文件失败。')
+    Write-Host ('Done with ' + $failed + ' failed file(s).')
     exit 1
 }
-Write-Host '同步完成。'
+Write-Host 'Sync complete.'
 exit 0

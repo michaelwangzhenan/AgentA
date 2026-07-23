@@ -235,19 +235,19 @@ function Show-Status {
 
 function Show-Help {
     Write-Host ""
-    Write-Host "dev_server.ps1 — 管理 AgentA UI 的两个 dev server"
+    Write-Host "dev_server.ps1 - manage AgentA dev servers (uvicorn + vite)"
     Write-Host ""
     Write-Host "Usage:"
-    Write-Host "  dev_server.ps1 start                  启动 uvicorn (:8000) + vite (:5173)，后台运行"
-    Write-Host "  dev_server.ps1 stop    [uvicorn|vite]  停止（不带参数 = 都停）"
-    Write-Host "  dev_server.ps1 restart [uvicorn|vite]  重启（先停再起，不带参数 = 都重启）"
-    Write-Host "  dev_server.ps1 logs     uvicorn|vite   tail -f 日志（Ctrl+C 退出查看，服务继续跑）"
-    Write-Host "  dev_server.ps1 status                 显示 PID / 端口 / URL"
-    Write-Host "  dev_server.ps1 help                   显示本帮助（不带参数时默认显示）"
+    Write-Host "  dev_server.ps1 start                  Start uvicorn (:8000) + vite (:5173) in background"
+    Write-Host "  dev_server.ps1 stop    [uvicorn|vite]  Stop one or both servers"
+    Write-Host "  dev_server.ps1 restart [uvicorn|vite]  Restart one or both servers"
+    Write-Host "  dev_server.ps1 logs     uvicorn|vite   Tail log (Ctrl+C stops viewing only)"
+    Write-Host "  dev_server.ps1 status                 Show PID / port / URL"
+    Write-Host "  dev_server.ps1 help                   Show this help (default when no args)"
     Write-Host ""
     Write-Host "Files:"
-    Write-Host "  .run/<name>.pid               后台进程 PID（脚本自管）"
-    Write-Host "  logs/<name>.log               合并的 stdout + stderr"
+    Write-Host "  .run/<name>.pid               Background process PID (managed by script)"
+    Write-Host "  logs/<name>.log               Combined stdout + stderr"
     Write-Host ""
 }
 
@@ -258,7 +258,7 @@ function Tail-Log {
         Write-Host "[$Name] no log file yet: $($Svc.LogFile)" -ForegroundColor Yellow
         return
     }
-    Write-Host "Tailing $($Svc.LogFile) — Ctrl+C 退出查看，服务继续跑。" -ForegroundColor Cyan
+    Write-Host "Tailing $($Svc.LogFile) - Ctrl+C stops viewing; server keeps running." -ForegroundColor Cyan
     Write-Host ("-" * 70)
     Get-Content -Path $Svc.LogFile -Wait -Tail 50
 }
