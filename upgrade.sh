@@ -29,6 +29,7 @@ NEED_NPM_INSTALL=false
 NEED_NPM_BUILD=false
 NEED_BACKEND_RESTART=false
 NEED_NGINX_RELOAD=false
+WORD_PACK_CHANGED=false
 
 if changed_matches '^requirements\.txt$'; then
   NEED_PIP=true
@@ -46,6 +47,12 @@ fi
 
 if changed_matches '^(src/|tools/|\.agenta/)'; then
   NEED_BACKEND_RESTART=true
+fi
+
+# 敏感词库：运行时只读 deny.tsv 等，须在开发机 build 后随 git 发布；线上不执行 build，变更后重启以重新加载。
+if changed_matches '^resources/sensitive_words/(deny\.tsv|allow\.txt|metadata\.json|trad_simp\.tsv)$'; then
+  NEED_BACKEND_RESTART=true
+  WORD_PACK_CHANGED=true
 fi
 
 if [ "$MCP_FIXED" = true ]; then
@@ -106,6 +113,15 @@ if [ "$HEALTH_OK" != true ]; then
   echo "ERROR: backend health check failed after 30s"
   journalctl -u agenta-backend -n 20 --no-pager
   exit 1
+fi
+
+if [ "$WORD_PACK_CHANGED" = true ]; then
+  echo ">> sensitive word pack changed — reload verified at startup"
+  .venv/bin/python tools/cli/sensitive_word_cli.py status
+  if ! journalctl -u agenta-backend --since "2 min ago" --no-pager 2>/dev/null \
+    | grep -q 'sensitive_word_filter.*词库加载完成'; then
+    echo "WARN: 最近启动日志未见「词库加载完成」，请执行: journalctl -u agenta-backend -n 30 --no-pager"
+  fi
 fi
 
 # nginx 健康检查：HTTPS 部署后 server_name 为域名，裸访 127.0.0.1 会 404
