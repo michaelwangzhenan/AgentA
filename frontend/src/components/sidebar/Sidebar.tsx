@@ -14,6 +14,8 @@ import {
   LogOut,
   MessageSquare,
   MoreHorizontal,
+  PanelLeft,
+  PanelLeftClose,
   Pencil,
   Plug,
   Plus,
@@ -57,9 +59,11 @@ import { pathForView, viewKindFromPathname } from '@/routes/paths'
 
 const RECENTS_COLLAPSED_KEY = 'agenta:sidebar:recentsCollapsed'
 const SIDEBAR_WIDTH_KEY = 'agenta:sidebar:width'
+const SIDEBAR_COLLAPSED_KEY = 'agenta:sidebar:collapsed'
 const SIDEBAR_MIN_WIDTH = 150
 const SIDEBAR_MAX_WIDTH = 480
 const SIDEBAR_DEFAULT_WIDTH = 256
+const SIDEBAR_COLLAPSED_WIDTH = 48
 
 export type ViewKind =
   | 'chat'
@@ -116,6 +120,13 @@ export function Sidebar(props: SidebarProps) {
   const [recentsCollapsed, setRecentsCollapsed] = useState<boolean>(() => {
     try {
       return localStorage.getItem(RECENTS_COLLAPSED_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'
     } catch {
       return false
     }
@@ -189,6 +200,30 @@ export function Sidebar(props: SidebarProps) {
     }
   }, [])
 
+  const toggleSidebarCollapsed = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? '1' : '0')
+      } catch {
+        // 隐私模式下 localStorage 可能不可用，忽略
+      }
+      return next
+    })
+  }
+
+  // Ctrl+. / Cmd+. 切换侧栏收起
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === '.') {
+        e.preventDefault()
+        toggleSidebarCollapsed()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   const toggleRecents = () => {
     setRecentsCollapsed((prev) => {
       const next = !prev
@@ -228,46 +263,92 @@ export function Sidebar(props: SidebarProps) {
     onCreate()
   }
 
+  const displayWidth = sidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : width
+
   return (
     <aside
-      className="relative flex h-full shrink-0 flex-col border-r border-border bg-muted/30"
-      style={{ width }}
+      className={cn(
+        'relative flex h-full shrink-0 flex-col border-r border-border bg-muted/30',
+        sidebarCollapsed && 'overflow-hidden',
+      )}
+      style={{
+        width: displayWidth,
+        transition: resizing ? undefined : 'width 200ms ease',
+      }}
     >
-      <div className="border-b border-border p-3">
-        <Button
-          variant="outline"
-          size="sm"
-          className="w-full justify-start gap-2"
-          onClick={handleCreateAndSwitch}
-        >
-          <Plus className="h-4 w-4" />
-          新建会话
-        </Button>
+      <div
+        className={cn(
+          'border-b border-border',
+          sidebarCollapsed ? 'px-2 py-2' : 'p-3',
+        )}
+      >
+        {sidebarCollapsed ? (
+          <div className="flex flex-col items-center gap-1">
+            <SidebarToggleButton
+              collapsed
+              onClick={toggleSidebarCollapsed}
+            />
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={handleCreateAndSwitch}
+              title="新建会话"
+              aria-label="新建会话"
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-w-0 flex-1 justify-start gap-2"
+              onClick={handleCreateAndSwitch}
+            >
+              <Plus className="h-4 w-4 shrink-0" />
+              新建会话
+            </Button>
+            <SidebarToggleButton
+              collapsed={false}
+              onClick={toggleSidebarCollapsed}
+            />
+          </div>
+        )}
       </div>
 
-      <div className="border-b border-border px-2 py-2">
+      <div
+        className={cn(
+          'border-b border-border',
+          sidebarCollapsed ? 'px-1 py-2' : 'px-2 py-2',
+        )}
+      >
         <ViewNavButton
           icon={<MessageSquare className="h-4 w-4" />}
           label="聊天"
           active={activeView === 'chat'}
+          collapsed={sidebarCollapsed}
           onClick={() => goToView('chat')}
         />
         <ViewNavButton
           icon={<BookOpen className="h-4 w-4" />}
           label="知识库"
           active={activeView === 'kb'}
+          collapsed={sidebarCollapsed}
           onClick={() => goToView('kb')}
         />
         <ViewNavButton
           icon={<Brain className="h-4 w-4" />}
           label="记忆"
           active={activeView === 'memory'}
+          collapsed={sidebarCollapsed}
           onClick={() => goToView('memory')}
         />
         <ViewNavButton
           icon={<ScrollText className="h-4 w-4" />}
           label="Rules"
           active={activeView === 'rules'}
+          collapsed={sidebarCollapsed}
           onClick={() => goToView('rules')}
         />
         {isAdmin && (
@@ -275,6 +356,7 @@ export function Sidebar(props: SidebarProps) {
             icon={<Sparkles className="h-4 w-4" />}
             label="Skills"
             active={activeView === 'skills'}
+            collapsed={sidebarCollapsed}
             onClick={() => goToView('skills')}
           />
         )}
@@ -283,6 +365,7 @@ export function Sidebar(props: SidebarProps) {
             icon={<Plug className="h-4 w-4" />}
             label="MCP"
             active={activeView === 'mcp'}
+            collapsed={sidebarCollapsed}
             onClick={() => goToView('mcp')}
           />
         )}
@@ -290,18 +373,21 @@ export function Sidebar(props: SidebarProps) {
           icon={<GraduationCap className="h-4 w-4" />}
           label="学而时习"
           active={activeView === 'mastery'}
+          collapsed={sidebarCollapsed}
           onClick={() => goToView('mastery')}
         />
         <ViewNavButton
           icon={<BarChart3 className="h-4 w-4" />}
           label="用量看板"
           active={activeView === 'usage'}
+          collapsed={sidebarCollapsed}
           onClick={() => goToView('usage')}
         />
         <ViewNavButton
           icon={<GaugeCircle className="h-4 w-4" />}
           label="质量看板"
           active={activeView === 'quality'}
+          collapsed={sidebarCollapsed}
           onClick={() => goToView('quality')}
         />
         {isAdmin && (
@@ -309,6 +395,7 @@ export function Sidebar(props: SidebarProps) {
             icon={<Database className="h-4 w-4" />}
             label="数据库"
             active={activeView === 'database'}
+            collapsed={sidebarCollapsed}
             onClick={() => goToView('database')}
           />
         )}
@@ -317,11 +404,13 @@ export function Sidebar(props: SidebarProps) {
             icon={<HardDriveDownload className="h-4 w-4" />}
             label="备份与恢复"
             active={activeView === 'backup'}
+            collapsed={sidebarCollapsed}
             onClick={() => goToView('backup')}
           />
         )}
       </div>
 
+      {!sidebarCollapsed && (
       <div className="flex min-h-0 flex-1 flex-col">
         <button
           type="button"
@@ -394,21 +483,41 @@ export function Sidebar(props: SidebarProps) {
           </nav>
         )}
       </div>
+      )}
 
-      <div className="flex items-center justify-between gap-2 border-t border-border px-3 py-2">
+      {sidebarCollapsed && <div className="flex-1" />}
+
+      <div
+        className={cn(
+          'border-t border-border',
+          sidebarCollapsed
+            ? 'flex flex-col items-center gap-2 px-2 py-2'
+            : 'flex items-center justify-between gap-2 px-3 py-2',
+        )}
+      >
         <DropdownMenu>
           <DropdownMenuTrigger
-            className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1 text-left hover:bg-accent/60"
+            className={cn(
+              'rounded-md hover:bg-accent/60',
+              sidebarCollapsed
+                ? 'p-1.5'
+                : 'flex min-w-0 flex-1 items-center gap-1.5 px-1.5 py-1 text-left',
+            )}
             title={username}
+            aria-label={`用户菜单：${username}`}
           >
             <UserCircle2 className="h-5 w-5 shrink-0 text-muted-foreground" />
-            <div className="flex min-w-0 flex-col">
-              <span className="truncate text-sm leading-tight">{username}</span>
-              <span className="truncate text-[11px] leading-tight text-muted-foreground">
-                {isAdmin ? 'ADMIN' : 'User'}
-              </span>
-            </div>
-            <ChevronDown className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            {!sidebarCollapsed && (
+              <>
+                <div className="flex min-w-0 flex-col">
+                  <span className="truncate text-sm leading-tight">{username}</span>
+                  <span className="truncate text-[11px] leading-tight text-muted-foreground">
+                    {isAdmin ? 'ADMIN' : 'User'}
+                  </span>
+                </div>
+                <ChevronDown className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              </>
+            )}
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" side="top" className="w-44">
             <DropdownMenuItem onClick={() => goToView('settings')}>
@@ -536,20 +645,48 @@ export function Sidebar(props: SidebarProps) {
         </DialogContent>
       </Dialog>
 
-      {/* 右缘拖拽条：拖动调宽度，双击重置默认 */}
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="拖动调整侧边栏宽度"
-        onPointerDown={startResize}
-        onDoubleClick={resetWidth}
-        className={cn(
-          'absolute -right-0.5 top-0 z-20 h-full w-1.5 cursor-col-resize transition-colors',
-          'hover:bg-primary/40',
-          resizing && 'bg-primary/60',
-        )}
-      />
+      {/* 右缘拖拽条：展开态可拖动调宽度，双击重置默认 */}
+      {!sidebarCollapsed && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="拖动调整侧边栏宽度"
+          onPointerDown={startResize}
+          onDoubleClick={resetWidth}
+          className={cn(
+            'absolute -right-0.5 top-0 z-20 h-full w-1.5 cursor-col-resize transition-colors',
+            'hover:bg-primary/40',
+            resizing && 'bg-primary/60',
+          )}
+        />
+      )}
     </aside>
+  )
+}
+
+type SidebarToggleButtonProps = {
+  collapsed: boolean
+  onClick: () => void
+}
+
+function SidebarToggleButton({ collapsed, onClick }: SidebarToggleButtonProps) {
+  const label = collapsed ? '展开侧栏' : '收起侧栏'
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="shrink-0"
+      onClick={onClick}
+      aria-label={label}
+      aria-expanded={!collapsed}
+      title={`${label} (Ctrl+.)`}
+    >
+      {collapsed ? (
+        <PanelLeft className="h-4 w-4" />
+      ) : (
+        <PanelLeftClose className="h-4 w-4" />
+      )}
+    </Button>
   )
 }
 
@@ -557,20 +694,31 @@ type ViewNavButtonProps = {
   icon: ReactNode
   label: string
   active: boolean
+  collapsed?: boolean
   onClick: () => void
 }
 
-function ViewNavButton({ icon, label, active, onClick }: ViewNavButtonProps) {
+function ViewNavButton({
+  icon,
+  label,
+  active,
+  collapsed = false,
+  onClick,
+}: ViewNavButtonProps) {
   return (
     <button
+      type="button"
       className={cn(
-        'mt-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm first:mt-0',
+        'mt-1 flex w-full items-center rounded-md text-sm first:mt-0',
+        collapsed ? 'justify-center px-0 py-2' : 'gap-2 px-2 py-1.5',
         active ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/60',
       )}
       onClick={onClick}
+      title={collapsed ? label : undefined}
+      aria-label={label}
     >
       {icon}
-      {label}
+      {!collapsed && label}
     </button>
   )
 }
