@@ -337,3 +337,37 @@ def vacuum(db_key: str | None = None) -> dict:
         finally:
             conn.close()
     return {"results": results}
+
+
+# ── BM25 修复 ─────────────────────────────────────────────────────────────
+
+def repair_preview() -> dict:
+    """扫描全部 BM25 索引侧车健康状态。"""
+    items: list[dict] = []
+    for path in inspect._bm25_files():  # noqa: SLF001
+        items.append(inspect.bm25_sidecar_health(path))
+    need = sum(1 for i in items if i.get("needs_repair"))
+    return {"indexes": items, "needs_repair": need}
+
+
+def repair_run(collections: list[str] | None = None) -> dict:
+    """从 pkl 重建 manifest + chunks.jsonl；默认只修复 needs_repair 的索引。"""
+    from src.rag.bm25_index import rewrite_index_sidecars
+
+    preview = repair_preview()
+    targets = [
+        i["collection"] for i in preview["indexes"]
+        if i.get("needs_repair") and i.get("pkl_exists")
+    ]
+    if collections is not None:
+        allowed = set(collections)
+        targets = [c for c in targets if c in allowed]
+    results: list[dict] = []
+    for coll in targets:
+        try:
+            out = rewrite_index_sidecars(coll)
+            results.append(out)
+        except Exception as e:
+            results.append({"collection": coll, "ok": False, "error": f"{type(e).__name__}: {e}"})
+    ok = sum(1 for r in results if r.get("ok"))
+    return {"repaired": ok, "failed": len(results) - ok, "items": results}

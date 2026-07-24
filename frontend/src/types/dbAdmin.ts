@@ -79,6 +79,8 @@ export type Bm25DocsPage = {
   collection: string
   total: number
   items: Bm25Doc[]
+  skipped_lines?: number
+  error?: string
 }
 
 export type Bm25DocDetail = {
@@ -162,6 +164,29 @@ export type OrphanCleanupResult = {
   removed: string[]
   freed_bytes: number
   failed: { uuid: string; error: string }[]
+}
+
+export type Bm25SidecarHealth = {
+  collection: string
+  pkl_exists: boolean
+  pkl_bytes?: number
+  manifest_docs?: number
+  chunks_loaded?: number
+  skipped_lines?: number
+  duplicate_ids?: number
+  needs_repair: boolean
+  error?: string
+}
+
+export type RepairPreview = {
+  indexes: Bm25SidecarHealth[]
+  needs_repair: number
+}
+
+export type RepairResult = {
+  repaired: number
+  failed: number
+  items: { collection: string; docs?: number; ok?: boolean; error?: string }[]
 }
 
 export type SqliteTableRows = {

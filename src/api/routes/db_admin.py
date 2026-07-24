@@ -18,6 +18,8 @@
 - POST /api/admin/db/maintenance/vacuum：SQLite VACUUM
 - GET /api/admin/db/maintenance/orphan-segments/preview：预览孤儿向量段
 - POST /api/admin/db/maintenance/orphan-segments：清理孤儿向量段
+- GET /api/admin/db/maintenance/repair/preview：预览 BM25 侧车需修复项
+- POST /api/admin/db/maintenance/repair：从 pkl 重建 BM25 侧车文件
 """
 from __future__ import annotations
 
@@ -166,6 +168,10 @@ class VacuumRequest(BaseModel):
     db_key: str | None = None
 
 
+class RepairRequest(BaseModel):
+    collections: list[str] | None = None
+
+
 @router.get("/maintenance/prune/preview")
 def prune_preview(days: int = Query(ge=1)) -> dict:
     return maintain.prune_preview(days)
@@ -199,3 +205,13 @@ def orphan_segments_preview() -> dict:
 @router.post("/maintenance/orphan-segments")
 def cleanup_orphan_segments() -> dict:
     return maintain.cleanup_orphan_segments()
+
+
+@router.get("/maintenance/repair/preview")
+def repair_preview() -> dict:
+    return maintain.repair_preview()
+
+
+@router.post("/maintenance/repair")
+def repair_run(req: RepairRequest = RepairRequest()) -> dict:
+    return maintain.repair_run(req.collections)

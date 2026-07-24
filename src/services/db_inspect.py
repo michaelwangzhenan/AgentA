@@ -7,6 +7,7 @@ CLI（`tools/cli/db_cli.py`）与 API（`/admin/db/*`）共用本模块，保证
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sqlite3
 from datetime import datetime
@@ -14,6 +15,8 @@ from pathlib import Path
 
 import src.config as config
 from src.rag.chroma_client import get_chroma_client
+
+logger = logging.getLogger(__name__)
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent  # src/services/x.py → 仓库根
 
@@ -399,32 +402,137 @@ def _read_bm25_manifest(path: Path) -> dict | None:
         return None
 
 
-def _load_bm25_chunk_rows(collection: str, pkl_path: Path) -> list[dict] | None:
-    """从 chunks.jsonl 加载 L2 列表行（不反序列化 pkl）。"""
+def _bm25_chunks_path(pkl_path: Path, manifest: dict) -> Path:
+    chunks_name = manifest.get("chunks_file") or f"{pkl_path.stem}.chunks.jsonl"
+    return pkl_path.parent / str(chunks_name)
+
+
+def _bm25_sidecar_error(pkl_path: Path) -> str | None:
+    """manifest / chunks.jsonl 不可用时返回说明；否则 None。"""
     manifest = _read_bm25_manifest(pkl_path)
     if manifest is None:
-        return None
-    chunks_name = manifest.get("chunks_file") or f"{pkl_path.stem}.chunks.jsonl"
-    chunks_path = pkl_path.parent / str(chunks_name)
+        return "manifest 缺失（请重新入库或重建 BM25 索引）"
+    chunks_path = _bm25_chunks_path(pkl_path, manifest)
     if not chunks_path.is_file():
-        return None
-    rows: list[dict] = []
+        return "chunks.jsonl 缺失（请重新入库或重建 BM25 索引）"
+    return None
+
+
+def _parse_bm25_chunks_jsonl(pkl_path: Path) -> tuple[list[dict] | None, int, int]:
+    """从 chunks.jsonl 解析 L2 行（不反序列化 pkl）。坏行跳过；同 id 保留首条。"""
+    collection = _coll_of(pkl_path)
+    manifest = _read_bm25_manifest(pkl_path)
+    if manifest is None:
+        logger.warning(
+            "[db_inspect] BM25 manifest 缺失 collection=%s path=%s",
+            collection,
+            _manifest_path_for_pkl(pkl_path),
+        )
+        return None, 0, 0
+    chunks_path = _bm25_chunks_path(pkl_path, manifest)
+    if not chunks_path.is_file():
+        logger.warning(
+            "[db_inspect] BM25 chunks.jsonl 缺失 collection=%s path=%s",
+            collection,
+            chunks_path,
+        )
+        return None, 0, 0
+    by_id: dict[str, dict] = {}
+    skipped = 0
+    duplicate_ids = 0
+    bad_line_nos: list[int] = []
     try:
         with chunks_path.open(encoding="utf-8") as f:
-            for line in f:
+            for line_no, line in enumerate(f, 1):
                 line = line.strip()
                 if not line:
                     continue
-                item = json.loads(line)
-                rows.append({
-                    "id": item["id"],
-                    "document": "",
-                    "metadata": dict(item.get("metadata") or {}),
-                    "tokens": int(item.get("tokens") or 0),
-                })
-    except (OSError, json.JSONDecodeError, KeyError, TypeError):
-        return None
-    return rows
+                try:
+                    item = json.loads(line)
+                    cid = item["id"]
+                    if cid in by_id:
+                        duplicate_ids += 1
+                        continue
+                    by_id[cid] = {
+                        "id": cid,
+                        "document": "",
+                        "metadata": dict(item.get("metadata") or {}),
+                        "tokens": int(item.get("tokens") or 0),
+                    }
+                except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+                    skipped += 1
+                    if len(bad_line_nos) < 5:
+                        bad_line_nos.append(line_no)
+    except OSError as exc:
+        logger.warning(
+            "[db_inspect] BM25 chunks.jsonl 读取失败 collection=%s path=%s err=%s",
+            collection,
+            chunks_path,
+            exc,
+        )
+        return None, 0, 0
+    if skipped or duplicate_ids:
+        manifest_docs = int(manifest.get("docs") or 0)
+        logger.warning(
+            "[db_inspect] BM25 chunks.jsonl 异常 collection=%s loaded=%d manifest_docs=%d "
+            "skipped_lines=%d bad_line_nos=%s duplicate_ids=%d path=%s",
+            collection,
+            len(by_id),
+            manifest_docs,
+            skipped,
+            bad_line_nos,
+            duplicate_ids,
+            chunks_path,
+        )
+    return list(by_id.values()), skipped, duplicate_ids
+
+
+def bm25_sidecar_health(pkl_path: Path) -> dict:
+    """BM25 侧车文件健康检查（供维护修复预览）。"""
+    collection = _coll_of(pkl_path)
+    row: dict = {
+        "collection": collection,
+        "pkl_exists": pkl_path.is_file(),
+        "needs_repair": False,
+    }
+    if not row["pkl_exists"]:
+        row["error"] = "pkl 缺失"
+        return row
+    row["pkl_bytes"] = pkl_path.stat().st_size
+    sidecar_err = _bm25_sidecar_error(pkl_path)
+    manifest = _read_bm25_manifest(pkl_path)
+    if manifest is not None:
+        row["manifest_docs"] = int(manifest.get("docs") or 0)
+    if sidecar_err:
+        row["needs_repair"] = True
+        row["error"] = sidecar_err
+        return row
+    rows, skipped, duplicate_ids = _parse_bm25_chunks_jsonl(pkl_path)
+    if rows is None:
+        row["needs_repair"] = True
+        row["error"] = "chunks.jsonl 无法解析"
+        return row
+    loaded = len(rows)
+    row["chunks_loaded"] = loaded
+    row["skipped_lines"] = skipped
+    row["duplicate_ids"] = duplicate_ids
+    manifest_docs = int(row.get("manifest_docs") or 0)
+    issues: list[str] = []
+    if skipped:
+        issues.append(f"坏行 {skipped}")
+    if duplicate_ids:
+        issues.append(f"重复 id {duplicate_ids}")
+    if manifest_docs and loaded != manifest_docs:
+        issues.append(f"块数不一致 manifest={manifest_docs} loaded={loaded}")
+    if issues:
+        row["needs_repair"] = True
+        row["error"] = "；".join(issues)
+    return row
+
+
+def _load_bm25_chunk_rows(collection: str, pkl_path: Path) -> tuple[list[dict] | None, int, int]:
+    """从 chunks.jsonl 加载 L2 列表行（不反序列化 pkl）。"""
+    return _parse_bm25_chunks_jsonl(pkl_path)
 
 
 def bm25_indexes() -> dict:
@@ -440,8 +548,9 @@ def bm25_indexes() -> dict:
             "is_default": coll == config.DEFAULT_COLLECTION,
         }
         manifest = _read_bm25_manifest(path)
-        if manifest is None:
-            row["error"] = "manifest 缺失（请重新入库或重建 BM25 索引）"
+        sidecar_err = _bm25_sidecar_error(path)
+        if sidecar_err:
+            row["error"] = sidecar_err
         else:
             row["docs"] = int(manifest.get("docs") or 0)
             row["k1"] = manifest.get("k1")
@@ -469,10 +578,27 @@ def bm25_docs(
     """L2：某索引的文档块分页（id + metadata 摘要）。读 manifest/chunks.jsonl，不 load pkl。"""
     pkl_path = _bm25_pkl_path(collection)
     if not pkl_path.exists():
+        logger.info(
+            "[db_inspect] BM25 索引文件不存在 collection=%s path=%s",
+            collection,
+            pkl_path,
+        )
         return None
-    rows = _load_bm25_chunk_rows(collection, pkl_path)
+    rows, skipped_lines, _duplicate_ids = _load_bm25_chunk_rows(collection, pkl_path)
     if rows is None:
-        return None
+        sidecar_err = _bm25_sidecar_error(pkl_path) or "侧车文件不可用"
+        logger.warning(
+            "[db_inspect] BM25 侧车文件不可用 collection=%s pkl=%s reason=%s",
+            collection,
+            pkl_path,
+            sidecar_err,
+        )
+        return {
+            "collection": collection,
+            "total": 0,
+            "items": [],
+            "error": sidecar_err,
+        }
     rows = filter_sort_rows(
         rows, filename_q=filename_q, body_q=body_q,
         ts_from=ts_from, ts_to=ts_to, sort_by=sort_by, desc=desc,
@@ -488,15 +614,17 @@ def bm25_docs(
         }
         for r in page
     ]
-    return {"collection": collection, "total": total, "items": items}
+    out: dict = {"collection": collection, "total": total, "items": items}
+    if skipped_lines:
+        out["skipped_lines"] = skipped_lines
+    return out
 
 
 def _find_bm25_chunk_row(pkl_path: Path, chunk_id: str) -> dict | None:
     manifest = _read_bm25_manifest(pkl_path)
     if manifest is None:
         return None
-    chunks_name = manifest.get("chunks_file") or f"{pkl_path.stem}.chunks.jsonl"
-    chunks_path = pkl_path.parent / str(chunks_name)
+    chunks_path = _bm25_chunks_path(pkl_path, manifest)
     if not chunks_path.is_file():
         return None
     try:
@@ -505,7 +633,10 @@ def _find_bm25_chunk_row(pkl_path: Path, chunk_id: str) -> dict | None:
                 line = line.strip()
                 if not line:
                     continue
-                item = json.loads(line)
+                try:
+                    item = json.loads(line)
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    continue
                 if item.get("id") != chunk_id:
                     continue
                 return {
@@ -513,7 +644,7 @@ def _find_bm25_chunk_row(pkl_path: Path, chunk_id: str) -> dict | None:
                     "metadata": dict(item.get("metadata") or {}),
                     "tokens": int(item.get("tokens") or 0),
                 }
-    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+    except OSError:
         return None
     return None
 
@@ -525,6 +656,11 @@ def bm25_doc(collection: str, doc_id: str) -> dict | None:
         return None
     meta_row = _find_bm25_chunk_row(pkl_path, doc_id)
     if meta_row is None:
+        logger.info(
+            "[db_inspect] BM25 文档块未找到 collection=%s doc_id=%s",
+            collection,
+            doc_id,
+        )
         return None
     document = ""
     try:

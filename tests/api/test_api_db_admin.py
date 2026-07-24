@@ -177,3 +177,20 @@ def test_maintenance_vacuum(client, monkeypatch):
     r = client.post("/api/admin/db/maintenance/vacuum", json={})
     assert r.status_code == 200
     assert r.json()["results"][0]["ok"] is True
+
+
+def test_maintenance_repair_preview(client, monkeypatch):
+    monkeypatch.setattr(
+        maintain, "repair_preview",
+        lambda: {"indexes": [{"collection": "kb_zh", "needs_repair": False}], "needs_repair": 0},
+    )
+    r = client.get("/api/admin/db/maintenance/repair/preview")
+    assert r.status_code == 200
+    assert r.json()["needs_repair"] == 0
+
+
+def test_maintenance_repair_run(client, monkeypatch):
+    monkeypatch.setattr(maintain, "repair_run", lambda collections=None: {"repaired": 1, "failed": 0, "items": []})
+    r = client.post("/api/admin/db/maintenance/repair", json={})
+    assert r.status_code == 200
+    assert r.json()["repaired"] == 1

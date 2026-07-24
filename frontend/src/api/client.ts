@@ -89,6 +89,8 @@ import type {
   PurgePreview,
   PurgeResult,
   PurgeSelection,
+  RepairPreview,
+  RepairResult,
   SqliteDatabases,
   SqliteTableRows,
   VacuumResult,
@@ -1452,6 +1454,22 @@ export async function cleanupOrphanSegments(): Promise<OrphanCleanupResult> {
   })
   await _ensureOk(res)
   return (await res.json()) as OrphanCleanupResult
+}
+
+export async function getRepairPreview(): Promise<RepairPreview> {
+  const res = await apiFetch('/api/admin/db/maintenance/repair/preview')
+  await _ensureOk(res)
+  return (await res.json()) as RepairPreview
+}
+
+export async function runRepair(collections?: string[]): Promise<RepairResult> {
+  const res = await apiFetch('/api/admin/db/maintenance/repair', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(collections ? { collections } : {}),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as RepairResult
 }
 
 export async function getSqliteTableRows(

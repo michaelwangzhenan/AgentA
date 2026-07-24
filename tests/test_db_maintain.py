@@ -197,3 +197,33 @@ def test_orphan_preview_unavailable_when_no_sqlite(tmp_path, monkeypatch):
     assert r["removed"] == []
     # 没误删
     assert (root / _UUID_ORPHAN).exists()
+
+
+def test_repair_preview_and_run(tmp_path, monkeypatch):
+    from src.rag.bm25_index import BM25Index, save_index
+
+    monkeypatch.setattr(
+        "src.rag.bm25_index.get_index_path",
+        lambda coll: tmp_path / f"bm25_{coll}.pkl",
+    )
+    monkeypatch.setattr(inspect, "bm25_dir", lambda: tmp_path)
+
+    idx = BM25Index("kb_fix")
+    idx.upsert(["a"], ["hello"], [{"doc_id": "d0", "filename": "a.md"}])
+    pkl = tmp_path / "bm25_kb_fix.pkl"
+    save_index(idx, pkl)
+
+    chunks = tmp_path / "bm25_kb_fix.chunks.jsonl"
+    chunks.write_text(chunks.read_text(encoding="utf-8") + "bad line\n", encoding="utf-8")
+
+    pre = maintain.repair_preview()
+    row = next(i for i in pre["indexes"] if i["collection"] == "kb_fix")
+    assert row["needs_repair"] is True
+
+    out = maintain.repair_run()
+    assert out["repaired"] == 1
+    assert out["failed"] == 0
+
+    post = maintain.repair_preview()
+    row2 = next(i for i in post["indexes"] if i["collection"] == "kb_fix")
+    assert row2["needs_repair"] is False

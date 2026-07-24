@@ -26,11 +26,13 @@ import {
   getOrphanSegmentsPreview,
   getPrunePreview,
   getPurgeUserPreview,
+  getRepairPreview,
   getSqliteDatabases,
   getSqliteTableRows,
   listUsers,
   runPrune,
   runPurgeUser,
+  runRepair,
   runVacuum,
 } from '@/api/client'
 import type {
@@ -45,6 +47,7 @@ import type {
   PruneResult,
   PurgePreview,
   PurgeSelection,
+  RepairPreview,
   SqliteDatabases,
   SqliteTableRows,
   VacuumResult,
@@ -935,6 +938,12 @@ function Bm25Docs({
       <ChromaFilterBar filters={filters} sort={sort} onFilters={onFilters} onSort={onSort} />
       {loading && <Spinner />}
       {error && <ErrorNote msg={error} />}
+      {data?.error && <ErrorNote msg={data.error} />}
+      {data?.skipped_lines ? (
+        <p className="mb-2 text-xs text-amber-600 dark:text-amber-500">
+          chunks.jsonl 有 {data.skipped_lines} 行损坏，已跳过
+        </p>
+      ) : null}
       {data && !loading && (
         <>
           <Pager
@@ -1969,27 +1978,53 @@ function ConfirmDialog({
   title,
   desc,
   onConfirm,
+  loading = false,
+  confirmLabel = '确认',
 }: {
   open: boolean
   onOpenChange: (o: boolean) => void
   title: string
   desc: string
-  onConfirm: () => void
+  onConfirm: () => void | Promise<void>
+  loading?: boolean
+  confirmLabel?: string
 }) {
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
+    <AlertDialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!loading) onOpenChange(o)
+      }}
+    >
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{desc}</AlertDialogDescription>
         </AlertDialogHeader>
+        {loading && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+            处理中，请稍候…
+          </div>
+        )}
         <AlertDialogFooter>
-          <AlertDialogCancel>取消</AlertDialogCancel>
+          <AlertDialogCancel disabled={loading}>取消</AlertDialogCancel>
           <AlertDialogAction
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            onClick={onConfirm}
+            disabled={loading}
+            onClick={(e) => {
+              e.preventDefault()
+              void onConfirm()
+            }}
           >
-            确认
+            {loading ? (
+              <span className="inline-flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                处理中…
+              </span>
+            ) : (
+              confirmLabel
+            )}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -2004,6 +2039,7 @@ function MaintenancePanel() {
       <PurgeUserPanel />
       <OrphanSegmentsPanel />
       <VacuumPanel />
+      <RepairPanel />
     </div>
   )
 }
@@ -2014,6 +2050,118 @@ function fmtBytes(n: number): string {
   if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`
   if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${n} B`
+}
+
+function RepairPanel() {
+  const [preview, setPreview] = useState<RepairPreview | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [busyLabel, setBusyLabel] = useState('')
+  const [confirm, setConfirm] = useState(false)
+
+  const doPreview = async () => {
+    setBusy(true)
+    setBusyLabel('正在扫描 BM25 侧车文件…')
+    try {
+      setPreview(await getRepairPreview())
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '扫描失败')
+    } finally {
+      setBusy(false)
+      setBusyLabel('')
+    }
+  }
+
+  const doRun = async () => {
+    setBusy(true)
+    setBusyLabel('正在从 pkl 重建侧车文件，大索引可能需要数十秒…')
+    try {
+      const r = await runRepair()
+      if (r.failed > 0) {
+        toast.error(`修复完成：成功 ${r.repaired}，失败 ${r.failed}`)
+      } else if (r.repaired > 0) {
+        toast.success(`已修复 ${r.repaired} 个 BM25 索引侧车`)
+      } else {
+        toast.success('没有需要修复的索引')
+      }
+      setBusyLabel('正在刷新扫描结果…')
+      setPreview(await getRepairPreview())
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '修复失败')
+    } finally {
+      setBusy(false)
+      setBusyLabel('')
+      setConfirm(false)
+    }
+  }
+
+  const broken = preview?.indexes.filter((i) => i.needs_repair) ?? []
+
+  return (
+    <Card
+      title="BM25 修复"
+      desc="从 pkl 重建 manifest.json 与 chunks.jsonl，修复管理端 BM25 列表异常。不改动 pkl 检索索引本体。"
+    >
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+        <button type="button" onClick={doPreview} disabled={busy} className={btnCls}>
+          扫描
+        </button>
+        <button
+          type="button"
+          onClick={() => setConfirm(true)}
+          disabled={busy || !preview || preview.needs_repair === 0}
+          className={btnCls}
+        >
+          修复
+        </button>
+      </div>
+
+      {busy && (
+        <div className="mb-3 flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+          {busyLabel || '处理中…'}
+        </div>
+      )}
+
+      {!busy && preview && preview.needs_repair === 0 && (
+        <p className="text-sm text-muted-foreground">全部 BM25 侧车文件正常。</p>
+      )}
+      {preview && preview.needs_repair > 0 && (
+        <div className={cn('rounded-md border border-border', busy && 'opacity-60')}>
+          <div className="border-b border-border bg-muted/30 px-3 py-1.5 text-xs text-muted-foreground">
+            需修复 {preview.needs_repair} 个索引
+          </div>
+          <ul className="max-h-64 overflow-auto">
+            {broken.map((ix) => (
+              <li
+                key={ix.collection}
+                className="border-t border-border/50 px-3 py-2 text-sm first:border-t-0"
+              >
+                <div className="font-medium">{ix.collection}</div>
+                <div className="text-xs text-destructive">{ix.error}</div>
+                {ix.manifest_docs != null && (
+                  <div className="text-xs text-muted-foreground">
+                    manifest {ix.manifest_docs} 块
+                    {ix.skipped_lines ? ` · 坏行 ${ix.skipped_lines}` : ''}
+                    {ix.duplicate_ids ? ` · 重复 id ${ix.duplicate_ids}` : ''}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={confirm}
+        onOpenChange={setConfirm}
+        title="确认修复 BM25 侧车？"
+        desc={`将从 pkl 重建 ${preview?.needs_repair ?? 0} 个索引的 manifest / chunks.jsonl。不改动 pkl 本体。`}
+        loading={busy}
+        confirmLabel="确认"
+        onConfirm={doRun}
+      />
+    </Card>
+  )
 }
 
 function OrphanSegmentsPanel() {

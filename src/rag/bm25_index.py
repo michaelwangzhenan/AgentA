@@ -19,10 +19,12 @@ BM25 倒排索引（自实现，零外部依赖）
 
 from __future__ import annotations
 
+import contextlib
 import gc
 import json
 import logging
 import math
+import os
 import pickle
 import re
 import threading
@@ -355,8 +357,39 @@ def get_chunks_list_path(collection_name: str) -> Path:
     return pkl.with_name(f"{pkl.stem}.chunks.jsonl")
 
 
-def _write_index_sidecars(idx: BM25Index, pkl_path: Path) -> None:
-    """写盘 pkl 后同步 manifest + chunks.jsonl，管理巡检无需反序列化全索引。"""
+_SIDECAR_LOCK_WAIT_SEC = 30.0
+_SIDECAR_LOCK_POLL_SEC = 0.1
+
+
+def _sidecar_lock_path(pkl_path: Path) -> Path:
+    return pkl_path.with_suffix(pkl_path.suffix + ".sidecar.lock")
+
+
+@contextlib.contextmanager
+def _sidecar_write_lock(pkl_path: Path):
+    """跨进程互斥：避免多进程/多 worker 同时写同一 chunks.jsonl.tmp。"""
+    lock_path = _sidecar_lock_path(pkl_path)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd: int | None = None
+    deadline = time.monotonic() + _SIDECAR_LOCK_WAIT_SEC
+    while True:
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except FileExistsError:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"BM25 sidecar 写入锁超时: {lock_path}") from None
+            time.sleep(_SIDECAR_LOCK_POLL_SEC)
+    try:
+        yield
+    finally:
+        if fd is not None:
+            os.close(fd)
+        lock_path.unlink(missing_ok=True)
+
+
+def _write_index_sidecars_unlocked(idx: BM25Index, pkl_path: Path) -> None:
+    """写 manifest + chunks.jsonl（调用方负责加锁）。"""
     chunks_path = get_chunks_list_path(idx.collection_name)
     manifest_path = get_manifest_path(idx.collection_name)
     chunks_path.parent.mkdir(parents=True, exist_ok=True)
@@ -386,6 +419,26 @@ def _write_index_sidecars(idx: BM25Index, pkl_path: Path) -> None:
     with open(manifest_tmp, "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
     manifest_tmp.replace(manifest_path)
+
+
+def _write_index_sidecars(idx: BM25Index, pkl_path: Path) -> None:
+    """写盘 pkl 后同步 manifest + chunks.jsonl，管理巡检无需反序列化全索引。"""
+    with _sidecar_write_lock(pkl_path):
+        _write_index_sidecars_unlocked(idx, pkl_path)
+
+
+def rewrite_index_sidecars(collection_name: str) -> dict:
+    """从 pkl 重建 manifest + chunks.jsonl，不改动 pkl 本体。"""
+    pkl_path = get_index_path(collection_name)
+    if not pkl_path.is_file():
+        raise ValueError(f"BM25 pkl 不存在: {collection_name}")
+    drop_index(collection_name)
+    idx = BM25Index.load_or_new(collection_name, pkl_path)
+    if not idx.docs:
+        raise ValueError(f"BM25 pkl 为空或无法加载: {collection_name}")
+    with _sidecar_write_lock(pkl_path):
+        _write_index_sidecars_unlocked(idx, pkl_path)
+    return {"collection": collection_name, "docs": len(idx.docs), "ok": True}
 
 
 def save_index(idx: BM25Index, path: Path) -> None:

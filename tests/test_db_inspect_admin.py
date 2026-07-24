@@ -121,6 +121,50 @@ def test_bm25_docs_20k_filter_without_pickle(
     assert page["items"][0]["id"] == "c199"
 
 
+def test_bm25_indexes_flags_missing_chunks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_bm25_sidecars(tmp_path, "kb_no_chunks", 2, monkeypatch)
+    monkeypatch.setattr(inspect, "bm25_dir", lambda: tmp_path)
+    (tmp_path / "bm25_kb_no_chunks.chunks.jsonl").unlink()
+
+    data = inspect.bm25_indexes()
+    row = data["indexes"][0]
+    assert row["collection"] == "kb_no_chunks"
+    assert "chunks.jsonl 缺失" in row["error"]
+
+
+def test_bm25_docs_sidecar_missing_returns_error_not_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_bm25_sidecars(tmp_path, "kb_no_chunks", 2, monkeypatch)
+    monkeypatch.setattr(inspect, "bm25_dir", lambda: tmp_path)
+    (tmp_path / "bm25_kb_no_chunks.chunks.jsonl").unlink()
+
+    page = inspect.bm25_docs("kb_no_chunks", limit=50, offset=0)
+    assert page is not None
+    assert page["total"] == 0
+    assert page["items"] == []
+    assert "chunks.jsonl 缺失" in page["error"]
+
+
+def test_bm25_docs_skips_corrupt_jsonl_lines(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    _write_bm25_sidecars(tmp_path, "kb_bad", 3, monkeypatch)
+    monkeypatch.setattr(inspect, "bm25_dir", lambda: tmp_path)
+    chunks = tmp_path / "bm25_kb_bad.chunks.jsonl"
+    text = chunks.read_text(encoding="utf-8")
+    chunks.write_text(text + "not valid json\n", encoding="utf-8")
+
+    with caplog.at_level("WARNING"):
+        page = inspect.bm25_docs("kb_bad", limit=50, offset=0)
+    assert page is not None
+    assert page["total"] == 3
+    assert page.get("skipped_lines") == 1
+    assert any("chunks.jsonl 异常" in r.message for r in caplog.records)
+
+
 def test_save_index_writes_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "src.rag.bm25_index.get_index_path",
