@@ -19,6 +19,7 @@ import { getConfig, patchConfig, resetConfig } from '@/api/client'
 import type { ConfigGroupView, ConfigItemView } from '@/types/config'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
+import { useUrlState } from '@/routes/useUrlState'
 
 type LocalEdit = {
   value: unknown
@@ -36,16 +37,26 @@ function isInstantType(t: ConfigItemView['type']): boolean {
 
 export function SettingsView({
   embedded = false,
+  urlDriven = false,
   title,
   description,
-}: { embedded?: boolean; title?: string; description?: string } = {}) {
+}: { embedded?: boolean; urlDriven?: boolean; title?: string; description?: string } = {}) {
   const [groups, setGroups] = useState<ConfigGroupView[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [search, setSearch] = useState('')
-  const [edits, setEdits] = useState<Record<string, LocalEdit>>({})
-  const [activeGroup, setActiveGroup] = useState<string | null>(null)
+  const url = useUrlState()
+  const [localSearch, setLocalSearch] = useState('')
+  const [localActiveGroup, setLocalActiveGroup] = useState<string | null>(null)
+  const search = urlDriven ? url.get('q') : localSearch
+  const setSearch = urlDriven
+    ? (v: string) => url.patch({ q: v || null })
+    : setLocalSearch
+  const activeGroup = urlDriven ? url.get('group') || null : localActiveGroup
+  const setActiveGroup = urlDriven
+    ? (name: string) => url.patch({ group: name || null, q: null })
+    : setLocalActiveGroup
   const [pendingDanger, setPendingDanger] = useState<{ key: string; value: unknown } | null>(null)
+  const [edits, setEdits] = useState<Record<string, LocalEdit>>({})
 
   // 延时保存定时器（每个 key 独立，新 change 来了清旧再排）
   const saveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout> | undefined>>({})
@@ -61,17 +72,32 @@ export function SettingsView({
     try {
       const res = await getConfig()
       setGroups(res.groups)
-      setActiveGroup((prev) => prev ?? res.groups[0]?.name ?? null)
+      if (!urlDriven) {
+        setLocalActiveGroup((prev) => prev ?? res.groups[0]?.name ?? null)
+      }
     } catch (e) {
       setLoadError((e as Error).message)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [urlDriven])
 
   useEffect(() => {
-    refresh()
+    void refresh()
   }, [refresh])
+
+  // 网址缺 group 或非法时补默认值；与拉配置分离，避免 patch 触发重复 refresh 闪烁
+  useEffect(() => {
+    if (!urlDriven || groups.length === 0) return
+    const names = groups.map((g) => g.name)
+    const g = url.get('group')
+    if (g && !names.includes(g)) {
+      url.patch({ group: groups[0]?.name ?? null }, { replace: true })
+    } else if (!g && groups[0]) {
+      url.patch({ group: groups[0].name }, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlDriven, groups, url.searchParams])
 
   // 卸载时清掉所有 pending 定时器，避免内存泄漏 + 切走 view 又触发保存
   useEffect(() => {
@@ -212,10 +238,13 @@ export function SettingsView({
   // ─── 搜索过滤 ─────────────────────────────────────────────────────
   // 无搜索：只显示当前 activeGroup；有搜索：跨所有组展示命中项（VSCode 设置面板风格）
   const searching = search.trim().length > 0
+  const resolvedActiveGroup = urlDriven
+    ? url.get('group') || groups[0]?.name || null
+    : activeGroup
   const visibleGroups = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) {
-      const g = groups.find((it) => it.name === activeGroup)
+      const g = groups.find((it) => it.name === resolvedActiveGroup)
       if (!g) return []
       return [{ ...g, items: g.items.filter((it) => !it.hidden) }]
     }
@@ -232,7 +261,7 @@ export function SettingsView({
         }),
       }))
       .filter((g) => g.items.length > 0)
-  }, [groups, search, activeGroup])
+  }, [groups, search, resolvedActiveGroup])
 
   // 各组在搜索状态下的命中数（仅命中数 > 0 的组在左导航上显示徽章）
   const groupMatchCounts = useMemo(() => {
@@ -300,7 +329,7 @@ export function SettingsView({
               {groups.map((g) => {
                 const matchCount = groupMatchCounts[g.name]
                 const savingN = groupSavingCounts[g.name]
-                const isActive = !searching && activeGroup === g.name
+                const isActive = !searching && resolvedActiveGroup === g.name
                 const dimmed = searching && (matchCount ?? 0) === 0
                 return (
                   <li key={g.name}>
@@ -308,7 +337,6 @@ export function SettingsView({
                       type="button"
                       onClick={() => {
                         setActiveGroup(g.name)
-                        // 用户点导航时清掉搜索，回到单组视图
                         if (searching) setSearch('')
                       }}
                       className={cn(

@@ -17,6 +17,7 @@ import type {
   TraceOverview,
   TraceSeries,
 } from '@/types/eval'
+import { useUrlState } from '@/routes/useUrlState'
 
 type Range = '1d' | '7d' | '30d' | 'mtd' | 'last_month'
 const RANGES: { value: Range; label: string }[] = [
@@ -47,12 +48,22 @@ function ms(v: number): string {
 
 export function TraceDashboard() {
   const { isAdmin } = useAuth()
-  const [range, setRange] = useState<Range>('30d')
-  const [scope, setScope] = useState<'mine' | 'all'>('mine')
+  const url = useUrlState()
+  const parseRange = (v: string): Range =>
+    (RANGES.map((r) => r.value) as string[]).includes(v) ? (v as Range) : '30d'
+  const range = parseRange(url.get('range', '30d'))
+  const scope: 'mine' | 'all' = url.get('scope') === 'all' ? 'all' : 'mine'
+  const page = Math.max(0, url.getInt('page', 0))
+  const traceId = url.get('trace')
+
+  const setRange = (r: Range) => url.patch({ range: r === '30d' ? null : r, page: null })
+  const setScope = (s: 'mine' | 'all') =>
+    url.patch({ scope: s === 'mine' ? null : s, page: null })
+  const setPage = (p: number) => url.patch({ page: p <= 0 ? null : p })
+
   const [overview, setOverview] = useState<TraceOverview | null>(null)
   const [series, setSeries] = useState<TraceSeries | null>(null)
   const [list, setList] = useState<TraceList | null>(null)
-  const [page, setPage] = useState(0)
   const [loading, setLoading] = useState(true)
   const [openTrace, setOpenTrace] = useState<TraceDetail | null>(null)
 
@@ -79,18 +90,19 @@ export function TraceDashboard() {
   }, [refresh])
 
   useEffect(() => {
-    setPage(0)
-  }, [range, scope])
+    if (!traceId) {
+      setOpenTrace(null)
+      return
+    }
+    void getTraceDetail(traceId)
+      .then(setOpenTrace)
+      .catch((e) => toast.error((e as Error).message))
+  }, [traceId])
 
   const maxDay = Math.max(1, ...(series?.rows.map((r) => r.avg_ms) ?? [1]))
 
-  const openDetail = async (traceId: string) => {
-    try {
-      setOpenTrace(await getTraceDetail(traceId))
-    } catch (e) {
-      toast.error((e as Error).message)
-    }
-  }
+  const openDetail = (id: string) => url.patch({ trace: id })
+  const closeDetail = () => url.patch({ trace: null })
 
   return (
     <div className="space-y-5">
@@ -242,7 +254,7 @@ export function TraceDashboard() {
         </div>
         {list && list.total > PAGE_SIZE && (
           <div className="mt-3 flex items-center justify-end gap-2 text-sm">
-            <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>
+            <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage(page - 1)}>
               上一页
             </Button>
             <span className="text-xs text-muted-foreground">
@@ -252,7 +264,7 @@ export function TraceDashboard() {
               variant="outline"
               size="sm"
               disabled={(page + 1) * PAGE_SIZE >= list.total}
-              onClick={() => setPage((p) => p + 1)}
+              onClick={() => setPage(page + 1)}
             >
               下一页
             </Button>
@@ -260,7 +272,7 @@ export function TraceDashboard() {
         )}
       </section>
 
-      {openTrace && <WaterfallPanel trace={openTrace} onClose={() => setOpenTrace(null)} />}
+      {openTrace && <WaterfallPanel trace={openTrace} onClose={closeDetail} />}
     </div>
   )
 }

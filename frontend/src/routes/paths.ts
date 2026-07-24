@@ -118,3 +118,39 @@ export function qualityGoldenPath(params: {
   const q = sp.toString()
   return q ? `/quality/golden?${q}` : '/quality/golden'
 }
+
+export function databasePath(
+  tab: DatabaseTab,
+  seg1?: string,
+  seg2?: string,
+  search?: URLSearchParams | string,
+): string {
+  let path = `/database/${tab}`
+  if (seg1) path += `/${encodeURIComponent(seg1)}`
+  if (seg2) path += `/${encodeURIComponent(seg2)}`
+  if (!search) return path
+  const q = typeof search === 'string' ? search : search.toString()
+  return q ? `${path}?${q}` : path
+}
+
+/** 合并查询参数补丁并保留当前其它键（用于切库/表时保留筛选）。 */
+export function mergeSearchParams(
+  current: URLSearchParams,
+  updates: Record<string, string | number | null | undefined>,
+): URLSearchParams {
+  const next = new URLSearchParams(current)
+  for (const [key, value] of Object.entries(updates)) {
+    if (value === null || value === undefined || value === '') next.delete(key)
+    else next.set(key, String(value))
+  }
+  return next
+}
+
+/** epoch 秒 → YYYY-MM-DD（本地时区），供日期筛选进网址。 */
+export function epochToDateInput(epoch?: number): string {
+  if (epoch == null || !Number.isFinite(epoch) || epoch <= 0) return ''
+  const d = new Date(epoch * 1000)
+  if (Number.isNaN(d.getTime())) return ''
+  const p = (x: number) => String(x).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}

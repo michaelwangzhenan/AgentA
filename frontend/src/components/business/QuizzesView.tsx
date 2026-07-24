@@ -23,6 +23,7 @@ import {
 } from '@/types/business'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
+import { useUrlState } from '@/routes/useUrlState'
 
 const MCQ_TYPES = ['mcq_single', 'mcq_multi']
 
@@ -187,8 +188,13 @@ function AnswerQuestion({
 }
 
 export function QuizzesView() {
+  const url = useUrlState()
+  const quizParam = url.get('quiz')
+  const selectedId = quizParam ? Number(quizParam) : null
+  const setSelectedId = (id: number | null) =>
+    url.patch({ quiz: id != null && !Number.isNaN(id) ? id : null })
+
   const [list, setList] = useState<QuizSetSummary[]>([])
-  const [selectedId, setSelectedId] = useState<number | null>(null)
   const [selected, setSelected] = useState<QuizSet | null>(null)
   const [loadingList, setLoadingList] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -203,17 +209,17 @@ export function QuizzesView() {
     try {
       const items = await listQuizzes()
       setList(items)
-      setSelectedId((prev) => {
-        if (preferId !== undefined) return preferId
-        if (prev !== null && items.some((q) => q.id === prev)) return prev
-        return items[0]?.id ?? null
-      })
+      let nextId: number | null = selectedId
+      if (preferId !== undefined) nextId = preferId
+      else if (selectedId !== null && items.some((q) => q.id === selectedId)) nextId = selectedId
+      else nextId = items[0]?.id ?? null
+      if (nextId !== selectedId) setSelectedId(nextId)
     } catch (e) {
       setError((e as Error).message)
     } finally {
       setLoadingList(false)
     }
-  }, [])
+  }, [selectedId])
 
   useEffect(() => {
     refreshList()

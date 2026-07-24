@@ -14,6 +14,7 @@ import type {
   SecurityRuntimeSummary,
 } from '@/types/eval'
 import type { UserInfo } from '@/types/auth'
+import { useUrlState } from '@/routes/useUrlState'
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const
 
@@ -109,30 +110,59 @@ export function RuntimeMonitor() {
 
 // 实时拦截事件表：服务端筛选（时间 / 类型 / 用户）+ 表头排序 + 分页（参考数据库页）。
 function RuntimeEventsTable({ users }: { users: UserInfo[] }) {
+  const url = useUrlState()
   const userMap = useMemo(() => {
     const m: Record<string, string> = {}
     for (const u of users) m[String(u.id)] = u.username
     return m
   }, [users])
 
-  const [eventType, setEventType] = useState('')
-  const [userId, setUserId] = useState('') // '' = 全部
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
-  // 已提交的时间范围（点「查询」才生效；类型 / 用户即时生效）
-  const [range, setRange] = useState<{ tsFrom?: number; tsTo?: number }>({})
-  const [sortBy, setSortBy] = useState('created_at')
-  const [desc, setDesc] = useState(true)
-  const [offset, setOffset] = useState(0)
-  const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[0])
+  const eventType = url.get('type')
+  const userId = url.get('uid')
+  const from = url.get('from')
+  const to = url.get('to')
+  const range = {
+    tsFrom: dateToEpoch(from, false),
+    tsTo: dateToEpoch(to, true),
+  }
+  const sortBy = url.get('sort', 'created_at')
+  const desc = url.get('dir') !== 'asc'
+  const rawSize = url.getInt('size', PAGE_SIZE_OPTIONS[0])
+  const pageSize = (PAGE_SIZE_OPTIONS as readonly number[]).includes(rawSize)
+    ? rawSize
+    : PAGE_SIZE_OPTIONS[0]
+  const pageNum = Math.max(1, url.getInt('page', 1))
+  const offset = (pageNum - 1) * pageSize
 
-  const [page, setPage] = useState<SecurityEventPage | null>(null)
+  const [page, setPageData] = useState<SecurityEventPage | null>(null)
   const [loading, setLoading] = useState(true)
+
+  const resetTo0 = () => url.patch({ page: null })
+  const applyRange = () => resetTo0()
+  const clearFilters = () =>
+    url.patch({ type: null, uid: null, from: null, to: null, page: null })
+  const setEventType = (v: string) => url.patch({ type: v || null, page: null })
+  const setUserId = (v: string) => url.patch({ uid: v || null, page: null })
+  const setFrom = (v: string) => url.patch({ from: v || null })
+  const setTo = (v: string) => url.patch({ to: v || null })
+  const setOffset = (n: number) => {
+    const p = Math.floor(n / pageSize) + 1
+    url.patch({ page: p <= 1 ? null : p })
+  }
+  const onPageSize = (n: number) =>
+    url.patch({ size: n === PAGE_SIZE_OPTIONS[0] ? null : n, page: null })
+  const toggleSort = (col: string) => {
+    if (sortBy === col) {
+      url.patch({ dir: desc ? 'asc' : null, page: null })
+    } else {
+      url.patch({ sort: col === 'created_at' ? null : col, dir: null, page: null })
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      setPage(
+      setPageData(
         await getSecurityRuntimeEvents({
           tsFrom: range.tsFrom,
           tsTo: range.tsTo,
@@ -149,38 +179,11 @@ function RuntimeEventsTable({ users }: { users: UserInfo[] }) {
     } finally {
       setLoading(false)
     }
-  }, [range, eventType, userId, sortBy, desc, pageSize, offset])
+  }, [range.tsFrom, range.tsTo, eventType, userId, sortBy, desc, pageSize, offset])
 
   useEffect(() => {
     void load()
   }, [load])
-
-  // 筛选 / 排序 / 每页变化时回到第一页
-  const resetTo0 = () => setOffset(0)
-
-  const applyRange = () => {
-    setRange({ tsFrom: dateToEpoch(from, false), tsTo: dateToEpoch(to, true) })
-    resetTo0()
-  }
-  const clearFilters = () => {
-    setEventType('')
-    setUserId('')
-    setFrom('')
-    setTo('')
-    setRange({})
-    resetTo0()
-  }
-
-  // 点表头：同列切升降，换列默认降序
-  const toggleSort = (col: string) => {
-    if (sortBy === col) {
-      setDesc((d) => !d)
-    } else {
-      setSortBy(col)
-      setDesc(true)
-    }
-    resetTo0()
-  }
 
   const inputCls = 'rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground'
   const items = page?.items ?? []
@@ -194,10 +197,7 @@ function RuntimeEventsTable({ users }: { users: UserInfo[] }) {
           类型
           <select
             value={eventType}
-            onChange={(e) => {
-              setEventType(e.target.value)
-              resetTo0()
-            }}
+            onChange={(e) => setEventType(e.target.value)}
             className={inputCls}
           >
             <option value="">全部</option>
@@ -213,10 +213,7 @@ function RuntimeEventsTable({ users }: { users: UserInfo[] }) {
           用户
           <select
             value={userId}
-            onChange={(e) => {
-              setUserId(e.target.value)
-              resetTo0()
-            }}
+            onChange={(e) => setUserId(e.target.value)}
             className={inputCls}
           >
             <option value="">全部</option>
@@ -283,7 +280,7 @@ function RuntimeEventsTable({ users }: { users: UserInfo[] }) {
         </p>
       )}
 
-      <EventsPager total={total} offset={offset} pageSize={pageSize} onOffset={setOffset} onPageSize={(n) => { setPageSize(n); resetTo0() }} />
+      <EventsPager total={total} offset={offset} pageSize={pageSize} onOffset={setOffset} onPageSize={onPageSize} />
     </div>
   )
 }

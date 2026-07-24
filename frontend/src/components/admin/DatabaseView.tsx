@@ -52,6 +52,8 @@ import type {
 import type { UserInfo } from '@/types/auth'
 
 import type { DatabaseTab } from '@/routes/paths'
+import { databasePath, epochToDateInput } from '@/routes/paths'
+import { useUrlState } from '@/routes/useUrlState'
 
 // 后端 limit 上限 200，候选项不超过它
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 200] as const
@@ -61,10 +63,16 @@ const CHROMA_SCAN_CAP_HINT = 20000
 
 export function DatabaseView({
   tab,
+  seg1,
+  seg2,
   onTabChange,
+  onPathChange,
 }: {
   tab: DatabaseTab
+  seg1?: string
+  seg2?: string
   onTabChange: (tab: DatabaseTab) => void
+  onPathChange: (path: string) => void
 }) {
   const tabs: { value: DatabaseTab; label: string; icon: LucideIcon }[] = [
     { value: 'chroma', label: 'Chroma', icon: Boxes },
@@ -101,9 +109,15 @@ export function DatabaseView({
           </ul>
         </nav>
         <div className="min-w-0 flex-1">
-          {tab === 'chroma' && <ChromaPanel />}
-          {tab === 'bm25' && <Bm25Panel />}
-          {tab === 'sqlite' && <SqlitePanel />}
+          {tab === 'chroma' && (
+            <ChromaPanel seg1={seg1} seg2={seg2} onPathChange={onPathChange} />
+          )}
+          {tab === 'bm25' && (
+            <Bm25Panel seg1={seg1} seg2={seg2} onPathChange={onPathChange} />
+          )}
+          {tab === 'sqlite' && (
+            <SqlitePanel seg1={seg1} seg2={seg2} onPathChange={onPathChange} />
+          )}
           {tab === 'maintenance' && <MaintenancePanel />}
         </div>
       </div>
@@ -397,64 +411,98 @@ type ChromaFilters = { filenameQ: string; bodyQ: string; tsFrom?: number; tsTo?:
 type ChromaSort = { by?: 'filename' | 'ingested_at'; desc: boolean }
 const EMPTY_FILTERS: ChromaFilters = { filenameQ: '', bodyQ: '' }
 
-function ChromaPanel() {
-  const [sel, setSel] = useState<{ name: string; itemId?: string } | null>(null)
-  const [offset, setOffset] = useState(0)
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
-  const [filters, setFilters] = useState<ChromaFilters>(EMPTY_FILTERS)
-  const [sort, setSort] = useState<ChromaSort>({ desc: true })
-  const changePageSize = (n: number) => {
-    setPageSize(n)
-    setOffset(0)
-  }
-  const changeFilters = (f: ChromaFilters) => {
-    setFilters(f)
-    setOffset(0)
-  }
-  const changeSort = (s: ChromaSort) => {
-    setSort(s)
-    setOffset(0)
+function useChromaListUrlState() {
+  const url = useUrlState()
+  const page = Math.max(1, url.getInt('page', 1))
+  const rawSize = url.getInt('size', DEFAULT_PAGE_SIZE)
+  const pageSize = (PAGE_SIZE_OPTIONS as readonly number[]).includes(rawSize)
+    ? rawSize
+    : DEFAULT_PAGE_SIZE
+  const offset = (page - 1) * pageSize
+
+  const fromStr = url.get('from')
+  const toStr = url.get('to')
+  const filters: ChromaFilters = {
+    filenameQ: url.get('filename'),
+    bodyQ: url.get('body'),
+    tsFrom: dateToEpoch(fromStr, false),
+    tsTo: dateToEpoch(toStr, true),
   }
 
-  if (sel?.itemId) {
+  const sortBy = url.get('sort')
+  const sort: ChromaSort = {
+    by: sortBy === 'filename' || sortBy === 'ingested_at' ? sortBy : undefined,
+    desc: url.get('dir') !== 'asc',
+  }
+
+  const setOffset = (n: number) => {
+    const p = Math.floor(n / pageSize) + 1
+    url.patch({ page: p <= 1 ? null : p })
+  }
+  const setPageSize = (n: number) => {
+    url.patch({ size: n === DEFAULT_PAGE_SIZE ? null : n, page: null })
+  }
+  const setFilters = (f: ChromaFilters) => {
+    url.patch({
+      filename: f.filenameQ || null,
+      body: f.bodyQ || null,
+      from: f.tsFrom ? epochToDateInput(f.tsFrom) : null,
+      to: f.tsTo ? epochToDateInput(f.tsTo) : null,
+      page: null,
+    })
+  }
+  const setSort = (s: ChromaSort) => {
+    url.patch({
+      sort: s.by || null,
+      dir: s.by && !s.desc ? 'asc' : null,
+      page: null,
+    })
+  }
+
+  return { offset, pageSize, filters, sort, setOffset, setPageSize, setFilters, setSort }
+}
+
+function ChromaPanel({
+  seg1,
+  seg2,
+  onPathChange,
+}: {
+  seg1?: string
+  seg2?: string
+  onPathChange: (path: string) => void
+}) {
+  const { offset, pageSize, filters, sort, setOffset, setPageSize, setFilters, setSort } =
+    useChromaListUrlState()
+
+  if (seg1 && seg2) {
     return (
       <ChromaDetail
-        name={sel.name}
-        itemId={sel.itemId}
-        onBack={() => setSel({ name: sel.name })}
-        onRoot={() => setSel(null)}
+        name={seg1}
+        itemId={seg2}
+        onBack={() => onPathChange(databasePath('chroma', seg1))}
+        onRoot={() => onPathChange(databasePath('chroma'))}
       />
     )
   }
-  if (sel) {
+  if (seg1) {
     return (
       <ChromaItems
-        name={sel.name}
+        name={seg1}
         offset={offset}
         setOffset={setOffset}
         pageSize={pageSize}
-        onPageSize={changePageSize}
+        onPageSize={setPageSize}
         filters={filters}
-        onFilters={changeFilters}
+        onFilters={setFilters}
         sort={sort}
-        onSort={changeSort}
-        onOpen={(id) => setSel({ name: sel.name, itemId: id })}
-        onRoot={() => {
-          setSel(null)
-          setOffset(0)
-        }}
+        onSort={setSort}
+        onOpen={(id) => onPathChange(databasePath('chroma', seg1, id))}
+        onRoot={() => onPathChange(databasePath('chroma'))}
       />
     )
   }
   return (
-    <ChromaList
-      onOpen={(name) => {
-        setSel({ name })
-        setOffset(0)
-        setFilters(EMPTY_FILTERS)
-        setSort({ desc: true })
-      }}
-    />
+    <ChromaList onOpen={(name) => onPathChange(databasePath('chroma', name))} />
   )
 }
 
@@ -750,65 +798,46 @@ function ChromaDetail({
 
 // ── BM25 面板 ──────────────────────────────────────────────────────────────
 
-function Bm25Panel() {
-  const [sel, setSel] = useState<{ coll: string; docId?: string } | null>(null)
-  const [offset, setOffset] = useState(0)
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
-  const [filters, setFilters] = useState<ChromaFilters>(EMPTY_FILTERS)
-  const [sort, setSort] = useState<ChromaSort>({ desc: true })
-  const changePageSize = (n: number) => {
-    setPageSize(n)
-    setOffset(0)
-  }
-  const changeFilters = (f: ChromaFilters) => {
-    setFilters(f)
-    setOffset(0)
-  }
-  const changeSort = (s: ChromaSort) => {
-    setSort(s)
-    setOffset(0)
-  }
+function Bm25Panel({
+  seg1,
+  seg2,
+  onPathChange,
+}: {
+  seg1?: string
+  seg2?: string
+  onPathChange: (path: string) => void
+}) {
+  const { offset, pageSize, filters, sort, setOffset, setPageSize, setFilters, setSort } =
+    useChromaListUrlState()
 
-  if (sel?.docId) {
+  if (seg1 && seg2) {
     return (
       <Bm25DocView
-        coll={sel.coll}
-        docId={sel.docId}
-        onBack={() => setSel({ coll: sel.coll })}
-        onRoot={() => setSel(null)}
+        coll={seg1}
+        docId={seg2}
+        onBack={() => onPathChange(databasePath('bm25', seg1))}
+        onRoot={() => onPathChange(databasePath('bm25'))}
       />
     )
   }
-  if (sel) {
+  if (seg1) {
     return (
       <Bm25Docs
-        coll={sel.coll}
+        coll={seg1}
         offset={offset}
         setOffset={setOffset}
         pageSize={pageSize}
-        onPageSize={changePageSize}
+        onPageSize={setPageSize}
         filters={filters}
-        onFilters={changeFilters}
+        onFilters={setFilters}
         sort={sort}
-        onSort={changeSort}
-        onOpen={(id) => setSel({ coll: sel.coll, docId: id })}
-        onRoot={() => {
-          setSel(null)
-          setOffset(0)
-        }}
+        onSort={setSort}
+        onOpen={(id) => onPathChange(databasePath('bm25', seg1, id))}
+        onRoot={() => onPathChange(databasePath('bm25'))}
       />
     )
   }
-  return (
-    <Bm25List
-      onOpen={(coll) => {
-        setSel({ coll })
-        setFilters(EMPTY_FILTERS)
-        setSort({ desc: true })
-        setOffset(0)
-      }}
-    />
-  )
+  return <Bm25List onOpen={(coll) => onPathChange(databasePath('bm25', coll))} />
 }
 
 function Bm25List({ onOpen }: { onOpen: (coll: string) => void }) {
@@ -993,62 +1022,128 @@ function Bm25DocView({
 type SqliteFilters = { userId?: number; timeCol?: string; tsFrom?: number; tsTo?: number }
 type SqliteSort = { by?: string; desc: boolean }
 
-function SqlitePanel() {
-  const [dbSel, setDbSel] = useState<{ key: string; file: string } | null>(null)
-  const [table, setTable] = useState<string | null>(null)
-  const [offset, setOffset] = useState(0)
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
-  const [filters, setFilters] = useState<SqliteFilters>({})
-  const [sort, setSort] = useState<SqliteSort>({ desc: true })
-  const changePageSize = (n: number) => {
-    setPageSize(n)
-    setOffset(0)
+function useSqliteListUrlState() {
+  const url = useUrlState()
+  const page = Math.max(1, url.getInt('page', 1))
+  const rawSize = url.getInt('size', DEFAULT_PAGE_SIZE)
+  const pageSize = (PAGE_SIZE_OPTIONS as readonly number[]).includes(rawSize)
+    ? rawSize
+    : DEFAULT_PAGE_SIZE
+  const offset = (page - 1) * pageSize
+
+  const uidRaw = url.get('uid')
+  const fromStr = url.get('from')
+  const toStr = url.get('to')
+  const filters: SqliteFilters = {
+    userId: uidRaw ? Number(uidRaw) : undefined,
+    timeCol: url.get('tcol') || undefined,
+    tsFrom: dateToEpoch(fromStr, false),
+    tsTo: dateToEpoch(toStr, true),
   }
-  const changeFilters = (f: SqliteFilters) => {
-    setFilters(f)
-    setOffset(0)
-  }
-  const changeSort = (s: SqliteSort) => {
-    setSort(s)
-    setOffset(0)
-  }
-  const openTable = (t: string) => {
-    setTable(t)
-    setOffset(0)
-    setFilters({})
-    setSort({ desc: true })
+  const sortBy = url.get('sort')
+  const sort: SqliteSort = {
+    by: sortBy || undefined,
+    desc: url.get('dir') !== 'asc',
   }
 
-  if (dbSel && table) {
+  const setOffset = (n: number) => {
+    const p = Math.floor(n / pageSize) + 1
+    url.patch({ page: p <= 1 ? null : p, row: null })
+  }
+  const setPageSize = (n: number) => {
+    url.patch({ size: n === DEFAULT_PAGE_SIZE ? null : n, page: null, row: null })
+  }
+  const setFilters = (f: SqliteFilters) => {
+    url.patch({
+      uid: f.userId != null ? f.userId : null,
+      tcol: f.timeCol || null,
+      from: f.tsFrom ? epochToDateInput(f.tsFrom) : null,
+      to: f.tsTo ? epochToDateInput(f.tsTo) : null,
+      page: null,
+      row: null,
+    })
+  }
+  const setSort = (s: SqliteSort) => {
+    url.patch({
+      sort: s.by || null,
+      dir: s.by && !s.desc ? 'asc' : null,
+      page: null,
+      row: null,
+    })
+  }
+  const rowKey = url.get('row')
+
+  const setRowKey = (key: string | null) => {
+    url.patch({ row: key })
+  }
+
+  return {
+    offset,
+    pageSize,
+    filters,
+    sort,
+    rowKey,
+    setOffset,
+    setPageSize,
+    setFilters,
+    setSort,
+    setRowKey,
+  }
+}
+
+function SqlitePanel({
+  seg1,
+  seg2,
+  onPathChange,
+}: {
+  seg1?: string
+  seg2?: string
+  onPathChange: (path: string) => void
+}) {
+  const {
+    offset,
+    pageSize,
+    filters,
+    sort,
+    rowKey,
+    setOffset,
+    setPageSize,
+    setFilters,
+    setSort,
+    setRowKey,
+  } = useSqliteListUrlState()
+
+  if (seg1 && seg2) {
     return (
       <SqliteRows
-        sel={{ dbKey: dbSel.key, file: dbSel.file, table }}
+        sel={{ dbKey: seg1, file: seg1, table: seg2 }}
         offset={offset}
         setOffset={setOffset}
         pageSize={pageSize}
-        onPageSize={changePageSize}
+        onPageSize={setPageSize}
         filters={filters}
-        onFilters={changeFilters}
+        onFilters={setFilters}
         sort={sort}
-        onSort={changeSort}
-        onBack={() => {
-          setTable(null)
-          setOffset(0)
-        }}
-        onRoot={() => {
-          setDbSel(null)
-          setTable(null)
-          setOffset(0)
-        }}
+        onSort={setSort}
+        rowKey={rowKey}
+        onRowKey={setRowKey}
+        onBack={() => onPathChange(databasePath('sqlite', seg1))}
+        onRoot={() => onPathChange(databasePath('sqlite'))}
       />
     )
   }
-  if (dbSel) {
+  if (seg1) {
     return (
-      <SqliteTables db={dbSel} onOpen={openTable} onRoot={() => setDbSel(null)} />
+      <SqliteTables
+        db={{ key: seg1, file: seg1 }}
+        onOpen={(t) => onPathChange(databasePath('sqlite', seg1, t))}
+        onRoot={() => onPathChange(databasePath('sqlite'))}
+      />
     )
   }
-  return <SqliteDbList onOpen={(key, file) => setDbSel({ key, file })} />
+  return (
+    <SqliteDbList onOpen={(key) => onPathChange(databasePath('sqlite', key))} />
+  )
 }
 
 // 各业务库的中文名（键为文件名去扩展名，与后端 db.key 对齐）
@@ -1094,7 +1189,7 @@ const TABLE_DESCRIPTIONS: Record<string, string> = {
 }
 
 // L1：只列 DB（与 Chroma 的 collection 列表对齐）
-function SqliteDbList({ onOpen }: { onOpen: (key: string, file: string) => void }) {
+function SqliteDbList({ onOpen }: { onOpen: (key: string) => void }) {
   const { data, loading, error } = useAsync<SqliteDatabases>(getSqliteDatabases, 'sqlite-dbs')
   if (loading) return <Spinner />
   if (error) return <ErrorNote msg={error} />
@@ -1115,7 +1210,7 @@ function SqliteDbList({ onOpen }: { onOpen: (key: string, file: string) => void 
             <li key={db.key}>
               <button
                 type="button"
-                onClick={() => db.exists && onOpen(db.key, db.file)}
+                onClick={() => db.exists && onOpen(db.key)}
                 disabled={!db.exists}
                 className="grid w-full grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,2fr)] items-center gap-3 rounded-md border border-border px-3 py-2 text-left text-sm hover:bg-muted/50 disabled:opacity-60"
               >
@@ -1149,7 +1244,15 @@ function SqliteTables({
   const found = data?.databases.find((d) => d.key === db.key)
   return (
     <div>
-      <Breadcrumb parts={[{ label: 'SQLite', onClick: onRoot }, { label: db.file }]} />
+      <Breadcrumb
+        parts={[
+          { label: 'SQLite', onClick: onRoot },
+          {
+            label: found?.file ?? `${DB_LABELS[db.key] ?? db.key}`,
+            onClick: onRoot,
+          },
+        ]}
+      />
       {loading && <Spinner />}
       {error && <ErrorNote msg={error} />}
       {data && !loading && (
@@ -1306,6 +1409,8 @@ function SqliteRows({
   onFilters,
   sort,
   onSort,
+  rowKey,
+  onRowKey,
   onBack,
   onRoot,
 }: {
@@ -1318,10 +1423,12 @@ function SqliteRows({
   onFilters: (f: SqliteFilters) => void
   sort: SqliteSort
   onSort: (s: SqliteSort) => void
+  rowKey: string
+  onRowKey: (key: string | null) => void
   onBack: () => void
   onRoot: () => void
 }) {
-  const [detail, setDetail] = useState<Record<string, unknown> | null>(null)
+  const [ephemeralDetail, setEphemeralDetail] = useState<Record<string, unknown> | null>(null)
   const fKey = `${filters.userId ?? ''}|${filters.timeCol ?? ''}|${filters.tsFrom ?? ''}|${filters.tsTo ?? ''}`
   const { data, loading, error } = useAsync<SqliteTableRows>(
     () =>
@@ -1342,6 +1449,11 @@ function SqliteRows({
   const userMap: Record<string, string> = {}
   for (const u of users ?? []) userMap[String(u.id)] = u.username
   const annotateUser = !(sel.dbKey === 'auth' && sel.table === 'users')
+  const hasIdCol = data?.columns.includes('id') ?? false
+  const urlDetail = rowKey
+    ? data?.rows.find((r) => hasIdCol && String(r.id) === rowKey) ?? null
+    : null
+  const detail = urlDetail ?? ephemeralDetail
   return (
     <div>
       <Breadcrumb
@@ -1373,7 +1485,10 @@ function SqliteRows({
                 <span className="text-sm font-medium">行详情</span>
                 <button
                   type="button"
-                  onClick={() => setDetail(null)}
+                  onClick={() => {
+                    onRowKey(null)
+                    setEphemeralDetail(null)
+                  }}
                   className="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-muted/50"
                 >
                   关闭
@@ -1421,7 +1536,15 @@ function SqliteRows({
                 {data.rows.map((row, i) => (
                   <tr
                     key={i}
-                    onClick={() => setDetail(row)}
+                    onClick={() => {
+                      if (hasIdCol && row.id != null) {
+                        onRowKey(String(row.id))
+                        setEphemeralDetail(null)
+                      } else {
+                        onRowKey(null)
+                        setEphemeralDetail(row)
+                      }
+                    }}
                     className={cn(
                       'cursor-pointer border-t border-border align-top hover:bg-accent/40',
                       i % 2 === 1 && 'bg-muted/20',

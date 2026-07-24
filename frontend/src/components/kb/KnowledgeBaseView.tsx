@@ -41,6 +41,7 @@ import {
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
 import { useAuth } from '@/lib/auth'
+import { useUrlState } from '@/routes/useUrlState'
 
 export function KnowledgeBaseView({
   alias: aliasProp,
@@ -254,6 +255,58 @@ function Stat({
 
 // ── L2：单个库的文档管理 ─────────────────────────────────────────────────────
 
+function useDocumentListUrlState(): {
+  query: DocumentListQuery
+  onQueryChange: (patch: Partial<DocumentListQuery>) => void
+} {
+  const url = useUrlState()
+  const sortKey = url.get('sort', 'ingested_at')
+  const validSort = (
+    ['filename', 'lang', 'chunks', 'total_chars', 'mtime', 'ingested_at'] as const
+  ).includes(sortKey as DocumentListQuery['sortKey'])
+    ? (sortKey as DocumentListQuery['sortKey'])
+    : 'ingested_at'
+
+  const query: DocumentListQuery = {
+    page: Math.max(1, url.getInt('page', 1)),
+    pageSize: url.getInt('size', DEFAULT_DOCUMENT_LIST_QUERY.pageSize),
+    sortKey: validSort,
+    sortDir: url.get('dir') === 'asc' ? 'asc' : 'desc',
+    nameQ: url.get('q'),
+    lang: url.get('lang'),
+    ext: url.get('ext'),
+    tsFrom: url.get('from'),
+    tsTo: url.get('to'),
+  }
+
+  const onQueryChange = (patch: Partial<DocumentListQuery>) => {
+    const next = { ...query, ...patch }
+    const resetPage = patch.page === undefined && (
+      patch.pageSize !== undefined ||
+      patch.sortKey !== undefined ||
+      patch.sortDir !== undefined ||
+      patch.nameQ !== undefined ||
+      patch.lang !== undefined ||
+      patch.ext !== undefined ||
+      patch.tsFrom !== undefined ||
+      patch.tsTo !== undefined
+    )
+    url.patch({
+      page: (resetPage ? 1 : next.page) <= 1 ? null : resetPage ? 1 : next.page,
+      size: next.pageSize === DEFAULT_DOCUMENT_LIST_QUERY.pageSize ? null : next.pageSize,
+      sort: next.sortKey === 'ingested_at' ? null : next.sortKey,
+      dir: next.sortDir === 'desc' ? null : next.sortDir,
+      q: next.nameQ || null,
+      lang: next.lang || null,
+      ext: next.ext || null,
+      from: next.tsFrom || null,
+      to: next.tsTo || null,
+    })
+  }
+
+  return { query, onQueryChange }
+}
+
 function LibraryView({
   alias,
   onBack,
@@ -268,17 +321,13 @@ function LibraryView({
   const [documents, setDocuments] = useState<KBDocument[]>([])
   const [total, setTotal] = useState(0)
   const [chunkTotal, setChunkTotal] = useState(0)
-  const [listQuery, setListQuery] = useState<DocumentListQuery>(DEFAULT_DOCUMENT_LIST_QUERY)
+  const { query: listQuery, onQueryChange: handleQueryChange } = useDocumentListUrlState()
   const [loading, setLoading] = useState(true)
   const [clearDialogOpen, setClearDialogOpen] = useState(false)
   const [clearing, setClearing] = useState(false)
   const [genDocId, setGenDocId] = useState<string | null>(null)
   const [goldenLlm, setGoldenLlm] = useState('kimi-k2.5')
   const [goldenMaxQ, setGoldenMaxQ] = useState(3)
-
-  useEffect(() => {
-    setListQuery(DEFAULT_DOCUMENT_LIST_QUERY)
-  }, [alias])
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -302,10 +351,6 @@ function LibraryView({
   useEffect(() => {
     void refresh()
   }, [refresh])
-
-  const handleQueryChange = useCallback((patch: Partial<DocumentListQuery>) => {
-    setListQuery((q) => ({ ...q, ...patch }))
-  }, [])
 
   const handleDelete = useCallback(
     async (docId: string) => {

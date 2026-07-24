@@ -37,6 +37,7 @@ import {
 } from '@/types/business'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
+import { useUrlState } from '@/routes/useUrlState'
 
 function TaskStatusIcon({ status }: { status: string }) {
   if (status === 'success') return <CheckCircle2 className="h-4 w-4 text-green-600" />
@@ -62,9 +63,14 @@ const NEXT_STATUS: Record<string, string> = {
 }
 
 export function PlansView() {
+  const url = useUrlState()
+  const planParam = url.get('plan')
+  const selectedId = planParam ? Number(planParam) : null
+  const setSelectedId = (id: number | null) =>
+    url.patch({ plan: id != null && !Number.isNaN(id) ? id : null })
+
   const [plans, setPlans] = useState<PlanSummary[]>([])
   const [selected, setSelected] = useState<Plan | null>(null)
-  const [selectedId, setSelectedId] = useState<number | null>(null)
   const [loadingList, setLoadingList] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -81,18 +87,20 @@ export function PlansView() {
     try {
       const list = await listPlans()
       setPlans(list)
-      setSelectedId((prev) => {
-        if (preferId !== undefined) return preferId
-        if (prev !== null && list.some((p) => p.id === prev)) return prev
+      let nextId: number | null = selectedId
+      if (preferId !== undefined) nextId = preferId
+      else if (selectedId !== null && list.some((p) => p.id === selectedId)) nextId = selectedId
+      else {
         const active = list.find((p) => p.is_active) ?? list[0]
-        return active?.id ?? null
-      })
+        nextId = active?.id ?? null
+      }
+      if (nextId !== selectedId) setSelectedId(nextId)
     } catch (e) {
       setError((e as Error).message)
     } finally {
       setLoadingList(false)
     }
-  }, [])
+  }, [selectedId])
 
   useEffect(() => {
     refreshList()

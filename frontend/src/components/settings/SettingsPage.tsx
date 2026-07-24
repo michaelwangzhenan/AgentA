@@ -127,6 +127,7 @@ export function SettingsPage({
               <div className="min-h-0 flex-1">
                 <SettingsView
                   embedded
+                  urlDriven
                   title="系统配置"
                   description="调整服务端运行参数，改完立即生效并持久化。"
                 />

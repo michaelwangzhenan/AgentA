@@ -70,7 +70,7 @@ export function AppRoutes() {
         />
         <Route path="/database" element={<DatabaseIndexRedirect />} />
         <Route
-          path="/database/:tab"
+          path="/database/:tab/*"
           element={
             <RouteGuard>
               <DatabaseTabGuard />

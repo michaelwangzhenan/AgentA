@@ -3,6 +3,7 @@ import { ArrowLeft, Check, Download, Pencil, Plus, RotateCcw, Trash2, X } from '
 
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
+import { useUrlState } from '@/routes/useUrlState'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -67,12 +68,24 @@ export function GoldenManager({
   onClearDocFilter?: () => void
   onBackToKb?: () => void
 } = {}) {
-  const [status, setStatus] = useState('')
-  const [source, setSource] = useState('')
-  const [textQ, setTextQ] = useState('')          // 旁侧输入框即时值
-  const [textQApplied, setTextQApplied] = useState('') // 防抖后真正用于查询的值
-  const [offset, setOffset] = useState(0)
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
+  const url = useUrlState()
+  const status = url.get('status')
+  const source = url.get('source')
+  const textQApplied = url.get('q')
+  const [textQ, setTextQ] = useState(textQApplied)
+  const pageNum = Math.max(1, url.getInt('page', 1))
+  const rawSize = url.getInt('size', DEFAULT_PAGE_SIZE)
+  const pageSize = rawSize > 0 ? rawSize : DEFAULT_PAGE_SIZE
+  const offset = (pageNum - 1) * pageSize
+  const setOffset = (n: number) => {
+    const p = Math.floor(n / pageSize) + 1
+    url.patch({ page: p <= 1 ? null : p })
+  }
+  const setStatus = (v: string) => url.patch({ status: v || null, page: null })
+  const setSource = (v: string) => url.patch({ source: v || null, page: null })
+  const setPageSize = (n: number) =>
+    url.patch({ size: n === DEFAULT_PAGE_SIZE ? null : n, page: null })
+
   const [data, setData] = useState<GoldenList | null>(null)
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
@@ -92,7 +105,8 @@ export function GoldenManager({
   const [localDoc, setLocalDoc] = useState<GoldenDocFilter | undefined>(docFilter)
   useEffect(() => {
     setLocalDoc(docFilter)
-    setOffset(0)
+    url.patch({ page: null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docFilter])
   const docId = localDoc?.docId
   const isQueryFilter = source === FILTER_QUERY
@@ -110,7 +124,8 @@ export function GoldenManager({
       })
       // 删除后当前页可能已无数据，收紧 offset 再拉一次
       if (result.total > 0 && offset >= result.total) {
-        setOffset(Math.floor((result.total - 1) / pageSize) * pageSize)
+        const next = Math.floor((result.total - 1) / pageSize) * pageSize
+        setOffset(next)
         return
       }
       setData(result)
@@ -129,10 +144,10 @@ export function GoldenManager({
   // 旁侧输入框防抖（300ms）：输入停顿后才触发查询，同时回第一页
   useEffect(() => {
     const t = setTimeout(() => {
-      setOffset(0)
-      setTextQApplied(textQ.trim())
+      url.patch({ q: textQ.trim() || null, page: null })
     }, 300)
     return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [textQ])
 
   const items = data?.items ?? []
@@ -282,9 +297,8 @@ export function GoldenManager({
         <select
           value={source}
           onChange={(e) => {
-            setOffset(0)
             setTextQ('')
-            setTextQApplied('')
+            url.patch({ q: null })
             setSource(e.target.value)
           }}
           className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"

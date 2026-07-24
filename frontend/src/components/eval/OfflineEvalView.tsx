@@ -1,7 +1,6 @@
-import { useState } from 'react'
-
 import { cn } from '@/lib/utils'
 import { EvalRunner, type EvalTaskConfig } from './EvalRunner'
+import { useUrlState } from '@/routes/useUrlState'
 
 // 离线评估各子页配置。后续 eval 逐个往这里加。
 const EVAL_TASKS: EvalTaskConfig[] = [
@@ -429,8 +428,11 @@ const EVAL_TASKS: EvalTaskConfig[] = [
 ]
 
 export function OfflineEvalView() {
-  const [activeKey, setActiveKey] = useState<string>(EVAL_TASKS[0]?.key ?? '')
-  const active = EVAL_TASKS.find((t) => t.key === activeKey) ?? EVAL_TASKS[0]
+  const url = useUrlState()
+  const taskKey = url.get('task') || EVAL_TASKS[0]?.key || ''
+  const active = EVAL_TASKS.find((t) => t.key === taskKey) ?? EVAL_TASKS[0]
+  const setActiveKey = (key: string) =>
+    url.patch({ task: key === EVAL_TASKS[0]?.key ? null : key })
 
   return (
     <div className="flex min-h-0 flex-1 gap-4">

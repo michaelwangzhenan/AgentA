@@ -10,13 +10,18 @@ import {
   type UsageRange,
 } from '@/types/usage'
 import { formatCost, fullNumber } from './format'
+import { useUrlState } from '@/routes/useUrlState'
 
 type Scope = 'mine' | 'all'
 
 const RANGES: UsageRange[] = ['1d', '7d', '30d', 'mtd', 'last_month']
 
 export function SavingsPanel({ scope }: { scope: Scope }) {
-  const [range, setRange] = useState<UsageRange>('30d')
+  const url = useUrlState()
+  const parseRange = (v: string): UsageRange =>
+    (RANGES as readonly string[]).includes(v) ? (v as UsageRange) : '30d'
+  const range = parseRange(url.get('range', '30d'))
+  const setRange = (r: UsageRange) => url.patch({ range: r === '30d' ? null : r })
   const [summary, setSummary] = useState<SavingsSummary | null>(null)
   const [series, setSeries] = useState<SavingsSeries | null>(null)
   const [loading, setLoading] = useState(true)

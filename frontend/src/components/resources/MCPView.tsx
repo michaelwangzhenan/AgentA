@@ -53,6 +53,7 @@ import type { MCPServer, MCPTool } from '@/types/resources'
 import { ResourcePage } from '@/components/resources/ResourcePage'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
+import { useUrlState } from '@/routes/useUrlState'
 
 const NAME_PATTERN = /^[a-zA-Z0-9_-]+$/
 
@@ -63,18 +64,21 @@ type SortDir = 'asc' | 'desc'
 // ============================================================================
 
 export function MCPView() {
+  const url = useUrlState()
   const [servers, setServers] = useState<MCPServer[]>([])
   const [tools, setTools] = useState<MCPTool[]>([])
   const [loading, setLoading] = useState(true)
   const [reloading, setReloading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const expanded = useMemo(() => new Set(url.getCsv('open')), [url.searchParams])
   const [editing, setEditing] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
 
-  const [query, setQuery] = useState('')
-  const [sortDir, setSortDir] = useState<SortDir>('asc')
+  const query = url.get('q')
+  const sortDir: SortDir = url.get('sort') === 'desc' ? 'desc' : 'asc'
+  const setQuery = (v: string) => url.patch({ q: v || null })
+  const setSortDir = (d: SortDir) => url.patch({ sort: d === 'asc' ? null : d })
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -115,16 +119,15 @@ export function MCPView() {
   }
 
   const toggleExpand = (name: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (next.has(name)) {
-        next.delete(name)
-        if (editing === name) setEditing(null)
-      } else {
-        next.add(name)
-      }
-      return next
-    })
+    const next = new Set(expanded)
+    if (next.has(name)) {
+      next.delete(name)
+      if (editing === name) setEditing(null)
+    } else {
+      next.add(name)
+    }
+    const arr = [...next]
+    url.patch({ open: arr.length ? arr.join(',') : null })
   }
 
   const handleToggle = async (name: string, enabled: boolean) => {
@@ -182,7 +185,7 @@ export function MCPView() {
     <>
       <SearchBox value={query} onChange={setQuery} disabled={busy} />
       <Button
-        onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
+        onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}
         size="sm"
         variant="outline"
         disabled={busy}

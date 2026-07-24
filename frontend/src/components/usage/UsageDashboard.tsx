@@ -23,6 +23,7 @@ import {
 } from '@/types/usage'
 import { TrendChart } from './TrendChart'
 import { compactNumber, formatCost, formatTime, fullNumber } from './format'
+import { useUrlState } from '@/routes/useUrlState'
 
 type Scope = 'mine' | 'all'
 
@@ -33,15 +34,28 @@ const PAGE_SIZE = 20
 type DashboardProps = { scope: Scope }
 
 export function UsageDashboard({ scope }: DashboardProps) {
-  const [range, setRange] = useState<UsageRange>('30d')
-  const [metric, setMetric] = useState<UsageMetric>('total_tokens')
-  const [groupBy, setGroupBy] = useState<string>('model')
+  const url = useUrlState()
+  const parseRange = (v: string): UsageRange =>
+    (RANGES as readonly string[]).includes(v) ? (v as UsageRange) : '30d'
+  const range = parseRange(url.get('range', '30d'))
+  const metric: UsageMetric =
+    (METRICS as readonly string[]).includes(url.get('metric'))
+      ? (url.get('metric') as UsageMetric)
+      : 'total_tokens'
+  const groupBy = url.get('group', 'model')
+  const page = Math.max(0, url.getInt('page', 0))
+
+  const setRange = (r: UsageRange) =>
+    url.patch({ range: r === '30d' ? null : r, page: null })
+  const setMetric = (m: UsageMetric) =>
+    url.patch({ metric: m === 'total_tokens' ? null : m })
+  const setGroupBy = (g: string) => url.patch({ group: g === 'model' ? null : g })
+  const setPage = (p: number) => url.patch({ page: p <= 0 ? null : p })
 
   const [summary, setSummary] = useState<UsageSummary | null>(null)
   const [series, setSeries] = useState<UsageSeries | null>(null)
   const [users, setUsers] = useState<UserUsageList | null>(null)
   const [events, setEvents] = useState<UsageEvents | null>(null)
-  const [page, setPage] = useState(0)
   const [loading, setLoading] = useState(true)
 
   const groupOptions =
@@ -90,11 +104,6 @@ export function UsageDashboard({ scope }: DashboardProps) {
   useEffect(() => {
     void refreshEvents()
   }, [refreshEvents])
-
-  // 切范围时回到第一页
-  useEffect(() => {
-    setPage(0)
-  }, [range, scope])
 
   const currency = summary?.currency ?? '¥'
   const csvUrl = usageEventsCsvUrl(range, { scope })
@@ -243,7 +252,7 @@ export function UsageDashboard({ scope }: DashboardProps) {
               variant="outline"
               size="sm"
               disabled={page === 0}
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              onClick={() => setPage(page - 1)}
             >
               上一页
             </Button>
@@ -254,7 +263,7 @@ export function UsageDashboard({ scope }: DashboardProps) {
               variant="outline"
               size="sm"
               disabled={(page + 1) * PAGE_SIZE >= events.total}
-              onClick={() => setPage((p) => p + 1)}
+              onClick={() => setPage(page + 1)}
             >
               下一页
             </Button>

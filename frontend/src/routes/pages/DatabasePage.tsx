@@ -1,16 +1,26 @@
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
 
 import { DatabaseView } from '@/components/admin/DatabaseView'
-import { isDatabaseTab, type DatabaseTab } from '@/routes/paths'
+import { databasePath, isDatabaseTab, type DatabaseTab } from '@/routes/paths'
 
 export function DatabasePage() {
-  const { tab: tabParam } = useParams()
+  const { tab: tabParam, '*': rest } = useParams()
   const navigate = useNavigate()
   const tab: DatabaseTab =
     tabParam && isDatabaseTab(tabParam) ? tabParam : 'chroma'
 
+  const parts = (rest ?? '').split('/').filter(Boolean)
+  const seg1 = parts[0] ? decodeURIComponent(parts[0]) : undefined
+  const seg2 = parts[1] ? decodeURIComponent(parts[1]) : undefined
+
   return (
-    <DatabaseView tab={tab} onTabChange={(next) => navigate(`/database/${next}`)} />
+    <DatabaseView
+      tab={tab}
+      seg1={seg1}
+      seg2={seg2}
+      onTabChange={(next) => navigate(databasePath(next))}
+      onPathChange={(path) => navigate(path)}
+    />
   )
 }
 
