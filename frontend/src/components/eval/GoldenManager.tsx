@@ -460,7 +460,7 @@ export function GoldenManager({
                       aria-label="选择此条"
                     />
                   </td>
-                  <td className="px-3 py-2 max-w-[260px]">
+                  <td className="px-3 py-2 max-w-65">
                     {it.query}
                     {it.type ? (
                       <span className="ml-1.5 rounded bg-muted px-1 text-[10px] text-muted-foreground">

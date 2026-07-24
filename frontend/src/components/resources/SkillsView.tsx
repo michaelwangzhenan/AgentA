@@ -867,8 +867,8 @@ function CreateSkillDialog({
           // 默认 DialogContent 是 grid + sm:max-w-sm；这里用 flex column 撑满 viewport
           'grid-cols-none! flex flex-col',
           'w-[calc(100vw-2rem)] sm:max-w-none',
-          'max-w-[1400px]',
-          'h-[calc(100vh-2rem)] max-h-[900px]',
+          'max-w-350',
+          'h-[calc(100vh-2rem)] max-h-225',
         )}
       >
         <DialogHeader>

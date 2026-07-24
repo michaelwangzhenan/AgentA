@@ -1101,7 +1101,7 @@ function CreateMCPDialog({
         className={cn(
           'grid-cols-none! flex flex-col',
           'w-[calc(100vw-2rem)] sm:max-w-none',
-          'max-w-[900px]',
+          'max-w-225',
           'max-h-[90vh]',
         )}
       >

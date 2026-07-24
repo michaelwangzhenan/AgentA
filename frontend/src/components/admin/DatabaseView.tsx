@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { Boxes, ChevronRight, Database, Loader2, Search, Wrench } from 'lucide-react'
+import { Boxes, ChevronRight, Database, Loader2, Search, Wrench, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { cn } from '@/lib/utils'
@@ -54,6 +54,20 @@ const PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 200] as const
 const DEFAULT_PAGE_SIZE = 10
 // 与后端 db_inspect.CHROMA_SCAN_CAP 对齐，仅用于 truncated 提示文案
 const CHROMA_SCAN_CAP_HINT = 20000
+const BM25_LARGE_CHUNK_WARN = 10_000
+
+function Bm25MemoryWarning({ variant }: { variant: 'browse' | 'repair' }) {
+  const text =
+    variant === 'browse'
+      ? '警告：低内存服务器上进入大库可能会 OOM'
+      : '警告：低内存服务器上扫描/修复可能会 OOM'
+  return (
+    <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-700 dark:text-amber-400">
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+      <span>{text}</span>
+    </div>
+  )
+}
 
 export function DatabaseView({
   tab,
@@ -842,6 +856,7 @@ function Bm25List({ onOpen }: { onOpen: (coll: string) => void }) {
   return (
     <div>
       <Breadcrumb parts={[{ label: 'BM25' }]} />
+      <Bm25MemoryWarning variant="browse" />
       <p className="mb-2 text-xs text-muted-foreground">索引目录：{data.dir}</p>
       <ul className="space-y-1">
         {[...data.indexes]
@@ -862,6 +877,11 @@ function Bm25List({ onOpen }: { onOpen: (coll: string) => void }) {
               <span className="flex items-center gap-2">
                 <span className="font-medium">{ix.file}</span>
                 {ix.is_default && <DefaultBadge />}
+                {!ix.error && (ix.docs ?? 0) >= BM25_LARGE_CHUNK_WARN && (
+                  <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                    大库
+                  </span>
+                )}
               </span>
               <span className="flex items-center gap-1.5">
                 {ix.error ? (
@@ -2037,6 +2057,7 @@ function RepairPanel() {
       title="BM25 修复"
       desc="修复侧车文件（manifest / chunks.jsonl），并以 Chroma 为准对齐 BM25 块数（删孤儿块、补缺失块）。"
     >
+      <Bm25MemoryWarning variant="repair" />
       <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
         <button type="button" onClick={doPreview} disabled={busy} className={btnCls}>
           扫描
@@ -2293,5 +2314,5 @@ function SqliteDetailValue({ col, value }: { col: string; value: unknown }) {
     return <pre className="overflow-x-auto rounded-md bg-muted/50 p-2 text-xs leading-relaxed">{pretty}</pre>
   }
   if (!s) return <span className="text-muted-foreground">（空）</span>
-  return <span className="whitespace-pre-wrap break-words">{s}</span>
+  return <span className="whitespace-pre-wrap wrap-break-word">{s}</span>
 }
