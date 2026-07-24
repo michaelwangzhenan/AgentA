@@ -1994,7 +1994,7 @@ function RepairPanel() {
 
   const doPreview = async () => {
     setBusy(true)
-    setBusyLabel('正在扫描 BM25 侧车文件…')
+    setBusyLabel('正在扫描 BM25 侧车与 Chroma 对齐…')
     try {
       setPreview(await getRepairPreview())
     } catch (e) {
@@ -2007,13 +2007,13 @@ function RepairPanel() {
 
   const doRun = async () => {
     setBusy(true)
-    setBusyLabel('正在从 pkl 重建侧车文件，大索引可能需要数十秒…')
+    setBusyLabel('正在对齐并修复 BM25 索引，大库可能需要数十秒…')
     try {
       const r = await runRepair()
       if (r.failed > 0) {
         toast.error(`修复完成：成功 ${r.repaired}，失败 ${r.failed}`)
       } else if (r.repaired > 0) {
-        toast.success(`已修复 ${r.repaired} 个 BM25 索引侧车`)
+        toast.success(`已修复 ${r.repaired} 个 BM25 索引`)
       } else {
         toast.success('没有需要修复的索引')
       }
@@ -2029,11 +2029,13 @@ function RepairPanel() {
   }
 
   const broken = preview?.indexes.filter((i) => i.needs_repair) ?? []
+  const misaligned = preview?.indexes.filter((i) => i.needs_align) ?? []
+  const needsAction = (preview?.needs_repair ?? 0) + (preview?.needs_align ?? 0)
 
   return (
     <Card
       title="BM25 修复"
-      desc="从 pkl 重建 manifest.json 与 chunks.jsonl，修复管理端 BM25 列表异常。不改动 pkl 检索索引本体。"
+      desc="修复侧车文件（manifest / chunks.jsonl），并以 Chroma 为准对齐 BM25 块数（删孤儿块、补缺失块）。"
     >
       <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
         <button type="button" onClick={doPreview} disabled={busy} className={btnCls}>
@@ -2042,7 +2044,7 @@ function RepairPanel() {
         <button
           type="button"
           onClick={() => setConfirm(true)}
-          disabled={busy || !preview || preview.needs_repair === 0}
+          disabled={busy || !preview || needsAction === 0}
           className={btnCls}
         >
           修复
@@ -2056,15 +2058,41 @@ function RepairPanel() {
         </div>
       )}
 
-      {!busy && preview && preview.needs_repair === 0 && (
-        <p className="text-sm text-muted-foreground">全部 BM25 侧车文件正常。</p>
+      {!busy && preview && needsAction === 0 && (
+        <p className="text-sm text-muted-foreground">全部 BM25 索引侧车正常，且与 Chroma 块数一致。</p>
+      )}
+      {preview && preview.needs_align > 0 && (
+        <div className={cn('mb-3 rounded-md border border-border', busy && 'opacity-60')}>
+          <div className="border-b border-border bg-muted/30 px-3 py-1.5 text-xs text-muted-foreground">
+            需与 Chroma 对齐 {preview.needs_align} 个索引
+          </div>
+          <ul className="max-h-48 overflow-auto">
+            {misaligned.map((ix) => (
+              <li
+                key={ix.collection}
+                className="border-t border-border/50 px-3 py-2 text-sm first:border-t-0"
+              >
+                <div className="font-medium">{ix.collection}</div>
+                <div className="text-xs text-muted-foreground">
+                  BM25 {ix.bm25_chunks?.toLocaleString() ?? '—'} 块 · Chroma{' '}
+                  {ix.chroma_chunks?.toLocaleString() ?? '—'} 条
+                  {ix.orphan_bm25 ? ` · BM25 孤儿 ${ix.orphan_bm25.toLocaleString()}` : ''}
+                  {ix.orphan_chroma ? ` · Chroma 缺 BM25 ${ix.orphan_chroma.toLocaleString()}` : ''}
+                </div>
+                {ix.align_error && (
+                  <div className="text-xs text-destructive">{ix.align_error}</div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
       {preview && preview.needs_repair > 0 && (
         <div className={cn('rounded-md border border-border', busy && 'opacity-60')}>
           <div className="border-b border-border bg-muted/30 px-3 py-1.5 text-xs text-muted-foreground">
-            需修复 {preview.needs_repair} 个索引
+            侧车需修复 {preview.needs_repair} 个索引
           </div>
-          <ul className="max-h-64 overflow-auto">
+          <ul className="max-h-48 overflow-auto">
             {broken.map((ix) => (
               <li
                 key={ix.collection}
@@ -2088,8 +2116,8 @@ function RepairPanel() {
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}
-        title="确认修复 BM25 侧车？"
-        description={`将从 pkl 重建 ${preview?.needs_repair ?? 0} 个索引的 manifest / chunks.jsonl。不改动 pkl 本体。`}
+        title="确认修复 BM25？"
+        description={`将对 ${preview?.needs_align ?? 0} 个索引做 Chroma 对齐，并重建 ${preview?.needs_repair ?? 0} 个侧车文件。会改动 pkl 与 manifest / chunks.jsonl。`}
         loading={busy}
         confirmLabel="确认"
         onConfirm={doRun}

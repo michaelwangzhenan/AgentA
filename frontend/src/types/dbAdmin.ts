@@ -176,17 +176,31 @@ export type Bm25SidecarHealth = {
   duplicate_ids?: number
   needs_repair: boolean
   error?: string
+  chroma_chunks?: number | null
+  bm25_chunks?: number
+  orphan_bm25?: number
+  orphan_chroma?: number
+  needs_align?: boolean
+  align_error?: string
 }
 
 export type RepairPreview = {
   indexes: Bm25SidecarHealth[]
   needs_repair: number
+  needs_align: number
 }
 
 export type RepairResult = {
   repaired: number
   failed: number
-  items: { collection: string; docs?: number; ok?: boolean; error?: string }[]
+  items: {
+    collection: string
+    docs?: number
+    ok?: boolean
+    error?: string
+    removed_orphan_bm25?: number
+    added_from_chroma?: number
+  }[]
 }
 
 export type SqliteTableRows = {

@@ -16,6 +16,8 @@ autouse fixture：将 Agent 共享内存替换为每个测试独立的临时 SQL
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
+from pathlib import Path
+
 import pytest
 
 import src.agent.agent as _agent_module
@@ -146,6 +148,38 @@ def _isolated_agent_memory(tmp_path, _neutralize_runtime_overrides):
             pass
     semantic_cache.reset_shared_store_for_testing(None)
     mem.close()
+
+
+@pytest.fixture(autouse=True)
+def _guard_bm25_production_dir():
+    """BM25 索引目录防泄漏：任何测试不得在 db/bm25 增删文件。
+
+    BM25 相关 UT 应 monkeypatch get_index_path + bm25_dir 到 tmp_path；
+    本 fixture 在测试前后对比目录快照，有变化即 fail。
+    """
+    import src.config as _cfg
+
+    bm25_dir = Path(_cfg.BM25_INDEX_DIR or _cfg.CHROMA_DB_PATH).resolve()
+
+    def _names() -> set[str]:
+        if not bm25_dir.is_dir():
+            return set()
+        return {p.name for p in bm25_dir.iterdir()}
+
+    before = _names()
+    yield
+    after = _names()
+    added = after - before
+    removed = before - after
+    if added or removed:
+        parts: list[str] = []
+        if added:
+            parts.append(f"新增 {sorted(added)}")
+        if removed:
+            parts.append(f"删除 {sorted(removed)}")
+        pytest.fail(
+            f"BM25 生产目录被测试改动（{'；'.join(parts)}）: {bm25_dir}"
+        )
 
 
 @pytest.fixture(autouse=True)

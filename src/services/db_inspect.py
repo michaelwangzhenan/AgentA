@@ -530,6 +530,60 @@ def bm25_sidecar_health(pkl_path: Path) -> dict:
     return row
 
 
+def _chroma_chunk_ids(collection: str) -> tuple[set[str] | None, int | None, str | None]:
+    """读取 Chroma collection 全部 chunk id；失败时返回 (None, None, error)。"""
+    try:
+        client = get_chroma_client()
+        col = client.get_collection(name=collection)
+        chroma_count = col.count()
+    except Exception as exc:
+        return None, None, f"{type(exc).__name__}: {exc}"
+    chroma_ids: set[str] = set()
+    offset = 0
+    while True:
+        got = col.get(limit=1000, offset=offset, include=[])
+        ids = got.get("ids") or []
+        if not ids:
+            break
+        chroma_ids.update(ids)
+        offset += len(ids)
+    return chroma_ids, chroma_count, None
+
+
+def bm25_chroma_align_stats(collection: str) -> dict:
+    """BM25 与 Chroma 块 id 对齐统计（供维护修复预览）。"""
+    pkl_path = _bm25_pkl_path(collection)
+    if not pkl_path.exists():
+        return {
+            "chroma_chunks": None,
+            "bm25_chunks": 0,
+            "orphan_bm25": 0,
+            "orphan_chroma": 0,
+            "needs_align": False,
+        }
+    rows, _, _ = _load_bm25_chunk_rows(collection, pkl_path)
+    bm25_ids = {r["id"] for r in rows} if rows else set()
+    chroma_ids, chroma_count, err = _chroma_chunk_ids(collection)
+    if chroma_ids is None:
+        return {
+            "chroma_chunks": None,
+            "bm25_chunks": len(bm25_ids),
+            "orphan_bm25": 0,
+            "orphan_chroma": 0,
+            "needs_align": False,
+            "align_error": err,
+        }
+    orphan_bm25 = sum(1 for cid in bm25_ids if cid not in chroma_ids)
+    orphan_chroma = sum(1 for cid in chroma_ids if cid not in bm25_ids)
+    return {
+        "chroma_chunks": chroma_count,
+        "bm25_chunks": len(bm25_ids),
+        "orphan_bm25": orphan_bm25,
+        "orphan_chroma": orphan_chroma,
+        "needs_align": orphan_bm25 > 0 or orphan_chroma > 0,
+    }
+
+
 def _load_bm25_chunk_rows(collection: str, pkl_path: Path) -> tuple[list[dict] | None, int, int]:
     """从 chunks.jsonl 加载 L2 列表行（不反序列化 pkl）。"""
     return _parse_bm25_chunks_jsonl(pkl_path)
@@ -561,6 +615,65 @@ def bm25_indexes() -> dict:
 
 def _bm25_pkl_path(collection: str) -> Path:
     return bm25_dir() / f"bm25_{collection}.pkl"
+
+
+def _fetch_bm25_previews_from_chroma(collection: str, ids: list[str]) -> dict[str, str]:
+    """从 Chroma 批量拉正文摘要（BM25 侧车不含 document 字段）。"""
+    if not ids:
+        return {}
+    try:
+        client = get_chroma_client()
+        coll = client.get_collection(name=collection)
+        got = coll.get(ids=ids, include=["documents"])
+    except Exception:
+        logger.warning(
+            "[db_inspect] BM25 Chroma 正文回表失败 collection=%s n=%d",
+            collection,
+            len(ids),
+            exc_info=True,
+        )
+        return {}
+    id_list = got.get("ids") or []
+    docs = got.get("documents") or []
+    out: dict[str, str] = {}
+    for i, cid in enumerate(id_list):
+        doc = (docs[i] if i < len(docs) else "") or ""
+        out[cid] = truncate(doc, CHROMA_LIST_PREVIEW_MAX)
+    return out
+
+
+def _bm25_ids_matching_body_chroma(collection: str, body_q: str) -> set[str] | None:
+    """用 Chroma where_document 筛出正文含关键字的块 id；不可用返回 None。"""
+    if not body_q:
+        return set()
+    try:
+        client = get_chroma_client()
+        coll = client.get_collection(name=collection)
+    except Exception:
+        logger.warning(
+            "[db_inspect] BM25 正文过滤失败 collection=%s",
+            collection,
+            exc_info=True,
+        )
+        return None
+    ids: set[str] = set()
+    offset = 0
+    while len(ids) < CHROMA_SCAN_CAP:
+        chunk_limit = min(CHROMA_SCAN_BATCH, CHROMA_SCAN_CAP - len(ids))
+        got = coll.get(
+            where_document={"$contains": body_q},
+            limit=chunk_limit,
+            offset=offset,
+            include=[],
+        )
+        batch_ids = got.get("ids") or []
+        if not batch_ids:
+            break
+        ids.update(batch_ids)
+        offset += len(batch_ids)
+        if len(batch_ids) < chunk_limit:
+            break
+    return ids
 
 
 def bm25_docs(
@@ -599,16 +712,27 @@ def bm25_docs(
             "items": [],
             "error": sidecar_err,
         }
+    if body_q:
+        match_ids = _bm25_ids_matching_body_chroma(collection, body_q)
+        if match_ids is None:
+            return {
+                "collection": collection,
+                "total": 0,
+                "items": [],
+                "error": "Chroma 不可用，无法按正文过滤",
+            }
+        rows = [r for r in rows if r["id"] in match_ids]
     rows = filter_sort_rows(
-        rows, filename_q=filename_q, body_q=body_q,
+        rows, filename_q=filename_q,
         ts_from=ts_from, ts_to=ts_to, sort_by=sort_by, desc=desc,
     )
     total = len(rows)
     page = rows[offset: offset + limit]
+    previews = _fetch_bm25_previews_from_chroma(collection, [r["id"] for r in page])
     items = [
         {
             "id": r["id"],
-            "preview": "",
+            "preview": previews.get(r["id"], ""),
             "tokens": r["tokens"],
             "metadata": r["metadata"],
         }
@@ -671,7 +795,19 @@ def bm25_doc(collection: str, doc_id: str) -> dict | None:
         if docs and docs[0]:
             document = docs[0]
     except Exception:
+        logger.warning(
+            "[db_inspect] BM25 L3 Chroma 回表失败 collection=%s doc_id=%s",
+            collection,
+            doc_id,
+            exc_info=True,
+        )
         document = ""
+    if not document:
+        logger.info(
+            "[db_inspect] BM25 L3 正文为空 collection=%s doc_id=%s",
+            collection,
+            doc_id,
+        )
     return {
         "id": doc_id,
         "document": document,

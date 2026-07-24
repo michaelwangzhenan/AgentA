@@ -341,32 +341,102 @@ def vacuum(db_key: str | None = None) -> dict:
 
 # ── BM25 修复 ─────────────────────────────────────────────────────────────
 
+_ALIGN_BATCH = 500
+
+
+def align_bm25_with_chroma(collection: str) -> dict:
+    """以 Chroma 为准对齐 BM25：删孤儿块、补缺失块，重写 pkl + 侧车。"""
+    from src.rag.bm25_index import BM25Index, drop_index, get_index_path, save_index
+
+    chroma_ids, _chroma_count, err = inspect._chroma_chunk_ids(collection)  # noqa: SLF001
+    if chroma_ids is None:
+        return {"collection": collection, "ok": False, "error": err or "Chroma 不可用"}
+
+    drop_index(collection)
+    pkl_path = get_index_path(collection)
+    idx = BM25Index.load_or_new(collection, pkl_path)
+    bm25_ids = set(idx.docs.keys())
+
+    remove = list(bm25_ids - chroma_ids)
+    add = list(chroma_ids - bm25_ids)
+    removed = idx.delete_ids(remove) if remove else 0
+
+    added = 0
+    try:
+        from src.rag.chroma_client import get_chroma_client
+
+        col = get_chroma_client().get_collection(name=collection)
+        for i in range(0, len(add), _ALIGN_BATCH):
+            batch = add[i: i + _ALIGN_BATCH]
+            got = col.get(ids=batch, include=["documents", "metadatas"])
+            ids_out = got.get("ids") or []
+            docs = got.get("documents") or []
+            metas = got.get("metadatas") or []
+            if not ids_out:
+                continue
+            documents = [(docs[j] if j < len(docs) else "") or "" for j in range(len(ids_out))]
+            metadatas = [
+                dict(metas[j] or {}) if j < len(metas) else {}
+                for j in range(len(ids_out))
+            ]
+            idx.upsert(ids_out, documents, metadatas)
+            added += len(ids_out)
+    except Exception as exc:
+        return {
+            "collection": collection,
+            "ok": False,
+            "error": f"{type(exc).__name__}: {exc}",
+            "removed_orphan_bm25": removed,
+        }
+
+    save_index(idx, pkl_path)
+    drop_index(collection)
+    return {
+        "collection": collection,
+        "ok": True,
+        "removed_orphan_bm25": removed,
+        "added_from_chroma": added,
+        "docs": len(idx.docs),
+    }
+
+
 def repair_preview() -> dict:
-    """扫描全部 BM25 索引侧车健康状态。"""
+    """扫描 BM25 侧车健康 + 与 Chroma 对齐情况。"""
     items: list[dict] = []
     for path in inspect._bm25_files():  # noqa: SLF001
-        items.append(inspect.bm25_sidecar_health(path))
-    need = sum(1 for i in items if i.get("needs_repair"))
-    return {"indexes": items, "needs_repair": need}
+        row = inspect.bm25_sidecar_health(path)
+        if row.get("pkl_exists"):
+            row.update(inspect.bm25_chroma_align_stats(row["collection"]))
+        items.append(row)
+    needs_repair = sum(1 for i in items if i.get("needs_repair"))
+    needs_align = sum(1 for i in items if i.get("needs_align"))
+    return {"indexes": items, "needs_repair": needs_repair, "needs_align": needs_align}
 
 
 def repair_run(collections: list[str] | None = None) -> dict:
-    """从 pkl 重建 manifest + chunks.jsonl；默认只修复 needs_repair 的索引。"""
+    """修复 BM25：先与 Chroma 对齐，再重建侧车文件。"""
     from src.rag.bm25_index import rewrite_index_sidecars
 
     preview = repair_preview()
+    by_coll = {i["collection"]: i for i in preview["indexes"]}
     targets = [
-        i["collection"] for i in preview["indexes"]
-        if i.get("needs_repair") and i.get("pkl_exists")
+        coll for coll, row in by_coll.items()
+        if row.get("pkl_exists") and (row.get("needs_align") or row.get("needs_repair"))
     ]
     if collections is not None:
         allowed = set(collections)
         targets = [c for c in targets if c in allowed]
+
     results: list[dict] = []
     for coll in targets:
+        row = by_coll[coll]
         try:
-            out = rewrite_index_sidecars(coll)
-            results.append(out)
+            if row.get("needs_align"):
+                out = align_bm25_with_chroma(coll)
+                results.append(out)
+            elif row.get("needs_repair"):
+                out = rewrite_index_sidecars(coll)
+                results.append(out)
         except Exception as e:
             results.append({"collection": coll, "ok": False, "error": f"{type(e).__name__}: {e}"})
     ok = sum(1 for r in results if r.get("ok"))

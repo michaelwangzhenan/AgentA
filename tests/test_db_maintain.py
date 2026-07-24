@@ -207,6 +207,7 @@ def test_repair_preview_and_run(tmp_path, monkeypatch):
         lambda coll: tmp_path / f"bm25_{coll}.pkl",
     )
     monkeypatch.setattr(inspect, "bm25_dir", lambda: tmp_path)
+    monkeypatch.setattr(inspect, "_chroma_chunk_ids", lambda _c: ({"a"}, 1, None))
 
     idx = BM25Index("kb_fix")
     idx.upsert(["a"], ["hello"], [{"doc_id": "d0", "filename": "a.md"}])
@@ -219,6 +220,7 @@ def test_repair_preview_and_run(tmp_path, monkeypatch):
     pre = maintain.repair_preview()
     row = next(i for i in pre["indexes"] if i["collection"] == "kb_fix")
     assert row["needs_repair"] is True
+    assert row.get("needs_align") is False
 
     out = maintain.repair_run()
     assert out["repaired"] == 1
@@ -227,3 +229,53 @@ def test_repair_preview_and_run(tmp_path, monkeypatch):
     post = maintain.repair_preview()
     row2 = next(i for i in post["indexes"] if i["collection"] == "kb_fix")
     assert row2["needs_repair"] is False
+
+
+def test_align_bm25_with_chroma(tmp_path, monkeypatch):
+    from src.rag.bm25_index import BM25Index, save_index
+
+    pkl = tmp_path / "bm25_kb_align.pkl"
+    monkeypatch.setattr(
+        "src.rag.bm25_index.get_index_path",
+        lambda coll: tmp_path / f"bm25_{coll}.pkl",
+    )
+    monkeypatch.setattr(inspect, "bm25_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        inspect,
+        "_chroma_chunk_ids",
+        lambda _c: ({"keep", "new"}, 2, None),
+    )
+
+    idx = BM25Index("kb_align")
+    idx.upsert(
+        ["keep", "orphan"],
+        ["hello", "bye"],
+        [{"doc_id": "d0"}, {"doc_id": "d1"}],
+    )
+    save_index(idx, pkl)
+
+    class _Col:
+        def get(self, **kwargs):
+            ids = list(kwargs.get("ids") or [])
+            return {
+                "ids": ids,
+                "documents": ["doc-" + i for i in ids],
+                "metadatas": [{"doc_id": "d"} for _ in ids],
+            }
+
+    monkeypatch.setattr(
+        "src.rag.chroma_client.get_chroma_client",
+        lambda: type("C", (), {"get_collection": lambda _s, name: _Col()})(),
+    )
+
+    out = maintain.align_bm25_with_chroma("kb_align")
+    assert out["ok"] is True
+    assert out["removed_orphan_bm25"] == 1
+    assert out["added_from_chroma"] == 1
+    assert out["docs"] == 2
+
+    post = maintain.repair_preview()
+    row = next(i for i in post["indexes"] if i["collection"] == "kb_align")
+    assert row.get("needs_align") is False
+    assert row["bm25_chunks"] == 2
+    assert row["chroma_chunks"] == 2

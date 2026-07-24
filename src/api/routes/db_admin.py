@@ -18,8 +18,8 @@
 - POST /api/admin/db/maintenance/vacuum：SQLite VACUUM
 - GET /api/admin/db/maintenance/orphan-segments/preview：预览孤儿向量段
 - POST /api/admin/db/maintenance/orphan-segments：清理孤儿向量段
-- GET /api/admin/db/maintenance/repair/preview：预览 BM25 侧车需修复项
-- POST /api/admin/db/maintenance/repair：从 pkl 重建 BM25 侧车文件
+- GET /api/admin/db/maintenance/repair/preview：预览 BM25 侧车需修复项与 Chroma 对齐情况
+- POST /api/admin/db/maintenance/repair：对齐 BM25 与 Chroma，并重建侧车文件
 """
 from __future__ import annotations
 

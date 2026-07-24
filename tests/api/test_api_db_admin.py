@@ -182,7 +182,7 @@ def test_maintenance_vacuum(client, monkeypatch):
 def test_maintenance_repair_preview(client, monkeypatch):
     monkeypatch.setattr(
         maintain, "repair_preview",
-        lambda: {"indexes": [{"collection": "kb_zh", "needs_repair": False}], "needs_repair": 0},
+        lambda: {"indexes": [{"collection": "kb_zh", "needs_repair": False}], "needs_repair": 0, "needs_align": 0},
     )
     r = client.get("/api/admin/db/maintenance/repair/preview")
     assert r.status_code == 200

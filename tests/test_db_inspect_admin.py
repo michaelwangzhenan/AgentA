@@ -165,6 +165,35 @@ def test_bm25_docs_skips_corrupt_jsonl_lines(
     assert any("chunks.jsonl 异常" in r.message for r in caplog.records)
 
 
+def test_bm25_docs_fetches_preview_from_chroma(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_bm25_sidecars(tmp_path, "kb_prev", 2, monkeypatch)
+    monkeypatch.setattr(inspect, "bm25_dir", lambda: tmp_path)
+
+    class _Col:
+        def get(self, **kwargs: Any) -> dict:
+            ids = kwargs.get("ids")
+            if ids is not None:
+                return {
+                    "ids": list(ids),
+                    "documents": [f"body for {i}" for i in ids],
+                }
+            return {"ids": []}
+
+    class _Client:
+        def get_collection(self, name: str) -> _Col:
+            assert name == "kb_prev"
+            return _Col()
+
+    monkeypatch.setattr(inspect, "get_chroma_client", lambda: _Client())
+
+    page = inspect.bm25_docs("kb_prev", limit=50, offset=0)
+    assert page is not None
+    assert page["total"] == 2
+    assert all(it["preview"].startswith("body for ") for it in page["items"])
+
+
 def test_save_index_writes_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "src.rag.bm25_index.get_index_path",
