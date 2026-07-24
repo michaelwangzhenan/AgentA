@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ChevronLeft,
   ChevronRight,
@@ -246,11 +246,7 @@ function Stat({
 
 // ── L2：单个库的文档管理 ─────────────────────────────────────────────────────
 
-function useDocumentListUrlState(): {
-  query: DocumentListQuery
-  onQueryChange: (patch: Partial<DocumentListQuery>) => void
-} {
-  const url = useUrlState()
+function readDocumentListQuery(url: ReturnType<typeof useUrlState>): DocumentListQuery {
   const sortKey = url.get('sort', 'ingested_at')
   const validSort = (
     ['filename', 'lang', 'chunks', 'total_chars', 'mtime', 'ingested_at'] as const
@@ -258,7 +254,7 @@ function useDocumentListUrlState(): {
     ? (sortKey as DocumentListQuery['sortKey'])
     : 'ingested_at'
 
-  const query: DocumentListQuery = {
+  return {
     page: Math.max(1, url.getInt('page', 1)),
     pageSize: url.getInt('size', DEFAULT_DOCUMENT_LIST_QUERY.pageSize),
     sortKey: validSort,
@@ -269,31 +265,44 @@ function useDocumentListUrlState(): {
     tsFrom: url.get('from'),
     tsTo: url.get('to'),
   }
+}
 
-  const onQueryChange = (patch: Partial<DocumentListQuery>) => {
-    const next = { ...query, ...patch }
-    const resetPage = patch.page === undefined && (
-      patch.pageSize !== undefined ||
-      patch.sortKey !== undefined ||
-      patch.sortDir !== undefined ||
-      patch.nameQ !== undefined ||
-      patch.lang !== undefined ||
-      patch.ext !== undefined ||
-      patch.tsFrom !== undefined ||
-      patch.tsTo !== undefined
-    )
-    url.patch({
-      page: (resetPage ? 1 : next.page) <= 1 ? null : resetPage ? 1 : next.page,
-      size: next.pageSize === DEFAULT_DOCUMENT_LIST_QUERY.pageSize ? null : next.pageSize,
-      sort: next.sortKey === 'ingested_at' ? null : next.sortKey,
-      dir: next.sortDir === 'desc' ? null : next.sortDir,
-      q: next.nameQ || null,
-      lang: next.lang || null,
-      ext: next.ext || null,
-      from: next.tsFrom || null,
-      to: next.tsTo || null,
-    })
-  }
+function useDocumentListUrlState(): {
+  query: DocumentListQuery
+  onQueryChange: (patch: Partial<DocumentListQuery>) => void
+} {
+  const url = useUrlState()
+  const query = useMemo(() => readDocumentListQuery(url), [url.searchParams])
+
+  const onQueryChange = useCallback(
+    (patch: Partial<DocumentListQuery>) => {
+      const current = readDocumentListQuery(url)
+      const next = { ...current, ...patch }
+      const resetPage =
+        patch.page === undefined &&
+        (patch.pageSize !== undefined ||
+          patch.sortKey !== undefined ||
+          patch.sortDir !== undefined ||
+          patch.nameQ !== undefined ||
+          patch.lang !== undefined ||
+          patch.ext !== undefined ||
+          patch.tsFrom !== undefined ||
+          patch.tsTo !== undefined)
+      const page = resetPage ? 1 : next.page
+      url.patch({
+        page: page <= 1 ? null : page,
+        size: next.pageSize === DEFAULT_DOCUMENT_LIST_QUERY.pageSize ? null : next.pageSize,
+        sort: next.sortKey === 'ingested_at' ? null : next.sortKey,
+        dir: next.sortDir === 'desc' ? null : next.sortDir,
+        q: next.nameQ || null,
+        lang: next.lang || null,
+        ext: next.ext || null,
+        from: next.tsFrom || null,
+        to: next.tsTo || null,
+      })
+    },
+    [url],
+  )
 
   return { query, onQueryChange }
 }
