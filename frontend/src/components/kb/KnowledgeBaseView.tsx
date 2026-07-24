@@ -28,16 +28,7 @@ import {
 import { GOLDEN_LLM_LABELS, GoldenGenControls } from '@/components/kb/GoldenGenControls'
 import { IngestPanel } from '@/components/kb/IngestPanel'
 import { Button } from '@/components/ui/button'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
 import { useAuth } from '@/lib/auth'
@@ -491,45 +482,28 @@ function LibraryView({
         />
       </div>
 
-      <AlertDialog
+      <ConfirmDialog
         open={clearDialogOpen}
-        onOpenChange={(o: boolean) => !clearing && setClearDialogOpen(o)}
-      >
-        <AlertDialogContent
-          onKeyDown={(e) => {
-            if (
-              e.key === 'Enter' &&
-              !e.shiftKey &&
-              !e.ctrlKey &&
-              !e.metaKey &&
-              !e.altKey
-            ) {
+        onOpenChange={(o) => !clearing && setClearDialogOpen(o)}
+        title={`清空库 ${alias}？`}
+        description={
+          <>
+            将删除 <b>{alias}</b> 库的 <b>{total}</b> 个文档（共 <b>{chunkTotal}</b> chunks），同时清空{' '}
+            <code>web_uploads/</code> 下对应的物理文件。该操作不可恢复。
+          </>
+        }
+        loading={clearing}
+        confirmLabel="清空"
+        contentProps={{
+          onKeyDown: (e) => {
+            if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
               e.preventDefault()
-              if (!clearing) handleClearAll()
+              if (!clearing) void handleClearAll()
             }
-          }}
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle>清空库 {alias}？</AlertDialogTitle>
-            <AlertDialogDescription>
-              将删除 <b>{alias}</b> 库的 <b>{total}</b> 个文档（共{' '}
-              <b>{chunkTotal}</b> chunks），同时清空 <code>web_uploads/</code>{' '}
-              下对应的物理文件。该操作不可恢复。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={clearing}>取消</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={handleClearAll}
-              disabled={clearing}
-              autoFocus
-            >
-              {clearing ? '清空中...' : '清空'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+          },
+        }}
+        onConfirm={handleClearAll}
+      />
     </div>
   )
 }

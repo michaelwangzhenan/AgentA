@@ -20,16 +20,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   Dialog,
   DialogClose,
@@ -74,6 +65,7 @@ export function MCPView() {
   const [editing, setEditing] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
 
   const query = url.get('q')
   const sortDir: SortDir = url.get('sort') === 'desc' ? 'desc' : 'asc'
@@ -142,6 +134,7 @@ export function MCPView() {
 
   const handleDelete = async () => {
     if (!deleteTarget) return
+    setDeleteBusy(true)
     try {
       await deleteMCPServer(deleteTarget)
       toast.success(`已删除 server：${deleteTarget}`)
@@ -149,6 +142,8 @@ export function MCPView() {
       await refresh()
     } catch (e) {
       toast.error(`删除失败：${(e as Error).message}`)
+    } finally {
+      setDeleteBusy(false)
     }
   }
 
@@ -311,36 +306,28 @@ export function MCPView() {
         }}
       />
 
-      <AlertDialog
+      <ConfirmDialog
         open={deleteTarget !== null}
-        onOpenChange={(o: boolean) => !o && setDeleteTarget(null)}
-      >
-        <AlertDialogContent
-          onKeyDown={(e) => {
+        onOpenChange={(o) => !o && !deleteBusy && setDeleteTarget(null)}
+        title={`删除 server：${deleteTarget}？`}
+        description={
+          <>
+            将从 <code>.agenta/mcp/config.json</code> 移除该 server，并立即停止其子进程。该操作不可恢复。
+          </>
+        }
+        loading={deleteBusy}
+        confirmLabel="删除"
+        onConfirm={handleDelete}
+        contentProps={{
+          onKeyDown: (e) => {
+            if (deleteBusy) return
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
               void handleDelete()
             }
-          }}
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除 server：{deleteTarget}？</AlertDialogTitle>
-            <AlertDialogDescription>
-              将从 <code>.agenta/mcp/config.json</code> 移除该 server，并立即停止其子进程。该操作不可恢复。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={handleDelete}
-              autoFocus
-            >
-              删除
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+          },
+        }}
+      />
     </ResourcePage>
   )
 }

@@ -6,16 +6,7 @@ import { toast } from '@/lib/toast'
 import { useUrlState } from '@/routes/useUrlState'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   createGolden,
   deleteGolden,
@@ -194,7 +185,6 @@ export function GoldenManager({
 
   const confirmDelete = async () => {
     const ids = deleteIds ?? []
-    setDeleteIds(null)
     if (!ids.length) return
     setBusy(true)
     try {
@@ -205,6 +195,7 @@ export function GoldenManager({
       void refresh()
     } finally {
       setBusy(false)
+      setDeleteIds(null)
     }
   }
 
@@ -575,25 +566,15 @@ export function GoldenManager({
         </div>
       )}
 
-      <AlertDialog open={deleteIds !== null} onOpenChange={(o: boolean) => !o && setDeleteIds(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除 golden？</AlertDialogTitle>
-            <AlertDialogDescription>
-              即将删除 {deleteIds?.length ?? 0} 条 golden（不可恢复）。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={confirmDelete}
-            >
-              删除
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDialog
+        open={deleteIds !== null}
+        onOpenChange={(o) => !o && !busy && setDeleteIds(null)}
+        title="删除 golden？"
+        description={`即将删除 ${deleteIds?.length ?? 0} 条 golden（不可恢复）。`}
+        loading={busy && deleteIds !== null}
+        confirmLabel="删除"
+        onConfirm={confirmDelete}
+      />
     </div>
   )
 }

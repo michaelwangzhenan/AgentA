@@ -2,16 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { deleteUser, listUsers } from '@/api/client'
 import { useAuth } from '@/lib/auth'
 import { toast } from '@/lib/toast'
@@ -46,12 +37,12 @@ export function UserManagement() {
     try {
       await deleteUser(target.id)
       toast.success(`已删除用户 ${target.username}`)
-      setTarget(null)
       await refresh()
     } catch (e) {
       toast.error((e as Error).message)
     } finally {
       setDeleting(false)
+      setTarget(null)
     }
   }
 
@@ -114,28 +105,19 @@ export function UserManagement() {
         </div>
       )}
 
-      <AlertDialog open={target !== null} onOpenChange={(open) => !open && setTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除用户</AlertDialogTitle>
-            <AlertDialogDescription>
-              {target
-                ? `确定删除用户「${target.username}」？其全部业务数据将一并清除，且不可恢复。`
-                : ''}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setTarget(null)}>取消</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmDelete}
-              disabled={deleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              删除
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDialog
+        open={target !== null}
+        onOpenChange={(open) => !open && setTarget(null)}
+        title="删除用户"
+        description={
+          target
+            ? `确定删除用户「${target.username}」？其全部业务数据将一并清除，且不可恢复。`
+            : ''
+        }
+        loading={deleting}
+        confirmLabel="删除"
+        onConfirm={confirmDelete}
+      />
     </div>
   )
 }

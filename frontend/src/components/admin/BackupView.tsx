@@ -12,16 +12,7 @@ import { toast } from 'sonner'
 
 import { ResourcePage } from '@/components/resources/ResourcePage'
 import { Button } from '@/components/ui/button'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   backupDownloadUrl,
   createBackup,
@@ -67,6 +58,7 @@ export function BackupView() {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [restoring, setRestoring] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const [pendingFile, setPendingFile] = useState<File | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -96,10 +88,8 @@ export function BackupView() {
   }
 
   async function handleCreate() {
-    setConfirmOpen(false)
     setCreating(true)
     try {
-      // 按固定顺序传，便于后端 / 日志可读
       const ordered = BACKUP_CATEGORIES.map((c) => c.key).filter((k) => cats.has(k))
       const snap = await createBackup(ordered)
       toast.success(`已生成备份：${snap.file_count} 个文件，${fmtSize(snap.zip_bytes)}`)
@@ -108,26 +98,30 @@ export function BackupView() {
       toast.error(e instanceof Error ? e.message : '生成备份失败')
     } finally {
       setCreating(false)
+      setConfirmOpen(false)
     }
   }
 
   async function handleDelete(name: string) {
-    setDeleteTarget(null)
+    setDeleting(true)
     try {
       await deleteBackup(name)
       toast.success('已删除备份')
       await refresh()
+      setDeleteTarget(null)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '删除失败')
+    } finally {
+      setDeleting(false)
     }
   }
 
   async function handleRestore(file: File) {
-    setPendingFile(null)
     setRestoring(true)
     try {
       const res = await restoreBackup(file)
       toast.success(res.message, { duration: 8000 })
+      setPendingFile(null)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '还原失败')
     } finally {
@@ -264,67 +258,63 @@ export function BackupView() {
         </section>
       </div>
 
-      {/* 生成备份确认（回车=确认） */}
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <HardDriveDownload className="h-4 w-4" /> 确认生成备份
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              将备份以下类别：
-              {BACKUP_CATEGORIES.filter((c) => cats.has(c.key)).map((c) => c.label).join(' / ')}。
-              {cats.has('A') && '（含明文密钥，请妥善保管）'}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void handleCreate()}>开始备份</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title={
+          <span className="inline-flex items-center gap-2">
+            <HardDriveDownload className="h-4 w-4" /> 确认生成备份
+          </span>
+        }
+        description={
+          <>
+            将备份以下类别：
+            {BACKUP_CATEGORIES.filter((c) => cats.has(c.key)).map((c) => c.label).join(' / ')}。
+            {cats.has('A') && '（含明文密钥，请妥善保管）'}
+          </>
+        }
+        loading={creating}
+        confirmLabel="开始备份"
+        destructive={false}
+        onConfirm={handleCreate}
+      />
 
-      {/* 删除确认 */}
-      <AlertDialog open={deleteTarget !== null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除备份</AlertDialogTitle>
-            <AlertDialogDescription>
-              确定删除 {deleteTarget}？此操作不可恢复。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={() => deleteTarget && void handleDelete(deleteTarget)}>
-              删除
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title="删除备份"
+        description={deleteTarget ? `确定删除 ${deleteTarget}？此操作不可恢复。` : ''}
+        loading={deleting}
+        confirmLabel="删除"
+        onConfirm={async () => {
+          if (deleteTarget) await handleDelete(deleteTarget)
+        }}
+      />
 
-      {/* 还原确认 */}
-      <AlertDialog open={pendingFile !== null} onOpenChange={(o) => !o && setPendingFile(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <UploadCloud className="h-4 w-4" /> 确认还原
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              即将用 <strong>{pendingFile?.name}</strong> 覆盖服务器现有的 .env / 数据库 /
+      <ConfirmDialog
+        open={pendingFile !== null}
+        onOpenChange={(o) => !o && setPendingFile(null)}
+        title={
+          <span className="inline-flex items-center gap-2">
+            <UploadCloud className="h-4 w-4" /> 确认还原
+          </span>
+        }
+        description={
+          pendingFile ? (
+            <>
+              即将用 <strong>{pendingFile.name}</strong> 覆盖服务器现有的 .env / 数据库 /
               向量库等文件，且不可撤销。还原后请重启后端。确定继续？
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => pendingFile && void handleRestore(pendingFile)}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              确认还原
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </>
+          ) : (
+            ''
+          )
+        }
+        loading={restoring}
+        confirmLabel="确认还原"
+        onConfirm={async () => {
+          if (pendingFile) await handleRestore(pendingFile)
+        }}
+      />
     </ResourcePage>
   )
 }

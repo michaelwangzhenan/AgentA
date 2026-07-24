@@ -5,16 +5,7 @@ import { toast } from 'sonner'
 
 import { cn } from '@/lib/utils'
 import { ResourcePage } from '@/components/resources/ResourcePage'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   cleanupOrphanSegments,
   getBm25Doc,
@@ -1716,7 +1707,8 @@ function PrunePanel() {
         open={confirm}
         onOpenChange={setConfirm}
         title="确认清理？"
-        desc={`将删除约 ${preview?.total ?? 0} 行（保留 ${days} 天内），不可恢复。`}
+        description={`将删除约 ${preview?.total ?? 0} 行（保留 ${days} 天内），不可恢复。`}
+        loading={busy}
         onConfirm={doRun}
       />
     </Card>
@@ -1920,7 +1912,8 @@ function PurgeUserPanel() {
         open={confirm}
         onOpenChange={setConfirm}
         title="确认清理？"
-        desc={`将删除 user_id=${uid} 选中的约 ${total} 行（含子表级联），不可恢复。`}
+        description={`将删除 user_id=${uid} 选中的约 ${total} 行（含子表级联），不可恢复。`}
+        loading={busy}
         onConfirm={doRun}
       />
     </Card>
@@ -1965,70 +1958,11 @@ function VacuumPanel() {
         open={confirm}
         onOpenChange={setConfirm}
         title="确认 VACUUM？"
-        desc="将对全部 SQLite 库执行 VACUUM，期间短暂占用写锁。"
+        description="将对全部 SQLite 库执行 VACUUM，期间短暂占用写锁。"
+        loading={busy}
         onConfirm={doRun}
       />
     </Card>
-  )
-}
-
-function ConfirmDialog({
-  open,
-  onOpenChange,
-  title,
-  desc,
-  onConfirm,
-  loading = false,
-  confirmLabel = '确认',
-}: {
-  open: boolean
-  onOpenChange: (o: boolean) => void
-  title: string
-  desc: string
-  onConfirm: () => void | Promise<void>
-  loading?: boolean
-  confirmLabel?: string
-}) {
-  return (
-    <AlertDialog
-      open={open}
-      onOpenChange={(o) => {
-        if (!loading) onOpenChange(o)
-      }}
-    >
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription>{desc}</AlertDialogDescription>
-        </AlertDialogHeader>
-        {loading && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-            处理中，请稍候…
-          </div>
-        )}
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={loading}>取消</AlertDialogCancel>
-          <AlertDialogAction
-            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            disabled={loading}
-            onClick={(e) => {
-              e.preventDefault()
-              void onConfirm()
-            }}
-          >
-            {loading ? (
-              <span className="inline-flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                处理中…
-              </span>
-            ) : (
-              confirmLabel
-            )}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   )
 }
 
@@ -2155,7 +2089,7 @@ function RepairPanel() {
         open={confirm}
         onOpenChange={setConfirm}
         title="确认修复 BM25 侧车？"
-        desc={`将从 pkl 重建 ${preview?.needs_repair ?? 0} 个索引的 manifest / chunks.jsonl。不改动 pkl 本体。`}
+        description={`将从 pkl 重建 ${preview?.needs_repair ?? 0} 个索引的 manifest / chunks.jsonl。不改动 pkl 本体。`}
         loading={busy}
         confirmLabel="确认"
         onConfirm={doRun}
@@ -2251,7 +2185,8 @@ function OrphanSegmentsPanel() {
         open={confirm}
         onOpenChange={setConfirm}
         title="确认清理孤儿段？"
-        desc={`将物理删除 ${preview?.count ?? 0} 个孤儿段目录（约 ${fmtBytes(preview?.total_bytes ?? 0)}），不可恢复。`}
+        description={`将物理删除 ${preview?.count ?? 0} 个孤儿段目录（约 ${fmtBytes(preview?.total_bytes ?? 0)}），不可恢复。`}
+        loading={busy}
         onConfirm={doRun}
       />
     </Card>

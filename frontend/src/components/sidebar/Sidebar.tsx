@@ -35,6 +35,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -115,6 +116,7 @@ export function Sidebar(props: SidebarProps) {
   const [renameTarget, setRenameTarget] = useState<Session | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
   const [confirmLogout, setConfirmLogout] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [recentsCollapsed, setRecentsCollapsed] = useState<boolean>(() => {
@@ -251,8 +253,13 @@ export function Sidebar(props: SidebarProps) {
 
   const confirmDelete = async () => {
     if (!deleteTarget) return
-    await onDelete(deleteTarget.id)
-    setDeleteTarget(null)
+    setDeleteBusy(true)
+    try {
+      await onDelete(deleteTarget.id)
+      setDeleteTarget(null)
+    } finally {
+      setDeleteBusy(false)
+    }
   }
 
   const handleSelectSession = (id: string) => {
@@ -569,13 +576,17 @@ export function Sidebar(props: SidebarProps) {
         </DialogContent>
       </Dialog>
 
-      {/* 删除确认 AlertDialog —— 回车默认触发"删除" */}
-      <AlertDialog
+      <ConfirmDialog
         open={deleteTarget !== null}
-        onOpenChange={(o: boolean) => !o && setDeleteTarget(null)}
-      >
-        <AlertDialogContent
-          onKeyDown={(e) => {
+        onOpenChange={(o) => !o && !deleteBusy && setDeleteTarget(null)}
+        title="删除会话？"
+        description={`即将删除 "${deleteTarget?.title || 'New Chat'}" 及其所有消息记录，不可恢复。`}
+        loading={deleteBusy}
+        confirmLabel="删除"
+        onConfirm={confirmDelete}
+        contentProps={{
+          onKeyDown: (e) => {
+            if (deleteBusy) return
             if (
               e.key === 'Enter' &&
               !e.shiftKey &&
@@ -584,29 +595,11 @@ export function Sidebar(props: SidebarProps) {
               !e.altKey
             ) {
               e.preventDefault()
-              confirmDelete()
+              void confirmDelete()
             }
-          }}
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除会话？</AlertDialogTitle>
-            <AlertDialogDescription>
-              即将删除 "{deleteTarget?.title || 'New Chat'}"
-              及其所有消息记录，不可恢复。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={confirmDelete}
-              autoFocus
-            >
-              删除
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+          },
+        }}
+      />
 
       {/* 退出确认 AlertDialog */}
       <AlertDialog

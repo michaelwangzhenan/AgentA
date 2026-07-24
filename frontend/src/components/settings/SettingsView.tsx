@@ -3,15 +3,8 @@ import { Search } from 'lucide-react'
 
 import { Input } from '@/components/ui/input'
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
+  ConfirmDialog,
+} from '@/components/ui/confirm-dialog'
 import { ResourcePage } from '@/components/resources/ResourcePage'
 import { ConfigField } from '@/components/settings/ConfigField'
 import { RoutingPoolConfig } from '@/components/settings/RoutingPoolConfig'
@@ -56,6 +49,7 @@ export function SettingsView({
     ? (name: string) => url.patch({ group: name || null, q: null })
     : setLocalActiveGroup
   const [pendingDanger, setPendingDanger] = useState<{ key: string; value: unknown } | null>(null)
+  const [dangerSaving, setDangerSaving] = useState(false)
   const [edits, setEdits] = useState<Record<string, LocalEdit>>({})
 
   // 延时保存定时器（每个 key 独立，新 change 来了清旧再排）
@@ -203,6 +197,7 @@ export function SettingsView({
 
   // 危险项 Dialog: 取消时把 local edit 也回滚（让 UI 控件视觉态回到原值）
   const cancelDanger = () => {
+    if (dangerSaving) return
     if (pendingDanger) {
       setEdits((prev) => {
         const next = { ...prev }
@@ -216,8 +211,13 @@ export function SettingsView({
   const confirmDanger = async () => {
     if (!pendingDanger) return
     const { key, value } = pendingDanger
-    setPendingDanger(null)
-    await commitSave(key, value)
+    setDangerSaving(true)
+    try {
+      await commitSave(key, value)
+      setPendingDanger(null)
+    } finally {
+      setDangerSaving(false)
+    }
   }
 
   const resetItem = async (item: ConfigItemView) => {
@@ -455,29 +455,22 @@ export function SettingsView({
         </div>
       )}
 
-      {/* 危险项二次确认 */}
-      <AlertDialog
+      <ConfirmDialog
         open={pendingDanger !== null}
         onOpenChange={(open) => {
-          // 关闭 = 取消（无论点 X 还是 ESC）：回滚 local edit
           if (!open) cancelDanger()
         }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>确认修改敏感配置</AlertDialogTitle>
-            <AlertDialogDescription>
-              {pendingDanger
-                ? `${pendingDanger.key} 是敏感配置，改动会立即影响安全相关行为。是否继续？`
-                : ''}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={cancelDanger}>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDanger}>确认修改</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        title="确认修改敏感配置"
+        description={
+          pendingDanger
+            ? `${pendingDanger.key} 是敏感配置，改动会立即影响安全相关行为。是否继续？`
+            : ''
+        }
+        loading={dangerSaving}
+        confirmLabel="确认修改"
+        destructive={false}
+        onConfirm={confirmDanger}
+      />
     </>
   )
 

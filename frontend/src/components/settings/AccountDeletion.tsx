@@ -1,16 +1,7 @@
 import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { SettingsSection } from '@/components/settings/SettingsSection'
 import { deleteOwnAccount } from '@/api/client'
 import { useAuth } from '@/lib/auth'
@@ -55,56 +46,24 @@ export function AccountDeletion() {
         </Button>
       </SettingsSection>
 
-      {/* 第 1 次确认 */}
-      <AlertDialog
+      <ConfirmDialog
         open={step === 'confirm1'}
         onOpenChange={(open) => !open && setStep('idle')}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>确定要注销账号吗？</AlertDialogTitle>
-            <AlertDialogDescription>
-              这会永久删除你的账号及全部数据。请谨慎操作。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setStep('idle')}>取消</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => setStep('confirm2')}
-            >
-              继续
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        title="确定要注销账号吗？"
+        description="这会永久删除你的账号及全部数据。请谨慎操作。"
+        confirmLabel="继续"
+        onConfirm={() => setStep('confirm2')}
+      />
 
-      {/* 第 2 次确认 */}
-      <AlertDialog
+      <ConfirmDialog
         open={step === 'confirm2'}
         onOpenChange={(open) => !open && !deleting && setStep('idle')}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>最后确认</AlertDialogTitle>
-            <AlertDialogDescription>
-              此操作不可恢复。确认后将立即删除账号「{user?.username}」及其所有数据。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting} onClick={() => setStep('idle')}>
-              取消
-            </AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              disabled={deleting}
-              onClick={doDelete}
-            >
-              确认注销
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        title="最后确认"
+        description={`此操作不可恢复。确认后将立即删除账号「${user?.username}」及其所有数据。`}
+        loading={deleting}
+        confirmLabel="确认注销"
+        onConfirm={doDelete}
+      />
     </div>
   )
 }

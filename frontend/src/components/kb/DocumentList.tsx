@@ -12,16 +12,7 @@ export function dateToEpoch(s: string, endOfDay: boolean): number | undefined {
 }
 
 import { Button } from '@/components/ui/button'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { cn } from '@/lib/utils'
 import type { KBDocument, KBDocumentsQuery } from '@/types/kb'
 
@@ -131,7 +122,9 @@ export function DocumentList({
   goldenGenPreview,
 }: DocumentListProps) {
   const [deleteTarget, setDeleteTarget] = useState<KBDocument | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
   const [genTarget, setGenTarget] = useState<KBDocument | null>(null)
+  const [genBusy, setGenBusy] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
   const { sortKey, sortDir, pageSize, page, nameQ, lang, ext, tsFrom, tsTo } = query
@@ -161,11 +154,17 @@ export function DocumentList({
     })
   }
   const [batchOpen, setBatchOpen] = useState(false)
+  const [batchBusy, setBatchBusy] = useState(false)
 
   const confirmBatchDelete = async () => {
-    await onDeleteMany?.([...selected])
-    setSelected(new Set())
-    setBatchOpen(false)
+    setBatchBusy(true)
+    try {
+      await onDeleteMany?.([...selected])
+      setSelected(new Set())
+      setBatchOpen(false)
+    } finally {
+      setBatchBusy(false)
+    }
   }
 
   const hasFilter = Boolean(nameQ || lang || ext || tsFrom || tsTo)
@@ -194,15 +193,24 @@ export function DocumentList({
 
   const confirmDelete = async () => {
     if (!deleteTarget) return
-    await onDelete(deleteTarget.doc_id)
-    setDeleteTarget(null)
+    setDeleteBusy(true)
+    try {
+      await onDelete(deleteTarget.doc_id)
+      setDeleteTarget(null)
+    } finally {
+      setDeleteBusy(false)
+    }
   }
 
   const confirmGenerate = async () => {
     if (!genTarget) return
-    const target = genTarget
-    setGenTarget(null)
-    await onGenerateGolden?.(target)
+    setGenBusy(true)
+    try {
+      await onGenerateGolden?.(genTarget)
+      setGenTarget(null)
+    } finally {
+      setGenBusy(false)
+    }
   }
 
   if (loading) {
@@ -467,12 +475,17 @@ export function DocumentList({
         </>
       )}
 
-      <AlertDialog
+      <ConfirmDialog
         open={deleteTarget !== null}
-        onOpenChange={(o: boolean) => !o && setDeleteTarget(null)}
-      >
-        <AlertDialogContent
-          onKeyDown={(e) => {
+        onOpenChange={(o) => !o && !deleteBusy && setDeleteTarget(null)}
+        title="删除文档？"
+        description={`即将删除 "${deleteTarget?.filename}" 及其 ${deleteTarget?.chunks} 个 chunks（不可恢复）`}
+        loading={deleteBusy}
+        confirmLabel="删除"
+        onConfirm={confirmDelete}
+        contentProps={{
+          onKeyDown: (e) => {
+            if (deleteBusy) return
             if (
               e.key === 'Enter' &&
               !e.shiftKey &&
@@ -481,35 +494,31 @@ export function DocumentList({
               !e.altKey
             ) {
               e.preventDefault()
-              confirmDelete()
+              void confirmDelete()
             }
-          }}
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除文档？</AlertDialogTitle>
-            <AlertDialogDescription>
-              即将删除 "{deleteTarget?.filename}" 及其 {deleteTarget?.chunks} 个 chunks（不可恢复）
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={confirmDelete}
-              autoFocus
-            >
-              删除
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+          },
+        }}
+      />
 
-      <AlertDialog
+      <ConfirmDialog
         open={genTarget !== null}
-        onOpenChange={(o: boolean) => !o && setGenTarget(null)}
-      >
-        <AlertDialogContent
-          onKeyDown={(e) => {
+        onOpenChange={(o) => !o && !genBusy && setGenTarget(null)}
+        title="生成评估题候选？"
+        description={
+          <>
+            将用 <b>{goldenGenPreview?.llmLabel ?? 'LLM'}</b> 为 &quot;
+            {genTarget?.filename}&quot; 生成评估题候选（按文档字数，上限{' '}
+            <b>{goldenGenPreview?.maxQ ?? 3}</b> 条）。会清掉该文档旧 pending（approved
+            保留），消耗 token 并耗时若干秒。
+          </>
+        }
+        loading={genBusy}
+        destructive={false}
+        confirmLabel="生成"
+        onConfirm={confirmGenerate}
+        contentProps={{
+          onKeyDown: (e) => {
+            if (genBusy) return
             if (
               e.key === 'Enter' &&
               !e.shiftKey &&
@@ -518,31 +527,27 @@ export function DocumentList({
               !e.altKey
             ) {
               e.preventDefault()
-              confirmGenerate()
+              void confirmGenerate()
             }
-          }}
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle>生成评估题候选？</AlertDialogTitle>
-            <AlertDialogDescription>
-              将用 <b>{goldenGenPreview?.llmLabel ?? 'LLM'}</b> 为 &quot;
-              {genTarget?.filename}&quot; 生成评估题候选（按文档字数，上限{' '}
-              <b>{goldenGenPreview?.maxQ ?? 3}</b> 条）。会清掉该文档旧 pending（approved
-              保留），消耗 token 并耗时若干秒。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmGenerate} autoFocus>
-              生成
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+          },
+        }}
+      />
 
-      <AlertDialog open={batchOpen} onOpenChange={(o: boolean) => !o && setBatchOpen(false)}>
-        <AlertDialogContent
-          onKeyDown={(e) => {
+      <ConfirmDialog
+        open={batchOpen}
+        onOpenChange={(o) => !o && !batchBusy && setBatchOpen(o)}
+        title={`批量删除 ${selected.size} 个文档？`}
+        description={
+          <>
+            即将删除选中的 <b>{selected.size}</b> 个文档及其所有 chunks（不可恢复）。
+          </>
+        }
+        loading={batchBusy}
+        confirmLabel="删除"
+        onConfirm={confirmBatchDelete}
+        contentProps={{
+          onKeyDown: (e) => {
+            if (batchBusy) return
             if (
               e.key === 'Enter' &&
               !e.shiftKey &&
@@ -551,28 +556,11 @@ export function DocumentList({
               !e.altKey
             ) {
               e.preventDefault()
-              confirmBatchDelete()
+              void confirmBatchDelete()
             }
-          }}
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle>批量删除 {selected.size} 个文档？</AlertDialogTitle>
-            <AlertDialogDescription>
-              即将删除选中的 <b>{selected.size}</b> 个文档及其所有 chunks（不可恢复）。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={confirmBatchDelete}
-              autoFocus
-            >
-              删除
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+          },
+        }}
+      />
     </>
   )
 }

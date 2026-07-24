@@ -11,16 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   abandonPlan,
   activatePlan,
@@ -80,6 +71,7 @@ export function PlansView() {
   const [addTasks, setAddTasks] = useState('')
   const [adding, setAdding] = useState(false)
   const [abandonTarget, setAbandonTarget] = useState<PlanSummary | null>(null)
+  const [abandonBusy, setAbandonBusy] = useState(false)
 
   const refreshList = useCallback(async (preferId?: number) => {
     setLoadingList(true)
@@ -193,6 +185,7 @@ export function PlansView() {
 
   const confirmAbandon = async () => {
     if (!abandonTarget) return
+    setAbandonBusy(true)
     try {
       await abandonPlan(abandonTarget.id)
       toast.success('已放弃该计划')
@@ -200,6 +193,8 @@ export function PlansView() {
       await refreshList()
     } catch (e) {
       toast.error(`操作失败：${(e as Error).message}`)
+    } finally {
+      setAbandonBusy(false)
     }
   }
 
@@ -427,29 +422,15 @@ export function PlansView() {
         </DialogContent>
       </Dialog>
 
-      {/* 放弃计划确认 */}
-      <AlertDialog
+      <ConfirmDialog
         open={abandonTarget !== null}
-        onOpenChange={(o: boolean) => !o && setAbandonTarget(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>放弃该计划？</AlertDialogTitle>
-            <AlertDialogDescription>
-              "{abandonTarget?.goal}" 将被标记为已放弃，不再出现在列表里。已有任务记录会保留。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={confirmAbandon}
-            >
-              放弃
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        onOpenChange={(o) => !o && !abandonBusy && setAbandonTarget(null)}
+        title="放弃该计划？"
+        description={`"${abandonTarget?.goal}" 将被标记为已放弃，不再出现在列表里。已有任务记录会保留。`}
+        loading={abandonBusy}
+        confirmLabel="放弃"
+        onConfirm={confirmAbandon}
+      />
     </div>
   )
 }

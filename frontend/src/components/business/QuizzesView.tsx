@@ -2,16 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { archiveQuiz, getQuiz, listQuizzes, submitQuiz } from '@/api/client'
 import {
   QUIZ_STATUS_LABELS,
@@ -202,6 +193,7 @@ export function QuizzesView() {
   const [answers, setAnswers] = useState<Record<number, string>>({})
   const [submitting, setSubmitting] = useState(false)
   const [archiveTarget, setArchiveTarget] = useState<QuizSetSummary | null>(null)
+  const [archiveBusy, setArchiveBusy] = useState(false)
 
   const refreshList = useCallback(async (preferId?: number) => {
     setLoadingList(true)
@@ -271,6 +263,7 @@ export function QuizzesView() {
 
   const confirmArchive = async () => {
     if (!archiveTarget) return
+    setArchiveBusy(true)
     try {
       await archiveQuiz(archiveTarget.id)
       toast.success('已归档')
@@ -278,6 +271,8 @@ export function QuizzesView() {
       await refreshList()
     } catch (e) {
       toast.error(`归档失败：${(e as Error).message}`)
+    } finally {
+      setArchiveBusy(false)
     }
   }
 
@@ -391,23 +386,16 @@ export function QuizzesView() {
         </div>
       )}
 
-      <AlertDialog
+      <ConfirmDialog
         open={archiveTarget !== null}
-        onOpenChange={(o: boolean) => !o && setArchiveTarget(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>归档该测验？</AlertDialogTitle>
-            <AlertDialogDescription>
-              "{archiveTarget?.topic}" 将从列表中隐藏。数据会保留，可通过聊天查询历史。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmArchive}>归档</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        onOpenChange={(o) => !o && !archiveBusy && setArchiveTarget(null)}
+        title="归档该测验？"
+        description={`"${archiveTarget?.topic}" 将从列表中隐藏。数据会保留，可通过聊天查询历史。`}
+        loading={archiveBusy}
+        destructive={false}
+        confirmLabel="归档"
+        onConfirm={confirmArchive}
+      />
     </div>
   )
 }

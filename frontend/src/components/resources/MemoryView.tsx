@@ -10,16 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   clearMemories,
   createMemory,
@@ -42,7 +33,9 @@ export function MemoryView() {
   const [editTarget, setEditTarget] = useState<MemoryItem | null>(null)
   const [editValue, setEditValue] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<MemoryItem | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
   const [confirmClearOpen, setConfirmClearOpen] = useState(false)
+  const [clearBusy, setClearBusy] = useState(false)
 
   // 手动添加表单
   const [addOpen, setAddOpen] = useState(false)
@@ -81,24 +74,30 @@ export function MemoryView() {
 
   const confirmDelete = async () => {
     if (!deleteTarget) return
+    setDeleteBusy(true)
     try {
       await deleteMemory(deleteTarget.id)
-      setDeleteTarget(null)
       toast.success('已删除')
       await refresh()
+      setDeleteTarget(null)
     } catch (e) {
       toast.error(`删除失败：${(e as Error).message}`)
+    } finally {
+      setDeleteBusy(false)
     }
   }
 
   const confirmClear = async () => {
+    setClearBusy(true)
     try {
       const resp = await clearMemories()
-      setConfirmClearOpen(false)
       toast.success(`已清空 ${resp.cleared} 条`)
       await refresh()
+      setConfirmClearOpen(false)
     } catch (e) {
       toast.error(`清空失败：${(e as Error).message}`)
+    } finally {
+      setClearBusy(false)
     }
   }
 
@@ -241,51 +240,25 @@ export function MemoryView() {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog
+      <ConfirmDialog
         open={deleteTarget !== null}
-        onOpenChange={(o: boolean) => !o && setDeleteTarget(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除该条记忆？</AlertDialogTitle>
-            <AlertDialogDescription>
-              即将删除：{deleteTarget?.text}，不可恢复。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={confirmDelete}
-            >
-              删除
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        onOpenChange={(o) => !o && !deleteBusy && setDeleteTarget(null)}
+        title="删除该条记忆？"
+        description={deleteTarget ? `即将删除：${deleteTarget.text}，不可恢复。` : ''}
+        loading={deleteBusy}
+        confirmLabel="删除"
+        onConfirm={confirmDelete}
+      />
 
-      <AlertDialog
+      <ConfirmDialog
         open={confirmClearOpen}
-        onOpenChange={setConfirmClearOpen}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>清空全部记忆？</AlertDialogTitle>
-            <AlertDialogDescription>
-              这会删除全部 {items.length} 条记忆，无法恢复。LLM 下次回答将失去这些上下文。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={confirmClear}
-            >
-              清空
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        onOpenChange={(o) => !o && !clearBusy && setConfirmClearOpen(o)}
+        title="清空全部记忆？"
+        description={`这会删除全部 ${items.length} 条记忆，无法恢复。LLM 下次回答将失去这些上下文。`}
+        loading={clearBusy}
+        confirmLabel="清空"
+        onConfirm={confirmClear}
+      />
 
       <Dialog
         open={addOpen}

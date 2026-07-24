@@ -23,16 +23,7 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { MarkdownEditor } from '@/components/ui/markdown-editor'
 import { MarkdownPreview } from '@/components/ui/markdown-preview'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   Dialog,
   DialogClose,
@@ -92,6 +83,7 @@ export function SkillsView() {
   const [editing, setEditing] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
 
   const query = url.get('q')
   const sortDir: SortDir = url.get('sort') === 'desc' ? 'desc' : 'asc'
@@ -156,6 +148,7 @@ export function SkillsView() {
 
   const handleDelete = async () => {
     if (!deleteTarget) return
+    setDeleteBusy(true)
     try {
       await deleteSkill(deleteTarget)
       toast.success(`已删除 skill：${deleteTarget}`)
@@ -163,6 +156,8 @@ export function SkillsView() {
       await refresh()
     } catch (e) {
       toast.error(`删除失败：${(e as Error).message}`)
+    } finally {
+      setDeleteBusy(false)
     }
   }
 
@@ -308,36 +303,29 @@ export function SkillsView() {
         }}
       />
 
-      <AlertDialog
+      <ConfirmDialog
         open={deleteTarget !== null}
-        onOpenChange={(o: boolean) => !o && setDeleteTarget(null)}
-      >
-        <AlertDialogContent
-          onKeyDown={(e) => {
+        onOpenChange={(o) => !o && !deleteBusy && setDeleteTarget(null)}
+        title={`删除 skill：${deleteTarget}？`}
+        description={
+          <>
+            将删除 <code>.agenta/skills/{deleteTarget}/</code>{' '}
+            整个目录（含 scripts/ 等子文件）。该操作不可恢复。
+          </>
+        }
+        loading={deleteBusy}
+        confirmLabel="删除"
+        onConfirm={handleDelete}
+        contentProps={{
+          onKeyDown: (e) => {
+            if (deleteBusy) return
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
               void handleDelete()
             }
-          }}
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle>删除 skill：{deleteTarget}？</AlertDialogTitle>
-            <AlertDialogDescription>
-              将删除 <code>.agenta/skills/{deleteTarget}/</code> 整个目录（含 scripts/ 等子文件）。该操作不可恢复。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={handleDelete}
-              autoFocus
-            >
-              删除
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+          },
+        }}
+      />
     </ResourcePage>
   )
 }
