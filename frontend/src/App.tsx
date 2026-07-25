@@ -9,7 +9,7 @@ import { useAuth } from '@/lib/auth'
 function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen flex-col bg-background">
-      <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
+      <div className="min-h-0 flex-1 overflow-hidden pb-8">{children}</div>
       <SiteFooter />
     </div>
   )

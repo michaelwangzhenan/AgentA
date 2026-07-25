@@ -1,15 +1,52 @@
+import { Fragment } from 'react'
+
+import { toast } from '@/lib/toast'
+
 const ICP_NUMBER = '浙ICP备2026055936号-1'
 const ICP_URL = 'https://beian.miit.gov.cn/'
 const PSB_NUMBER = '浙公网安备33010502013300号'
-const PSB_URL = 'https://beian.mps.gov.cn/#/query/webSearch?code=33010502013300'
+const PSB_URL =
+  'https://beian.mps.gov.cn/#/query/webSearch?code=33010502013300'
+
+const PRODUCT_LINKS = [
+  '关于 AgentA',
+  '使用须知',
+  '帮助中心',
+  '隐私政策',
+  '联系我们',
+] as const
 
 const linkClass =
-  'text-sm text-muted-foreground hover:text-foreground hover:underline'
+  'text-white/85 transition-colors hover:text-white hover:underline'
+
+function showComingSoon() {
+  toast.info('页面建设中')
+}
 
 export function SiteFooter() {
   return (
-    <footer className="shrink-0 border-t border-border/60 bg-background py-2.5 text-center">
-      <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
+    <footer className="fixed inset-x-0 bottom-0 z-30 border-t border-transparent bg-black/50 px-3 py-1.5 text-center text-xs backdrop-blur-sm dark:border-white/10 dark:bg-black/70">
+      <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
+        {PRODUCT_LINKS.map((label, index) => (
+          <Fragment key={label}>
+            {index > 0 ? (
+              <span className="text-white/40" aria-hidden>
+                ·
+              </span>
+            ) : null}
+            <button
+              type="button"
+              onClick={showComingSoon}
+              className={linkClass}
+            >
+              {label}
+            </button>
+          </Fragment>
+        ))}
+
+        <span className="text-white/40" aria-hidden>
+          ·
+        </span>
         <a
           href={ICP_URL}
           target="_blank"
@@ -18,6 +55,10 @@ export function SiteFooter() {
         >
           {ICP_NUMBER}
         </a>
+
+        <span className="text-white/40" aria-hidden>
+          ·
+        </span>
         <a
           href={PSB_URL}
           target="_blank"
@@ -26,9 +67,9 @@ export function SiteFooter() {
         >
           <img
             src="/beian-icon.png"
-            alt=""
-            width={16}
-            height={17}
+            alt="公安备案图标"
+            width={14}
+            height={15}
             className="inline-block"
           />
           {PSB_NUMBER}
