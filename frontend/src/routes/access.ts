@@ -13,7 +13,8 @@ const ADMIN_VIEWS: ViewKind[] = ['skills', 'mcp', 'database', 'backup']
 
 const ADMIN_QUALITY_TABS: QualityTab[] = ['security_runtime', 'offline', 'golden']
 const ADMIN_USAGE_TABS: UsageTab[] = ['all', 'savings_all', 'pricing']
-const ADMIN_SETTINGS_SECTIONS: SettingsSection[] = ['system', 'apikeys', 'users']
+const ADMIN_SETTINGS_SECTIONS: SettingsSection[] = ['system', 'apikeys']
+const SUPER_ADMIN_SETTINGS_SECTIONS: SettingsSection[] = ['users']
 
 export function routeRequiresAdmin(pathname: string): boolean {
   const view = viewKindFromPathname(pathname)
@@ -30,6 +31,18 @@ export function routeRequiresAdmin(pathname: string): boolean {
   }
   if (view === 'settings' && sub && isSettingsSection(sub)) {
     return ADMIN_SETTINGS_SECTIONS.includes(sub)
+  }
+
+  return false
+}
+
+export function routeRequiresSuperAdmin(pathname: string): boolean {
+  const view = viewKindFromPathname(pathname)
+  const parts = pathname.split('/').filter(Boolean)
+  const sub = parts[1]
+
+  if (view === 'settings' && sub && isSettingsSection(sub)) {
+    return SUPER_ADMIN_SETTINGS_SECTIONS.includes(sub)
   }
 
   return false

@@ -63,7 +63,7 @@ import type {
   SRSRating,
 } from '@/types/business'
 import type { ApiKeyView, ApiKeysResponse } from '@/types/apiKeys'
-import type { AuthResponse, LlmPrefs, LlmPrefsUpdate, UserInfo } from '@/types/auth'
+import type { AuthResponse, LlmPrefs, LlmPrefsUpdate, UserInfo, UserRole } from '@/types/auth'
 import type {
   PricingResponse,
   PricingUpdateItem,
@@ -909,6 +909,30 @@ export async function listUsers(): Promise<UserInfo[]> {
   const res = await apiFetch('/api/admin/users')
   await _ensureOk(res)
   return ((await res.json()) as { users: UserInfo[] }).users
+}
+
+export async function createUser(
+  username: string,
+  password: string,
+  role: UserRole = 'user',
+): Promise<UserInfo> {
+  const res = await apiFetch('/api/admin/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password, role }),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as UserInfo
+}
+
+export async function updateUserRole(userId: number, role: UserRole): Promise<UserInfo> {
+  const res = await apiFetch(`/api/admin/users/${userId}/role`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role }),
+  })
+  await _ensureOk(res)
+  return (await res.json()) as UserInfo
 }
 
 export async function deleteUser(userId: number): Promise<void> {

@@ -381,7 +381,7 @@ MEMORY_DB_PATH: str = os.getenv("MEMORY_DB_PATH", "./db/sqlite/session.db")
 AUTH_ENABLED: bool = os.getenv("AUTH_ENABLED", "true").lower() == "true"
 # 账号 / 登录态 / 每用户 rules 的 SQLite 路径
 AUTH_DB_PATH: str = os.getenv("AUTH_DB_PATH", "./db/sqlite/auth.db")
-# 该用户名注册后自动成为 admin，其余均为普通用户
+# 主账号用户名（大小写不敏感）；仅此账号可操作用户管理
 AUTH_ADMIN_USERNAME: str = os.getenv("AUTH_ADMIN_USERNAME", "admin")
 # 登录态有效天数
 AUTH_SESSION_TTL_DAYS: int = int(os.getenv("AUTH_SESSION_TTL_DAYS", "30"))

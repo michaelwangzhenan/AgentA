@@ -19,6 +19,21 @@ class UserInfo(BaseModel):
     username: str
     role: str
     created_at: str = ""
+    can_manage_users: bool = False
+
+
+class CreateUserRequest(BaseModel):
+    """主账号新建用户。"""
+
+    username: str = Field(..., min_length=1, max_length=64, description="用户名")
+    password: str = Field(..., min_length=1, max_length=128, description="初始密码")
+    role: str = Field(default="user", description="角色：user 或 admin")
+
+
+class UpdateUserRoleRequest(BaseModel):
+    """主账号改用户角色。"""
+
+    role: str = Field(..., description="角色：user 或 admin")
 
 
 class AuthResponse(BaseModel):

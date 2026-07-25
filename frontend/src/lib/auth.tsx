@@ -20,6 +20,7 @@ type AuthState = {
   user: UserInfo | null
   loading: boolean
   isAdmin: boolean
+  isSuperAdmin: boolean
   login: (username: string, password: string) => Promise<void>
   logout: () => Promise<void>
   refreshUser: () => Promise<void>
@@ -74,6 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       loading,
       isAdmin: user?.role === 'admin',
+      isSuperAdmin: user?.can_manage_users === true,
       login,
       logout,
       refreshUser,

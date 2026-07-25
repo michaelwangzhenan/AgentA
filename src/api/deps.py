@@ -194,10 +194,26 @@ async def get_current_user(
     return user
 
 
+def is_super_admin_user(user: dict[str, Any]) -> bool:
+    """主账号：用户名等于 AUTH_ADMIN_USERNAME（大小写不敏感）。"""
+    name = (user.get("username") or "").strip()
+    expected = (_cfg.AUTH_ADMIN_USERNAME or "admin").strip()
+    return bool(name) and name.casefold() == expected.casefold()
+
+
 def require_admin(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     """在 get_current_user 之上要求 admin 角色，否则 403。"""
     if user.get("role") != ROLE_ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限"
+        )
+    return user
+
+
+def require_super_admin(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    """要求主账号（用户名 = AUTH_ADMIN_USERNAME），否则 403。"""
+    if not is_super_admin_user(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="需要主账号权限"
         )
     return user

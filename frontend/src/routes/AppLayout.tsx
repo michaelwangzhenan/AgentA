@@ -18,7 +18,7 @@ import { chatPath, masteryPath, type MasteryTab } from '@/routes/paths'
 
 export function AppLayout() {
   const { theme } = useTheme()
-  const { user, isAdmin, logout } = useAuth()
+  const { user, isAdmin, isSuperAdmin, logout } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
 
@@ -209,6 +209,7 @@ export function AppLayout() {
           activeId={activeSessionId}
           username={user.username}
           isAdmin={isAdmin}
+          isSuperAdmin={isSuperAdmin}
           onLogout={logout}
           onSelect={handleSelectSession}
           onCreate={handleCreateSession}

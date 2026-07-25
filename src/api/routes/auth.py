@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 import src.config as _cfg
 from src.api.deps import get_current_user, get_user_store
 from src.api.routes.admin import purge_user_data
+from src.api.user_info import to_user_info
 from src.llm import model_router
 from src.api.schemas.auth import (
     AuthRequest,
@@ -64,7 +65,7 @@ def login(
         )
     token = store.create_session(user["id"], _cfg.AUTH_SESSION_TTL_DAYS)
     _set_session_cookie(response, token)
-    return AuthResponse(user=UserInfo(**user))
+    return AuthResponse(user=to_user_info(user))
 
 
 @router.post("/logout", response_model=LogoutResponse)
@@ -94,7 +95,7 @@ def update_username(
     if result != "ok":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用户名无效")
     updated = store.get_user_by_id(user["id"])
-    return UserInfo(**updated)  # type: ignore[arg-type]
+    return to_user_info(updated)  # type: ignore[arg-type]
 
 
 @router.post("/password", response_model=OkResponse)
@@ -194,11 +195,13 @@ def me(
 ) -> UserInfo:
     """返回当前登录用户；未登录 401。"""
     if not _cfg.AUTH_ENABLED:
-        return UserInfo(id=_cfg.DEFAULT_USER_ID, username="local", role=ROLE_ADMIN)
+        return to_user_info(
+            {"id": _cfg.DEFAULT_USER_ID, "username": "local", "role": ROLE_ADMIN, "created_at": ""}
+        )
     token = request.cookies.get(_cfg.AUTH_COOKIE_NAME)
     user = store.get_user_by_token(token or "")
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录或登录已过期"
         )
-    return UserInfo(**user)
+    return to_user_info(user)

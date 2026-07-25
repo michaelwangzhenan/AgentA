@@ -5,6 +5,7 @@ export type UserInfo = {
   username: string
   role: UserRole
   created_at?: string
+  can_manage_users?: boolean
 }
 
 export type AuthResponse = {

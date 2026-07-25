@@ -309,6 +309,19 @@ class UserStore:
                 ).fetchone()[0]
             )
 
+    def update_role(self, user_id: int, role: str) -> bool:
+        """改用户角色；角色非法或用户不存在返回 False。"""
+        if role not in _ROLES:
+            return False
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE users SET role = ? WHERE id = ?", (role, user_id)
+            )
+        updated = cur.rowcount > 0
+        if updated:
+            logger.info("update_role: id=%d, role=%s", user_id, role)
+        return updated
+
     def delete_user(self, user_id: int) -> bool:
         """删除账号本身：users + 登录态 + 偏好规则 + LLM 偏好。
 

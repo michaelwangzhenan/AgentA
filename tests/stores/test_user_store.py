@@ -168,6 +168,16 @@ class TestUserManagement:
     def test_delete_unknown_returns_false(self, store: UserStore) -> None:
         assert store.delete_user(9999) is False
 
+    def test_update_role(self, store: UserStore) -> None:
+        u = store.create_user("roleuser", "pw")
+        assert u is not None
+        assert store.update_role(u["id"], ROLE_ADMIN) is True
+        updated = store.get_user_by_id(u["id"])
+        assert updated is not None
+        assert updated["role"] == ROLE_ADMIN
+        assert store.update_role(u["id"], "nope") is False
+        assert store.update_role(9999, ROLE_USER) is False
+
 
 class TestLlmSettings:
     def test_default_all_none(self, store: UserStore) -> None:

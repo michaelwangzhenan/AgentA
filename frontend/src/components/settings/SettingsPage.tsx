@@ -16,6 +16,7 @@ type NavItem = {
   label: string
   icon: typeof User
   adminOnly?: boolean
+  superAdminOnly?: boolean
   danger?: boolean
 }
 
@@ -39,7 +40,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'system', label: '系统配置', icon: SlidersHorizontal, adminOnly: true },
       { id: 'apikeys', label: 'API 密钥', icon: KeySquare, adminOnly: true },
-      { id: 'users', label: '用户管理', icon: Users, adminOnly: true },
+      { id: 'users', label: '用户管理', icon: Users, superAdminOnly: true },
     ],
   },
   {
@@ -56,11 +57,15 @@ export function SettingsPage({
   section: Section
   onSectionChange: (section: Section) => void
 }) {
-  const { isAdmin } = useAuth()
+  const { isAdmin, isSuperAdmin } = useAuth()
 
   const groups = NAV_GROUPS.map((g) => ({
     ...g,
-    items: g.items.filter((it) => !it.adminOnly || isAdmin),
+    items: g.items.filter((it) => {
+      if (it.superAdminOnly) return isSuperAdmin
+      if (it.adminOnly) return isAdmin
+      return true
+    }),
   })).filter((g) => g.items.length > 0)
 
   return (
@@ -143,9 +148,12 @@ export function SettingsPage({
               <ApiKeysConfig />
             </div>
           )}
-          {section === 'users' && isAdmin && (
+          {section === 'users' && isSuperAdmin && (
             <div className="max-w-6xl">
-              <PageHeader title="用户管理" description="查看并删除用户账号及其全部数据。" />
+              <PageHeader
+                title="用户管理"
+                description="新建用户、调整角色或删除账号及其全部数据。"
+              />
               <UserManagement />
             </div>
           )}

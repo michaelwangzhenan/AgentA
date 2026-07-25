@@ -85,6 +85,7 @@ export type SidebarProps = {
   activeId: string | null
   username: string
   isAdmin: boolean
+  isSuperAdmin: boolean
   onLogout: () => void
   onSelect: (id: string) => void
   onCreate: () => void
@@ -98,6 +99,7 @@ export function Sidebar(props: SidebarProps) {
     activeId,
     username,
     isAdmin,
+    isSuperAdmin,
     onLogout,
     onSelect,
     onCreate,
@@ -519,7 +521,7 @@ export function Sidebar(props: SidebarProps) {
                 <div className="flex min-w-0 flex-col">
                   <span className="truncate text-sm leading-tight">{username}</span>
                   <span className="truncate text-[11px] leading-tight text-muted-foreground">
-                    {isAdmin ? 'ADMIN' : 'User'}
+                    {isSuperAdmin ? 'SUPER' : isAdmin ? 'ADMIN' : 'User'}
                   </span>
                 </div>
                 <ChevronDown className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground" />
