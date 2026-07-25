@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 
 import { LoginView } from '@/components/auth/LoginView'
 import { SiteFooter } from '@/components/layout/SiteFooter'
+import { ContactPage } from '@/components/public/ContactPage'
 import { AppRoutes } from '@/routes/AppRoutes'
 import { useAuth } from '@/lib/auth'
 
@@ -23,10 +24,10 @@ function App() {
   const prevUserRef = useRef(user)
   const authInitializedRef = useRef(false)
 
-  // 未登录时记录深链目标（App 层 ref，避免 LoginView 卸载丢失）
+  // 未登录时记录深链目标（/contact 除外，避免登录后仍停在联系页）
   if (!authLoading && !user) {
     const target = location.pathname + location.search
-    if (target && target !== '/') {
+    if (target && target !== '/' && target !== '/contact') {
       pendingRedirectRef.current = target
     }
   }
@@ -62,14 +63,20 @@ function App() {
   if (!user) {
     return (
       <AppShell>
-        <LoginView />
+        <Routes>
+          <Route path="/contact" element={<ContactPage />} />
+          <Route path="*" element={<LoginView />} />
+        </Routes>
       </AppShell>
     )
   }
 
   return (
     <AppShell>
-      <AppRoutes />
+      <Routes>
+        <Route path="/contact" element={<ContactPage />} />
+        <Route path="/*" element={<AppRoutes />} />
+      </Routes>
     </AppShell>
   )
 }

@@ -1,0 +1,20 @@
+{
+  "notice": "",
+  "demoAccount": {
+    "username": "guest",
+    "password": "guest",
+    "note": ""
+  },
+  "contact": {
+    "phone": "137-7788-9353",
+    "email": "81884775@qq.com",
+    "wechat": {
+      "label": "微信",
+      "hint": "扫码或搜索微信号添加",
+      "id": "michael_wza",
+      "qrImage": ""
+    },
+    "linkedin": "https://www.linkedin.com/in/michael-wang-1192a537",
+    "github": "https://github.com/michaelwangzhenan/AgentA"
+  }
+}

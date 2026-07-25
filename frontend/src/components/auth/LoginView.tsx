@@ -1,9 +1,11 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PublicHero } from '@/components/public/PublicHero'
+import { PublicPageShell } from '@/components/public/PublicPageShell'
 import { useAuth } from '@/lib/auth'
-import logoUrl from '@/assets/agentA_logo.svg'
 
 export function LoginView() {
   const { login } = useAuth()
@@ -30,17 +32,11 @@ export function LoginView() {
   }
 
   return (
-    <div className="flex h-full items-center justify-center px-4">
-      <form
-        onSubmit={handleSubmit}
-        className="w-full max-w-sm space-y-5 rounded-xl border border-border bg-card p-8 shadow-sm"
-      >
-        <div className="space-y-1 text-center">
-          <div className="flex items-center justify-center">
-            <img src={logoUrl} alt="AgentA logo" className="h-20 w-20" />
-            <h1 className="text-3xl font-semibold">AgentA</h1>
-          </div>
-          <p className="text-sm text-muted-foreground">登录你的账号</p>
+    <PublicPageShell aside={<PublicHero />}>
+      <form onSubmit={handleSubmit} className="w-full space-y-5">
+        <div className="space-y-1">
+          <h2 className="text-xl font-semibold tracking-tight">登录</h2>
+          <p className="text-sm text-muted-foreground">使用已有账号登录 AgentA</p>
         </div>
 
         <div className="space-y-3">
@@ -83,7 +79,18 @@ export function LoginView() {
         <Button type="submit" className="w-full" disabled={!canSubmit}>
           {submitting ? '处理中…' : '登录'}
         </Button>
+
+        <p className="text-center text-sm leading-relaxed text-muted-foreground">
+          本站不开放注册。请{' '}
+          <Link
+            to="/contact"
+            className="text-foreground underline underline-offset-2 hover:text-primary"
+          >
+          联系我们
+          </Link>
+          {' '}获取体验账号。
+        </p>
       </form>
-    </div>
+    </PublicPageShell>
   )
 }

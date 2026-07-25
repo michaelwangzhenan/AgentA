@@ -3,6 +3,7 @@ import { matchPath, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Toaster } from 'sonner'
 
 import { Sidebar } from '@/components/sidebar/Sidebar'
+import { UserFeatureBanner } from '@/components/layout/UserFeatureBanner'
 import { useChat } from '@/hooks/useChat'
 import { useAuth } from '@/lib/auth'
 import { useTheme } from '@/lib/theme'
@@ -217,6 +218,7 @@ export function AppLayout() {
           onDelete={handleDeleteSession}
         />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <UserFeatureBanner />
           <Outlet />
         </div>
       </div>

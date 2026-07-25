@@ -1,4 +1,5 @@
 import { Fragment } from 'react'
+import { Link } from 'react-router-dom'
 
 import { toast } from '@/lib/toast'
 
@@ -9,11 +10,11 @@ const PSB_URL =
   'https://beian.mps.gov.cn/#/query/webSearch?code=33010502013300'
 
 const PRODUCT_LINKS = [
-  '关于 AgentA',
-  '使用须知',
-  '帮助中心',
-  '隐私政策',
-  '联系我们',
+  { label: '关于 AgentA', href: null },
+  { label: '使用须知', href: null },
+  { label: '帮助中心', href: null },
+  { label: '隐私政策', href: null },
+  { label: '联系我们', href: '/contact' },
 ] as const
 
 const linkClass =
@@ -27,20 +28,22 @@ export function SiteFooter() {
   return (
     <footer className="fixed inset-x-0 bottom-0 z-30 border-t border-transparent bg-black/50 px-3 py-1.5 text-center text-xs backdrop-blur-sm dark:border-white/10 dark:bg-black/70">
       <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
-        {PRODUCT_LINKS.map((label, index) => (
-          <Fragment key={label}>
+        {PRODUCT_LINKS.map((item, index) => (
+          <Fragment key={item.label}>
             {index > 0 ? (
               <span className="text-white/40" aria-hidden>
                 ·
               </span>
             ) : null}
-            <button
-              type="button"
-              onClick={showComingSoon}
-              className={linkClass}
-            >
-              {label}
-            </button>
+            {item.href ? (
+              <Link to={item.href} className={linkClass}>
+                {item.label}
+              </Link>
+            ) : (
+              <button type="button" onClick={showComingSoon} className={linkClass}>
+                {item.label}
+              </button>
+            )}
           </Fragment>
         ))}
 
