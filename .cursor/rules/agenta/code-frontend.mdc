@@ -1,5 +1,5 @@
 ---
-description: AgentA 前端 React / TypeScript 文件命名与归属规范。
+description: AgentA 前端 React / TypeScript 命名、归属与 Tailwind 类名规范。
 globs: frontend/**/*.{ts,tsx}
 alwaysApply: false
 ---
@@ -8,13 +8,47 @@ alwaysApply: false
 
 ## 文件 / 模块命名
 
-| 类型 | 位置 | 命名 |
-|---|---|---|
-| 业务组件 | `frontend/src/components/<area>/` | 文件与组件同名、大驼峰 `.tsx`（如 `chat/ChatView.tsx`）；`<area>` 按领域分（chat / kb / usage / settings / business / resources …） |
-| 基础 UI 控件 | `frontend/src/components/ui/` | 小写文件名（如 `button.tsx` / `dialog.tsx`），只放无业务逻辑的通用控件 |
-| 类型定义 | `frontend/src/types/<feature>.ts` | 小写文件，按 feature 拆（如 `routing.ts` / `usage.ts`） |
-| 接口调用 | `frontend/src/api/client.ts` | 统一出口，导出 `getXxx` / `putXxx` 等函数 |
-| React hook | `frontend/src/hooks/use<Name>.ts` | `use` 前缀、小驼峰（如 `useChat.ts`） |
-| 通用工具 / Context | `frontend/src/lib/` | 小写文件（如 `auth.tsx` / `theme.tsx` / `utils.ts`） |
+开新文件前先确认归属：能在已有文件里加就别另起新文件；确需新增下列未覆盖的类型，先在本节补一条约定再落地。
 
-开新文件前先确认归属：能在已有文件里加就别另起新文件；确需新增上表没有的类型，先在本表补一行约定再落地。
+- 业务组件：frontend/src/components/<area>/，文件与组件同名、大驼峰 .tsx（如 chat/ChatView.tsx）；area 按领域分（chat、kb、usage、settings、business、resources 等）。
+- 基础 UI 控件：frontend/src/components/ui/，小写文件名（如 button.tsx、dialog.tsx），只放无业务逻辑的通用控件。
+- 类型定义：frontend/src/types/<feature>.ts，小写文件，按 feature 拆（如 routing.ts、usage.ts）。
+- 接口调用：frontend/src/api/client.ts，统一出口，导出 getXxx、putXxx 等函数。
+- React hook：frontend/src/hooks/use<Name>.ts，use 前缀、小驼峰（如 useChat.ts）。
+- 通用工具与 Context：frontend/src/lib/，小写文件（如 auth.tsx、theme.tsx、utils.ts）。
+
+## Tailwind 类名
+
+本项目用 Tailwind v4 与 @tailwindcss/vite。编辑器黄波浪线来自 Tailwind IntelliSense 或 tailwindcss 插件，表示类名可改进；优先采纳插件建议的标准刻度，不要忽略。
+
+### 优先标准刻度
+
+v4 间距按 --spacing（默认 0.25rem）成倍扩展，大数字类名（如 min-h-100）合法且常用。插件若提示方括号任意值可写成标准类，直接改。心算：N 刻度约等于 N×4px（即 N×0.25rem）。
+
+常见替换：
+
+```
+min-h-[400px] → min-h-100    # 400px
+max-h-[200px] → max-h-50     # 200px
+max-w-[140px] → max-w-35     # 140px
+max-w-[160px] → max-w-40     # 160px
+max-w-[260px] → max-w-65     # 260px
+max-w-[380px] → max-w-95     # 380px
+w-[2px]       → w-0.5        # 2px
+```
+
+无对应刻度时再用方括号任意值，单位写清楚，例如 min-h-[50vh]、w-[calc(100%-2rem)]。
+
+### v4 更名
+
+break-words 在 v4 改为 wrap-break-word。
+
+### 语义别混用
+
+- 撑满父级高度用 min-h-full 或 h-full；min-h-100 表示 400px，不是 100%。
+- 整屏高度用 min-h-screen，不要写成 min-h-100vh。
+- 不要臆造无对应 token 的类名（如 text-15、gap-15、p-999）；查刻度或写方括号任意值。
+
+### 提交前自检
+
+写 className 时扫一眼：带数字的 w-*、h-*、min-h-*、max-*、p-* 若标黄，先看插件能否换成标准刻度；确认无等价刻度再用方括号。不确定时查 Tailwind 官方文档。
