@@ -1,11 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { ExternalLink, Link2, Mail, MessageCircle, Phone } from 'lucide-react'
 
-import { buttonVariants } from '@/components/ui/button'
-import { useAuth } from '@/lib/auth'
+import { StaticPageShell } from '@/components/public/StaticPageShell'
 import { loadSiteConfig } from '@/lib/siteConfig'
-import { cn } from '@/lib/utils'
 import type { SiteConfig } from '@/types/site'
 
 type ContactRow = {
@@ -72,7 +69,6 @@ function buildRows(config: SiteConfig): ContactRow[] {
 }
 
 export function ContactPage() {
-  const { user } = useAuth()
   const [config, setConfig] = useState<SiteConfig | null>(null)
 
   useEffect(() => {
@@ -83,84 +79,66 @@ export function ContactPage() {
   const qrImage = config?.contact.wechat.qrImage
 
   return (
-    <div className="flex h-full min-h-0 items-center justify-center overflow-y-auto px-4 py-8 pb-12">
-      <div className="w-full max-w-md space-y-6 rounded-2xl border border-border bg-card p-8 shadow-sm">
-          <div>
-            <h2 className="text-xl font-semibold tracking-tight">联系我们</h2>
-          </div>
+    <StaticPageShell title="联系我们" showContactLink={false}>
+      {!config ? (
+        <p className="text-sm text-muted-foreground">加载中…</p>
+      ) : rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          联系方式尚未配置，请编辑 frontend/public/site.json。
+        </p>
+      ) : (
+        <ul className="space-y-3">
+          {rows.map((row) => {
+            const Icon = row.icon
+            const inner = (
+              <>
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                  <Icon className="h-4 w-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-xs text-muted-foreground">{row.label}</span>
+                  <span className="block truncate text-sm font-medium">{row.value}</span>
+                </span>
+              </>
+            )
+            return (
+              <li key={row.key}>
+                {row.href ? (
+                  <a
+                    href={row.href}
+                    target={row.external ? '_blank' : undefined}
+                    rel={row.external ? 'noopener noreferrer' : undefined}
+                    className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 transition-colors hover:bg-muted/50"
+                  >
+                    {inner}
+                  </a>
+                ) : (
+                  <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
+                    {inner}
+                  </div>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
 
-          {!config ? (
-            <p className="text-sm text-muted-foreground">加载中…</p>
-          ) : rows.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              联系方式尚未配置，请编辑 frontend/public/site.json。
-            </p>
-          ) : (
-            <ul className="space-y-3">
-              {rows.map((row) => {
-                const Icon = row.icon
-                const inner = (
-                  <>
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                      <Icon className="h-4 w-4" />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-xs text-muted-foreground">{row.label}</span>
-                      <span className="block truncate text-sm font-medium">{row.value}</span>
-                    </span>
-                  </>
-                )
-                return (
-                  <li key={row.key}>
-                    {row.href ? (
-                      <a
-                        href={row.href}
-                        target={row.external ? '_blank' : undefined}
-                        rel={row.external ? 'noopener noreferrer' : undefined}
-                        className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 transition-colors hover:bg-muted/50"
-                      >
-                        {inner}
-                      </a>
-                    ) : (
-                      <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
-                        {inner}
-                      </div>
-                    )}
-                  </li>
-                )
-              })}
-            </ul>
-          )}
+      {qrImage ? (
+        <div className="rounded-xl border border-border bg-card p-4 text-center">
+          <p className="mb-3 text-xs text-muted-foreground">
+            {config?.contact.wechat.hint || '微信二维码'}
+          </p>
+          <img
+            src={qrImage}
+            alt="微信二维码"
+            className="mx-auto h-36 w-36 rounded-lg border border-border object-contain"
+          />
+        </div>
+      ) : null}
 
-          {qrImage ? (
-            <div className="rounded-xl border border-border bg-card p-4 text-center">
-              <p className="mb-3 text-xs text-muted-foreground">
-                {config?.contact.wechat.hint || '微信二维码'}
-              </p>
-              <img
-                src={qrImage}
-                alt="微信二维码"
-                className="mx-auto h-36 w-36 rounded-lg border border-border object-contain"
-              />
-            </div>
-          ) : null}
-
-          {config?.notice ? (
-            <p className="text-xs leading-relaxed text-muted-foreground">{config.notice}</p>
-          ) : null}
-
-          <div className="flex flex-wrap gap-2 pt-2">
-            {user ? (
-              <Link to="/chat" className={cn(buttonVariants({ variant: 'default' }))}>
-                进入应用
-              </Link>
-            ) : (
-              <Link to="/" className={cn(buttonVariants({ variant: 'default' }))}>
-                返回登录
-              </Link>
-            )}
-          </div>
-      </div>
-    </div>
+      {config?.notice ? (
+        <p className="text-xs leading-relaxed text-muted-foreground">{config.notice}</p>
+      ) : null}
+    </StaticPageShell>
   )
 }

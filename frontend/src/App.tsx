@@ -3,9 +3,10 @@ import { Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 
 import { LoginView } from '@/components/auth/LoginView'
 import { SiteFooter } from '@/components/layout/SiteFooter'
-import { ContactPage } from '@/components/public/ContactPage'
 import { AppRoutes } from '@/routes/AppRoutes'
+import { getPublicRouteElements } from '@/routes/PublicRoutes'
 import { useAuth } from '@/lib/auth'
+import { isPublicPath } from '@/lib/staticPages'
 
 function AppShell({ children }: { children: React.ReactNode }) {
   return (
@@ -24,10 +25,10 @@ function App() {
   const prevUserRef = useRef(user)
   const authInitializedRef = useRef(false)
 
-  // 未登录时记录深链目标（/contact 除外，避免登录后仍停在联系页）
+  // 未登录时记录深链目标（公开静态页除外，避免登录后仍停在介绍页）
   if (!authLoading && !user) {
     const target = location.pathname + location.search
-    if (target && target !== '/' && target !== '/contact') {
+    if (target && target !== '/' && !isPublicPath(location.pathname)) {
       pendingRedirectRef.current = target
     }
   }
@@ -64,7 +65,8 @@ function App() {
     return (
       <AppShell>
         <Routes>
-          <Route path="/contact" element={<ContactPage />} />
+          {getPublicRouteElements()}
+          <Route path="/" element={<LoginView />} />
           <Route path="*" element={<LoginView />} />
         </Routes>
       </AppShell>
@@ -74,7 +76,7 @@ function App() {
   return (
     <AppShell>
       <Routes>
-        <Route path="/contact" element={<ContactPage />} />
+        {getPublicRouteElements()}
         <Route path="/*" element={<AppRoutes />} />
       </Routes>
     </AppShell>
