@@ -213,10 +213,13 @@ def test_put_pricing_ignores_unknown_model(client: TestClient) -> None:
     assert all(it["model_id"] != "no-such-model" for it in r.json()["items"])
 
 
-# ── admin 门禁（开认证 + 普通用户） ────────────────────────────────────────────
+# ── 写权限门禁（开认证 + 普通用户） ────────────────────────────────────────────
 
 
-def test_admin_endpoints_require_admin(usage_store: UsageStore, user_store: UserStore) -> None:
+def test_admin_usage_readable_but_pricing_write_requires_admin(
+    usage_store: UsageStore, user_store: UserStore
+) -> None:
+    """user 可读全员用量；写单价需 usage 写权限（admin）。"""
     app.dependency_overrides[get_user_store] = lambda: user_store
     orig = _cfg.AUTH_ENABLED
     _cfg.AUTH_ENABLED = True
@@ -227,8 +230,8 @@ def test_admin_endpoints_require_admin(usage_store: UsageStore, user_store: User
         assert login.status_code == 200
         # 本人端点放行
         assert c.get("/api/usage/summary?range=30d").status_code == 200
-        # 全员端点 403
-        assert c.get("/api/usage/admin/summary?range=30d").status_code == 403
+        # 全员端点可读（三档角色读权限一致）
+        assert c.get("/api/usage/admin/summary?range=30d").status_code == 200
         # 写单价 403
         wr = c.put("/api/usage/pricing", json={"items": []})
         assert wr.status_code == 403

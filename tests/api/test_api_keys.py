@@ -7,7 +7,7 @@
 4. PUT 空串 / DELETE → 恢复到启动时（.env）值
 5. 重启模拟：apply_overrides 仍能恢复值
 6. 未知 key → 404
-7. admin 门禁：开认证 + 普通用户 → 403
+7. 写权限门禁：开认证 + 普通用户可读脱敏列表、写操作 403
 """
 
 from __future__ import annotations
@@ -148,9 +148,10 @@ def test_override_survives_apply_on_restart(client: TestClient) -> None:
     assert _cfg.PROVIDER_CONFIGS["deepseek"].api_key == "sk-deepseek-restart-77"
 
 
-# ─── admin 门禁 ──────────────────────────────────────────────────────────────
+# ─── 写权限门禁 ──────────────────────────────────────────────────────────────
 
-def test_endpoints_require_admin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_write_requires_config_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """user 可读脱敏列表；PUT/DELETE 需 config 写权限（admin）。"""
     monkeypatch.setattr(_store, "KEYS_PATH", tmp_path / "api_keys.json")
     user_store = UserStore(str(tmp_path / "auth.db"))
     user_store.create_user("admin", "pw", role="admin")
@@ -162,7 +163,7 @@ def test_endpoints_require_admin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         c = TestClient(app)
         login = c.post("/api/auth/login", json={"username": "bob", "password": "pw"})
         assert login.status_code == 200
-        assert c.get("/api/api-keys").status_code == 403
+        assert c.get("/api/api-keys").status_code == 200
         assert c.put("/api/api-keys/openai", json={"value": "x"}).status_code == 403
         assert c.delete("/api/api-keys/openai").status_code == 403
     finally:
