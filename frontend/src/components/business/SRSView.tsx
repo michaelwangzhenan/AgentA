@@ -26,6 +26,7 @@ import {
   type SRSRating,
 } from '@/types/business'
 import { toast } from '@/lib/toast'
+import { useWriteScope } from '@/lib/permissions'
 
 const RATING_ORDER: SRSRating[] = ['again', 'hard', 'good', 'easy']
 
@@ -33,9 +34,13 @@ const RATING_ORDER: SRSRating[] = ['again', 'hard', 'good', 'easy']
 function Reviewer({
   cards,
   onReviewed,
+  readOnly = false,
+  writeTip,
 }: {
   cards: SRSCard[]
   onReviewed: () => void
+  readOnly?: boolean
+  writeTip?: string
 }) {
   const [idx, setIdx] = useState(0)
   const [revealed, setRevealed] = useState(false)
@@ -113,9 +118,9 @@ function Reviewer({
               key={r}
               size="sm"
               variant="outline"
-              disabled={busy}
+              disabled={busy || readOnly}
+              title={readOnly ? writeTip : SRS_RATING_HINTS[r]}
               onClick={() => rate(r)}
-              title={SRS_RATING_HINTS[r]}
             >
               {SRS_RATING_LABELS[r]}
             </Button>
@@ -129,9 +134,13 @@ function Reviewer({
 function CardRow({
   card,
   onStatus,
+  readOnly = false,
+  writeTip,
 }: {
   card: SRSCard
   onStatus: (id: number, action: 'suspend' | 'resume' | 'archive') => void
+  readOnly?: boolean
+  writeTip?: string
 }) {
   return (
     <li className="group rounded-md border border-border p-3 text-sm">
@@ -159,7 +168,9 @@ function CardRow({
         <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
           {card.status === 'active' && (
             <button
-              className="rounded px-1.5 py-0.5 text-[10px] hover:bg-accent"
+              className="rounded px-1.5 py-0.5 text-[10px] hover:bg-accent disabled:opacity-40"
+              disabled={readOnly}
+              title={readOnly ? writeTip : undefined}
               onClick={() => onStatus(card.id, 'suspend')}
             >
               暂停
@@ -167,7 +178,9 @@ function CardRow({
           )}
           {card.status === 'suspended' && (
             <button
-              className="rounded px-1.5 py-0.5 text-[10px] hover:bg-accent"
+              className="rounded px-1.5 py-0.5 text-[10px] hover:bg-accent disabled:opacity-40"
+              disabled={readOnly}
+              title={readOnly ? writeTip : undefined}
               onClick={() => onStatus(card.id, 'resume')}
             >
               恢复
@@ -175,7 +188,9 @@ function CardRow({
           )}
           {card.status !== 'archived' && (
             <button
-              className="rounded px-1.5 py-0.5 text-[10px] text-destructive hover:bg-accent"
+              className="rounded px-1.5 py-0.5 text-[10px] text-destructive hover:bg-accent disabled:opacity-40"
+              disabled={readOnly}
+              title={readOnly ? writeTip : undefined}
               onClick={() => onStatus(card.id, 'archive')}
             >
               归档
@@ -188,6 +203,7 @@ function CardRow({
 }
 
 export function SRSView() {
+  const { allowed: canWriteMemory, tip: memoryTip } = useWriteScope('memory')
   const [due, setDue] = useState<SRSCard[]>([])
   const [all, setAll] = useState<SRSCard[]>([])
   const [loading, setLoading] = useState(true)
@@ -258,7 +274,7 @@ export function SRSView() {
           间隔重复：答得越熟，下次出现的间隔越长。到期的卡会进"待复习"，逐张翻面打分即可。
         </p>
         <div className="flex shrink-0 items-center gap-2">
-          <Button onClick={() => setAddOpen(true)} size="sm">
+          <Button onClick={() => setAddOpen(true)} size="sm" disabled={!canWriteMemory} title={canWriteMemory ? undefined : memoryTip}>
             <Plus className="mr-1 h-4 w-4" />
             新建卡片
           </Button>
@@ -282,7 +298,7 @@ export function SRSView() {
         {loading && due.length === 0 ? (
           <p className="px-3 py-2 text-sm text-muted-foreground">加载中…</p>
         ) : (
-          <Reviewer cards={due} onReviewed={refresh} />
+          <Reviewer cards={due} onReviewed={refresh} readOnly={!canWriteMemory} writeTip={memoryTip} />
         )}
       </div>
 
@@ -299,7 +315,7 @@ export function SRSView() {
         ) : (
           <ul className="space-y-2 p-3">
             {all.map((c) => (
-              <CardRow key={c.id} card={c} onStatus={handleStatus} />
+              <CardRow key={c.id} card={c} onStatus={handleStatus} readOnly={!canWriteMemory} writeTip={memoryTip} />
             ))}
           </ul>
         )}
@@ -354,7 +370,8 @@ export function SRSView() {
             </Button>
             <Button
               onClick={submitAdd}
-              disabled={!addFront.trim() || !addBack.trim() || adding}
+              disabled={!canWriteMemory || !addFront.trim() || !addBack.trim() || adding}
+              title={canWriteMemory ? undefined : memoryTip}
             >
               {adding ? '新建中...' : '新建'}
             </Button>

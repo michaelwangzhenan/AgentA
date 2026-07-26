@@ -57,13 +57,14 @@ export function SettingsPage({
   section: Section
   onSectionChange: (section: Section) => void
 }) {
-  const { isAdmin, isSuperAdmin } = useAuth()
+  const { canRead, isSuperAdmin } = useAuth()
 
   const groups = NAV_GROUPS.map((g) => ({
     ...g,
     items: g.items.filter((it) => {
       if (it.superAdminOnly) return isSuperAdmin
-      if (it.adminOnly) return isAdmin
+      if (it.id === 'password' || it.id === 'account') return canRead('account')
+      if (it.id === 'system' || it.id === 'apikeys') return canRead('config')
       return true
     }),
   })).filter((g) => g.items.length > 0)
@@ -127,7 +128,7 @@ export function SettingsPage({
               <PasswordSettings />
             </div>
           )}
-          {section === 'system' && isAdmin && (
+          {section === 'system' && canRead('config') && (
             <div className="flex h-full max-w-6xl flex-col">
               <div className="min-h-0 flex-1">
                 <SettingsView
@@ -139,7 +140,7 @@ export function SettingsPage({
               </div>
             </div>
           )}
-          {section === 'apikeys' && isAdmin && (
+          {section === 'apikeys' && canRead('config') && (
             <div className="max-w-6xl">
               <PageHeader
                 title="API 密钥"

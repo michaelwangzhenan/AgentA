@@ -23,6 +23,7 @@ from src.agent.core import run_cancel
 from src.api.sse_outbound import SseOutbound
 from src.stores.user_context import use_user
 from src.api.deps import get_agent, get_session_store, get_current_user, get_user_store
+from src.api.permissions import require_write
 from src.api.routes.auth import effective_llm_prefs
 from src.api.schemas.chat import ChatRequest, ChatResponse, assert_message_within_limit
 from src.llm import model_router
@@ -394,7 +395,7 @@ def _maybe_store_cache(
 def chat(
     req: ChatRequest,
     agent: AgentAPI = Depends(get_agent),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("chat")),
     history: SessionStore = Depends(get_session_store),
     users: UserStore = Depends(get_user_store),
 ) -> ChatResponse:
@@ -537,7 +538,7 @@ async def chat_stream(
     req: ChatRequest,
     request: Request,
     agent: AgentAPI = Depends(get_agent),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("chat")),
     history: SessionStore = Depends(get_session_store),
     users: UserStore = Depends(get_user_store),
 ) -> EventSourceResponse:

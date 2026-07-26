@@ -6,11 +6,13 @@ import { Input } from '@/components/ui/input'
 import { getApiKeys, resetApiKey, updateApiKey } from '@/api/client'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
+import { useWriteScope } from '@/lib/permissions'
 import type { ApiKeyView } from '@/types/apiKeys'
 
 /** API 密钥配置：仅 admin 可见。后端永不返回明文，只展示脱敏串 + 是否已配置。
  *  保存后下一次 LLM 调用即生效，无需重启服务。 */
 export function ApiKeysConfig() {
+  const { allowed: canWriteConfig, tip: configTip } = useWriteScope('config')
   const [items, setItems] = useState<ApiKeyView[]>([])
   const [loading, setLoading] = useState(true)
   const [drafts, setDrafts] = useState<Record<string, string>>({})
@@ -110,8 +112,8 @@ export function ApiKeysConfig() {
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    title="恢复为环境变量值"
-                    disabled={rowBusy}
+                    title={canWriteConfig ? '恢复为环境变量值' : configTip}
+                    disabled={!canWriteConfig || rowBusy}
                     onClick={() => void reset(item)}
                   >
                     <RotateCcw className="h-4 w-4" />
@@ -125,6 +127,8 @@ export function ApiKeysConfig() {
                   value={draft}
                   placeholder="输入新 key 后保存"
                   autoComplete="off"
+                  readOnly={!canWriteConfig}
+                  disabled={!canWriteConfig}
                   onChange={(e) =>
                     setDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))
                   }
@@ -134,7 +138,8 @@ export function ApiKeysConfig() {
                 />
                 <Button
                   size="sm"
-                  disabled={!draft.trim() || rowBusy}
+                  disabled={!canWriteConfig || !draft.trim() || rowBusy}
+                  title={canWriteConfig ? undefined : configTip}
                   onClick={() => void save(item.id)}
                 >
                   <Check className="mr-1 h-3.5 w-3.5" />

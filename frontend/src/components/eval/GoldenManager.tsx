@@ -3,6 +3,8 @@ import { ArrowLeft, Check, Download, Pencil, Plus, RotateCcw, Trash2, X } from '
 
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
+import { useAuth } from '@/lib/auth'
+import { allSettledAreWritePermissionDenied, isWritePermissionDenied, writeDeniedMessage } from '@/lib/permissions'
 import { useUrlState } from '@/routes/useUrlState'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -59,6 +61,10 @@ export function GoldenManager({
   onClearDocFilter?: () => void
   onBackToKb?: () => void
 } = {}) {
+  const { canWrite, user } = useAuth()
+  const canWriteQuality = canWrite('quality')
+  const qualityWriteTip = writeDeniedMessage('quality', user?.role)
+
   const url = useUrlState()
   const status = url.get('status')
   const source = url.get('source')
@@ -163,11 +169,9 @@ export function GoldenManager({
       toast.success(`已标记为${STATUS_TEXT[s]}`)
       void refresh()
     } catch (e) {
-      toast.error((e as Error).message)
+      if (!isWritePermissionDenied(e)) toast.error((e as Error).message)
     }
   }
-
-  // 批量改状态：无批量端点，客户端并发逐条调（admin 工具量级够用）
   const batchSetStatus = async (s: GoldenStatus) => {
     const ids = [...selected]
     if (!ids.length) return
@@ -175,8 +179,10 @@ export function GoldenManager({
     try {
       const rs = await Promise.allSettled(ids.map((id) => updateGolden(id, { status: s })))
       const failed = rs.filter((r) => r.status === 'rejected').length
-      if (failed) toast.error(`${ids.length - failed} 条已标记为${STATUS_TEXT[s]}，${failed} 条失败`)
-      else toast.success(`${ids.length} 条已标记为${STATUS_TEXT[s]}`)
+      if (failed === 0) toast.success(`${ids.length} 条已标记为${STATUS_TEXT[s]}`)
+      else if (!allSettledAreWritePermissionDenied(rs)) {
+        toast.error(`${ids.length - failed} 条已标记为${STATUS_TEXT[s]}，${failed} 条失败`)
+      }
       void refresh()
     } finally {
       setBusy(false)
@@ -190,8 +196,10 @@ export function GoldenManager({
     try {
       const rs = await Promise.allSettled(ids.map((id) => deleteGolden(id)))
       const failed = rs.filter((r) => r.status === 'rejected').length
-      if (failed) toast.error(`已删除 ${ids.length - failed} 条，${failed} 条失败`)
-      else toast.success(`已删除 ${ids.length} 条`)
+      if (failed === 0) toast.success(`已删除 ${ids.length} 条`)
+      else if (!allSettledAreWritePermissionDenied(rs)) {
+        toast.error(`已删除 ${ids.length - failed} 条，${failed} 条失败`)
+      }
       void refresh()
     } finally {
       setBusy(false)
@@ -310,11 +318,11 @@ export function GoldenManager({
             <Download className="h-3.5 w-3.5" />
             导出 json
           </Button>
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={doImport}>
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={doImport} disabled={!canWriteQuality} title={canWriteQuality ? undefined : qualityWriteTip}>
             <RotateCcw className="h-3.5 w-3.5" />
             从 golden.json 导入
           </Button>
-          <Button size="sm" className="gap-1.5" onClick={() => setShowCreate((v) => !v)}>
+          <Button size="sm" className="gap-1.5" onClick={() => setShowCreate((v) => !v)} disabled={!canWriteQuality} title={canWriteQuality ? undefined : qualityWriteTip}>
             <Plus className="h-3.5 w-3.5" />
             新增
           </Button>
@@ -355,15 +363,15 @@ export function GoldenManager({
         <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
           <span className="text-muted-foreground">已选 {selected.size} 条</span>
           <div className="ml-auto flex items-center gap-2">
-            <Button variant="outline" size="sm" className="gap-1.5" disabled={busy} onClick={() => batchSetStatus('approved')}>
+            <Button variant="outline" size="sm" className="gap-1.5" disabled={busy || !canWriteQuality} title={canWriteQuality ? undefined : qualityWriteTip} onClick={() => batchSetStatus('approved')}>
               <Check className="h-3.5 w-3.5 text-emerald-600" />
               批量通过
             </Button>
-            <Button variant="outline" size="sm" className="gap-1.5" disabled={busy} onClick={() => batchSetStatus('rejected')}>
+            <Button variant="outline" size="sm" className="gap-1.5" disabled={busy || !canWriteQuality} title={canWriteQuality ? undefined : qualityWriteTip} onClick={() => batchSetStatus('rejected')}>
               <X className="h-3.5 w-3.5 text-amber-600" />
               批量拒绝
             </Button>
-            <Button variant="outline" size="sm" className="gap-1.5 text-destructive" disabled={busy} onClick={() => setDeleteIds([...selected])}>
+            <Button variant="outline" size="sm" className="gap-1.5 text-destructive" disabled={busy || !canWriteQuality} title={canWriteQuality ? undefined : qualityWriteTip} onClick={() => setDeleteIds([...selected])}>
               <Trash2 className="h-3.5 w-3.5" />
               批量删除
             </Button>
@@ -400,7 +408,7 @@ export function GoldenManager({
             <Button variant="outline" size="sm" onClick={() => setShowCreate(false)}>
               取消
             </Button>
-            <Button size="sm" onClick={submitCreate} disabled={!newQuery.trim()}>
+            <Button size="sm" onClick={submitCreate} disabled={!canWriteQuality || !newQuery.trim()} title={canWriteQuality ? undefined : qualityWriteTip}>
               保存
             </Button>
           </div>
@@ -484,16 +492,18 @@ export function GoldenManager({
                   <td className="px-3 py-2">
                     <div className="flex items-center justify-end gap-1">
                       <button
-                        className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                        title="编辑"
+                        className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40 disabled:pointer-events-none"
+                        title={canWriteQuality ? '编辑' : qualityWriteTip}
+                        disabled={!canWriteQuality}
                         onClick={() => setEditItem(it)}
                       >
                         <Pencil className="h-4 w-4" />
                       </button>
                       {it.status !== 'approved' && (
                         <button
-                          className="rounded p-1 text-emerald-600 hover:bg-accent"
-                          title="通过"
+                          className="rounded p-1 text-emerald-600 hover:bg-accent disabled:opacity-40 disabled:pointer-events-none"
+                          title={canWriteQuality ? '通过' : qualityWriteTip}
+                          disabled={!canWriteQuality}
                           onClick={() => setItemStatus(it, 'approved')}
                         >
                           <Check className="h-4 w-4" />
@@ -501,16 +511,18 @@ export function GoldenManager({
                       )}
                       {it.status !== 'rejected' && (
                         <button
-                          className="rounded p-1 text-amber-600 hover:bg-accent"
-                          title="拒绝"
+                          className="rounded p-1 text-amber-600 hover:bg-accent disabled:opacity-40 disabled:pointer-events-none"
+                          title={canWriteQuality ? '拒绝' : qualityWriteTip}
+                          disabled={!canWriteQuality}
                           onClick={() => setItemStatus(it, 'rejected')}
                         >
                           <X className="h-4 w-4" />
                         </button>
                       )}
                       <button
-                        className="rounded p-1 text-destructive hover:bg-accent"
-                        title="删除"
+                        className="rounded p-1 text-destructive hover:bg-accent disabled:opacity-40 disabled:pointer-events-none"
+                        title={canWriteQuality ? '删除' : qualityWriteTip}
+                        disabled={!canWriteQuality}
                         onClick={() => setDeleteIds([it.id])}
                       >
                         <Trash2 className="h-4 w-4" />
@@ -560,7 +572,7 @@ export function GoldenManager({
             </div>
             <div className="flex justify-end gap-2 pt-1">
               <Button variant="outline" size="sm" onClick={() => setEditItem(null)}>取消</Button>
-              <Button size="sm" onClick={submitEdit} disabled={!editItem.query.trim()}>保存</Button>
+              <Button size="sm" onClick={submitEdit} disabled={!canWriteQuality || !editItem.query.trim()} title={canWriteQuality ? undefined : qualityWriteTip}>保存</Button>
             </div>
           </div>
         </div>

@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { fileBadge } from '@/lib/attachments'
 import { cn } from '@/lib/utils'
+import { useWriteScope } from '@/lib/permissions'
 import type { AssistantMessage, Message, MessageAttachment } from '@/types/chat'
 
 export type BubbleCallbacks = {
@@ -116,6 +117,7 @@ function UserBubble({
   message: Extract<Message, { role: 'user' }>
   cb: BubbleCallbacks
 }) {
+  const { allowed: canWriteChat, tip: chatTip } = useWriteScope('chat')
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(message.content)
   const [confirm, setConfirm] = useState<null | { text: string }>(null)
@@ -181,13 +183,13 @@ function UserBubble({
           {formatTime(message.createdAt)}
         </span>
         <IconBtn
-          label="重发"
-          disabled={cb.inFlight}
+          label={canWriteChat ? '重发' : chatTip}
+          disabled={cb.inFlight || !canWriteChat}
           onClick={() => cb.onResendUser(message.id)}
         >
           <RotateCcw className="h-3.5 w-3.5" />
         </IconBtn>
-        <IconBtn label="编辑" onClick={startEdit}>
+        <IconBtn label={canWriteChat ? '编辑' : chatTip} disabled={!canWriteChat} onClick={startEdit}>
           <Pencil className="h-3.5 w-3.5" />
         </IconBtn>
         <IconBtn label="复制" onClick={() => copyText(message.content)}>
@@ -270,6 +272,7 @@ function AssistantBubble({
   message: AssistantMessage
   cb: BubbleCallbacks
 }) {
+  const { allowed: canWriteChat, tip: chatTip } = useWriteScope('chat')
   const { body, sources } = parseSources(message.content)
   const versions = message.versions
   const showVersions = !!versions && versions.length > 1
@@ -339,7 +342,8 @@ function AssistantBubble({
             <Button
               variant="outline"
               size="xs"
-              disabled={cb.inFlight}
+              disabled={cb.inFlight || !canWriteChat}
+              title={canWriteChat ? undefined : chatTip}
               onClick={() => cb.onRegenerate(message.id)}
             >
               <RotateCcw className="h-3 w-3" /> 重试
@@ -376,8 +380,8 @@ function AssistantBubble({
             </IconBtn>
           ) : null}
           <IconBtn
-            label="重新生成"
-            disabled={cb.inFlight}
+            label={canWriteChat ? '重新生成' : chatTip}
+            disabled={cb.inFlight || !canWriteChat}
             onClick={() => cb.onRegenerate(message.id)}
           >
             <RefreshCw className="h-3.5 w-3.5" />

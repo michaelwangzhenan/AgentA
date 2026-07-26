@@ -29,9 +29,10 @@ logger = logging.getLogger(__name__)
 AUTH_DB_PATH: str = config.AUTH_DB_PATH
 
 # 合法角色枚举
+ROLE_READONLY = "readonly"
 ROLE_USER = "user"
 ROLE_ADMIN = "admin"
-_ROLES: tuple[str, ...] = (ROLE_USER, ROLE_ADMIN)
+_ROLES: tuple[str, ...] = (ROLE_READONLY, ROLE_USER, ROLE_ADMIN)
 
 # pbkdf2 参数（仅本地学习项目，取一个合理的迭代数）
 _PBKDF2_ITERATIONS = 200_000

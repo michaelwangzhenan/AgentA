@@ -21,6 +21,7 @@ import {
   restoreBackup,
 } from '@/api/client'
 import type { BackupSnapshot } from '@/types/backup'
+import { useWriteScope } from '@/lib/permissions'
 
 function fmtSize(n: number): string {
   const units = ['B', 'KB', 'MB', 'GB']
@@ -50,6 +51,7 @@ const BACKUP_CATEGORIES: { key: string; label: string; note?: string }[] = [
 ]
 
 export function BackupView() {
+  const { allowed: canWriteBackup, tip: backupTip } = useWriteScope('backup')
   const [snapshots, setSnapshots] = useState<BackupSnapshot[]>([])
   const [loading, setLoading] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -79,6 +81,7 @@ export function BackupView() {
   }, [refresh])
 
   function toggleCat(key: string) {
+    if (!canWriteBackup) return
     setCats((prev) => {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
@@ -158,6 +161,7 @@ export function BackupView() {
                   type="checkbox"
                   checked={cats.has(c.key)}
                   onChange={() => toggleCat(c.key)}
+                  disabled={!canWriteBackup}
                   className="mt-0.5 h-4 w-4 accent-primary"
                 />
                 <span>
@@ -167,7 +171,7 @@ export function BackupView() {
               </label>
             ))}
           </div>
-          <Button onClick={() => setConfirmOpen(true)} disabled={creating || cats.size === 0}>
+          <Button onClick={() => setConfirmOpen(true)} disabled={!canWriteBackup || creating || cats.size === 0} title={canWriteBackup ? undefined : backupTip}>
             {creating ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
             生成备份
           </Button>
@@ -214,7 +218,9 @@ export function BackupView() {
                           <button
                             type="button"
                             onClick={() => setDeleteTarget(s.name)}
-                            className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
+                            disabled={!canWriteBackup}
+                            title={canWriteBackup ? undefined : backupTip}
+                            className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-destructive hover:bg-destructive/10 disabled:opacity-40"
                           >
                             <Trash2 className="h-3.5 w-3.5" /> 删除
                           </button>
@@ -242,7 +248,8 @@ export function BackupView() {
               ref={fileInputRef}
               type="file"
               accept=".zip"
-              disabled={restoring}
+              disabled={!canWriteBackup || restoring}
+              title={canWriteBackup ? undefined : backupTip}
               onChange={(e) => {
                 const f = e.target.files?.[0]
                 if (f) setPendingFile(f)

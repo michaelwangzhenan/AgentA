@@ -3,7 +3,7 @@ import { matchPath, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Toaster } from 'sonner'
 
 import { Sidebar } from '@/components/sidebar/Sidebar'
-import { UserFeatureBanner } from '@/components/layout/UserFeatureBanner'
+import { RoleHintBanner } from '@/components/layout/RoleHintBanner'
 import { useChat } from '@/hooks/useChat'
 import { useAuth } from '@/lib/auth'
 import { useTheme } from '@/lib/theme'
@@ -19,7 +19,7 @@ import { chatPath, masteryPath, type MasteryTab } from '@/routes/paths'
 
 export function AppLayout() {
   const { theme } = useTheme()
-  const { user, isAdmin, isSuperAdmin, logout } = useAuth()
+  const { user, isSuperAdmin, logout, canWrite } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
 
@@ -44,10 +44,15 @@ export function AppLayout() {
         const list = await listSessions()
         if (cancelled) return
         if (list.length === 0) {
-          const created = await createSession()
-          if (cancelled) return
-          setSessions([created])
-          setActiveSessionId(created.id)
+          if (canWrite('chat')) {
+            const created = await createSession()
+            if (cancelled) return
+            setSessions([created])
+            setActiveSessionId(created.id)
+          } else {
+            setSessions([])
+            setActiveSessionId(null)
+          }
         } else {
           setSessions(list)
           setActiveSessionId(list[0].id)
@@ -61,7 +66,7 @@ export function AppLayout() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [canWrite])
 
   const {
     messages,
@@ -125,11 +130,12 @@ export function AppLayout() {
   )
 
   const handleCreateSession = useCallback(async () => {
+    if (!canWrite('chat')) return
     const created = await createSession()
     setSessions((prev) => [created, ...prev])
     setActiveSessionId(created.id)
     navigate(chatPath(created.id))
-  }, [navigate])
+  }, [navigate, canWrite])
 
   const handleRenameSession = useCallback(async (id: string, title: string) => {
     const updated = await renameSession(id, title)
@@ -209,8 +215,9 @@ export function AppLayout() {
           sessions={sessions}
           activeId={activeSessionId}
           username={user.username}
-          isAdmin={isAdmin}
+          role={user.role}
           isSuperAdmin={isSuperAdmin}
+          canWriteChat={canWrite('chat')}
           onLogout={logout}
           onSelect={handleSelectSession}
           onCreate={handleCreateSession}
@@ -218,7 +225,7 @@ export function AppLayout() {
           onDelete={handleDeleteSession}
         />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <UserFeatureBanner />
+          <RoleHintBanner />
           <Outlet />
         </div>
       </div>

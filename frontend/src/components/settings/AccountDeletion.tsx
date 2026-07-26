@@ -6,12 +6,14 @@ import { SettingsSection } from '@/components/settings/SettingsSection'
 import { deleteOwnAccount } from '@/api/client'
 import { useAuth } from '@/lib/auth'
 import { toast } from '@/lib/toast'
+import { useWriteScope } from '@/lib/permissions'
 
 type Step = 'idle' | 'confirm1' | 'confirm2'
 
 /** 注销账号：二次确认后永久删除本账号及其全部数据，随后退出到登录页。 */
 export function AccountDeletion() {
   const { user, logout } = useAuth()
+  const { allowed: canWriteAccount, tip: accountTip } = useWriteScope('account')
   const [step, setStep] = useState<Step>('idle')
   const [deleting, setDeleting] = useState(false)
 
@@ -41,7 +43,7 @@ export function AccountDeletion() {
           </>
         }
       >
-        <Button variant="destructive" size="sm" onClick={() => setStep('confirm1')}>
+        <Button variant="destructive" size="sm" disabled={!canWriteAccount} title={canWriteAccount ? undefined : accountTip} onClick={() => setStep('confirm1')}>
           注销账号
         </Button>
       </SettingsSection>

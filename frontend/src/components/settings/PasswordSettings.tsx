@@ -5,9 +5,11 @@ import { Input } from '@/components/ui/input'
 import { SettingsSection } from '@/components/settings/SettingsSection'
 import { changePassword } from '@/api/client'
 import { toast } from '@/lib/toast'
+import { useWriteScope } from '@/lib/permissions'
 
 /** 修改密码：需校验旧密码，新密码两次输入一致。 */
 export function PasswordSettings() {
+  const { allowed: canWriteAccount, tip: accountTip } = useWriteScope('account')
   const [oldPwd, setOldPwd] = useState('')
   const [newPwd, setNewPwd] = useState('')
   const [confirmPwd, setConfirmPwd] = useState('')
@@ -42,6 +44,8 @@ export function PasswordSettings() {
           onChange={(e) => setOldPwd(e.target.value)}
           placeholder="当前密码"
           autoComplete="current-password"
+          readOnly={!canWriteAccount}
+          disabled={!canWriteAccount}
         />
         <Input
           type="password"
@@ -49,6 +53,8 @@ export function PasswordSettings() {
           onChange={(e) => setNewPwd(e.target.value)}
           placeholder="新密码"
           autoComplete="new-password"
+          readOnly={!canWriteAccount}
+          disabled={!canWriteAccount}
         />
         <Input
           type="password"
@@ -56,11 +62,14 @@ export function PasswordSettings() {
           onChange={(e) => setConfirmPwd(e.target.value)}
           placeholder="确认新密码"
           autoComplete="new-password"
+          readOnly={!canWriteAccount}
+          disabled={!canWriteAccount}
         />
         <Button
           size="sm"
           onClick={save}
-          disabled={!oldPwd || !newPwd || !confirmPwd || saving}
+          disabled={!canWriteAccount || !oldPwd || !newPwd || !confirmPwd || saving}
+          title={canWriteAccount ? undefined : accountTip}
         >
           更新密码
         </Button>

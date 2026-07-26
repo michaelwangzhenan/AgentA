@@ -12,7 +12,7 @@ import { toast } from '@/lib/toast'
 export type IngestPanelProps = {
   collections: KBCollection[]
   defaultAlias: string
-  isAdmin?: boolean
+  canWriteKb?: boolean
   onIngested: () => void
   onGotoGolden?: () => void // 入库完成 toast 里"去 Golden 管理"链接
 }
@@ -45,7 +45,7 @@ function relPathOf(f: File): string {
 export function IngestPanel({
   collections,
   defaultAlias,
-  isAdmin = false,
+  canWriteKb = false,
   onIngested,
   onGotoGolden,
 }: IngestPanelProps) {
@@ -166,7 +166,7 @@ export function IngestPanel({
             ingestId,
             (p) => setChunk(p),
             ac.signal,
-            isAdmin ? { goldenLlm, goldenMaxQ } : undefined,
+            canWriteKb ? { goldenLlm, goldenMaxQ } : undefined,
           )
           if (resp.chunks > 0 && resp.status === 'ingested') {
             ok++
@@ -240,6 +240,14 @@ export function IngestPanel({
   const chunkPct = chunk && chunk.total > 0 ? Math.round((chunk.done / chunk.total) * 100) : 0
 
   const pct = stats.total ? Math.round((stats.done / stats.total) * 100) : 0
+
+  if (!canWriteKb) {
+    return (
+      <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-6 text-center text-sm text-muted-foreground">
+        入库需管理员权限；当前账号仅可浏览文档列表。
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-3 rounded-lg border border-border bg-card p-4">
@@ -334,7 +342,7 @@ export function IngestPanel({
                 <Trash2 className="h-3.5 w-3.5" />
                 清空
               </Button>
-              {isAdmin && (
+              {canWriteKb && (
                 <GoldenGenControls
                   goldenLlm={goldenLlm}
                   goldenMaxQ={goldenMaxQ}

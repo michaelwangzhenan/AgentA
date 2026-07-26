@@ -28,6 +28,7 @@ import {
 } from '@/types/business'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
+import { useWriteScope } from '@/lib/permissions'
 import { useUrlState } from '@/routes/useUrlState'
 
 function TaskStatusIcon({ status }: { status: string }) {
@@ -54,6 +55,7 @@ const NEXT_STATUS: Record<string, string> = {
 }
 
 export function PlansView() {
+  const { allowed: canWriteMemory, tip: memoryTip } = useWriteScope('memory')
   const url = useUrlState()
   const planParam = url.get('plan')
   const selectedId = planParam ? Number(planParam) : null
@@ -205,7 +207,7 @@ export function PlansView() {
           给自己定个目标，拆成阶段任务，逐条勾掉。复杂目标可在聊天里说"帮我做一份 8 周的 ML 学习计划"，让 AI 自动拟好。
         </p>
         <div className="flex shrink-0 items-center gap-2">
-          <Button onClick={() => setAddOpen(true)} size="sm">
+          <Button onClick={() => setAddOpen(true)} size="sm" disabled={!canWriteMemory} title={canWriteMemory ? undefined : memoryTip}>
             <Plus className="mr-1 h-4 w-4" />
             新建计划
           </Button>
@@ -224,7 +226,7 @@ export function PlansView() {
       {plans.length === 0 && !loadingList && (
         <div className="rounded-lg border border-dashed border-border px-4 py-10 text-center">
           <p className="text-sm text-muted-foreground">还没有学习计划</p>
-          <Button onClick={() => setAddOpen(true)} size="sm" className="mt-3">
+          <Button onClick={() => setAddOpen(true)} size="sm" className="mt-3" disabled={!canWriteMemory} title={canWriteMemory ? undefined : memoryTip}>
             <Plus className="mr-1 h-4 w-4" />
             新建第一个计划
           </Button>
@@ -287,7 +289,7 @@ export function PlansView() {
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
                     {!selected.is_active && selected.status === 'active' && (
-                      <Button size="sm" variant="outline" onClick={() => handleActivate(selected.id)}>
+                      <Button size="sm" variant="outline" disabled={!canWriteMemory} title={canWriteMemory ? undefined : memoryTip} onClick={() => handleActivate(selected.id)}>
                         设为当前
                       </Button>
                     )}
@@ -296,6 +298,8 @@ export function PlansView() {
                         size="sm"
                         variant="ghost"
                         className="text-destructive"
+                        disabled={!canWriteMemory}
+                        title={canWriteMemory ? undefined : memoryTip}
                         onClick={() =>
                           setAbandonTarget(plans.find((p) => p.id === selected.id) ?? null)
                         }
@@ -318,9 +322,10 @@ export function PlansView() {
                           {(stages.get(idx) ?? []).map((t: PlanTask) => (
                             <li key={t.id} className="flex items-start gap-2 text-sm">
                               <button
-                                onClick={() => cycleTask(t)}
-                                className="mt-0.5 shrink-0 rounded hover:bg-accent"
-                                title="点击切换：待办 → 已完成 → 已跳过"
+                                onClick={() => canWriteMemory && cycleTask(t)}
+                                disabled={!canWriteMemory}
+                                title={canWriteMemory ? '点击切换：待办 → 已完成 → 已跳过' : memoryTip}
+                                className="mt-0.5 shrink-0 rounded hover:bg-accent disabled:opacity-40"
                               >
                                 <TaskStatusIcon status={t.status} />
                               </button>
@@ -415,7 +420,7 @@ export function PlansView() {
             >
               取消
             </Button>
-            <Button onClick={submitAdd} disabled={!addGoal.trim() || adding}>
+            <Button onClick={submitAdd} disabled={!canWriteMemory || !addGoal.trim() || adding} title={canWriteMemory ? undefined : memoryTip}>
               {adding ? '创建中...' : '创建'}
             </Button>
           </DialogFooter>

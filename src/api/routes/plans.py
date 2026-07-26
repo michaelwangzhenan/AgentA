@@ -13,6 +13,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.api.deps import get_current_user, get_plan_store
+from src.api.permissions import require_write
 from src.api.schemas.plan import (
     CreatePlanRequest,
     Plan,
@@ -72,7 +73,7 @@ def get_plan(
 def create_plan(
     req: CreatePlanRequest,
     store: LearningPlanStore = Depends(get_plan_store),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("memory")),
 ) -> Plan:
     """手动新建计划并设为 active；可同时带阶段任务。"""
     try:
@@ -90,7 +91,7 @@ def update_task(
     task_id: int,
     req: UpdateTaskRequest,
     store: LearningPlanStore = Depends(get_plan_store),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("memory")),
 ) -> Plan:
     """更新任务状态 / 备注（pending / success / skipped）。"""
     ok = store.update_task_status(plan_id, task_id, req.status, req.note, user_id=user["id"])
@@ -106,7 +107,7 @@ def update_task(
 def activate_plan(
     plan_id: int,
     store: LearningPlanStore = Depends(get_plan_store),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("memory")),
 ) -> Plan:
     """把指定 plan 切为当前 active（其余自动取消 active）。"""
     ok = store.switch_active(plan_id, user_id=user["id"])
@@ -122,7 +123,7 @@ def activate_plan(
 def abandon_plan(
     plan_id: int,
     store: LearningPlanStore = Depends(get_plan_store),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("memory")),
 ) -> Plan:
     """放弃计划（标记 abandoned + 取消 active）。"""
     ok = store.abandon_plan(plan_id, user_id=user["id"])

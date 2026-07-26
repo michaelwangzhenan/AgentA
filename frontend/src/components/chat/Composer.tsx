@@ -43,6 +43,8 @@ import {
 import { listSkills } from '@/api/client'
 import type { SkillItem } from '@/types/resources'
 import type { ChatMode } from '@/types/chat'
+import { useAuth } from '@/lib/auth'
+import { writeDeniedMessage } from '@/lib/permissions'
 import { cn } from '@/lib/utils'
 import { generateId } from '@/lib/id'
 import { toast } from 'sonner'
@@ -132,6 +134,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const settings = useComposerSettings()
+  const { canWrite, user } = useAuth()
+  const canSendChat = canWrite('chat')
+  const canWriteProfile = canWrite('profile')
+  const chatDeniedTip = writeDeniedMessage('chat', user?.role)
+  const profileDeniedTip = writeDeniedMessage('profile', user?.role)
   const { supported: micSupported, listening, toggle: toggleMic } =
     useSpeechInput((t) => setText(text ? `${text} ${t}` : t))
 
@@ -300,7 +307,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   }, [text, attachments])
 
   const submit = () => {
-    if (inFlight) return
+    if (inFlight || !canSendChat) return
     const msg = buildMessage()
     if (!msg) return
     const nbytes = messageUtf8Bytes(msg)
@@ -358,7 +365,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     }
   }
 
-  const canSend = !!buildMessage()
+  const canSend = canSendChat && !!buildMessage()
 
   return (
     <div className="border-t border-border bg-background px-4 py-3">
@@ -445,11 +452,17 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           <Textarea
             ref={textareaRef}
             className="max-h-[200px] min-h-11 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
-            placeholder="输入消息…（Enter 发送，Shift+Enter 换行，/ 调用 skill）"
+            placeholder={
+              canSendChat
+                ? '输入消息…（Enter 发送，Shift+Enter 换行，/ 调用 skill）'
+                : chatDeniedTip
+            }
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
+            disabled={!canSendChat}
+            title={canSendChat ? undefined : chatDeniedTip}
           />
 
           {/* 工具条 */}
@@ -457,8 +470,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             {/* + 上传菜单 */}
             <DropdownMenu>
               <DropdownMenuTrigger
-                className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-foreground/10 hover:text-foreground disabled:opacity-40"
                 aria-label="添加附件"
+                disabled={!canSendChat}
+                title={canSendChat ? undefined : chatDeniedTip}
               >
                 <Plus className="h-4 w-4" />
               </DropdownMenuTrigger>
@@ -472,8 +487,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             {/* 模型选择：厂商 → 具体模型 两级菜单 */}
             <DropdownMenu>
               <DropdownMenuTrigger
-                className="flex h-8 items-center gap-1 rounded-md px-2 text-sm text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
-                disabled={settings.loading}
+                className="flex h-8 items-center gap-1 rounded-md px-2 text-sm text-muted-foreground hover:bg-foreground/10 hover:text-foreground disabled:opacity-40"
+                disabled={settings.loading || !canWriteProfile}
+                title={canWriteProfile ? undefined : profileDeniedTip}
               >
                 {settings.activeModelLabel || '模型'}
               </DropdownMenuTrigger>
@@ -530,11 +546,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                     ? 'text-muted-foreground hover:bg-foreground/10 hover:text-foreground'
                     : 'cursor-not-allowed text-muted-foreground/40',
                 )}
-                disabled={!settings.thinkingSupported}
+                disabled={!settings.thinkingSupported || !canWriteProfile}
                 title={
-                  settings.thinkingSupported
-                    ? '推理强度'
-                    : '当前模型不支持 thinking'
+                  !canWriteProfile
+                    ? profileDeniedTip
+                    : settings.thinkingSupported
+                      ? '推理强度'
+                      : '当前模型不支持 thinking'
                 }
               >
                 <Brain className="h-4 w-4" />

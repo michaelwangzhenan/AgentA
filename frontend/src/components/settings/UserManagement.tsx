@@ -15,6 +15,12 @@ import { createUser, deleteUser, listUsers, updateUserRole } from '@/api/client'
 import { toast } from '@/lib/toast'
 import type { UserInfo, UserRole } from '@/types/auth'
 
+const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
+  { value: 'readonly', label: 'readonly' },
+  { value: 'user', label: 'user' },
+  { value: 'admin', label: 'admin' },
+]
+
 function isProtectedUser(u: UserInfo): boolean {
   return u.can_manage_users === true
 }
@@ -147,8 +153,11 @@ export function UserManagement() {
                             void handleRoleChange(u, e.target.value as UserRole)
                           }
                         >
-                          <option value="user">user</option>
-                          <option value="admin">admin</option>
+                          {ROLE_OPTIONS.map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </option>
+                          ))}
                         </select>
                       )}
                     </td>
@@ -223,8 +232,11 @@ export function UserManagement() {
                 value={createRole}
                 onChange={(e) => setCreateRole(e.target.value as UserRole)}
               >
-                <option value="user">user（默认）</option>
-                <option value="admin">admin</option>
+                {ROLE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.value === 'user' ? `${opt.label}（默认）` : opt.label}
+                  </option>
+                ))}
               </select>
             </div>
           </div>

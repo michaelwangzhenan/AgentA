@@ -46,7 +46,7 @@ export type DocumentListProps = {
   loading: boolean
   query: DocumentListQuery
   onQueryChange: (patch: Partial<DocumentListQuery>) => void
-  onDelete: (docId: string) => Promise<void> | void
+  onDelete?: (docId: string) => Promise<void> | void
   onDeleteMany?: (docIds: string[]) => Promise<void> | void
   onGenerateGolden?: (doc: KBDocument) => Promise<void> | void
   generatingDocId?: string | null
@@ -195,7 +195,7 @@ export function DocumentList({
     if (!deleteTarget) return
     setDeleteBusy(true)
     try {
-      await onDelete(deleteTarget.doc_id)
+      await onDelete?.(deleteTarget.doc_id)
       setDeleteTarget(null)
     } finally {
       setDeleteBusy(false)
@@ -296,6 +296,7 @@ export function DocumentList({
             >
               取消选择
             </Button>
+            {onDelete ? (
             <Button
               variant="ghost"
               size="sm"
@@ -305,6 +306,7 @@ export function DocumentList({
               <Trash2 className="h-3.5 w-3.5" />
               批量删除
             </Button>
+            ) : null}
           </div>
         </div>
       )}
@@ -448,6 +450,7 @@ export function DocumentList({
                 </div>
               </td>
               )}
+              {onDelete ? (
               <td className="px-3 py-2 text-right">
                 <Button
                   variant="ghost"
@@ -459,6 +462,7 @@ export function DocumentList({
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </td>
+              ) : null}
             </tr>
           ))}
         </tbody>

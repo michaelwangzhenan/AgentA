@@ -2,7 +2,6 @@ import type { LucideIcon } from 'lucide-react'
 import { PiggyBank, Tag, TrendingDown, User, Users } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
-import { useAuth } from '@/lib/auth'
 import { ResourcePage } from '@/components/resources/ResourcePage'
 import { UsageDashboard } from './UsageDashboard'
 import { PricingConfig } from './PricingConfig'
@@ -11,6 +10,14 @@ import type { UsageTab } from '@/routes/paths'
 
 type TabDef = { value: UsageTab; label: string; icon: LucideIcon }
 
+const TABS: TabDef[] = [
+  { value: 'mine', label: '我的用量', icon: User },
+  { value: 'all', label: '全员用量', icon: Users },
+  { value: 'savings', label: '降本', icon: TrendingDown },
+  { value: 'savings_all', label: '全员降本', icon: PiggyBank },
+  { value: 'pricing', label: '单价配置', icon: Tag },
+]
+
 export function UsageView({
   tab,
   onTabChange,
@@ -18,28 +25,14 @@ export function UsageView({
   tab: UsageTab
   onTabChange: (tab: UsageTab) => void
 }) {
-  const { isAdmin } = useAuth()
-
-  const tabs: TabDef[] = [
-    { value: 'mine', label: '我的用量', icon: User },
-    ...(isAdmin ? [{ value: 'all', label: '全员用量', icon: Users } as TabDef] : []),
-    { value: 'savings', label: '降本', icon: TrendingDown },
-    ...(isAdmin
-      ? ([
-          { value: 'savings_all', label: '全员降本', icon: PiggyBank },
-          { value: 'pricing', label: '单价配置', icon: Tag },
-        ] as TabDef[])
-      : []),
-  ]
-
-  const active = tabs.some((t) => t.value === tab) ? tab : 'mine'
+  const active = TABS.some((t) => t.value === tab) ? tab : 'mine'
 
   return (
     <ResourcePage title="用量" subtitle="Token 使用与成本估算（每用户独立）">
       <div className="flex min-h-0 flex-1 gap-4">
         <nav className="sticky top-0 w-32 shrink-0 self-start">
           <ul className="space-y-0.5">
-            {tabs.map((t) => (
+            {TABS.map((t) => (
               <li key={t.value}>
                 <button
                   type="button"
@@ -62,9 +55,9 @@ export function UsageView({
         <div className="min-w-0 flex-1">
           {active === 'mine' && <UsageDashboard scope="mine" />}
           {active === 'savings' && <SavingsPanel scope="mine" />}
-          {active === 'all' && isAdmin && <UsageDashboard scope="all" />}
-          {active === 'savings_all' && isAdmin && <SavingsPanel scope="all" />}
-          {active === 'pricing' && isAdmin && <PricingConfig />}
+          {active === 'all' && <UsageDashboard scope="all" />}
+          {active === 'savings_all' && <SavingsPanel scope="all" />}
+          {active === 'pricing' && <PricingConfig />}
         </div>
       </div>
     </ResourcePage>

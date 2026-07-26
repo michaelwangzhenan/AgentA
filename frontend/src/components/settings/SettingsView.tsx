@@ -12,6 +12,7 @@ import { getConfig, patchConfig, resetConfig } from '@/api/client'
 import type { ConfigGroupView, ConfigItemView } from '@/types/config'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
+import { useWriteScope } from '@/lib/permissions'
 import { useUrlState } from '@/routes/useUrlState'
 
 type LocalEdit = {
@@ -34,6 +35,7 @@ export function SettingsView({
   title,
   description,
 }: { embedded?: boolean; urlDriven?: boolean; title?: string; description?: string } = {}) {
+  const { allowed: canWriteConfig } = useWriteScope('config')
   const [groups, setGroups] = useState<ConfigGroupView[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -141,6 +143,7 @@ export function SettingsView({
   }
 
   const setLocalValue = (item: ConfigItemView, value: unknown) => {
+    if (!canWriteConfig) return
     // 改回原值 → 取消 pending、清掉 edit
     if (deepEqual(value, item.value)) {
       cancelPendingSave(item.key)
@@ -221,6 +224,7 @@ export function SettingsView({
   }
 
   const resetItem = async (item: ConfigItemView) => {
+    if (!canWriteConfig) return
     try {
       const updated = await resetConfig(item.key)
       setGroups((prev) =>
@@ -404,7 +408,7 @@ export function SettingsView({
                     localValue={edit?.value}
                     error={edit?.error ?? null}
                     saving={edit?.saving}
-                    disabled={disabledFor(item)}
+                    disabled={disabledFor(item) || !canWriteConfig}
                     onChange={(v) => setLocalValue(item, v)}
                     onReset={() => resetItem(item)}
                   />

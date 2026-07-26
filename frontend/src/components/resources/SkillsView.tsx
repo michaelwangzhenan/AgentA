@@ -46,6 +46,7 @@ import type { SkillItem, SkillsResponse } from '@/types/resources'
 import { ResourcePage } from '@/components/resources/ResourcePage'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
+import { useWriteScope } from '@/lib/permissions'
 import { useUrlState } from '@/routes/useUrlState'
 
 const NAME_PATTERN = /^[a-zA-Z0-9_-]+$/
@@ -74,6 +75,7 @@ type SortDir = 'asc' | 'desc'
 // ============================================================================
 
 export function SkillsView() {
+  const { allowed: canWriteSkills, tip: skillsTip } = useWriteScope('skills')
   const url = useUrlState()
   const [data, setData] = useState<SkillsResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -199,7 +201,8 @@ export function SkillsView() {
       <Button
         onClick={() => setCreateOpen(true)}
         size="sm"
-        disabled={busy}
+        disabled={busy || !canWriteSkills}
+        title={canWriteSkills ? undefined : skillsTip}
         className="gap-1.5"
       >
         <Plus className="h-3.5 w-3.5" />
@@ -209,7 +212,8 @@ export function SkillsView() {
         onClick={handleReload}
         size="sm"
         variant="outline"
-        disabled={busy}
+        disabled={busy || !canWriteSkills}
+        title={canWriteSkills ? undefined : skillsTip}
         className="gap-1.5"
       >
         <RefreshCw className={`h-3.5 w-3.5 ${reloading ? 'animate-spin' : ''}`} />
@@ -249,6 +253,8 @@ export function SkillsView() {
         onToggle={handleToggle}
         onDelete={(name) => setDeleteTarget(name)}
         enabled={true}
+        readOnly={!canWriteSkills}
+        writeTip={skillsTip}
       />
 
       {(data?.disabled.length ?? 0) > 0 && (
@@ -271,6 +277,8 @@ export function SkillsView() {
           onToggle={handleToggle}
           onDelete={(name) => setDeleteTarget(name)}
           enabled={false}
+          readOnly={!canWriteSkills}
+          writeTip={skillsTip}
         />
       )}
 
@@ -415,6 +423,8 @@ type SkillsSectionProps = {
   onSaved: () => void
   onToggle: (name: string, enabled: boolean) => void
   onDelete: (name: string) => void
+  readOnly?: boolean
+  writeTip?: string
 }
 
 function SkillsSection({
@@ -434,6 +444,8 @@ function SkillsSection({
   onSaved,
   onToggle,
   onDelete,
+  readOnly = false,
+  writeTip,
 }: SkillsSectionProps) {
   return (
     <div className="rounded-lg border border-border bg-card">
@@ -468,6 +480,8 @@ function SkillsSection({
               onSaved={onSaved}
               onToggle={(en) => onToggle(s.name, en)}
               onDelete={() => onDelete(s.name)}
+              readOnly={readOnly}
+              writeTip={writeTip}
             />
           ))}
         </ul>
@@ -488,6 +502,8 @@ type SkillRowProps = {
   onSaved: () => void
   onToggle: (enabled: boolean) => void
   onDelete: () => void
+  readOnly?: boolean
+  writeTip?: string
 }
 
 function SkillRow({
@@ -502,6 +518,8 @@ function SkillRow({
   onSaved,
   onToggle,
   onDelete,
+  readOnly = false,
+  writeTip,
 }: SkillRowProps) {
   return (
     <li className="text-sm">
@@ -509,6 +527,7 @@ function SkillRow({
         <Switch
           checked={enabled}
           onCheckedChange={onToggle}
+          disabled={readOnly}
           aria-label={`${enabled ? '禁用' : '启用'} ${skill.name}`}
           className="mt-0.5"
         />
@@ -541,7 +560,8 @@ function SkillRow({
             variant="ghost"
             size="sm"
             onClick={onStartEdit}
-            disabled={editing}
+            disabled={readOnly || editing}
+            title={readOnly ? writeTip : undefined}
             aria-label="编辑"
             className="h-7 w-7 p-0"
           >
@@ -551,6 +571,8 @@ function SkillRow({
             variant="ghost"
             size="sm"
             onClick={onDelete}
+            disabled={readOnly}
+            title={readOnly ? writeTip : undefined}
             aria-label="删除"
             className="h-7 w-7 p-0 text-destructive hover:text-destructive"
           >

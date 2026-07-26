@@ -14,7 +14,8 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from src.api.deps import get_agent, get_current_user, require_admin
+from src.api.deps import get_agent, get_current_user
+from src.api.permissions import require_write
 from src.api.schemas.skills import (
     SkillCreateRequest,
     SkillFailure,
@@ -84,7 +85,7 @@ def list_skills(_: dict = Depends(get_current_user)) -> SkillsResponse:
 
 
 @router.post("/reload", response_model=SkillReloadResponse)
-def reload_skills(_: dict = Depends(require_admin)) -> SkillReloadResponse:
+def reload_skills(_: dict = Depends(require_write("skills"))) -> SkillReloadResponse:
     """重新扫描 .agenta/skills/ 并清空 Agent 单例缓存。
 
     下一次 chat 请求会触发 `get_agent()` 重建实例，新 catalog 立即可用。
@@ -102,7 +103,7 @@ def reload_skills(_: dict = Depends(require_admin)) -> SkillReloadResponse:
 
 @router.post("", response_model=SkillItem, status_code=status.HTTP_201_CREATED)
 def create_skill_endpoint(
-    req: SkillCreateRequest, _: dict = Depends(require_admin)
+    req: SkillCreateRequest, _: dict = Depends(require_write("skills"))
 ) -> SkillItem:
     try:
         info = create_skill(
@@ -120,7 +121,7 @@ def create_skill_endpoint(
 
 @router.put("/{name}", response_model=SkillItem)
 def update_skill_endpoint(
-    name: str, req: SkillUpdateRequest, _: dict = Depends(require_admin)
+    name: str, req: SkillUpdateRequest, _: dict = Depends(require_write("skills"))
 ) -> SkillItem:
     try:
         info = update_skill(
@@ -138,7 +139,7 @@ def update_skill_endpoint(
 
 @router.post("/{name}/rename", response_model=SkillItem)
 def rename_skill_endpoint(
-    name: str, req: SkillRenameRequest, _: dict = Depends(require_admin)
+    name: str, req: SkillRenameRequest, _: dict = Depends(require_write("skills"))
 ) -> SkillItem:
     """改名：目录从 `<dir>/{name}/` 移到 `<dir>/{new_name}/`，同时同步
     frontmatter `name:` 字段（强一致）。如旧 name 在 disabled list 里，
@@ -154,7 +155,7 @@ def rename_skill_endpoint(
 
 
 @router.delete("/{name}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_skill_endpoint(name: str, _: dict = Depends(require_admin)) -> None:
+def delete_skill_endpoint(name: str, _: dict = Depends(require_write("skills"))) -> None:
     try:
         delete_skill(name)
     except SkillIOError as e:
@@ -165,7 +166,7 @@ def delete_skill_endpoint(name: str, _: dict = Depends(require_admin)) -> None:
 
 @router.post("/{name}/toggle", response_model=SkillToggleResponse)
 def toggle_skill_endpoint(
-    name: str, req: SkillToggleRequest, _: dict = Depends(require_admin)
+    name: str, req: SkillToggleRequest, _: dict = Depends(require_write("skills"))
 ) -> SkillToggleResponse:
     # 先扫盘拿到所有已存在的 name（含 disabled），再 toggle，防止操作不存在的 skill
     current = scan_skills()

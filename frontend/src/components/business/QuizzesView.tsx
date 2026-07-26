@@ -13,6 +13,7 @@ import {
   type QuizSetSummary,
 } from '@/types/business'
 import { toast } from '@/lib/toast'
+import { useWriteScope } from '@/lib/permissions'
 import { cn } from '@/lib/utils'
 import { useUrlState } from '@/routes/useUrlState'
 
@@ -98,10 +99,12 @@ function AnswerQuestion({
   q,
   value,
   onChange,
+  readOnly = false,
 }: {
   q: QuizQuestion
   value: string
   onChange: (next: string) => void
+  readOnly?: boolean
 }) {
   const isMulti = q.q_type === 'mcq_multi'
   const isMcq = MCQ_TYPES.includes(q.q_type)
@@ -139,7 +142,8 @@ function AnswerQuestion({
                   <li key={i}>
                     <button
                       type="button"
-                      onClick={() => toggleLetter(letter)}
+                      onClick={() => !readOnly && toggleLetter(letter)}
+                      disabled={readOnly}
                       className={cn(
                         'flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left',
                         checked
@@ -170,6 +174,8 @@ function AnswerQuestion({
               onChange={(e) => onChange(e.target.value)}
               placeholder="作答…"
               rows={3}
+              readOnly={readOnly}
+              disabled={readOnly}
             />
           )}
         </div>
@@ -179,6 +185,7 @@ function AnswerQuestion({
 }
 
 export function QuizzesView() {
+  const { allowed: canWriteMemory, tip: memoryTip } = useWriteScope('memory')
   const url = useUrlState()
   const quizParam = url.get('quiz')
   const selectedId = quizParam ? Number(quizParam) : null
@@ -344,7 +351,7 @@ export function QuizzesView() {
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
                     {isAnswering && (
-                      <Button size="sm" onClick={submit} disabled={submitting}>
+                      <Button size="sm" onClick={submit} disabled={!canWriteMemory || submitting} title={canWriteMemory ? undefined : memoryTip}>
                         {submitting ? '批改中...' : `提交批改 (${answeredCount}/${selected.questions.length})`}
                       </Button>
                     )}
@@ -353,6 +360,8 @@ export function QuizzesView() {
                         size="sm"
                         variant="ghost"
                         className="text-destructive"
+                        disabled={!canWriteMemory}
+                        title={canWriteMemory ? undefined : memoryTip}
                         onClick={() => setArchiveTarget(list.find((q) => q.id === selected.id) ?? null)}
                       >
                         归档
@@ -367,6 +376,7 @@ export function QuizzesView() {
                         key={q.id}
                         q={q}
                         value={answers[q.id] ?? ''}
+                        readOnly={!canWriteMemory}
                         onChange={(next) =>
                           setAnswers((prev) => ({ ...prev, [q.id]: next }))
                         }

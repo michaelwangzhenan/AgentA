@@ -53,9 +53,11 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { ThemeToggle } from '@/components/settings/ThemeToggle'
+import { writeDeniedMessage } from '@/lib/permissions'
 import { cn } from '@/lib/utils'
 
 import type { Session } from '@/types/session'
+import type { UserRole } from '@/types/auth'
 import { pathForView, viewKindFromPathname } from '@/routes/paths'
 
 const RECENTS_COLLAPSED_KEY = 'agenta:sidebar:recentsCollapsed'
@@ -84,8 +86,9 @@ export type SidebarProps = {
   sessions: Session[]
   activeId: string | null
   username: string
-  isAdmin: boolean
+  role: UserRole
   isSuperAdmin: boolean
+  canWriteChat: boolean
   onLogout: () => void
   onSelect: (id: string) => void
   onCreate: () => void
@@ -98,8 +101,9 @@ export function Sidebar(props: SidebarProps) {
     sessions,
     activeId,
     username,
-    isAdmin,
+    role,
     isSuperAdmin,
+    canWriteChat,
     onLogout,
     onSelect,
     onCreate,
@@ -268,7 +272,18 @@ export function Sidebar(props: SidebarProps) {
     onSelect(id)
   }
 
+  const roleLabel = isSuperAdmin
+    ? 'SUPER'
+    : role === 'admin'
+      ? 'ADMIN'
+      : role === 'readonly'
+        ? 'Read Only'
+        : 'User'
+
+  const chatWriteTip = writeDeniedMessage('chat', role)
+
   const handleCreateAndSwitch = () => {
+    if (!canWriteChat) return
     onCreate()
   }
 
@@ -301,7 +316,8 @@ export function Sidebar(props: SidebarProps) {
               variant="outline"
               size="icon"
               onClick={handleCreateAndSwitch}
-              title="新建会话"
+              disabled={!canWriteChat}
+              title={canWriteChat ? '新建会话' : chatWriteTip}
               aria-label="新建会话"
             >
               <Plus className="h-4 w-4" />
@@ -314,6 +330,8 @@ export function Sidebar(props: SidebarProps) {
               size="sm"
               className="min-w-0 flex-1 justify-start gap-2"
               onClick={handleCreateAndSwitch}
+              disabled={!canWriteChat}
+              title={canWriteChat ? undefined : chatWriteTip}
             >
               <Plus className="h-4 w-4 shrink-0" />
               新建会话
@@ -360,24 +378,20 @@ export function Sidebar(props: SidebarProps) {
           collapsed={sidebarCollapsed}
           onClick={() => goToView('rules')}
         />
-        {isAdmin && (
-          <ViewNavButton
-            icon={<Sparkles className="h-4 w-4" />}
-            label="Skills"
-            active={activeView === 'skills'}
-            collapsed={sidebarCollapsed}
-            onClick={() => goToView('skills')}
-          />
-        )}
-        {isAdmin && (
-          <ViewNavButton
-            icon={<Plug className="h-4 w-4" />}
-            label="MCP"
-            active={activeView === 'mcp'}
-            collapsed={sidebarCollapsed}
-            onClick={() => goToView('mcp')}
-          />
-        )}
+        <ViewNavButton
+          icon={<Sparkles className="h-4 w-4" />}
+          label="Skills"
+          active={activeView === 'skills'}
+          collapsed={sidebarCollapsed}
+          onClick={() => goToView('skills')}
+        />
+        <ViewNavButton
+          icon={<Plug className="h-4 w-4" />}
+          label="MCP"
+          active={activeView === 'mcp'}
+          collapsed={sidebarCollapsed}
+          onClick={() => goToView('mcp')}
+        />
         <ViewNavButton
           icon={<GraduationCap className="h-4 w-4" />}
           label="学而时习"
@@ -399,24 +413,20 @@ export function Sidebar(props: SidebarProps) {
           collapsed={sidebarCollapsed}
           onClick={() => goToView('quality')}
         />
-        {isAdmin && (
-          <ViewNavButton
-            icon={<Database className="h-4 w-4" />}
-            label="数据库"
-            active={activeView === 'database'}
-            collapsed={sidebarCollapsed}
-            onClick={() => goToView('database')}
-          />
-        )}
-        {isAdmin && (
-          <ViewNavButton
-            icon={<HardDriveDownload className="h-4 w-4" />}
-            label="备份与恢复"
-            active={activeView === 'backup'}
-            collapsed={sidebarCollapsed}
-            onClick={() => goToView('backup')}
-          />
-        )}
+        <ViewNavButton
+          icon={<Database className="h-4 w-4" />}
+          label="数据库"
+          active={activeView === 'database'}
+          collapsed={sidebarCollapsed}
+          onClick={() => goToView('database')}
+        />
+        <ViewNavButton
+          icon={<HardDriveDownload className="h-4 w-4" />}
+          label="备份与恢复"
+          active={activeView === 'backup'}
+          collapsed={sidebarCollapsed}
+          onClick={() => goToView('backup')}
+        />
       </div>
 
       {!sidebarCollapsed && (
@@ -462,6 +472,7 @@ export function Sidebar(props: SidebarProps) {
                       >
                         {s.title || 'New Chat'}
                       </span>
+                      {canWriteChat ? (
                       <DropdownMenu>
                         <DropdownMenuTrigger
                           className="opacity-0 transition-opacity group-hover:opacity-100 hover:bg-accent rounded p-1"
@@ -484,6 +495,7 @@ export function Sidebar(props: SidebarProps) {
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
+                      ) : null}
                     </div>
                   </li>
                 ))}
@@ -521,7 +533,7 @@ export function Sidebar(props: SidebarProps) {
                 <div className="flex min-w-0 flex-col">
                   <span className="truncate text-sm leading-tight">{username}</span>
                   <span className="truncate text-[11px] leading-tight text-muted-foreground">
-                    {isSuperAdmin ? 'SUPER' : isAdmin ? 'ADMIN' : 'User'}
+                    {roleLabel}
                   </span>
                 </div>
                 <ChevronDown className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground" />

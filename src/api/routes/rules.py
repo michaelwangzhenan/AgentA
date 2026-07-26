@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 import src.config as cfg
 from src.api.deps import get_current_user, get_user_store
+from src.api.permissions import require_write
 from src.api.schemas.rules import RulesReadResponse, RulesWriteRequest, RulesWriteResponse
 from src.stores.user_store import UserStore
 
@@ -27,7 +28,7 @@ def read_rules(
 def write_rules(
     req: RulesWriteRequest,
     store: UserStore = Depends(get_user_store),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("memory")),
 ) -> RulesWriteResponse:
     if len(req.text) > cfg.USER_RULES_MAX_CHARS:
         raise HTTPException(

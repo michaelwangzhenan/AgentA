@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { ResourcePage } from '@/components/resources/ResourcePage'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { useWriteScope } from '@/lib/permissions'
 import {
   cleanupOrphanSegments,
   getBm25Doc,
@@ -48,6 +49,8 @@ import type { UserInfo } from '@/types/auth'
 import type { DatabaseTab } from '@/routes/paths'
 import { databasePath, epochToDateInput } from '@/routes/paths'
 import { useUrlState } from '@/routes/useUrlState'
+import { useAuth } from '@/lib/auth'
+import { dbDrillDeniedMessage } from '@/lib/permissions'
 
 // 后端 limit 上限 200，候选项不超过它
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 200] as const
@@ -82,6 +85,10 @@ export function DatabaseView({
   onTabChange: (tab: DatabaseTab) => void
   onPathChange: (path: string) => void
 }) {
+  const { isAdmin } = useAuth()
+  const canDrillDb = isAdmin
+  const dbDrillTip = dbDrillDeniedMessage()
+
   const tabs: { value: DatabaseTab; label: string; icon: LucideIcon }[] = [
     { value: 'chroma', label: 'Chroma', icon: Boxes },
     { value: 'bm25', label: 'BM25', icon: Search },
@@ -118,13 +125,13 @@ export function DatabaseView({
         </nav>
         <div className="min-w-0 flex-1">
           {tab === 'chroma' && (
-            <ChromaPanel seg1={seg1} seg2={seg2} onPathChange={onPathChange} />
+            <ChromaPanel seg1={seg1} seg2={seg2} canDrillDb={canDrillDb} dbDrillTip={dbDrillTip} onPathChange={onPathChange} />
           )}
           {tab === 'bm25' && (
-            <Bm25Panel seg1={seg1} seg2={seg2} onPathChange={onPathChange} />
+            <Bm25Panel seg1={seg1} seg2={seg2} canDrillDb={canDrillDb} dbDrillTip={dbDrillTip} onPathChange={onPathChange} />
           )}
           {tab === 'sqlite' && (
-            <SqlitePanel seg1={seg1} seg2={seg2} onPathChange={onPathChange} />
+            <SqlitePanel seg1={seg1} seg2={seg2} canDrillDb={canDrillDb} dbDrillTip={dbDrillTip} onPathChange={onPathChange} />
           )}
           {tab === 'maintenance' && <MaintenancePanel />}
         </div>
@@ -470,17 +477,34 @@ function useChromaListUrlState() {
   return { offset, pageSize, filters, sort, setOffset, setPageSize, setFilters, setSort }
 }
 
+function useDbDrillGuard(
+  canDrill: boolean,
+  seg1: string | undefined,
+  seg2: string | undefined,
+  onReset: () => void,
+) {
+  useEffect(() => {
+    if (!canDrill && (seg1 || seg2)) onReset()
+  }, [canDrill, seg1, seg2, onReset])
+}
+
 function ChromaPanel({
   seg1,
   seg2,
+  canDrillDb,
+  dbDrillTip,
   onPathChange,
 }: {
   seg1?: string
   seg2?: string
+  canDrillDb: boolean
+  dbDrillTip: string
   onPathChange: (path: string) => void
 }) {
   const { offset, pageSize, filters, sort, setOffset, setPageSize, setFilters, setSort } =
     useChromaListUrlState()
+
+  useDbDrillGuard(canDrillDb, seg1, seg2, () => onPathChange(databasePath('chroma')))
 
   if (seg1 && seg2) {
     return (
@@ -510,7 +534,11 @@ function ChromaPanel({
     )
   }
   return (
-    <ChromaList onOpen={(name) => onPathChange(databasePath('chroma', name))} />
+    <ChromaList
+      canDrill={canDrillDb}
+      drillTip={dbDrillTip}
+      onOpen={(name) => onPathChange(databasePath('chroma', name))}
+    />
   )
 }
 
@@ -629,7 +657,15 @@ function ChromaFilterBar({
   )
 }
 
-function ChromaList({ onOpen }: { onOpen: (name: string) => void }) {
+function ChromaList({
+  onOpen,
+  canDrill = true,
+  drillTip,
+}: {
+  onOpen: (name: string) => void
+  canDrill?: boolean
+  drillTip?: string
+}) {
   const { data, loading, error } = useAsync<ChromaCollections>(getChromaCollections, 'chroma-cols')
   if (loading) return <Spinner />
   if (error) return <ErrorNote msg={error} />
@@ -646,12 +682,19 @@ function ChromaList({ onOpen }: { onOpen: (name: string) => void }) {
             <li key={c.name}>
               <button
                 type="button"
-                onClick={() => onOpen(c.name)}
+                onClick={() => canDrill && onOpen(c.name)}
+                disabled={!canDrill}
+                title={canDrill ? undefined : drillTip}
                 className={cn(
                   'flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition-colors',
                   c.is_default
-                    ? 'border-primary/50 bg-primary/5 hover:bg-primary/10'
-                    : 'border-border hover:bg-muted/50',
+                    ? 'border-primary/50 bg-primary/5'
+                    : 'border-border',
+                  canDrill
+                    ? c.is_default
+                      ? 'hover:bg-primary/10'
+                      : 'hover:bg-muted/50'
+                    : 'cursor-default opacity-100',
                 )}
               >
                 <span className="flex items-center gap-2">
@@ -809,14 +852,20 @@ function ChromaDetail({
 function Bm25Panel({
   seg1,
   seg2,
+  canDrillDb,
+  dbDrillTip,
   onPathChange,
 }: {
   seg1?: string
   seg2?: string
+  canDrillDb: boolean
+  dbDrillTip: string
   onPathChange: (path: string) => void
 }) {
   const { offset, pageSize, filters, sort, setOffset, setPageSize, setFilters, setSort } =
     useChromaListUrlState()
+
+  useDbDrillGuard(canDrillDb, seg1, seg2, () => onPathChange(databasePath('bm25')))
 
   if (seg1 && seg2) {
     return (
@@ -845,10 +894,24 @@ function Bm25Panel({
       />
     )
   }
-  return <Bm25List onOpen={(coll) => onPathChange(databasePath('bm25', coll))} />
+  return (
+    <Bm25List
+      canDrill={canDrillDb}
+      drillTip={dbDrillTip}
+      onOpen={(coll) => onPathChange(databasePath('bm25', coll))}
+    />
+  )
 }
 
-function Bm25List({ onOpen }: { onOpen: (coll: string) => void }) {
+function Bm25List({
+  onOpen,
+  canDrill = true,
+  drillTip,
+}: {
+  onOpen: (coll: string) => void
+  canDrill?: boolean
+  drillTip?: string
+}) {
   const { data, loading, error } = useAsync<Bm25Indexes>(getBm25Indexes, 'bm25-idx')
   if (loading) return <Spinner />
   if (error) return <ErrorNote msg={error} />
@@ -865,13 +928,19 @@ function Bm25List({ onOpen }: { onOpen: (coll: string) => void }) {
           <li key={ix.file}>
             <button
               type="button"
-              onClick={() => !ix.error && onOpen(ix.collection)}
-              disabled={!!ix.error}
+              onClick={() => canDrill && !ix.error && onOpen(ix.collection)}
+              disabled={!!ix.error || !canDrill}
+              title={canDrill ? undefined : drillTip}
               className={cn(
                 'flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition-colors disabled:opacity-60',
                 ix.is_default
-                  ? 'border-primary/50 bg-primary/5 hover:bg-primary/10'
-                  : 'border-border hover:bg-muted/50',
+                  ? 'border-primary/50 bg-primary/5'
+                  : 'border-border',
+                canDrill && !ix.error
+                  ? ix.is_default
+                    ? 'hover:bg-primary/10'
+                    : 'hover:bg-muted/50'
+                  : 'cursor-default',
               )}
             >
               <span className="flex items-center gap-2">
@@ -1114,10 +1183,14 @@ function useSqliteListUrlState() {
 function SqlitePanel({
   seg1,
   seg2,
+  canDrillDb,
+  dbDrillTip,
   onPathChange,
 }: {
   seg1?: string
   seg2?: string
+  canDrillDb: boolean
+  dbDrillTip: string
   onPathChange: (path: string) => void
 }) {
   const {
@@ -1132,6 +1205,8 @@ function SqlitePanel({
     setSort,
     setRowKey,
   } = useSqliteListUrlState()
+
+  useDbDrillGuard(canDrillDb, seg1, seg2, () => onPathChange(databasePath('sqlite')))
 
   if (seg1 && seg2) {
     return (
@@ -1162,7 +1237,11 @@ function SqlitePanel({
     )
   }
   return (
-    <SqliteDbList onOpen={(key) => onPathChange(databasePath('sqlite', key))} />
+    <SqliteDbList
+      canDrill={canDrillDb}
+      drillTip={dbDrillTip}
+      onOpen={(key) => onPathChange(databasePath('sqlite', key))}
+    />
   )
 }
 
@@ -1209,7 +1288,15 @@ const TABLE_DESCRIPTIONS: Record<string, string> = {
 }
 
 // L1：只列 DB（与 Chroma 的 collection 列表对齐）
-function SqliteDbList({ onOpen }: { onOpen: (key: string) => void }) {
+function SqliteDbList({
+  onOpen,
+  canDrill = true,
+  drillTip,
+}: {
+  onOpen: (key: string) => void
+  canDrill?: boolean
+  drillTip?: string
+}) {
   const { data, loading, error } = useAsync<SqliteDatabases>(getSqliteDatabases, 'sqlite-dbs')
   if (loading) return <Spinner />
   if (error) return <ErrorNote msg={error} />
@@ -1230,9 +1317,13 @@ function SqliteDbList({ onOpen }: { onOpen: (key: string) => void }) {
             <li key={db.key}>
               <button
                 type="button"
-                onClick={() => db.exists && onOpen(db.key)}
-                disabled={!db.exists}
-                className="grid w-full grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,2fr)] items-center gap-3 rounded-md border border-border px-3 py-2 text-left text-sm hover:bg-muted/50 disabled:opacity-60"
+                onClick={() => canDrill && db.exists && onOpen(db.key)}
+                disabled={!db.exists || !canDrill}
+                title={canDrill ? undefined : drillTip}
+                className={cn(
+                  'grid w-full grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,2fr)] items-center gap-3 rounded-md border border-border px-3 py-2 text-left text-sm disabled:opacity-60',
+                  canDrill ? 'hover:bg-muted/50' : 'cursor-default',
+                )}
               >
                 <span className="truncate font-medium" title={name}>
                   {name}
@@ -1663,9 +1754,14 @@ function Card({ title, desc, children }: { title: string; desc: string; children
 const btnCls = 'rounded-md border border-border px-2.5 py-1 hover:bg-muted/50 disabled:opacity-40'
 const dangerBtnCls =
   'rounded-md bg-destructive px-2.5 py-1 text-destructive-foreground hover:bg-destructive/90 disabled:opacity-40'
-const inputCls = 'rounded-md border border-border bg-background px-2 py-1 text-foreground'
+const inputCls = 'rounded-md border border-border bg-background px-2 py-1 text-foreground disabled:opacity-40'
+
+function maintDisabled(canWrite: boolean, busy: boolean, extra = false) {
+  return busy || !canWrite || extra
+}
 
 function PrunePanel() {
+  const { allowed: canWriteDb, tip: dbTip } = useWriteScope('db')
   const [days, setDays] = useState('90')
   const [preview, setPreview] = useState<PruneResult | null>(null)
   const [busy, setBusy] = useState(false)
@@ -1707,16 +1803,26 @@ function PrunePanel() {
             value={days}
             inputMode="numeric"
             onChange={(e) => setDays(e.target.value.replace(/[^0-9]/g, ''))}
+            disabled={!canWriteDb}
+            readOnly={!canWriteDb}
+            title={canWriteDb ? undefined : dbTip}
             className={cn(inputCls, 'w-20')}
           />
         </label>
-        <button type="button" onClick={doPreview} disabled={busy || !days} className={btnCls}>
+        <button
+          type="button"
+          onClick={doPreview}
+          disabled={maintDisabled(canWriteDb, busy, !days)}
+          title={canWriteDb ? undefined : dbTip}
+          className={btnCls}
+        >
           预览
         </button>
         <button
           type="button"
           onClick={() => setConfirm(true)}
-          disabled={busy || !preview || preview.total === 0}
+          disabled={maintDisabled(canWriteDb, busy, !preview || preview.total === 0)}
+          title={canWriteDb ? undefined : dbTip}
           className={dangerBtnCls}
         >
           执行清理
@@ -1736,6 +1842,7 @@ function PrunePanel() {
 }
 
 function PurgeUserPanel() {
+  const { allowed: canWriteDb, tip: dbTip } = useWriteScope('db')
   const [uid, setUid] = useState('')
   const [preview, setPreview] = useState<PurgePreview | null>(null)
   // sessions 表逐行勾选：被取消勾选的 rowid 集合（空集 = 全选）
@@ -1843,16 +1950,26 @@ function PurgeUserPanel() {
             value={uid}
             inputMode="numeric"
             onChange={(e) => setUid(e.target.value.replace(/[^0-9]/g, ''))}
+            disabled={!canWriteDb}
+            readOnly={!canWriteDb}
+            title={canWriteDb ? undefined : dbTip}
             className={cn(inputCls, 'w-20')}
           />
         </label>
-        <button type="button" onClick={doPreview} disabled={busy || !uid} className={btnCls}>
+        <button
+          type="button"
+          onClick={doPreview}
+          disabled={maintDisabled(canWriteDb, busy, !uid)}
+          title={canWriteDb ? undefined : dbTip}
+          className={btnCls}
+        >
           预览
         </button>
         <button
           type="button"
           onClick={() => setConfirm(true)}
-          disabled={busy || !preview || total === 0}
+          disabled={maintDisabled(canWriteDb, busy, !preview || total === 0)}
+          title={canWriteDb ? undefined : dbTip}
           className={dangerBtnCls}
         >
           清理选中（{total} 行）
@@ -1881,6 +1998,7 @@ function PurgeUserPanel() {
                   <input
                     type="checkbox"
                     checked={tableChecked}
+                    disabled={!canWriteDb}
                     onChange={() =>
                       isSessions ? toggleAll(key, rowids, tableChecked) : toggleTable(key)
                     }
@@ -1905,6 +2023,7 @@ function PurgeUserPanel() {
                               <input
                                 type="checkbox"
                                 checked={!ex.has(rid)}
+                                disabled={!canWriteDb}
                                 onChange={() => toggleRow(key, rid)}
                               />
                             </td>
@@ -1941,6 +2060,7 @@ function PurgeUserPanel() {
 }
 
 function VacuumPanel() {
+  const { allowed: canWriteDb, tip: dbTip } = useWriteScope('db')
   const [busy, setBusy] = useState(false)
   const [confirm, setConfirm] = useState(false)
   const [result, setResult] = useState<VacuumResult | null>(null)
@@ -1962,7 +2082,13 @@ function VacuumPanel() {
 
   return (
     <Card title="VACUUM 回收空间" desc="对全部 SQLite 库执行 VACUUM，回收删除后未释放的磁盘空间。期间相关库会被独占写锁。">
-      <button type="button" onClick={() => setConfirm(true)} disabled={busy} className={btnCls}>
+      <button
+        type="button"
+        onClick={() => setConfirm(true)}
+        disabled={maintDisabled(canWriteDb, busy)}
+        title={canWriteDb ? undefined : dbTip}
+        className={btnCls}
+      >
         对全部库执行 VACUUM
       </button>
       {result && (
@@ -2007,6 +2133,7 @@ function fmtBytes(n: number): string {
 }
 
 function RepairPanel() {
+  const { allowed: canWriteDb, tip: dbTip } = useWriteScope('db')
   const [preview, setPreview] = useState<RepairPreview | null>(null)
   const [busy, setBusy] = useState(false)
   const [busyLabel, setBusyLabel] = useState('')
@@ -2059,13 +2186,20 @@ function RepairPanel() {
     >
       <Bm25MemoryWarning variant="repair" />
       <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
-        <button type="button" onClick={doPreview} disabled={busy} className={btnCls}>
+        <button
+          type="button"
+          onClick={doPreview}
+          disabled={maintDisabled(canWriteDb, busy)}
+          title={canWriteDb ? undefined : dbTip}
+          className={btnCls}
+        >
           扫描
         </button>
         <button
           type="button"
           onClick={() => setConfirm(true)}
-          disabled={busy || !preview || needsAction === 0}
+          disabled={maintDisabled(canWriteDb, busy, !preview || needsAction === 0)}
+          title={canWriteDb ? undefined : dbTip}
           className={btnCls}
         >
           修复
@@ -2148,6 +2282,7 @@ function RepairPanel() {
 }
 
 function OrphanSegmentsPanel() {
+  const { allowed: canWriteDb, tip: dbTip } = useWriteScope('db')
   const [preview, setPreview] = useState<OrphanSegmentsPreview | null>(null)
   const [busy, setBusy] = useState(false)
   const [confirm, setConfirm] = useState(false)
@@ -2185,13 +2320,20 @@ function OrphanSegmentsPanel() {
       desc="清空 / 删除知识库后，Chroma 在磁盘上残留不再被任何库引用的 <uuid>/ 向量段目录（只占空间，不影响检索）。这里把它们物理删除。"
     >
       <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
-        <button type="button" onClick={doPreview} disabled={busy} className={btnCls}>
+        <button
+          type="button"
+          onClick={doPreview}
+          disabled={maintDisabled(canWriteDb, busy)}
+          title={canWriteDb ? undefined : dbTip}
+          className={btnCls}
+        >
           扫描
         </button>
         <button
           type="button"
           onClick={() => setConfirm(true)}
-          disabled={busy || !preview || !preview.available || preview.count === 0}
+          disabled={maintDisabled(canWriteDb, busy, !preview || !preview.available || preview.count === 0)}
+          title={canWriteDb ? undefined : dbTip}
           className={dangerBtnCls}
         >
           清理孤儿段

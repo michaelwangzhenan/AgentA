@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 import src.config as _cfg
 from src.api.deps import get_current_user, get_user_store
+from src.api.permissions import require_write
 from src.api.routes.admin import purge_user_data
 from src.api.user_info import to_user_info
 from src.llm import model_router
@@ -85,7 +86,7 @@ def logout(
 @router.patch("/username", response_model=UserInfo)
 def update_username(
     req: UpdateUsernameRequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("profile")),
     store: UserStore = Depends(get_user_store),
 ) -> UserInfo:
     """改当前用户的用户名。占用返回 409。"""
@@ -101,7 +102,7 @@ def update_username(
 @router.post("/password", response_model=OkResponse)
 def change_password(
     req: ChangePasswordRequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("account")),
     store: UserStore = Depends(get_user_store),
 ) -> OkResponse:
     """改当前用户密码，需旧密码校验。旧密码错返回 400。"""
@@ -138,7 +139,7 @@ def get_llm_prefs(
 @router.patch("/llm-prefs", response_model=LlmPrefs)
 def update_llm_prefs(
     req: LlmPrefsUpdate,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("profile")),
     store: UserStore = Depends(get_user_store),
 ) -> LlmPrefs:
     """更新当前用户的模型 / thinking 偏好；只改传入字段。不影响其他用户。
@@ -167,7 +168,7 @@ def update_llm_prefs(
 def delete_own_account(
     request: Request,
     response: Response,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("account")),
     store: UserStore = Depends(get_user_store),
 ) -> OkResponse:
     """注销当前账号：清空本人全部业务数据 + 删账号 + 清登录态。

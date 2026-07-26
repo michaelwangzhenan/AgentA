@@ -5,11 +5,13 @@ import { Button } from '@/components/ui/button'
 import { getRoutingPool, putRoutingPool } from '@/api/client'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
+import { useWriteScope } from '@/lib/permissions'
 import type { RoutingModel, RoutingPoolResponse } from '@/types/routing'
 
 /** 模型路由候选池：仅 admin。勾选"已充值可用"的模型，路由只在池内向更便宜的模型降级。
  *  不勾选任何项时回落到"已配 api_key"的全部模型。 */
 export function RoutingPoolConfig() {
+  const { allowed: canWriteConfig, tip: configTip } = useWriteScope('config')
   const [data, setData] = useState<RoutingPoolResponse | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
@@ -42,6 +44,7 @@ export function RoutingPoolConfig() {
   }, [data])
 
   const toggle = (id: string) => {
+    if (!canWriteConfig) return
     setSelected((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
@@ -94,6 +97,7 @@ export function RoutingPoolConfig() {
                     type="checkbox"
                     checked={selected.has(m.model_id)}
                     onChange={() => toggle(m.model_id)}
+                    disabled={!canWriteConfig}
                     className="h-4 w-4"
                   />
                   <span className="flex-1 truncate">{m.label}</span>
@@ -119,7 +123,7 @@ export function RoutingPoolConfig() {
       </div>
 
       <div className="flex items-center gap-2">
-        <Button size="sm" disabled={saving} onClick={() => void save()}>
+        <Button size="sm" disabled={!canWriteConfig || saving} title={canWriteConfig ? undefined : configTip} onClick={() => void save()}>
           <Check className="mr-1 h-3.5 w-3.5" />
           保存候选池
         </Button>

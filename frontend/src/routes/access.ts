@@ -1,49 +1,43 @@
 import type { ViewKind } from '@/components/sidebar/Sidebar'
 import {
-  isQualityTab,
   isSettingsSection,
-  isUsageTab,
   viewKindFromPathname,
-  type QualityTab,
   type SettingsSection,
-  type UsageTab,
 } from '@/routes/paths'
 
-const ADMIN_VIEWS: ViewKind[] = ['skills', 'mcp', 'database', 'backup']
+const ACCOUNT_SETTINGS_SECTIONS: SettingsSection[] = ['password', 'account']
 
-const ADMIN_QUALITY_TABS: QualityTab[] = ['security_runtime', 'offline', 'golden']
-const ADMIN_USAGE_TABS: UsageTab[] = ['all', 'savings_all', 'pricing']
-const ADMIN_SETTINGS_SECTIONS: SettingsSection[] = ['system', 'apikeys']
-const SUPER_ADMIN_SETTINGS_SECTIONS: SettingsSection[] = ['users']
-
-export function routeRequiresAdmin(pathname: string): boolean {
-  const view = viewKindFromPathname(pathname)
-  if (ADMIN_VIEWS.includes(view)) return true
-
-  const parts = pathname.split('/').filter(Boolean)
-  const sub = parts[1]
-
-  if (view === 'quality' && sub && isQualityTab(sub)) {
-    return ADMIN_QUALITY_TABS.includes(sub)
-  }
-  if (view === 'usage' && sub && isUsageTab(sub)) {
-    return ADMIN_USAGE_TABS.includes(sub)
-  }
-  if (view === 'settings' && sub && isSettingsSection(sub)) {
-    return ADMIN_SETTINGS_SECTIONS.includes(sub)
-  }
-
-  return false
-}
-
+/** 仅主账号可访问的路由（用户管理） */
 export function routeRequiresSuperAdmin(pathname: string): boolean {
   const view = viewKindFromPathname(pathname)
   const parts = pathname.split('/').filter(Boolean)
   const sub = parts[1]
 
   if (view === 'settings' && sub && isSettingsSection(sub)) {
-    return SUPER_ADMIN_SETTINGS_SECTIONS.includes(sub)
+    return sub === 'users'
   }
 
+  return false
+}
+
+/** readonly 不可访问账号写操作相关设置页 */
+export function routeRequiresAccountSettings(pathname: string): boolean {
+  const view = viewKindFromPathname(pathname)
+  const parts = pathname.split('/').filter(Boolean)
+  const sub = parts[1]
+
+  if (view === 'settings' && sub && isSettingsSection(sub)) {
+    return ACCOUNT_SETTINGS_SECTIONS.includes(sub)
+  }
+
+  return false
+}
+
+/** 保留兼容：原 admin 页现三档均可读，不再拦路由 */
+export function routeRequiresAdmin(_pathname: string): boolean {
+  return false
+}
+
+export function routeRequiresReadonlyBlock(_view: ViewKind): boolean {
   return false
 }

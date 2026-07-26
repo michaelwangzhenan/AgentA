@@ -4,12 +4,14 @@ import { Button } from '@/components/ui/button'
 import { readRules, writeRules } from '@/api/client'
 import { ResourcePage } from '@/components/resources/ResourcePage'
 import { toast } from '@/lib/toast'
+import { useWriteScope } from '@/lib/permissions'
 
 // 与后端 config.USER_RULES_MAX_CHARS 保持一致：超出会被 PUT /api/rules 拒绝（400），
 // 这里实时提示字数并提前禁用保存，避免用户白写。
 const MAX_RULES_CHARS = 4000
 
 export function RulesView() {
+  const { allowed: canWriteMemory, tip: memoryTip } = useWriteScope('memory')
   const [text, setText] = useState('')
   const [originalText, setOriginalText] = useState('')
   const [loading, setLoading] = useState(true)
@@ -64,7 +66,8 @@ export function RulesView() {
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
-        disabled={loading || saving}
+        disabled={loading || saving || !canWriteMemory}
+        readOnly={!canWriteMemory}
         placeholder={loading ? '加载中…' : '在此撰写你的个人 rules（Markdown）'}
         className="min-h-[400px] w-full flex-1 resize-y rounded-md border border-border bg-card p-3 font-mono text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-ring"
         spellCheck={false}
@@ -82,7 +85,8 @@ export function RulesView() {
           </span>
           <Button
             onClick={handleSave}
-            disabled={!dirty || saving || loading || overLimit}
+            disabled={!canWriteMemory || !dirty || saving || loading || overLimit}
+            title={canWriteMemory ? undefined : memoryTip}
             size="sm"
           >
             {saving ? '保存中…' : '保存'}

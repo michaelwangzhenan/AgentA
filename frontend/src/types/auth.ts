@@ -1,4 +1,18 @@
-export type UserRole = 'user' | 'admin'
+export type UserRole = 'readonly' | 'user' | 'admin'
+
+export type PermissionScope =
+  | 'chat'
+  | 'kb'
+  | 'memory'
+  | 'usage'
+  | 'quality'
+  | 'skills'
+  | 'db'
+  | 'backup'
+  | 'profile'
+  | 'account'
+  | 'config'
+  | 'users'
 
 export type UserInfo = {
   id: number
@@ -6,6 +20,7 @@ export type UserInfo = {
   role: UserRole
   created_at?: string
   can_manage_users?: boolean
+  capabilities?: PermissionScope[]
 }
 
 export type AuthResponse = {

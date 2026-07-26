@@ -44,6 +44,7 @@ import type { MCPServer, MCPTool } from '@/types/resources'
 import { ResourcePage } from '@/components/resources/ResourcePage'
 import { toast } from '@/lib/toast'
 import { cn } from '@/lib/utils'
+import { useWriteScope } from '@/lib/permissions'
 import { useUrlState } from '@/routes/useUrlState'
 
 const NAME_PATTERN = /^[a-zA-Z0-9_-]+$/
@@ -55,6 +56,7 @@ type SortDir = 'asc' | 'desc'
 // ============================================================================
 
 export function MCPView() {
+  const { allowed: canWriteSkills, tip: skillsTip } = useWriteScope('skills')
   const url = useUrlState()
   const [servers, setServers] = useState<MCPServer[]>([])
   const [tools, setTools] = useState<MCPTool[]>([])
@@ -197,7 +199,8 @@ export function MCPView() {
       <Button
         onClick={() => setCreateOpen(true)}
         size="sm"
-        disabled={busy}
+        disabled={busy || !canWriteSkills}
+        title={canWriteSkills ? undefined : skillsTip}
         className="gap-1.5"
       >
         <Plus className="h-3.5 w-3.5" />
@@ -207,7 +210,8 @@ export function MCPView() {
         onClick={handleReload}
         size="sm"
         variant="outline"
-        disabled={busy}
+        disabled={busy || !canWriteSkills}
+        title={canWriteSkills ? undefined : skillsTip}
         className="gap-1.5"
       >
         <RefreshCw className={`h-3.5 w-3.5 ${reloading ? 'animate-spin' : ''}`} />
@@ -247,6 +251,8 @@ export function MCPView() {
         }}
         onToggle={handleToggle}
         onDelete={(name) => setDeleteTarget(name)}
+        readOnly={!canWriteSkills}
+        writeTip={skillsTip}
       />
 
       {filteredDisabled.length > 0 && (
@@ -269,6 +275,8 @@ export function MCPView() {
           }}
           onToggle={handleToggle}
           onDelete={(name) => setDeleteTarget(name)}
+          readOnly={!canWriteSkills}
+          writeTip={skillsTip}
         />
       )}
 
@@ -293,6 +301,8 @@ export function MCPView() {
           onToggle={handleToggle}
           onDelete={(name) => setDeleteTarget(name)}
           tone="failed"
+          readOnly={!canWriteSkills}
+          writeTip={skillsTip}
         />
       )}
 
@@ -467,6 +477,8 @@ type MCPSectionProps = {
   onSaved: () => void
   onToggle: (name: string, enabled: boolean) => void
   onDelete: (name: string) => void
+  readOnly?: boolean
+  writeTip?: string
 }
 
 function MCPSection({
@@ -487,6 +499,8 @@ function MCPSection({
   onSaved,
   onToggle,
   onDelete,
+  readOnly = false,
+  writeTip,
 }: MCPSectionProps) {
   const wrapperCls =
     tone === 'failed'
@@ -534,6 +548,8 @@ function MCPSection({
               onSaved={onSaved}
               onToggle={(en) => onToggle(s.name, en)}
               onDelete={() => onDelete(s.name)}
+              readOnly={readOnly}
+              writeTip={writeTip}
             />
           ))}
         </ul>
@@ -554,6 +570,8 @@ type MCPRowProps = {
   onSaved: () => void
   onToggle: (enabled: boolean) => void
   onDelete: () => void
+  readOnly?: boolean
+  writeTip?: string
 }
 
 function MCPRow({
@@ -568,6 +586,8 @@ function MCPRow({
   onSaved,
   onToggle,
   onDelete,
+  readOnly = false,
+  writeTip,
 }: MCPRowProps) {
   return (
     <li className="text-sm">
@@ -575,6 +595,7 @@ function MCPRow({
         <Switch
           checked={server.enabled}
           onCheckedChange={onToggle}
+          disabled={readOnly}
           aria-label={`${server.enabled ? '禁用' : '启用'} ${server.name}`}
           className="mt-0.5"
         />
@@ -622,7 +643,8 @@ function MCPRow({
             variant="ghost"
             size="sm"
             onClick={onStartEdit}
-            disabled={editing}
+            disabled={readOnly || editing}
+            title={readOnly ? writeTip : undefined}
             aria-label="编辑"
             className="h-7 w-7 p-0"
           >
@@ -632,6 +654,8 @@ function MCPRow({
             variant="ghost"
             size="sm"
             onClick={onDelete}
+            disabled={readOnly}
+            title={readOnly ? writeTip : undefined}
             aria-label="删除"
             className="h-7 w-7 p-0 text-destructive hover:text-destructive"
           >

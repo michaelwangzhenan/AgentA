@@ -9,7 +9,8 @@ API key 配置端点，仅 admin：读写 .agenta/api_keys.json 中的 provider 
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.api.runtime import api_keys as _store
-from src.api.deps import require_admin
+from src.api.deps import get_current_user
+from src.api.permissions import require_write
 from src.api.schemas.api_keys import (
     ApiKeysResponse,
     ApiKeyUpdateRequest,
@@ -32,13 +33,13 @@ def _build_view(item: _store.SecretItem) -> ApiKeyView:
 
 
 @router.get("", response_model=ApiKeysResponse)
-def list_api_keys(_: dict = Depends(require_admin)) -> ApiKeysResponse:
+def list_api_keys(_: dict = Depends(get_current_user)) -> ApiKeysResponse:
     return ApiKeysResponse(items=[_build_view(it) for it in _store.SECRET_ITEMS])
 
 
 @router.put("/{key_id}", response_model=ApiKeyView)
 def set_api_key(
-    key_id: str, req: ApiKeyUpdateRequest, _: dict = Depends(require_admin)
+    key_id: str, req: ApiKeyUpdateRequest, _: dict = Depends(require_write("config"))
 ) -> ApiKeyView:
     item = _store.get_item(key_id)
     if item is None:
@@ -55,7 +56,7 @@ def set_api_key(
 
 
 @router.delete("/{key_id}", response_model=ApiKeyView)
-def reset_api_key(key_id: str, _: dict = Depends(require_admin)) -> ApiKeyView:
+def reset_api_key(key_id: str, _: dict = Depends(require_write("config"))) -> ApiKeyView:
     item = _store.get_item(key_id)
     if item is None:
         raise HTTPException(

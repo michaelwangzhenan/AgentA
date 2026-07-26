@@ -29,12 +29,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 import src.services.db_inspect as inspect
 import src.services.db_maintain as maintain
-from src.api.deps import require_admin
+from src.api.deps import get_current_user
+from src.api.permissions import require_write
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/admin/db", tags=["db-admin"], dependencies=[Depends(require_admin)])
+router = APIRouter(
+    prefix="/admin/db",
+    tags=["db-admin"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 # ── Chroma ────────────────────────────────────────────────────────────────────
@@ -178,7 +183,10 @@ def prune_preview(days: int = Query(ge=1)) -> dict:
 
 
 @router.post("/maintenance/prune")
-def prune(req: PruneRequest) -> dict:
+def prune(
+    req: PruneRequest,
+    _: dict = Depends(require_write("db")),
+) -> dict:
     return maintain.prune(req.days)
 
 
@@ -188,12 +196,18 @@ def purge_user_preview(user_id: int = Query(...)) -> dict:
 
 
 @router.post("/maintenance/purge-user")
-def purge_user(req: PurgeUserRequest) -> dict:
+def purge_user(
+    req: PurgeUserRequest,
+    _: dict = Depends(require_write("db")),
+) -> dict:
     return maintain.purge_user(req.user_id, [s.model_dump() for s in req.selections])
 
 
 @router.post("/maintenance/vacuum")
-def vacuum(req: VacuumRequest) -> dict:
+def vacuum(
+    req: VacuumRequest,
+    _: dict = Depends(require_write("db")),
+) -> dict:
     return maintain.vacuum(req.db_key)
 
 
@@ -203,7 +217,9 @@ def orphan_segments_preview() -> dict:
 
 
 @router.post("/maintenance/orphan-segments")
-def cleanup_orphan_segments() -> dict:
+def cleanup_orphan_segments(
+    _: dict = Depends(require_write("db")),
+) -> dict:
     return maintain.cleanup_orphan_segments()
 
 
@@ -213,5 +229,8 @@ def repair_preview() -> dict:
 
 
 @router.post("/maintenance/repair")
-def repair_run(req: RepairRequest = RepairRequest()) -> dict:
+def repair_run(
+    req: RepairRequest = RepairRequest(),
+    _: dict = Depends(require_write("db")),
+) -> dict:
     return maintain.repair_run(req.collections)

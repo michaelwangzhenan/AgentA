@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ExternalLink, Link2, Mail, MessageCircle, Phone, UserRound } from 'lucide-react'
+import { ExternalLink, Link2, Mail, MessageCircle, Phone } from 'lucide-react'
 
 import { buttonVariants } from '@/components/ui/button'
 import { useAuth } from '@/lib/auth'
@@ -81,8 +81,6 @@ export function ContactPage() {
 
   const rows = config ? buildRows(config) : []
   const qrImage = config?.contact.wechat.qrImage
-  const demo = config?.demoAccount
-  const hasDemoAccount = Boolean(demo?.username)
 
   return (
     <div className="flex h-full min-h-0 items-center justify-center overflow-y-auto px-4 py-8 pb-12">
@@ -93,11 +91,11 @@ export function ContactPage() {
 
           {!config ? (
             <p className="text-sm text-muted-foreground">加载中…</p>
-          ) : rows.length === 0 && !hasDemoAccount ? (
+          ) : rows.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               联系方式尚未配置，请编辑 frontend/public/site.json。
             </p>
-          ) : rows.length > 0 ? (
+          ) : (
             <ul className="space-y-3">
               {rows.map((row) => {
                 const Icon = row.icon
@@ -132,7 +130,7 @@ export function ContactPage() {
                 )
               })}
             </ul>
-          ) : null}
+          )}
 
           {qrImage ? (
             <div className="rounded-xl border border-border bg-card p-4 text-center">
@@ -149,30 +147,6 @@ export function ContactPage() {
 
           {config?.notice ? (
             <p className="text-xs leading-relaxed text-muted-foreground">{config.notice}</p>
-          ) : null}
-
-          {hasDemoAccount && demo ? (
-            <div className="rounded-xl border border-border bg-muted/30 px-4 py-3">
-              <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-                <UserRound className="h-4 w-4 text-muted-foreground" />
-                体验账号
-              </div>
-              <dl className="space-y-1.5 text-sm">
-                <div className="flex gap-2">
-                  <dt className="w-14 shrink-0 text-muted-foreground">用户名</dt>
-                  <dd className="font-medium">{demo.username}</dd>
-                </div>
-                {demo.password ? (
-                  <div className="flex gap-2">
-                    <dt className="w-14 shrink-0 text-muted-foreground">密码</dt>
-                    <dd className="font-medium">{demo.password}</dd>
-                  </div>
-                ) : null}
-              </dl>
-              {demo.note ? (
-                <p className="mt-2 text-xs text-muted-foreground">{demo.note}</p>
-              ) : null}
-            </div>
           ) : null}
 
           <div className="flex flex-wrap gap-2 pt-2">

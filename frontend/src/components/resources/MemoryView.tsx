@@ -24,8 +24,10 @@ import {
 } from '@/types/resources'
 import { ResourcePage } from '@/components/resources/ResourcePage'
 import { toast } from '@/lib/toast'
+import { useWriteScope } from '@/lib/permissions'
 
 export function MemoryView() {
+  const { allowed: canWriteMemory, tip: memoryTip } = useWriteScope('memory')
   const [items, setItems] = useState<MemoryItem[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -143,7 +145,7 @@ export function MemoryView() {
           <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
             <span className="text-sm font-medium">共 {items.length} 条</span>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
+              <Button variant="outline" size="sm" onClick={() => setAddOpen(true)} disabled={!canWriteMemory} title={canWriteMemory ? undefined : memoryTip}>
                 <Plus className="mr-1 h-4 w-4" />
                 添加记忆
               </Button>
@@ -151,7 +153,8 @@ export function MemoryView() {
                 variant="outline"
                 size="sm"
                 onClick={() => setConfirmClearOpen(true)}
-                disabled={items.length === 0}
+                disabled={!canWriteMemory || items.length === 0}
+                title={canWriteMemory ? undefined : memoryTip}
               >
                 清空全部
               </Button>
@@ -179,21 +182,23 @@ export function MemoryView() {
                 </div>
                 <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                   <button
-                    className="rounded p-1 hover:bg-accent"
+                    className="rounded p-1 hover:bg-accent disabled:opacity-40"
                     onClick={() => {
                       setEditValue(it.text)
                       setEditTarget(it)
                     }}
+                    disabled={!canWriteMemory}
                     aria-label="编辑"
-                    title="编辑记忆"
+                    title={canWriteMemory ? '编辑记忆' : memoryTip}
                   >
                     <Pencil className="h-4 w-4" />
                   </button>
                   <button
-                    className="rounded p-1 hover:bg-accent text-destructive"
+                    className="rounded p-1 hover:bg-accent text-destructive disabled:opacity-40"
                     onClick={() => setDeleteTarget(it)}
+                    disabled={!canWriteMemory}
                     aria-label="删除"
-                    title="删除"
+                    title={canWriteMemory ? '删除' : memoryTip}
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -233,7 +238,7 @@ export function MemoryView() {
             <Button variant="outline" onClick={() => setEditTarget(null)}>
               取消
             </Button>
-            <Button onClick={submitEdit} disabled={!editValue.trim()}>
+            <Button onClick={submitEdit} disabled={!canWriteMemory || !editValue.trim()} title={canWriteMemory ? undefined : memoryTip}>
               保存
             </Button>
           </DialogFooter>
@@ -307,7 +312,7 @@ export function MemoryView() {
             >
               取消
             </Button>
-            <Button onClick={submitAdd} disabled={!canSubmitAdd || adding}>
+            <Button onClick={submitAdd} disabled={!canWriteMemory || !canSubmitAdd || adding} title={canWriteMemory ? undefined : memoryTip}>
               {adding ? '添加中...' : '添加'}
             </Button>
           </DialogFooter>

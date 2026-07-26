@@ -47,7 +47,8 @@ export function KnowledgeBaseView({
   onOpenGolden?: (docId: string, label: string, alias: string) => void
   onGotoGolden?: () => void
 }) {
-  const { isAdmin } = useAuth()
+  const { canWrite } = useAuth()
+  const canWriteKb = canWrite('kb')
   const alias = aliasProp ?? null
 
   return (
@@ -64,15 +65,16 @@ export function KnowledgeBaseView({
           {alias === null ? (
             <L1View
               onOpen={onOpenLibrary}
-              onGotoGolden={isAdmin ? onGotoGolden : undefined}
-              isAdmin={isAdmin}
+              onGotoGolden={onGotoGolden}
+              canWriteKb={canWriteKb}
             />
           ) : (
             <LibraryView
               alias={alias}
               onBack={onBackToLibraries}
-              showGolden={isAdmin}
-              onOpenGolden={isAdmin ? onOpenGolden : undefined}
+              showGolden
+              onOpenGolden={onOpenGolden}
+              canWriteKb={canWriteKb}
             />
           )}
         </div>
@@ -89,11 +91,11 @@ let _cachedKbCollections: KBCollectionListResponse | null = null
 function L1View({
   onOpen,
   onGotoGolden,
-  isAdmin,
+  canWriteKb,
 }: {
   onOpen: (alias: string) => void
   onGotoGolden?: () => void
-  isAdmin: boolean
+  canWriteKb: boolean
 }) {
   const [collections, setCollections] = useState<KBCollection[]>(
     () => _cachedKbCollections?.collections ?? [],
@@ -216,7 +218,7 @@ function L1View({
       <IngestPanel
         collections={ordered}
         defaultAlias={defaultAlias}
-        isAdmin={isAdmin}
+        canWriteKb={canWriteKb}
         onIngested={() => load(true)}
         onGotoGolden={onGotoGolden}
       />
@@ -312,11 +314,13 @@ function LibraryView({
   onBack,
   onOpenGolden,
   showGolden,
+  canWriteKb,
 }: {
   alias: string
   onBack: () => void
   onOpenGolden?: (docId: string, label: string, alias: string) => void
   showGolden?: boolean
+  canWriteKb: boolean
 }) {
   const [documents, setDocuments] = useState<KBDocument[]>([])
   const [total, setTotal] = useState(0)
@@ -449,7 +453,7 @@ function LibraryView({
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
           <span className="text-sm font-medium">已入库文档 ({total})</span>
           <div className="flex flex-wrap items-center justify-end gap-2">
-            {showGolden && (
+            {showGolden && canWriteKb && (
               <GoldenGenControls
                 includeNone={false}
                 goldenLlm={goldenLlm}
@@ -463,7 +467,8 @@ function LibraryView({
               variant="ghost"
               size="sm"
               className="h-7 gap-1 text-xs text-muted-foreground hover:text-destructive"
-              disabled={total === 0 || clearing}
+              disabled={!canWriteKb || total === 0 || clearing}
+              title={canWriteKb ? undefined : '入库需管理员权限'}
               onClick={() => setClearDialogOpen(true)}
             >
               <Trash2 className="h-3.5 w-3.5" />
@@ -477,10 +482,10 @@ function LibraryView({
           loading={loading}
           query={listQuery}
           onQueryChange={handleQueryChange}
-          onDelete={handleDelete}
-          onDeleteMany={handleDeleteMany}
+          onDelete={canWriteKb ? handleDelete : undefined}
+          onDeleteMany={canWriteKb ? handleDeleteMany : undefined}
           showGolden={showGolden}
-          onGenerateGolden={showGolden ? handleGenerate : undefined}
+          onGenerateGolden={showGolden && canWriteKb ? handleGenerate : undefined}
           generatingDocId={genDocId}
           goldenGenPreview={
             showGolden ? { llmLabel: goldenLlmLabel, maxQ: goldenMaxQ } : undefined

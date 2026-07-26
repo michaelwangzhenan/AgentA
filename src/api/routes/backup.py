@@ -21,7 +21,8 @@ from fastapi.responses import FileResponse
 
 import src.config as config
 import src.services.runtime_backup as rb
-from src.api.deps import require_admin
+from src.api.deps import get_current_user
+from src.api.permissions import require_write
 from src.api.schemas.backup import (
     BackupListResponse,
     BackupSnapshot,
@@ -34,7 +35,11 @@ logger = logging.getLogger(__name__)
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _NAME_RE = re.compile(r"^agenta-backup-\d{8}-\d{6}\.zip$")
 
-router = APIRouter(prefix="/admin/backup", tags=["backup"], dependencies=[Depends(require_admin)])
+router = APIRouter(
+    prefix="/admin/backup",
+    tags=["backup"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 def _backup_dir() -> Path:
@@ -63,7 +68,10 @@ def _to_snapshot(s: dict) -> BackupSnapshot:
 
 
 @router.post("/create", response_model=BackupSnapshot)
-def create_backup(req: CreateBackupRequest) -> BackupSnapshot:
+def create_backup(
+    req: CreateBackupRequest,
+    _: dict = Depends(require_write("backup")),
+) -> BackupSnapshot:
     cats = set(req.categories)
     invalid = cats - set(rb.ALL_CATEGORIES)
     if invalid:
@@ -83,7 +91,10 @@ def list_backups() -> BackupListResponse:
 
 
 @router.get("/download/{name}")
-def download_backup(name: str) -> FileResponse:
+def download_backup(
+    name: str,
+    _: dict = Depends(require_write("backup")),
+) -> FileResponse:
     p = _safe_zip_path(name)
     if not p.is_file():
         raise HTTPException(status_code=404, detail="备份不存在")
@@ -91,7 +102,10 @@ def download_backup(name: str) -> FileResponse:
 
 
 @router.delete("/{name}")
-def delete_backup(name: str) -> dict:
+def delete_backup(
+    name: str,
+    _: dict = Depends(require_write("backup")),
+) -> dict:
     p = _safe_zip_path(name)
     if not p.is_file():
         raise HTTPException(status_code=404, detail="备份不存在")
@@ -100,7 +114,10 @@ def delete_backup(name: str) -> dict:
 
 
 @router.post("/restore", response_model=RestoreResponse)
-async def restore_backup(file: UploadFile = File(...)) -> RestoreResponse:
+async def restore_backup(
+    file: UploadFile = File(...),
+    _: dict = Depends(require_write("backup")),
+) -> RestoreResponse:
     if not (file.filename or "").endswith(".zip"):
         raise HTTPException(status_code=400, detail="请上传 .zip 备份文件")
 

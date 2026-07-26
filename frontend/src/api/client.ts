@@ -1,4 +1,5 @@
 import { fetchEventSource } from '@microsoft/fetch-event-source'
+import { toast } from 'sonner'
 import type {
   AgentStreamEvent,
   ChatMode,
@@ -137,17 +138,25 @@ function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
   return fetch(input, { credentials: 'include', ...init })
 }
 
+let _lastWritePermToastAt = 0
+
 async function _ensureOk(res: Response): Promise<void> {
   if (res.ok) return
   if (res.status === 401) _onUnauthorized?.()
-  // 后端给了友好 detail（如"用户名或密码错误"）就直接用，不加 "HTTP 401:" 前缀；
-  // 没 detail 时才回落到 HTTP 状态码。
   let detail = `HTTP ${res.status}`
   try {
     const data = (await res.json()) as { detail?: string }
     if (data?.detail) detail = data.detail
   } catch {
     // 响应不是 JSON
+  }
+  if (res.status === 403 && detail === '当前账号无修改权限') {
+    // 批量写操作并发 403 时只弹一次，避免与业务层失败汇总重复
+    const now = Date.now()
+    if (now - _lastWritePermToastAt > 2000) {
+      _lastWritePermToastAt = now
+      toast.error(detail)
+    }
   }
   throw new Error(detail)
 }

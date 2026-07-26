@@ -11,7 +11,8 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 import src.config as _cfg
-from src.api.deps import get_current_user, require_admin
+from src.api.deps import get_current_user
+from src.api.permissions import require_write
 from src.llm import model_router
 
 router = APIRouter(prefix="/routing", tags=["routing"])
@@ -69,7 +70,7 @@ def get_pool(_: dict = Depends(get_current_user)) -> RoutingPoolResponse:
 
 
 @router.put("/pool", response_model=RoutingPoolResponse)
-def set_pool(req: RoutingPoolUpdate, _: dict = Depends(require_admin)) -> RoutingPoolResponse:
+def set_pool(req: RoutingPoolUpdate, _: dict = Depends(require_write("config"))) -> RoutingPoolResponse:
     """保存候选池（仅 admin）；只接受已知模型 id。"""
     model_router.set_pool_config(req.model_ids)
     return _build_response()

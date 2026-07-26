@@ -20,6 +20,10 @@ class UserInfo(BaseModel):
     role: str
     created_at: str = ""
     can_manage_users: bool = False
+    capabilities: list[str] = Field(
+        default_factory=list,
+        description="当前账号可写的 scope 列表",
+    )
 
 
 class CreateUserRequest(BaseModel):
@@ -27,13 +31,13 @@ class CreateUserRequest(BaseModel):
 
     username: str = Field(..., min_length=1, max_length=64, description="用户名")
     password: str = Field(..., min_length=1, max_length=128, description="初始密码")
-    role: str = Field(default="user", description="角色：user 或 admin")
+    role: str = Field(default="user", description="角色：readonly / user / admin")
 
 
 class UpdateUserRoleRequest(BaseModel):
     """主账号改用户角色。"""
 
-    role: str = Field(..., description="角色：user 或 admin")
+    role: str = Field(..., description="角色：readonly / user / admin")
 
 
 class AuthResponse(BaseModel):

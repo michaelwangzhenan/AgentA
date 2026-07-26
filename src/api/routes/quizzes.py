@@ -10,6 +10,7 @@ Quiz 端点：测验集查询与页面写操作（答题批改 / 归档；与 LL
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.api.deps import get_current_user, get_quiz_store
+from src.api.permissions import require_write
 from src.api.schemas.quiz import (
     QuizListResponse,
     QuizSet,
@@ -53,7 +54,7 @@ def submit_quiz(
     quiz_set_id: int,
     req: SubmitQuizRequest,
     store: QuizStore = Depends(get_quiz_store),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("memory")),
 ) -> QuizSet:
     """提交答案批改：选择题本地字符串比对，简答走 LLM-judge；落库后返回带分数的 quiz。"""
     # 复用 tools.py 的批改 helper，避免重复实现两套评分逻辑（详 §2.5 决策）。
@@ -105,7 +106,7 @@ def submit_quiz(
 def archive_quiz(
     quiz_set_id: int,
     store: QuizStore = Depends(get_quiz_store),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("memory")),
 ) -> QuizSet:
     """归档 quiz（软删除，不再出现在默认列表）。"""
     if not store.archive_quiz_set(quiz_set_id, user_id=user["id"]):

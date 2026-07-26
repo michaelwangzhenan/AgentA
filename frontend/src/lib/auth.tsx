@@ -14,13 +14,16 @@ import {
   logout as apiLogout,
   setUnauthorizedHandler,
 } from '@/api/client'
-import type { UserInfo } from '@/types/auth'
+import type { PermissionScope, UserInfo } from '@/types/auth'
 
 type AuthState = {
   user: UserInfo | null
   loading: boolean
   isAdmin: boolean
+  isReadonly: boolean
   isSuperAdmin: boolean
+  canRead: (scope: PermissionScope) => boolean
+  canWrite: (scope: PermissionScope) => boolean
   login: (username: string, password: string) => Promise<void>
   logout: () => Promise<void>
   refreshUser: () => Promise<void>
@@ -47,7 +50,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // 任意请求拿到 401（登录态过期）→ 清空用户，界面回落到登录页
   useEffect(() => {
     setUnauthorizedHandler(() => setUser(null))
     return () => setUnauthorizedHandler(null)
@@ -65,22 +67,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // 个人信息改动后（如改用户名）重新拉一次 /me，刷新全局用户态
   const refreshUser = useCallback(async () => {
     setUser(await getMe())
   }, [])
+
+  const caps = useMemo(() => new Set(user?.capabilities ?? []), [user?.capabilities])
+
+  const canWrite = useCallback(
+    (scope: PermissionScope) => caps.has(scope),
+    [caps],
+  )
+
+  const canRead = useCallback(
+    (scope: PermissionScope) => {
+      if (scope === 'users') return user?.can_manage_users === true
+      if (scope === 'account') return user?.role !== 'readonly'
+      return true
+    },
+    [user],
+  )
 
   const value = useMemo<AuthState>(
     () => ({
       user,
       loading,
       isAdmin: user?.role === 'admin',
+      isReadonly: user?.role === 'readonly',
       isSuperAdmin: user?.can_manage_users === true,
+      canRead,
+      canWrite,
       login,
       logout,
       refreshUser,
     }),
-    [user, loading, login, logout, refreshUser],
+    [user, loading, canRead, canWrite, login, logout, refreshUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

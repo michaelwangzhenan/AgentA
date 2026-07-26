@@ -33,7 +33,7 @@ from src.api.schemas.auth import (
     UserListResponse,
 )
 from src.api.user_info import to_user_info
-from src.stores.user_store import ROLE_ADMIN, ROLE_USER, UserStore
+from src.stores.user_store import ROLE_ADMIN, ROLE_READONLY, ROLE_USER, UserStore
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ def create_user(
     store: UserStore = Depends(get_user_store),
 ) -> UserInfo:
     """新建用户（仅主账号）；成功不下发 cookie。"""
-    role = req.role if req.role in (ROLE_USER, ROLE_ADMIN) else ROLE_USER
+    role = req.role if req.role in (ROLE_READONLY, ROLE_USER, ROLE_ADMIN) else ROLE_USER
     user = store.create_user(req.username, req.password, role=role)
     if user is None:
         raise HTTPException(
@@ -97,7 +97,7 @@ def update_user_role(
     store: UserStore = Depends(get_user_store),
 ) -> UserInfo:
     """改用户角色（仅主账号）；主账号本身不可改。"""
-    if req.role not in (ROLE_USER, ROLE_ADMIN):
+    if req.role not in (ROLE_READONLY, ROLE_USER, ROLE_ADMIN):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效角色")
     target = store.get_user_by_id(user_id)
     if target is None:

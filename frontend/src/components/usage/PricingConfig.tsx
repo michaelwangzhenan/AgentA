@@ -3,12 +3,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/lib/toast'
+import { useWriteScope } from '@/lib/permissions'
 import { getPricing, putPricing } from '@/api/client'
 import type { PricingItem } from '@/types/usage'
 
 type Draft = Record<string, { input: string; output: string }>
 
 export function PricingConfig() {
+  const { allowed: canWriteUsage, tip: usageTip } = useWriteScope('usage')
   const [items, setItems] = useState<PricingItem[]>([])
   const [currency, setCurrency] = useState('¥')
   const [draft, setDraft] = useState<Draft>({})
@@ -65,6 +67,7 @@ export function PricingConfig() {
   }, [items, draft])
 
   const setField = (modelId: string, field: 'input' | 'output', value: string) => {
+    if (!canWriteUsage) return
     setDraft((prev) => ({ ...prev, [modelId]: { ...prev[modelId], [field]: value } }))
   }
 
@@ -94,7 +97,7 @@ export function PricingConfig() {
           单价为每 100 万（1M）token 的价格，币种 {currency}。默认值为内置参考价（2026-06
           快照，国产厂商按 ¥ 折算）；修改后覆盖默认值，用于成本估算。
         </p>
-        <Button size="sm" disabled={saving || changed.length === 0} onClick={save}>
+        <Button size="sm" disabled={!canWriteUsage || saving || changed.length === 0} title={canWriteUsage ? undefined : usageTip} onClick={save}>
           {changed.length > 0 ? `保存（${changed.length}）` : '保存'}
         </Button>
       </div>
@@ -138,6 +141,8 @@ export function PricingConfig() {
                           step="0.01"
                           value={d.input}
                           onChange={(e) => setField(it.model_id, 'input', e.target.value)}
+                          readOnly={!canWriteUsage}
+                          disabled={!canWriteUsage}
                           className="h-7 w-24"
                         />
                       </div>
@@ -151,6 +156,8 @@ export function PricingConfig() {
                           step="0.01"
                           value={d.output}
                           onChange={(e) => setField(it.model_id, 'output', e.target.value)}
+                          readOnly={!canWriteUsage}
+                          disabled={!canWriteUsage}
                           className="h-7 w-24"
                         />
                       </div>

@@ -37,8 +37,8 @@ from src.api.deps import (
     get_golden_store,
     get_security_event_store,
     get_trace_store,
-    require_admin,
 )
+from src.api.permissions import require_write
 from src.api.schemas.eval import (
     EvalMetric,
     EvalRunRequest,
@@ -116,7 +116,7 @@ def list_golden(
     query_contains: str | None = Query(None, description="按问题子串过滤"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(get_current_user),
     store: GoldenStore = Depends(get_golden_store),
 ) -> GoldenList:
     """列出 RAG golden（可按状态 / 来源 / 文档 / 来源文件 / 问题过滤）+ 各状态计数。"""
@@ -133,7 +133,7 @@ def list_golden(
 
 @router.get("/golden/export")
 def export_golden(
-    _: dict = Depends(require_admin),
+    _: dict = Depends(get_current_user),
     store: GoldenStore = Depends(get_golden_store),
 ) -> Response:
     """导出全部 golden 为可下载的 json 文件。"""
@@ -165,7 +165,7 @@ def golden_gen_options(_: dict = Depends(get_current_user)) -> GoldenGenOptionsR
 @router.post("/golden/generate", response_model=GoldenGenerateResponse)
 def generate_golden(
     req: GoldenGenerateRequest,
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_write("quality")),
     store: GoldenStore = Depends(get_golden_store),
 ) -> GoldenGenerateResponse:
     """为某已入库文档手动生成 golden 候选：定位正文来源 → LLM 出题 → pending。
@@ -217,7 +217,7 @@ def generate_golden(
 @router.post("/golden", response_model=GoldenItem)
 def create_golden(
     req: GoldenCreateRequest,
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_write("quality")),
     store: GoldenStore = Depends(get_golden_store),
 ) -> GoldenItem:
     """人工新增一条 golden（来源 manual、状态 approved）。"""
@@ -240,7 +240,7 @@ def create_golden(
 def update_golden(
     golden_id: int,
     req: GoldenUpdateRequest,
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_write("quality")),
     store: GoldenStore = Depends(get_golden_store),
 ) -> GoldenItem:
     """局部更新一条 golden（含审核改状态）。"""
@@ -259,7 +259,7 @@ def update_golden(
 @router.delete("/golden/{golden_id}")
 def delete_golden(
     golden_id: int,
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_write("quality")),
     store: GoldenStore = Depends(get_golden_store),
 ) -> dict:
     """删一条 golden。幂等：不存在返回 deleted=False。"""
@@ -268,7 +268,7 @@ def delete_golden(
 
 @router.post("/golden/import")
 def import_golden(
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_write("quality")),
     store: GoldenStore = Depends(get_golden_store),
 ) -> dict:
     """从 tools/rag_eval/golden.json 一键导入（幂等，按 query 去重）。"""
@@ -383,7 +383,7 @@ def _report_time(name: str, mtime: float) -> int:
 
 
 @router.get("/reports", response_model=ReportList)
-def list_reports(_: dict = Depends(require_admin)) -> ReportList:
+def list_reports(_: dict = Depends(get_current_user)) -> ReportList:
     """递归列出 tools/reports/ 下全部 Markdown 报告（按生成时间倒序）。name = 相对路径。
 
     时间取文件名里的 YYYYMMDD-HHMMSS（无则回落 mtime），避免 git 检出后 mtime
@@ -409,7 +409,7 @@ def list_reports(_: dict = Depends(require_admin)) -> ReportList:
 @router.get("/reports/content", response_model=ReportContent)
 def report_content(
     name: str = Query(..., description="相对 tools/reports 的路径，如 security/xxx.md"),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(get_current_user),
 ) -> ReportContent:
     """读取单份报告内容（路径受限于 tools/reports 目录，防目录穿越）。"""
     if not name or ".." in name or name.startswith(("/", "\\")) or "\\" in name:
@@ -450,7 +450,7 @@ def _load_sidecar(fp: Path) -> dict | None:
 def security_runtime_summary(
     range: str = Query("30d"),
     limit: int = Query(50, ge=1, le=200),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(get_current_user),
     store: SecurityEventStore = Depends(get_security_event_store),
 ) -> SecurityRuntimeSummary:
     """线上真实拦截统计：区间总数 + 分类型计数 + 最近若干条（全员视角，admin）。"""
@@ -478,7 +478,7 @@ def security_runtime_events(
     desc: bool = Query(True),
     limit: int = Query(10, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(get_current_user),
     store: SecurityEventStore = Depends(get_security_event_store),
 ) -> SecurityEventPage:
     """线上拦截事件分页查询：按时间 / 类型 / 用户筛选 + 排序 + 分页（全员视角，admin）。"""
@@ -610,7 +610,7 @@ def _build_eval_args(req: EvalRunRequest) -> list[str]:
 
 
 @router.post("/run", response_model=EvalRunStatus)
-def run_eval(req: EvalRunRequest, _: dict = Depends(require_admin)) -> EvalRunStatus:
+def run_eval(req: EvalRunRequest, _: dict = Depends(require_write("quality"))) -> EvalRunStatus:
     """触发一个离线评估子进程；已有任务在跑返回 409。"""
     args = _build_eval_args(req)
     try:
@@ -623,13 +623,13 @@ def run_eval(req: EvalRunRequest, _: dict = Depends(require_admin)) -> EvalRunSt
 
 
 @router.get("/run/status", response_model=EvalRunStatus)
-def run_status(_: dict = Depends(require_admin)) -> EvalRunStatus:
+def run_status(_: dict = Depends(get_current_user)) -> EvalRunStatus:
     """当前评估任务状态 + 日志末尾（前端轮询用）。"""
     return EvalRunStatus(**eval_runner.status())
 
 
 @router.post("/run/cancel", response_model=EvalRunStatus)
-def run_cancel(_: dict = Depends(require_admin)) -> EvalRunStatus:
+def run_cancel(_: dict = Depends(require_write("quality"))) -> EvalRunStatus:
     """取消当前评估任务（杀进程树）。"""
     return EvalRunStatus(**eval_runner.cancel())
 
@@ -962,7 +962,7 @@ _SUMMARY_BUILDERS = {
 def eval_summary(
     task: str = Query(...),
     report: str | None = Query(None, description="指定历史报告的 .md 名；空=最新一次"),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(get_current_user),
 ) -> EvalSummary:
     """某 eval 的通用摘要卡片：给 report 则读该报告快照，否则最新。未登记 / 无结果 → available=False。"""
     builder = _SUMMARY_BUILDERS.get(task)

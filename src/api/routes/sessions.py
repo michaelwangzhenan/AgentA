@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 import src.config as config
 
 from src.api.deps import get_session_store, get_current_user
+from src.api.permissions import require_write
 from src.api.schemas.session import (
     SessionCreateRequest,
     SessionDeleteResponse,
@@ -73,7 +74,7 @@ def list_sessions(
 def create_session(
     req: SessionCreateRequest | None = None,
     store: SessionStore = Depends(get_session_store),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("chat")),
 ) -> SessionInfo:
     """新建空 session（归属当前用户）。后端生成 uuid，返回完整元数据。"""
     session_id = str(uuid.uuid4())
@@ -92,7 +93,7 @@ def rename_session(
     session_id: str,
     req: SessionRenameRequest,
     store: SessionStore = Depends(get_session_store),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("chat")),
 ) -> SessionInfo:
     """重命名 session。404 if 不存在或非本人所有。"""
     _require_owned(store, session_id, user["id"])
@@ -109,7 +110,7 @@ def rename_session(
 def delete_session(
     session_id: str,
     store: SessionStore = Depends(get_session_store),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("chat")),
 ) -> SessionDeleteResponse:
     """硬删 session（级联清 messages + sessions 表）；非本人所有返回 deleted=False。"""
     if not store.owns_session(session_id, user["id"]):
@@ -133,7 +134,7 @@ def truncate_session(
     session_id: str,
     req: SessionTruncateRequest,
     store: SessionStore = Depends(get_session_store),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("chat")),
 ) -> SessionTruncateResponse:
     """从第 N 条 user 消息起截断 session（编辑重发 / 重新生成的前置步骤）。
 

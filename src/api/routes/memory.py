@@ -11,6 +11,7 @@ User Memory 端点：跨 session 用户长期记忆的增删改查。
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.api.deps import get_current_user, get_user_memory_store
+from src.api.permissions import require_write
 from src.api.schemas.memory import (
     MemoryClearResponse,
     MemoryCreateRequest,
@@ -49,7 +50,7 @@ def list_memories(
 def create_memory(
     req: MemoryCreateRequest,
     store: UserMemoryStore = Depends(_require_store),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("memory")),
 ) -> MemoryItem:
     new_id = store.add(req.text, source=req.source, user_id=user["id"])
     if new_id is None:
@@ -71,7 +72,7 @@ def patch_memory(
     memory_id: int,
     req: MemoryPatchRequest,
     store: UserMemoryStore = Depends(_require_store),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("memory")),
 ) -> MemoryPatchResponse:
     updated = store.update_text(memory_id, req.text, user_id=user["id"])
     if not updated:
@@ -86,7 +87,7 @@ def patch_memory(
 def delete_memory(
     memory_id: int,
     store: UserMemoryStore = Depends(_require_store),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("memory")),
 ) -> MemoryDeleteResponse:
     return MemoryDeleteResponse(deleted=store.delete(memory_id, user_id=user["id"]))
 
@@ -94,6 +95,6 @@ def delete_memory(
 @router.delete("", response_model=MemoryClearResponse)
 def clear_memories(
     store: UserMemoryStore = Depends(_require_store),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("memory")),
 ) -> MemoryClearResponse:
     return MemoryClearResponse(cleared=store.clear(user_id=user["id"]))

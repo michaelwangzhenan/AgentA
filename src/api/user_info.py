@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.api.deps import is_super_admin_user
+from src.api.permissions import capabilities_for_user
 from src.api.schemas.auth import UserInfo
 
 
@@ -15,4 +16,5 @@ def to_user_info(user: dict[str, Any]) -> UserInfo:
         role=user["role"],
         created_at=user.get("created_at") or "",
         can_manage_users=is_super_admin_user(user),
+        capabilities=capabilities_for_user(user),
     )

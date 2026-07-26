@@ -32,7 +32,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 import src.config as _cfg
-from src.api.deps import get_current_user, get_usage_store, get_user_store, require_admin
+from src.api.deps import get_current_user, get_usage_store, get_user_store
+from src.api.permissions import require_write
 from src.api.schemas.usage import (
     PricingItem,
     PricingResponse,
@@ -340,7 +341,7 @@ def _username_map(users: UserStore) -> dict[int, str]:
 @router.get("/admin/summary", response_model=UsageSummary)
 def admin_summary(
     range: str = Query("30d"),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(get_current_user),
     store: UsageStore = Depends(get_usage_store),
 ) -> UsageSummary:
     start, end = _resolve_range(range)
@@ -353,7 +354,7 @@ def admin_summary(
 def admin_series(
     range: str = Query("30d"),
     group_by: str = Query("model"),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(get_current_user),
     store: UsageStore = Depends(get_usage_store),
     users: UserStore = Depends(get_user_store),
 ) -> UsageSeries:
@@ -368,7 +369,7 @@ def admin_series(
 @router.get("/admin/users", response_model=UserUsageList)
 def admin_users(
     range: str = Query("30d"),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(get_current_user),
     store: UsageStore = Depends(get_usage_store),
     users: UserStore = Depends(get_user_store),
 ) -> UserUsageList:
@@ -405,7 +406,7 @@ def admin_events(
     model_id: str | None = Query(None),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(get_current_user),
     store: UsageStore = Depends(get_usage_store),
     users: UserStore = Depends(get_user_store),
 ) -> UsageEvents:
@@ -421,7 +422,7 @@ def admin_events_csv(
     range: str = Query("30d"),
     user_id: int | None = Query(None),
     model_id: str | None = Query(None),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(get_current_user),
     store: UsageStore = Depends(get_usage_store),
     users: UserStore = Depends(get_user_store),
 ) -> StreamingResponse:
@@ -462,7 +463,7 @@ def get_pricing(
 @router.put("/pricing", response_model=PricingResponse)
 def put_pricing(
     req: PricingUpdateRequest,
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_write("usage")),
     store: UsageStore = Depends(get_usage_store),
 ) -> PricingResponse:
     """保存单价覆盖（仅 admin）。只接受已知模型 id。"""
@@ -564,7 +565,7 @@ def my_savings_series(
 @router.get("/admin/savings", response_model=SavingsSummary)
 def admin_savings(
     range: str = Query("30d"),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(get_current_user),
     store: UsageStore = Depends(get_usage_store),
 ) -> SavingsSummary:
     start, end = _resolve_range(range)
@@ -576,7 +577,7 @@ def admin_savings(
 @router.get("/admin/savings/series", response_model=SavingsSeries)
 def admin_savings_series(
     range: str = Query("30d"),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(get_current_user),
     store: UsageStore = Depends(get_usage_store),
 ) -> SavingsSeries:
     start, end = _resolve_range(range)

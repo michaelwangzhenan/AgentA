@@ -72,7 +72,7 @@ export function ConfigField(props: ConfigFieldProps) {
               size="icon-xs"
               variant="ghost"
               onClick={onReset}
-              disabled={item.source !== 'override'}
+              disabled={disabled || item.source !== 'override'}
               title={item.source === 'override' ? '重置为默认值' : '已是默认值'}
             >
               <RotateCcw />

@@ -11,7 +11,8 @@ Config 编辑面板端点：读写 .agenta/config_overrides.json 中的运行时
 from fastapi import APIRouter, Depends, HTTPException, status
 
 import src.config as _cfg
-from src.api.deps import get_current_user, require_admin
+from src.api.deps import get_current_user
+from src.api.permissions import require_write
 from src.api.runtime import config_hooks, config_overrides
 from src.api.runtime.config_meta import (
     GROUP_LABELS,
@@ -100,7 +101,7 @@ def get_config(_: dict = Depends(get_current_user)) -> ConfigResponse:
 
 @router.patch("/{key}", response_model=ConfigItemResponse)
 def patch_config(
-    key: str, req: ConfigPatchRequest, _: dict = Depends(require_admin)
+    key: str, req: ConfigPatchRequest, _: dict = Depends(require_write("config"))
 ) -> ConfigItemResponse:
     item = get_item(key)
     if item is None or not item.editable:
@@ -122,7 +123,7 @@ def patch_config(
 
 
 @router.delete("/{key}", response_model=ConfigItemResponse)
-def reset_config(key: str, _: dict = Depends(require_admin)) -> ConfigItemResponse:
+def reset_config(key: str, _: dict = Depends(require_write("config"))) -> ConfigItemResponse:
     item = get_item(key)
     if item is None or not item.editable:
         raise HTTPException(
@@ -136,7 +137,7 @@ def reset_config(key: str, _: dict = Depends(require_admin)) -> ConfigItemRespon
 
 
 @router.post("/reload", response_model=ConfigReloadResponse)
-def reload_config(_: dict = Depends(require_admin)) -> ConfigReloadResponse:
+def reload_config(_: dict = Depends(require_write("config"))) -> ConfigReloadResponse:
     """从磁盘 overrides 文件重新加载，同步到 _cfg 并触发变化项的 hook。"""
     changed = config_overrides.reload_from_file()
     return ConfigReloadResponse(

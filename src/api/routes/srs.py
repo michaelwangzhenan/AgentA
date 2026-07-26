@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.agent.core.srs_scheduler import card_state_from_dict, parse_rating, schedule_review
 from src.api.deps import get_current_user, get_srs_store
+from src.api.permissions import require_write
 from src.api.schemas.srs import (
     CreateCardRequest,
     ReviewCardRequest,
@@ -71,7 +72,7 @@ def get_card(
 def create_card(
     req: CreateCardRequest,
     store: SRSStore = Depends(get_srs_store),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("memory")),
 ) -> SRSCard:
     """手动新建一张复习卡（正面 front / 背面 back）。新卡立即 due。"""
     try:
@@ -89,7 +90,7 @@ def review_card(
     card_id: int,
     req: ReviewCardRequest,
     store: SRSStore = Depends(get_srs_store),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("memory")),
 ) -> SRSCard:
     """4 档评分（again / hard / good / easy）→ 跑 SM-2 → 写回下次复习时间。"""
     card = store.get_card(card_id, user_id=user["id"])
@@ -125,7 +126,7 @@ def review_card(
 def suspend_card(
     card_id: int,
     store: SRSStore = Depends(get_srs_store),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("memory")),
 ) -> SRSCard:
     """暂停卡片（不再出现在 due 队列，可恢复）。"""
     if not store.suspend(card_id, user_id=user["id"]):
@@ -140,7 +141,7 @@ def suspend_card(
 def resume_card(
     card_id: int,
     store: SRSStore = Depends(get_srs_store),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("memory")),
 ) -> SRSCard:
     """从 suspended 恢复为 active。"""
     if not store.resume(card_id, user_id=user["id"]):
@@ -155,7 +156,7 @@ def resume_card(
 def archive_card(
     card_id: int,
     store: SRSStore = Depends(get_srs_store),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("memory")),
 ) -> SRSCard:
     """归档卡片（软删除，不再出现在默认列表）。"""
     if not store.archive(card_id, user_id=user["id"]):

@@ -20,7 +20,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import StreamingResponse
 
 import src.config as config
-from src.api.deps import ROLE_ADMIN, get_current_user
+from src.api.deps import get_current_user
+from src.api.permissions import can_write, require_write
 from src.api.schemas.kb import (
     KBCancelUploadResponse,
     KBClearAllResponse,
@@ -335,7 +336,7 @@ async def _ingest_event_stream(
 @router.post("/upload/cancel", response_model=KBCancelUploadResponse)
 def cancel_upload(
     ingest_id: str = Form(...),
-    _: dict = Depends(get_current_user),
+    _: dict = Depends(require_write("kb")),
 ) -> KBCancelUploadResponse:
     """取消进行中的单文件入库（与 upload 表单的 ingest_id 对应）。"""
     ingest_id = ingest_id.strip()
@@ -356,7 +357,7 @@ async def upload_document(
     relpath: str = Form(""),
     golden_llm: str | None = Form(None),
     golden_max_q: int | None = Form(None),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_write("kb")),
 ) -> StreamingResponse:
     """上传一个文件并以 SSE 流式回传入库进度 + 最终结果。
 
@@ -434,7 +435,7 @@ async def upload_document(
         effective_golden_llm,
     )
 
-    if user.get("role") == ROLE_ADMIN:
+    if can_write(user.get("role") or "", "kb"):
         llm_choice = effective_golden_llm(golden_llm)
         max_q = clamp_golden_max_q(golden_max_q)
     else:
@@ -456,7 +457,7 @@ async def upload_document(
 def delete_document(
     doc_id: str,
     model: str | None = Query(None, description="库别名 en/zh/m3/api-m3；缺省用当前默认"),
-    _: dict = Depends(get_current_user),
+    _: dict = Depends(require_write("kb")),
 ) -> KBDeleteResponse:
     """从指定库删除单文档（Chroma + BM25 + web_uploads 物理文件 + 关联 golden，一并清）。
 
@@ -480,7 +481,7 @@ def delete_document(
 @router.delete("/documents", response_model=KBClearAllResponse)
 def clear_all_documents(
     model: str | None = Query(None, description="库别名 en/zh/m3/api-m3；缺省用当前默认"),
-    _: dict = Depends(get_current_user),
+    _: dict = Depends(require_write("kb")),
 ) -> KBClearAllResponse:
     """清空指定库（Chroma collection + BM25 + web_uploads 物理文件）。
 

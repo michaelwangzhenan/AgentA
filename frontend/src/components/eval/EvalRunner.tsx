@@ -25,6 +25,8 @@ import { Button } from '@/components/ui/button'
 import { MarkdownPreview } from '@/components/ui/markdown-preview'
 import { cn } from '@/lib/utils'
 import { toast } from '@/lib/toast'
+import { useAuth } from '@/lib/auth'
+import { isWritePermissionDenied, writeDeniedMessage } from '@/lib/permissions'
 
 // 一个 eval 子页的 UI 配置（选项 / 是否用 LLM / 报告前缀）
 export type EvalOption =
@@ -91,6 +93,10 @@ function fmtTimeStr(s: string): string {
 }
 
 export function EvalRunner({ task }: { task: EvalTaskConfig }) {
+  const { canWrite, user } = useAuth()
+  const canWriteQuality = canWrite('quality')
+  const qualityWriteTip = writeDeniedMessage('quality', user?.role)
+
   const [status, setStatus] = useState<EvalRunStatus | null>(null)
   const [summary, setSummary] = useState<EvalSummary | null>(null)
   const [reports, setReports] = useState<ReportItem[]>([])
@@ -219,7 +225,7 @@ export function EvalRunner({ task }: { task: EvalTaskConfig }) {
       prevState.current = st.state
       toast.success('已开始评估')
     } catch (e) {
-      toast.error((e as Error).message)
+      if (!isWritePermissionDenied(e)) toast.error((e as Error).message)
     } finally {
       setBusy(false)
     }
@@ -230,7 +236,7 @@ export function EvalRunner({ task }: { task: EvalTaskConfig }) {
       setStatus(await cancelEval())
       toast.info('已取消')
     } catch (e) {
-      toast.error((e as Error).message)
+      if (!isWritePermissionDenied(e)) toast.error((e as Error).message)
     }
   }
 
@@ -390,7 +396,7 @@ export function EvalRunner({ task }: { task: EvalTaskConfig }) {
         {/* 操作按钮单独成行，右对齐（不跟控件挤同一行） */}
         <div className="flex items-center justify-end gap-2">
           {runningThis ? (
-            <Button size="sm" variant="destructive" className="h-8 gap-1" onClick={stop}>
+            <Button size="sm" variant="destructive" className="h-8 gap-1" onClick={stop} disabled={!canWriteQuality} title={canWriteQuality ? undefined : qualityWriteTip}>
               <Square className="h-3.5 w-3.5" />
               取消
             </Button>
@@ -398,7 +404,8 @@ export function EvalRunner({ task }: { task: EvalTaskConfig }) {
             <Button
               size="sm"
               className="h-8 gap-1"
-              disabled={busy || runningOther}
+              disabled={busy || runningOther || !canWriteQuality}
+              title={canWriteQuality ? undefined : qualityWriteTip}
               onClick={start}
             >
               <Play className="h-3.5 w-3.5" />
