@@ -11,8 +11,8 @@ const FEATURES = [
 export function PublicHero() {
   return (
     <div className="flex flex-col justify-center">
-      <div className="flex items-center gap-3">
-        <img src={logoUrl} alt="AgentA logo" className="h-12 w-12 lg:h-14 lg:w-14" />
+      <div className="flex items-center gap-2">
+        <img src={logoUrl} alt="AgentA logo" className="h-16 w-16 lg:h-28 lg:w-28" />
         <div>
           <h1 className="text-2xl font-semibold tracking-tight lg:text-3xl">AgentA</h1>
           <p className="text-sm text-muted-foreground">个人 AI 学习助手</p>

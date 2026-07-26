@@ -120,7 +120,7 @@ function DetailHint({ item }: { item: ConfigItemView }) {
       </span>
       <span
         role="tooltip"
-        className="pointer-events-none absolute left-0 top-full z-50 mt-1 hidden w-max max-w-[380px] whitespace-pre-line wrap-break-word rounded-md border border-border bg-popover px-2.5 py-1.5 text-xs leading-relaxed text-popover-foreground shadow-md group-hover/hint:block group-focus-within/hint:block"
+        className="pointer-events-none absolute left-0 top-full z-50 mt-1 hidden w-max max-w-95 whitespace-pre-line wrap-break-word rounded-md border border-border bg-popover px-2.5 py-1.5 text-xs leading-relaxed text-popover-foreground shadow-md group-hover/hint:block group-focus-within/hint:block"
       >
         {lines.join('\n')}
       </span>
@@ -262,7 +262,7 @@ function NumberInput({
         lastValueRef.current = n
         onChange(n)
       }}
-      className="max-w-[160px]"
+      className="max-w-40"
     />
   )
 }
@@ -317,7 +317,7 @@ function NativeSelect({
       id={id}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="flex h-9 w-full max-w-[260px] rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring scheme-light dark:scheme-dark"
+      className="flex h-9 w-full max-w-65 rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring scheme-light dark:scheme-dark"
     >
       {options.map((opt) => (
         <option key={opt} value={opt}>

@@ -69,7 +69,7 @@ export function RulesView() {
         disabled={loading || saving || !canWriteMemory}
         readOnly={!canWriteMemory}
         placeholder={loading ? '加载中…' : '在此撰写你的个人 rules（Markdown）'}
-        className="min-h-[400px] w-full flex-1 resize-y rounded-md border border-border bg-card p-3 font-mono text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-ring"
+        className="min-h-96 w-full flex-1 resize-y rounded-md border border-border bg-card p-3 font-mono text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-ring"
         spellCheck={false}
       />
 

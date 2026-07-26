@@ -15,10 +15,10 @@ type StaticPageShellProps = {
 
 function PublicBrandHeader() {
   return (
-    <div className="flex items-center gap-3 border-b border-border pb-6">
-      <img src={logoUrl} alt="AgentA logo" className="h-10 w-10" />
+    <div className="flex items-center gap-2 border-b border-border pb-4">
+      <img src={logoUrl} alt="AgentA logo" className="h-14 w-14 sm:h-28 sm:w-28" />
       <div>
-        <p className="text-lg font-semibold tracking-tight">AgentA</p>
+        <p className="text-xl font-semibold tracking-tight sm:text-3xl">AgentA</p>
         <p className="text-sm text-muted-foreground">个人 AI 学习助手</p>
       </div>
     </div>

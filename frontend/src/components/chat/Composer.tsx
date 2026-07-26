@@ -416,7 +416,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                   <Paperclip className="h-4 w-4 text-muted-foreground" />
                 )}
                 <div className="flex flex-col">
-                  <span className="max-w-[140px] truncate text-xs font-medium">
+                  <span className="max-w-35 truncate text-xs font-medium">
                     {a.file.name}
                   </span>
                   <span className="text-[10px] text-muted-foreground">
@@ -451,7 +451,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         >
           <Textarea
             ref={textareaRef}
-            className="max-h-[200px] min-h-11 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
+            className="max-h-50 min-h-11 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
             placeholder={
               canSendChat
                 ? '输入消息…（Enter 发送，Shift+Enter 换行，/ 调用 skill）'

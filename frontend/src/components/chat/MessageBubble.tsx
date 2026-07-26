@@ -172,7 +172,7 @@ function UserBubble({
       {attachments.length > 0 ? <AttachmentCards items={attachments} /> : null}
       {message.content ? (
         <div className={cn(
-          'rounded-2xl bg-user-bubble px-4 py-2 text-sm break-words whitespace-pre-wrap text-user-bubble-foreground',
+          'rounded-2xl bg-user-bubble px-4 py-2 text-sm wrap-break-word whitespace-pre-wrap text-user-bubble-foreground',
           cb.compact ? 'max-w-[92%]' : 'max-w-[80%]',
         )}>
           {message.content}
@@ -315,7 +315,7 @@ function AssistantBubble({
         )}
 
         {body ? (
-          <div className="rounded-2xl bg-muted px-4 py-2 text-[15px] text-foreground break-words">
+          <div className="rounded-2xl bg-muted px-4 py-2 text-[15px] text-foreground wrap-break-word">
             {message.streaming ? (
               <div className="whitespace-pre-wrap">{body}</div>
             ) : (
@@ -419,7 +419,7 @@ function AssistantBubble({
 
 function StreamingCursor() {
   return (
-    <span className="ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 animate-pulse bg-foreground/70 align-middle" />
+    <span className="ml-0.5 inline-block h-4 w-0.5 translate-y-0.5 animate-pulse bg-foreground/70 align-middle" />
   )
 }
 
