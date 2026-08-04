@@ -8,6 +8,7 @@
         * manual 路径（front+back 必填 / note 截断）
         * quiz_question 批量路径（反查 QuizStore + 防重复 + 部分跳过）
         * 非法 source_type / 缺 question_ids
+        * 归属校验：别人 quiz 里的题不能进当前用户的队列
     - `_tool_query_srs_due`：摘要 / detail / empty / limit
     - `_tool_review_srs_card`：4 档 mapping + 写库 + 非法 rating / card_id
     - `_tool_query_srs_stats`：空队列 empty / 有卡 ok
@@ -28,6 +29,7 @@ from src.stores import quiz_store as quiz_store_module
 from src.stores import srs_store as srs_store_module
 from src.stores.quiz_store import QuizStore
 from src.stores.srs_store import SRSStore
+from src.stores.user_context import use_user
 
 
 @pytest.fixture
@@ -231,6 +233,50 @@ class TestAddToSrs:
     def test_invalid_source_type(self, srs: SRSStore) -> None:
         result = execute_tool("add_to_srs", {"source_type": "bogus"})
         assert result.status == "error"
+
+
+class TestAddToSrsOwnership:
+    """
+    锁住归属校验：quiz_questions 主键全库递增，把题号当主键传进来会正好命中
+    别人 quiz 里的同号题，卡片内容因此串到其他用户。反查必须 join quiz_sets 校验。
+    """
+
+    def test_other_user_question_skipped(self, srs: SRSStore, quiz: QuizStore) -> None:
+        with use_user(777):
+            _, qids = _make_quiz_set_with_questions(quiz)
+        with use_user(888):
+            result = execute_tool("add_to_srs", {
+                "source_type": "quiz_question",
+                "question_ids": qids,
+            })
+        assert result.status == "empty"
+        assert "不属于当前用户" in result.content
+        assert srs.list_cards(user_id=888) == []
+
+    def test_own_question_still_added(self, srs: SRSStore, quiz: QuizStore) -> None:
+        with use_user(777):
+            _, qids = _make_quiz_set_with_questions(quiz)
+            result = execute_tool("add_to_srs", {
+                "source_type": "quiz_question",
+                "question_ids": qids,
+            })
+        assert result.status == "ok"
+        assert len(srs.list_cards(user_id=777)) == 3
+
+    def test_mixed_own_and_other_user(self, srs: SRSStore, quiz: QuizStore) -> None:
+        with use_user(777):
+            _, other_qids = _make_quiz_set_with_questions(quiz)
+        with use_user(888):
+            _, own_qids = _make_quiz_set_with_questions(quiz)
+            result = execute_tool("add_to_srs", {
+                "source_type": "quiz_question",
+                "question_ids": [own_qids[0], other_qids[0]],
+            })
+        assert result.status == "ok"
+        assert "新增 1 张" in result.content
+        assert "跳过 1 张" in result.content
+        cards = srs.list_cards(user_id=888)
+        assert [c["source_ref"] for c in cards] == [own_qids[0]]
 
 
 # ── query_srs_due ──────────────────────────────────────────────────────────

@@ -308,27 +308,27 @@ export function QuizzesView() {
 
       {list.length > 0 && (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-[280px_minmax(0,1fr)]">
-          <div className="rounded-lg border border-border bg-card">
+          <div className="h-fit min-w-0 overflow-hidden rounded-lg border border-border bg-card">
             <div className="border-b border-border px-3 py-2 text-sm font-medium">
               全部测验 ({list.length})
             </div>
             <ul className="divide-y divide-border">
               {list.map((q) => (
-                <li key={q.id}>
+                <li key={q.id} className="min-w-0">
                   <button
                     onClick={() => setSelectedId(q.id)}
                     className={cn(
-                      'flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-sm hover:bg-accent/60',
+                      'flex w-full min-w-0 flex-col gap-0.5 px-3 py-2 text-left text-sm hover:bg-accent/60',
                       selectedId === q.id && 'bg-accent text-accent-foreground',
                     )}
                   >
-                    <div className="truncate font-medium" title={q.topic}>
+                    <span className="w-full truncate font-medium" title={q.topic}>
                       {q.topic}
-                    </div>
-                    <div className="text-[10px] text-muted-foreground">
+                    </span>
+                    <span className="w-full truncate text-[10px] text-muted-foreground">
                       {q.num_questions} 题 · {QUIZ_STATUS_LABELS[q.status] ?? q.status}
                       {q.total_score !== null ? ` · ${q.total_score} 分` : ''}
-                    </div>
+                    </span>
                   </button>
                 </li>
               ))}

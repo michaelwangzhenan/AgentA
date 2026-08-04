@@ -21,6 +21,7 @@ from requests.utils import get_encoding_from_headers
 
 import src.config as _cfg
 from src.rag.retriever import search, format_search_results
+from src.stores.user_context import current_user_id
 
 if TYPE_CHECKING:
     # 仅用于类型注解；运行期不依赖，避免 retriever → agent.core 反向导入循环
@@ -1368,7 +1369,10 @@ _QUIZ_TOOLS: list[dict[str, Any]] = [
                         "description": (
                             "{question_id: 用户答案串} 映射。"
                             "MCQ 答案写字母（单选 『B』 / 多选 『AC』，不区分大小写）；简答写一句话或几句话。"
-                            "key 是 question_id 整数字符串（如 『12』 / 『13』）；缺漏的题视为未作答记 0 分。"
+                            "key 是 question_id 整数字符串（如 『12』 / 『13』），"
+                            "**取 create_quiz / query_quiz_history(detail=true) 里写明的 question_id，"
+                            "不要用用户嘴里的题号**——题号对不上主键时全部题会被判未作答记 0 分。"
+                            "缺漏的题视为未作答记 0 分。"
                         ),
                         "additionalProperties": {"type": "string"},
                     },
@@ -1385,7 +1389,8 @@ _QUIZ_TOOLS: list[dict[str, Any]] = [
                 "查 quiz 历史 / 单个 quiz 详情。"
                 "适用：用户问『我做过哪些 quiz / 上次 quiz 哪些错了 / 看下 quiz 5』。"
                 "**三种查询方式互斥（按优先级取一种）**：① 传 quiz_set_id → 返该 quiz 题目清单"
-                "（detail=True 时含 user_answer/correct_answer/反馈，用于复盘错题）；"
+                "（每题都标出 question_id；detail=True 时另含 user_answer/correct_answer/反馈，"
+                "用于复盘错题、以及给 add_to_srs / grade_quiz 取正确的 question_id）；"
                 "② 传 plan_id → 列该 plan 关联的全部 quiz 摘要；"
                 "③ 都不传 → 列最近若干条 quiz 摘要（不含具体题目）。"
             ),
@@ -1593,14 +1598,29 @@ def _tool_create_quiz(
     except Exception as e:
         return ToolResult(status="error", content=f"持久化 quiz 失败 — {e}")
 
+    # 落库前调用方只有题号，主键是 AUTOINCREMENT 分配的，必须回填映射：
+    # grade_quiz / add_to_srs 收的都是主键，拿题号顶替会打到别人 quiz 的同号题。
+    id_map_line = ""
+    try:
+        saved = store.get_quiz_with_questions(quiz_set_id)
+        if saved:
+            pairs = "，".join(
+                f"第{q['order_idx']}题 → question_id={q['id']}" for q in saved["questions"]
+            )
+            id_map_line = f"题号与 question_id 对应关系：{pairs}\n"
+    except Exception as e:  # noqa: BLE001 — 映射拿不到不该让已落库的 quiz 失败
+        logger.warning("create_quiz: 回填 question_id 失败（quiz 已落库）：%s", e)
+
     plan_suffix = f"，关联 plan_id={plan_id}" + (f"/Stage {stage_idx}" if stage_idx else "") if plan_id else ""
     return ToolResult(
         status="ok",
         content=(
             f"已创建 quiz_set_id={quiz_set_id}：\"{topic_clean}\"{plan_suffix}，"
             f"含 {added} 道题。\n"
+            f"{id_map_line}"
             "→ 可向用户依次呈现题目（含 ABCD 选项 / 简答提示），并提示：作答时按 "
-            "『1.B 2.AC 3. <文字>』格式回复；你之后会用 grade_quiz 自动批改。"
+            "『1.B 2.AC 3. <文字>』格式回复；你之后会用 grade_quiz 自动批改"
+            "（user_answers 的 key 用上面的 question_id，不是题号）。"
         ),
     )
 
@@ -1667,7 +1687,7 @@ def _tool_grade_quiz(
             order = q["order_idx"]
             stem_short = q["stem"][:40] + ("…" if len(q["stem"]) > 40 else "")
             wrong_lines.append(
-                f"  第 {order} 题 [{q_type}] {score:.1f}/1.0 — {fb}\n"
+                f"  第 {order} 题（question_id={qid}）[{q_type}] {score:.1f}/1.0 — {fb}\n"
                 f"    题干：{stem_short}\n"
                 f"    标答：{q['correct_answer']}"
             )
@@ -1693,6 +1713,7 @@ def _tool_grade_quiz(
     tail = (
         "\n\n→ 可向用户展示总分 + 错题点评（含标答 + 简短考点），"
         "再问是否要『再考一次 / 换主题 / 看错题详情』。"
+        "\n→ 错题进 SRS 时，add_to_srs(question_ids) 必须填上面括号里的 question_id，不要填题号。"
     )
     return ToolResult(status="ok", content=head + body + critic_block + tail)
 
@@ -1789,11 +1810,15 @@ def _render_quiz_detail(quiz: dict[str, Any], include_grading: bool) -> str:
         )
     if quiz.get("total_score") is not None:
         head_lines.append(f"- 总分：{quiz['total_score']:.1f}/100")
+    # 题号（第 N 题）在各 quiz 之间会重复，question_id 才是全局唯一主键。
+    # grade_quiz / add_to_srs 收的是主键，这里必须标出来，否则只能拿题号顶替，
+    # 会误伤别人 quiz 里同号的题。
+    head_lines.append("- 注：add_to_srs / grade_quiz 请用下面每题的 question_id，不要用题号。")
     head_lines.append("")
 
     body: list[str] = []
     for q in quiz.get("questions", []):
-        body.append(f"**第 {q['order_idx']} 题** [{q['q_type']}]")
+        body.append(f"**第 {q['order_idx']} 题**（question_id={q['id']}）[{q['q_type']}]")
         body.append(q["stem"])
         if q["q_type"] in _MCQ_TYPES and q["options"]:
             for i, opt in enumerate(q["options"]):
@@ -1898,7 +1923,10 @@ _SRS_TOOLS: list[dict[str, Any]] = [
                         "type": "array",
                         "description": (
                             "source_type=quiz_question 时必填：question_id 整数数组。"
-                            "通常从 grade_quiz 返回的错题清单 / query_quiz_history(detail=true) 拿到。"
+                            "**必须是 create_quiz / grade_quiz / query_quiz_history(detail=true) "
+                            "输出里写明的 question_id，不是题号（第 N 题）**——题号在各 quiz 之间重复，"
+                            "拿题号会命中别的 quiz 甚至别人的题。"
+                            "手头只有题号时，先调 query_quiz_history(quiz_set_id=X, detail=true) 换取 id。"
                         ),
                         "items": {"type": "integer", "minimum": 1},
                     },
@@ -2181,14 +2209,22 @@ def _tool_add_to_srs(
             skipped.append((qid, f"已有 card_id={existing}，跳过"))
             continue
         # 反查题面 / 题型 / 选项 / 标答 / 考点 —— MCQ 必须把选项也带进 front，
-        # 标答字母也要映射到选项文本，否则用户复习时只看到题干 + 孤零零的"C"无法判正确
+        # 标答字母也要映射到选项文本，否则用户复习时只看到题干 + 孤零零的"C"无法判正确。
+        # quiz_questions 没有 user_id，归属挂在父表 quiz_sets 上，必须 join 过去校验：
+        # 调用方误把题号当主键传进来时，会正好命中别人 quiz 里的题。
         question_row = quiz_store._conn.execute(  # noqa: SLF001 — 内部 join 查询
-            "SELECT q_type, stem, options, correct_answer, explanation "
-            "FROM quiz_questions WHERE id = ?",
-            (qid,),
+            "SELECT q.q_type, q.stem, q.options, q.correct_answer, q.explanation "
+            "FROM quiz_questions q "
+            "JOIN quiz_sets s ON s.id = q.quiz_set_id "
+            "WHERE q.id = ? AND s.user_id = ?",
+            (qid, current_user_id()),
         ).fetchone()
         if question_row is None:
-            skipped.append((qid, "question_id 不存在于 quiz_questions"))
+            skipped.append((
+                qid,
+                "question_id 不存在或不属于当前用户 —— 注意要传 question_id（数据库主键），"
+                "不是题号；可用 query_quiz_history(quiz_set_id=X, detail=true) 拿正确的 id",
+            ))
             continue
         q_type = str(question_row["q_type"] or "").strip()
         stem = str(question_row["stem"] or "").strip()

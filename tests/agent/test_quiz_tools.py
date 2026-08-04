@@ -7,6 +7,7 @@
     - `_tool_create_quiz`：入参校验（questions / topic / plan_id / stage_idx）+ 落库 + topic 派生
     - `_tool_grade_quiz`：MCQ 字符串比对 + 简答 LLM-judge（mock）+ 总分计算 + 错题清单
     - `_tool_query_quiz_history`：单查 / plan_id 过滤 / 全局列表 三路径
+    - 三 tool 输出都要带 question_id（下游 grade_quiz / add_to_srs 收的是主键，不是题号）
     - `execute_tool` 路由覆盖三 tool
 
 测试隔离：每个测试用 tmp_path 注入独立 QuizStore 替换全局共享。
@@ -337,6 +338,43 @@ class TestQueryQuizHistory:
     def test_invalid_limit_returns_error(self, store: QuizStore) -> None:
         res = execute_tool("query_quiz_history", {"limit": 0})
         assert res.status == "error"
+
+
+# ── question_id 可见性 ───────────────────────────────────────────────────────
+
+class TestQuestionIdExposed:
+    """
+    锁住三个 tool 输出里必须带 question_id。grade_quiz 与 add_to_srs 收的都是
+    主键，输出只给题号时调用方只能拿题号顶替，会打到别的 quiz 的同号题上。
+    """
+
+    def test_create_quiz_returns_id_mapping(self, store: QuizStore) -> None:
+        res = execute_tool("create_quiz", {"topic": "x", "questions": _ok_questions()})
+        assert res.status == "ok"
+        quiz = store.get_quiz_with_questions(store.list_quiz_sets()[0]["id"])
+        for q in quiz["questions"]:
+            assert f"第{q['order_idx']}题 → question_id={q['id']}" in res.content
+
+    def test_history_detail_shows_question_id(self, store: QuizStore) -> None:
+        execute_tool("create_quiz", {"topic": "x", "questions": _ok_questions()})
+        quiz_set_id = store.list_quiz_sets()[0]["id"]
+        res = execute_tool("query_quiz_history", {"quiz_set_id": quiz_set_id, "detail": True})
+        quiz = store.get_quiz_with_questions(quiz_set_id)
+        for q in quiz["questions"]:
+            assert f"question_id={q['id']}" in res.content
+
+    def test_grade_quiz_wrong_lines_show_question_id(self, store: QuizStore) -> None:
+        execute_tool("create_quiz", {"topic": "x", "questions": _ok_questions()})
+        quiz_set_id = store.list_quiz_sets()[0]["id"]
+        qids = [q["id"] for q in store.get_quiz_with_questions(quiz_set_id)["questions"]]
+        with patch("src.agent.tools._grade_one_short_answer", return_value=(0.0, "未作答")):
+            res = execute_tool("grade_quiz", {
+                "quiz_set_id": quiz_set_id,
+                "user_answers": {str(qids[0]): "A", str(qids[1]): "AC", str(qids[2]): ""},
+            })
+        assert res.status == "ok"
+        for qid in qids:
+            assert f"question_id={qid}" in res.content
 
 
 # ── execute_tool 路由 ────────────────────────────────────────────────────────

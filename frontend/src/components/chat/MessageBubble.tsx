@@ -127,76 +127,86 @@ function UserBubble({
     setEditing(true)
   }
 
+  // 弹窗挂在编辑态之外：点「保存并重发」会先退出编辑态，若弹窗只存在于编辑分支会被立即卸载
+  const resendConfirm = (
+    <ResendConfirm
+      open={!!confirm}
+      onOpenChange={(o) => !o && setConfirm(null)}
+      onConfirm={() => {
+        if (confirm) cb.onEditResend(message.id, confirm.text)
+        setConfirm(null)
+      }}
+    />
+  )
+
   if (editing) {
     return (
-      <div className="flex justify-end">
-        <div className="w-full max-w-[80%]">
-          <Textarea
-            autoFocus
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            className="min-h-20 resize-none"
-          />
-          <div className="mt-1.5 flex justify-end gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
-              取消
-            </Button>
-            <Button
-              size="sm"
-              disabled={!draft.trim()}
-              onClick={() => {
-                setEditing(false)
-                setConfirm({ text: draft.trim() })
-              }}
-            >
-              保存并重发
-            </Button>
+      <>
+        <div className="flex justify-end">
+          <div className="w-full max-w-[80%]">
+            <Textarea
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              className="min-h-20 resize-none"
+            />
+            <div className="mt-1.5 flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
+                取消
+              </Button>
+              <Button
+                size="sm"
+                disabled={!draft.trim()}
+                onClick={() => {
+                  setEditing(false)
+                  setConfirm({ text: draft.trim() })
+                }}
+              >
+                保存并重发
+              </Button>
+            </div>
           </div>
         </div>
-        <ResendConfirm
-          open={!!confirm}
-          onOpenChange={(o) => !o && setConfirm(null)}
-          onConfirm={() => {
-            if (confirm) cb.onEditResend(message.id, confirm.text)
-            setConfirm(null)
-          }}
-        />
-      </div>
+        {resendConfirm}
+      </>
     )
   }
 
   const attachments = message.attachments ?? []
 
   return (
-    <div className="group flex flex-col items-end gap-1">
-      {attachments.length > 0 ? <AttachmentCards items={attachments} /> : null}
-      {message.content ? (
-        <div className={cn(
-          'rounded-2xl bg-user-bubble px-4 py-2 text-sm wrap-break-word whitespace-pre-wrap text-user-bubble-foreground',
-          cb.compact ? 'max-w-[92%]' : 'max-w-[80%]',
-        )}>
-          {message.content}
+    <>
+      <div className="group flex flex-col items-end gap-1">
+        {attachments.length > 0 ? <AttachmentCards items={attachments} /> : null}
+        {message.content ? (
+          <div className={cn(
+            'rounded-2xl bg-user-bubble px-4 py-2 text-sm wrap-break-word whitespace-pre-wrap text-user-bubble-foreground',
+            cb.compact ? 'max-w-[92%]' : 'max-w-[80%]',
+          )}>
+            {message.content}
+          </div>
+        ) : null}
+        <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+          <span className="mr-1 text-[11px] text-muted-foreground">
+            {formatTime(message.createdAt)}
+          </span>
+          <IconBtn
+            label={canWriteChat ? '重发' : chatTip}
+            disabled={cb.inFlight || !canWriteChat}
+            onClick={() => cb.onResendUser(message.id)}
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+          </IconBtn>
+          <IconBtn label={canWriteChat ? '编辑' : chatTip} disabled={!canWriteChat} onClick={startEdit}>
+            <Pencil className="h-3.5 w-3.5" />
+          </IconBtn>
+          <IconBtn label="复制" onClick={() => copyText(message.content)}>
+            <Copy className="h-3.5 w-3.5" />
+          </IconBtn>
         </div>
-      ) : null}
-      <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-        <span className="mr-1 text-[11px] text-muted-foreground">
-          {formatTime(message.createdAt)}
-        </span>
-        <IconBtn
-          label={canWriteChat ? '重发' : chatTip}
-          disabled={cb.inFlight || !canWriteChat}
-          onClick={() => cb.onResendUser(message.id)}
-        >
-          <RotateCcw className="h-3.5 w-3.5" />
-        </IconBtn>
-        <IconBtn label={canWriteChat ? '编辑' : chatTip} disabled={!canWriteChat} onClick={startEdit}>
-          <Pencil className="h-3.5 w-3.5" />
-        </IconBtn>
-        <IconBtn label="复制" onClick={() => copyText(message.content)}>
-          <Copy className="h-3.5 w-3.5" />
-        </IconBtn>
       </div>
-    </div>
+      {resendConfirm}
+    </>
   )
 }
 

@@ -383,13 +383,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                   applySkill(s)
                 }}
                 className={cn(
-                  'flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left',
+                  'flex w-full min-w-0 flex-col gap-0.5 px-3 py-1.5 text-left',
                   i === slashIndex ? 'bg-accent' : 'hover:bg-accent/60',
                 )}
               >
-                <span className="font-mono text-sm">/{s.name}</span>
+                <span className="w-full truncate font-mono text-sm">/{s.name}</span>
                 {s.description ? (
-                  <span className="line-clamp-1 text-xs text-muted-foreground">
+                  <span className="w-full truncate text-xs text-muted-foreground" title={s.description}>
                     {s.description}
                   </span>
                 ) : null}
