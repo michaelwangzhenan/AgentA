@@ -61,7 +61,7 @@ export function ChatView({
   )
 
   return (
-    <div className="flex h-full flex-1 flex-col">
+    <div className="flex h-full min-h-0 flex-1 flex-col">
       {!hideHeader && (
         <header className="border-b border-border px-6 py-3">
           <h1 className="text-base font-semibold tracking-tight">AgentA</h1>
