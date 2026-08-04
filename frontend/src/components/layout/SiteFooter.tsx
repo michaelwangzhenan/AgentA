@@ -20,22 +20,6 @@ export function SiteFooter() {
   return (
     <footer className="fixed inset-x-0 bottom-0 z-30 border-t border-transparent bg-black/50 px-3 py-1.5 text-center text-xs backdrop-blur-sm dark:border-white/10 dark:bg-black/70">
       <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
-        {PRODUCT_LINKS.map((item, index) => (
-          <span key={item.href} className="contents">
-            {index > 0 ? (
-              <span className="text-white/40" aria-hidden>
-                ·
-              </span>
-            ) : null}
-            <Link to={item.href} className={linkClass}>
-              {item.label}
-            </Link>
-          </span>
-        ))}
-
-        <span className="text-white/40" aria-hidden>
-          ·
-        </span>
         <a
           href={ICP_URL}
           target="_blank"
@@ -48,6 +32,7 @@ export function SiteFooter() {
         <span className="text-white/40" aria-hidden>
           ·
         </span>
+        
         <a
           href={PSB_URL}
           target="_blank"
@@ -63,6 +48,24 @@ export function SiteFooter() {
           />
           {PSB_NUMBER}
         </a>
+
+        <span className="text-white/40" aria-hidden>
+          ·
+        </span>
+
+        {PRODUCT_LINKS.map((item, index) => (
+          <span key={item.href} className="contents">
+            {index > 0 ? (
+              <span className="text-white/40" aria-hidden>
+                ·
+              </span>
+            ) : null}
+            <Link to={item.href} className={linkClass}>
+              {item.label}
+            </Link>
+          </span>
+        ))}
+
       </div>
     </footer>
   )

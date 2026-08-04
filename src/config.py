@@ -981,8 +981,8 @@ TOOL_ALLOWLIST: str = os.getenv("TOOL_ALLOWLIST", "")
 # 是否启用 plan-execute 用户审批 mode（可选值：true / false）
 # 开启后 LLM 调 make_plan 后 CLI 弹 yes/no 提问；no → 当前 query 中止
 PLAN_PERMISSION_MODE: bool = os.getenv("PLAN_PERMISSION_MODE", "false").lower() == "true"
-# 是否仅允许学习相关问答（可选值：true / false）
-# 开启后非学习话题在进主对话前被拒答，每条消息额外调用 kimi-k2.5 分类
+# 是否限定问答范围（可选值：true / false）
+# 开启后仅允许学习相关话题与个人资料问答，其余在进主对话前被拒答；每条消息额外调用 kimi-k2.5 分类
 LEARNING_SCOPE_ONLY: bool = os.getenv("LEARNING_SCOPE_ONLY", "false").lower() == "true"
 # 是否对模型最终回答做语义复核（可选值：true / false）
 # 开启后每条回答额外调用 kimi-k2.5 检查逻辑/事实错误（非敏感词），流式首字延迟增加

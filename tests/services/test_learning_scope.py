@@ -48,6 +48,16 @@ def test_out_of_scope_reply_hides_internal_reason() -> None:
     assert chat_mock.call_args.kwargs["temperature"] == 0.0
 
 
+def test_classify_personal_profile_question_in_scope() -> None:
+    mock_resp = MagicMock()
+    mock_resp.choices = [MagicMock(message=MagicMock(content='{"in_scope": true}'))]
+
+    with patch("src.llm.provider.chat", return_value=mock_resp):
+        result = classify("你有哪些项目经验？适合什么岗位？")
+
+    assert result.in_scope is True
+
+
 def test_classify_returns_out_of_scope_when_model_says_false() -> None:
     mock_resp = MagicMock()
     mock_resp.choices = [

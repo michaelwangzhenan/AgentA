@@ -5,7 +5,7 @@
     - tool ：工具被名单门（SECURITY_MODE / BLOCKLIST / ALLOWLIST）拦下
     - ssrf ：fetch_url 的 URL 被 SSRF 防御拒绝
     - input_filter：用户输入命中敏感词前置过滤被拦截
-    - learning_scope：用户输入不在学习相关范围内被拦截
+    - learning_scope：用户输入不在允许问答范围内被拦截
     - semantic_review：模型最终回答未通过输出语义复核被替换为拒答
 
 复用 ``usage.db``（与 ``UsageStore`` / ``TraceStore`` 同库不同表）；独立 connection +

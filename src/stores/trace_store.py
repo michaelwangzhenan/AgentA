@@ -1,13 +1,12 @@
 """在线 trace 存储层。
 
-每次对话（一次 ``Agent.run()``）记录一条 trace + 若干 span：
+每次对话（一次 Agent.run()）记录一条 trace + 若干 span：
     - trace：总耗时 / 分阶段耗时（检索 / LLM / tool）/ token / 成本口径 / 是否出错
     - span：单个阶段（每轮 LLM、每次 tool、每次检索）的起止与耗时，供看板瀑布图用
 
-复用 ``usage.db``（与 ``UsageStore`` 同库不同表，见 iter_14 设计 D2）；独立 connection +
-``threading.Lock``，SQLite 文件级锁保证与 UsageStore 跨连接并发写安全。
-
-采集为旁路：写入出错只记日志、绝不抛（``record_trace`` 调用方亦应吞异常）。
+复用 usage.db（与 UsageStore 同库不同表，见 iter_14 设计 D2）；
+独立 connection + threading.Lock，SQLite 文件级锁保证与 UsageStore 跨连接并发写安全。
+采集为旁路：写入出错只记日志、不抛（record_trace 调用方亦应吞异常）。
 """
 
 from __future__ import annotations
