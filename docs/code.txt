@@ -86,11 +86,16 @@ chat_stream # src\api\routes\chat.py
     -> AutoGPTAgent # src\agent\autogpt_agent.py
     -> Agent # src\agent\agent.py
   -> assert_message_within_limit # src\api\schemas\chat.py
-  -> route # src\llm\model_router.py (auto 选 LLM)
-  -> lookup_cached # src\stores\semantic_cache.py (查语义换成)
+  -> _check_input_filter # 敏感词检查
+  -> _check_learning_scope # 问答范围检查
+  -> model_router.route # src\llm\model_router.py (auto 选 LLM)
+  -> semantic_cache.lookup_cached # src\stores\semantic_cache.py (语义缓存)
     -> SemanticCacheStore::lookup
   -> _estimate_cache_saving # 缓存命中，估算节省
   -> record_cache_lookup # 记录降本信息
+  -> ResearchEngine.run
+  -> agent.run # python/langchai/autogpt
+    ->
   
 
 -

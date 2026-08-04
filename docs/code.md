@@ -1515,10 +1515,12 @@ CLI 与 UI 两入口共用一套日志基建（格式 / 级别 / 上下文 / 滚
 
 # 5. 并发模型
 
-Web 后端单进程、单 asyncio 事件循环（每个 uvicorn worker 一个）。在这个模型上叠三层：
-- 协程做 HTTP / SSE 编排；
-- 线程池跑同步阻塞活（Agent、LLM、SQLite）；
-- 锁 + 信号量保护进程级单例。CLI 不经这套，基本单线程同步。
+Web 后端单进程、单 asyncio 事件循环（每个 uvicorn worker 一个）。分三块：
+- 协程管 HTTP / SSE 编排；
+- 线程池跑同步阻塞工作（Agent、LLM、SQLite）；
+- 锁和信号量护住进程级单例。
+
+CLI 不走这套，基本是单线程同步调用。
 
 ## 5.1. 进程里有什么在跑
 
@@ -1533,17 +1535,17 @@ Web 后端单进程、单 asyncio 事件循环（每个 uvicorn worker 一个）
 
 ## 5.2. HTTP 层：协程 vs 线程
 
-大多数路由是 def（sessions、auth、plans 等），不是 async def。FastAPI 把它们丢进线程池执行，避免同步 SQLite / 业务逻辑卡住事件循环。
+大多数路由是 def（sessions、auth、plans 等），不是 async def。FastAPI 把它们丢进线程池，免得同步 SQLite 和业务逻辑卡住事件循环。
 
-明确的 async 路由很少，只有需要长连接 / 流式推送的：
+需要长连接或流式推送的路由才写成 async def，目前就三个：
 
-- POST /api/chat/stream（chat.py）—— SSE 边收边推
-- POST /api/kb/upload 的 SSE 部分（kb.py）—— 入库进度流
-- POST /api/backup/restore（backup.py）—— 大文件上传
+- POST /api/chat/stream（chat.py）：SSE 边收边推
+- POST /api/kb/upload 的 SSE 部分（kb.py）：入库进度
+- POST /api/backup/restore（backup.py）：大文件上传
 
-其余包括 POST /api/chat（非流式）都是同步路由，整条链路阻塞在线程池线程里。
+其余路由（含非流式 POST /api/chat）都是同步的，整条链路堵在线程池线程里。
 
-鉴权依赖 get_current_user 是 async：查 cookie / SQLite 用 run_in_threadpool，set_current_user 必须在 async 上下文里调用（见 5.4）。
+鉴权依赖 get_current_user 是 async：查 cookie / SQLite 走 run_in_threadpool，set_current_user 必须在 async 上下文里调用（见 5.4）。
 
 ## 5.3. 两条 Chat 路径
 
@@ -1553,7 +1555,7 @@ Web 后端单进程、单 asyncio 事件循环（每个 uvicorn worker 一个）
 HTTP → FastAPI 线程池 → with _AGENT_SEMAPHORE, use_user → agent.run（同步，含 LLM / tools / store）→ 返回 JSON
 ```
 
-流式 POST /api/chat/stream（async def chat_stream）—— 项目里最完整的协程 + 线程协作：
+流式 POST /api/chat/stream（async def chat_stream）把协程和线程池拆开了：
 
 ```
 chat_stream（协程）
@@ -1572,37 +1574,37 @@ chat_stream（协程）
 | agent.run | 线程池线程 | 同步 ReAct + 阻塞 LLM |
 | _on_event | 线程池线程 | 回调里把事件桥回事件循环 |
 
-KB 入库 SSE（kb.py）同一套路：asyncio.to_thread(ingest_one) + call_soon_threadsafe + asyncio.Queue。
+KB 入库 SSE（kb.py）写法一样：asyncio.to_thread(ingest_one) + call_soon_threadsafe + asyncio.Queue。
 
 ## 5.4. 鉴权与用户上下文
 
-stores/user_context.py 用 contextvars 维护「当前请求是哪个用户」—— Agent 是进程级单例，tools 调 store 时拿不到 HTTP 请求对象，store 方法不显式传 user_id 时回落到 current_user_id()。
+stores/user_context.py 用 contextvars 记「当前请求是哪个用户」。Agent 是进程级单例，tools 调 store 时拿不到 HTTP 请求对象，store 方法不显式传 user_id 时就回落到 current_user_id()。
 
 - get_current_user（deps.py）：async 依赖，在事件循环里 set_current_user；DB 查询走 run_in_threadpool。
 - 流式 chat：run_in_executor 不会自动复制 contextvars，线程入口必须再包 use_user(user_id)，否则 store 会落到 DEFAULT_USER_ID。
 - run_cancel（agent/core/run_cancel.py）：cancel_scope 同样用 contextvars 绑定 threading.Event，须在跑 agent 的线程里激活。
 
-## 5.5. Agent 核心：刻意同步
+## 5.5. Agent 核心：同步实现
 
-agent.run、LLM chat()、RAG 检索、tool 执行都是同步阻塞代码，不在内层再开协程。设计意图：Agent 逻辑用同步写更清晰；LLM SDK 是阻塞 HTTP；通过「扔到线程池」与 FastAPI 事件循环隔离，而不是把整个 Agent 改成 async。
+agent.run、LLM chat()、RAG 检索、tool 执行都是同步阻塞代码，内层不再开协程。Agent 逻辑用同步写更直观；LLM SDK 本身是阻塞 HTTP；重活扔到线程池，和 FastAPI 事件循环隔开，而不是把整个 Agent 改成 async。
 
-进程级单例 Agent（deps.get_agent）多请求共用，靠这些不串台：
+进程级单例 Agent（deps.get_agent）多请求共用，靠下面几条避免串台：
 
 - session_id / event_callback 作为 per-run 入参传入 run()，不写实例字段
 - _AGENT_SEMAPHORE 限制并发 run 数（MAX_CONCURRENT_AGENT_RUNS）
 - use_user 绑定当前用户
 
-协作式取消：客户端断开 → cancel_event.set() → run_cancel.is_cancelled() 在轮次边界轮询；取消协程不等于立刻杀掉线程，线程可能还在跑直到 Agent 检测到 cancel。_event_gen 的 finally 里也会 cancel run_task、关 outbound。
+取消是协作式的：客户端断开 → cancel_event.set() → run_cancel.is_cancelled() 在轮次边界轮询。取消协程不会立刻杀掉线程，线程往往还要跑到 Agent 检测到 cancel 为止。_event_gen 的 finally 里也会 cancel run_task、关 outbound。
 
 ## 5.6. Store 层：线程安全
 
-所有 SQLite store 同一模式：
+所有 SQLite store 同一套写法：
 
 - sqlite3.connect(..., check_same_thread=False)：连接可跨线程
 - 每实例一个 threading.Lock：读写串行化
 - 进程级 get_shared_store() 单例：多请求、多线程池线程共享
 
-plan / quiz / srs 等：API 与 LLM 工具共用 get_shared_store() 一条连接。session_store / user_memory：API（deps lru_cache）与 Agent（agent_commons / agent.py）各持一条连接、同一 DB 文件，靠 Lock + SQLite 文件锁兜底（见 deps.py 模块注释）。正确性无虞，高并发下偶有 database is locked 重试。
+plan / quiz / srs 等：API 与 LLM 工具共用 get_shared_store() 一条连接。session_store / user_memory：API（deps lru_cache）与 Agent（agent_commons / agent.py）各持一条连接、同一 DB 文件，靠 Lock 加 SQLite 文件锁兜底（见 deps.py 模块注释）。数据一致性没问题，高并发下偶尔会 database is locked，会重试。
 
 ## 5.7. 其他并发点
 
@@ -1614,7 +1616,7 @@ plan / quiz / srs 等：API 与 LLM 工具共用 get_shared_store() 一条连接
 
 ## 5.8. 流式 chat 串起来
 
-见 3.7.3 节请求流程；下图只强调三协程与线程池的分工：
+完整请求流程见 3.7.3 节。下图是三协程和线程池怎么分工：
 
 ```mermaid
 graph TD
@@ -1629,16 +1631,14 @@ graph TD
   TP --> STORES[(Store 单例 + Lock)]
 ```
 
-_event_gen 的 finally（chat.py 508–515 行）：只要生成器被启动过就一定会跑——正常收 sentinel、断连、或 yield 异常都会进；缓存命中 early return 不走这条路径。清理：设 cancel_event、取消 disconnect_task、关 outbound、必要时 cancel run_task。
+_event_gen 的 finally（chat.py 508-515 行）：生成器一旦启动就会执行，正常收 sentinel、断连、yield 异常都会进；缓存命中 early return 不走这条路径。清理动作：设 cancel_event、取消 disconnect_task、关 outbound、必要时 cancel run_task。
 
 ## 5.9. 设计取舍
 
-读并发相关代码时记住这几条：
-
-1. 事件循环只做编排和 SSE，重活在线程池——这是主线，不是全栈 async。
-2. 大部分 API 是同步路由；只有长连接 / 流式才用协程。
-3. Agent 是单例 + 信号量限流，不是每请求 new 一个 Agent。
-4. LANGCHAIN / AUTOGPT 实现仍有实例级可变状态，多用户并发可能串台；生产应用 IMP_METHOD=PYTHON（见 deps.py）。
+1. 事件循环只管编排和 SSE，重活在线程池；没有做成全栈 async。
+2. 大部分 API 是同步路由，只有长连接 / 流式才用协程。
+3. Agent 是单例加信号量限流，不是每请求 new 一个。
+4. LANGCHAIN / AUTOGPT 实现仍有实例级可变状态，多用户并发可能串台；生产用 IMP_METHOD=PYTHON（见 deps.py）。
 5. 子进程只用于 eval，不在请求热路径上。
 
 代码：
