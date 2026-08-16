@@ -1,27 +1,29 @@
 # AgentA
 
 [![CI](https://github.com/michaelwangzhenan/AgentA/actions/workflows/AgentA_CI.yml/badge.svg)](https://github.com/michaelwangzhenan/AgentA/actions/workflows/AgentA_CI.yml)
+[![Live](https://img.shields.io/badge/Live-agenta.xin-brightgreen)](https://agenta.xin)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB)
 ![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688)
 ![React](https://img.shields.io/badge/React-19-61DAFB)
 ![TypeScript](https://img.shields.io/badge/TypeScript-frontend-3178C6)
 
-一个本地化私有知识库 Agent，提供 CLI、Web UI、SDK 三种交互方式，底层用 ChromaDB + BM25 向量库，接入 10 个国内外主流 LLM。自主实现 ReAct / Plan-Execute 推理循环，集成进阶 RAG（混合检索、RRF、Cross-Encoder 精排、Query 改写），内置防 prompt 注入、MCP（Model Context Protocol）接入、Skills 框架和跨 session 用户记忆。
+一个私有知识库 Agent，提供 CLI、Web UI、SDK 三种交互方式，底层用 ChromaDB + BM25 向量库，接入 10 个国内外主流 LLM。自主实现 ReAct / Plan-Execute 推理循环，集成进阶 RAG（混合检索、RRF、Cross-Encoder 精排、Query 改写），内置防 prompt 注入、MCP（Model Context Protocol）接入、Skills 框架和跨 session 用户记忆。
 
 面向学习 / 研究助理场景，覆盖入库、检索、出题、批改、间隔复习（SRS）的完整流程。
 
+已部署上线并完成 ICP 与公安备案，可直接在线体验。
+
 ---
 
-## 演示
+## 在线体验
 
-<!-- TODO: 把下方占位图替换为实际截图 / GIF，建议存放路径 docs/assets/ -->
+站点 [agenta.xin](https://agenta.xin)。
 
-| CLI 流式输出 | Web UI 聊天界面 |
+体验账号是只读权限，可以浏览知识库、翻阅预置的会话与学习计划、查看管理后台的用量与质量看板，不能发起对话或修改数据。想完整试用，请“联系我们”申请权限。
+
+| 登录界面 |  聊天界面 |
 |:---:|:---:|
-| ![CLI 流式输出 demo](https://placehold.co/600x350/1f2328/cbd5e1?text=CLI+streaming+demo%0A%28GIF+TODO%29) | ![Web UI 主界面](https://placehold.co/600x350/1f2328/cbd5e1?text=Web+UI+screenshot%0A%28PNG+TODO%29) |
-
-> **Live Demo 视频**：_待补充_<br>
-> 计划录制 60 秒完整流程 demo（入库、检索、出题、批改、SRS），上传 B 站 / YouTube 后在此处贴出链接。
+| ![登录界面](resources/README/login.png) | ![聊天界面](resources/README/chat.png) |
 
 ---
 
@@ -34,6 +36,7 @@
 - 内置安全防注入：隔离包装、启发式清洗、plan 执行审批、SSRF 防护、工具白名单等多层防护
 - 业务闭环：面向学习 / 研究助理，覆盖入库、检索、出题、批改至 SRS 间隔复习
 - 配套 Web 管理后台：用量统计、备份恢复、质量看板、模型路由池、用户与权限管理
+- 已上线公网并通过 ICP 与公安备案：线上跑在 2 核 2G 轻量服务器上，为此做了一轮内存治理，并按备案审核要求进行安全与账号管控
 
 ---
 
@@ -160,7 +163,7 @@ flowchart TB
 
 ### 测试体系
 
-- **87 个 pytest 测试文件**覆盖 Agent core / RAG / Memory / CLI / API / Tools 全模块
+- **121 个 pytest 测试文件**覆盖 Agent core / RAG / Memory / CLI / API / Tools 全模块
 - 用 `MagicMock` 隔离外部依赖（LLM / DB / 文件 IO），默认快速集约 1-2 分钟完成
 - 通过 `pytest.ini` marker 分档：默认仅运行快速集（自动排除 `integration` / `slow` / `langchain` / `autogpt`）；集成测试（真实 API / 网络 / ChromaDB）、慢用例、可选实现（LangChain / AutoGPT）测试按需单独运行
 
@@ -187,6 +190,20 @@ GitHub Actions（`.github/workflows/AgentA_CI.yml`）每次 push / PR 自动执�
 1. **Fast UT**：默认单测集（`pytest -q`），平均约 1 分钟完成
 2. **性能回归门禁**：运行 `eval_perf` 100 / 1000 数据档位，中位数延迟回归则判定失败，并上传报告 artifact
 3. **评估门禁（非 LLM）**：运行 `run_all --ci` 的确定性子集（安全拦截等不消耗 token 的用例），任一 FAIL 即判定失败，并上传报告 artifact
+
+---
+
+## 上线与合规
+
+AgentA 已上线部署，域名为 agenta.xin，已通过 ICP 备案与公安联网备案。
+
+### 线上的模型选择
+Embedding 与 Rerank 在本地跑的是 HuggingFace 模型，2 GiB 内存装不下，线上换成了硅基流动的 API，用 `BAAI/bge-m3` 与 `BAAI/bge-reranker-v2-m3`。
+
+### 账号与权限
+
+角色分 readonly、user、admin 三级，另有一个主账号可管理用户。
+设计原则是读的范围放宽、写的范围收紧：三种角色看到的导航一致，写权限逐级递增，只有admin 可以进行知识库的上传与入库。前端对无权限的操作置灰并给出提示，后端在路由层进行统一的权限检查。
 
 ---
 
@@ -348,6 +365,6 @@ python -m tools.agent_eval.perf.eval_perf --target all
 | **[`docs/design.md`](docs/design.md)** | **当前态设计（single source of truth）**：整体架构 / RAG（Ingest · Retrieval · Eval）/ Agent（API · 会话 · 记忆 · Prompt · Citation · Plan · Skills · MCP · 防注入） |
 | [`docs/v_1_0/iteration/`](docs/v_1_0/iteration) | **20+ 篇迭代设计文档**（V1.0，iter_0 至 iter_19，另有 LangChain / AutoGPT 专篇）：完整记录需求、设计、取舍的思考过程 |
 | [`docs/v_1_0/verification/`](docs/v_1_0/verification) | 迭代验证记录：评估体系 / 路由缓存 / 深度研究 / 安全红队等验收 |
-| [`docs/v_1_1/`](docs/v_1_1) | 当前版本（V1.1）迭代文档与 Review |
+| [`docs/v_1_1/`](docs/v_1_1) | **20+ 篇上线迭代文档**（V1.1）：部署与运维手册、云端 embedding 选型对比、低内存性能治理、备案合规改造、权限与前端路由重构 |
 | [`docs/knowledge/`](docs/knowledge) | 知识库：AI / UI / Git / Pytest 等学习沉淀 |
 | [`docs/code.md`](docs/code.md) | 代码导读：模块职责与关键实现索引 |
