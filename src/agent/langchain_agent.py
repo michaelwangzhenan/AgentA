@@ -286,10 +286,9 @@ class LangChainAgent:
             ))
             return _PLAN_CANCEL_MSG
 
-        # 引用回填：扫正文实际引到的 [n]，渲染 sources 块拼到末尾（无引用则原样）
+        # 引用回填：稀疏 [n] 压成从 1 起连续，再拼 sources 块（无引用则原样）
         try:
-            used = self._citation.extract_used(answer)
-            sources_block = self._citation.render(used)
+            answer, sources_block = self._citation.renumber_and_render(answer)
             if sources_block:
                 answer = answer + sources_block
         except Exception as e:  # 引用渲染失败不应吞掉回答

@@ -460,10 +460,13 @@ class TestRegisterWeb:
         assert len(builder) == 2
 
 
-# ── 8. 重编号（Deep Research：连续 [n]）─────────────────────────────────────
+# ── 8. 重编号（普通问答 / Deep Research：连续 [n]）─────────────────────────
 
 class TestRenumberAndRender:
-    """renumber_and_render()：把正文实际引用的稀疏编号压成从 1 起连续。"""
+    """renumber_and_render()：把正文实际引用的稀疏编号压成从 1 起连续。
+
+    普通问答与深度研究收尾都走这一步，避免参考资料列表出现 [1][3][7] 跳号。
+    """
 
     def test_no_citation_returns_text_and_empty(self) -> None:
         builder = CitationBuilder()

@@ -210,11 +210,11 @@ def _run_case(case: dict[str, Any]) -> dict[str, Any]:
             "reasons": [f"LLM 调用失败: {e}"],
         }
 
-    # Phase 1.4：复现 `Agent.run()` 末尾的 sources 拼接
+    # Phase 1.4：复现 Agent.run() 末尾的 sources 拼接（含连续重编号）
     final_answer = answer
     if builder is not None:
-        used = builder.extract_used(final_answer)
-        final_answer = final_answer + builder.render(used)
+        final_answer, sources_block = builder.renumber_and_render(final_answer)
+        final_answer = final_answer + sources_block
 
     passed, reasons = _check_expectations(final_answer, case.get("expected", {}))
 

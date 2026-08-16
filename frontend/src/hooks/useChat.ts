@@ -461,9 +461,9 @@ export function useChat({ sessionId, onSettled }: Options) {
                   flushContent()
                   update((m) => ({
                     ...m,
-                    // 深度研究：正文流式时是"被检索顺序"的原始编号，final_answer 才是
-                    // 重编号后的最终稿 —— 以它为准覆盖；普通对话保留已流式好的正文。
-                    content: m.research ? ev.payload.text : m.content || ev.payload.text,
+                    // 流式正文里的 [n] 是检索分配的原始编号；final_answer 已压成
+                    // 从 1 起连续。普通问答与深度研究都以最终稿覆盖，避免参考资料跳号。
+                    content: ev.payload.text || m.content,
                     streaming: false,
                     model: ev.payload.model ?? m.model,
                     cached: ev.payload.cached ?? false,

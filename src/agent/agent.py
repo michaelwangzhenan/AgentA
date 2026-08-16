@@ -421,12 +421,10 @@ class Agent:
             final_answer = message.content or ""
             if final_answer.strip():
                 logger.info("[Agent] 第 %d 轮得到最终回答，退出循环", iteration)
-                # 扫 LLM 正文实际引到的 [n]，按 builder 已注册的编号
-                # 渲染 sources 块并拼到 answer 末尾；无引用时 sources_block 为空，
-                # 答案保持原样（用户写 rules 禁引时的合法输出）
+                # 与深度研究同一套：只保留正文实际用到的 [n]，压成从 1 起连续，
+                # 再拼 sources 块。用户 rules 禁引时无 [n]，sources 为空、答案原样。
                 final_answer = final_answer.strip()
-                used_nums = citation_builder.extract_used(final_answer)
-                sources_block = citation_builder.render(used_nums)
+                final_answer, sources_block = citation_builder.renumber_and_render(final_answer)
                 if sources_block:
                     # 把 sources 块也作为 token_chunk emit，让 CLI
                     # 等流式 UI 能在正文 token 流完后继续渲染 sources 块；非流式

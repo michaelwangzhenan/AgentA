@@ -184,8 +184,7 @@ def test_langchain_agent_run_appends_citation():
     ag, _ = _mk()
     with patch('src.agent.langchain_agent.CitationBuilder') as p_cb:
         cb = MagicMock()
-        cb.extract_used.return_value = [1]
-        cb.render.return_value = '\n\n— sources —\n[1] doc'
+        cb.renumber_and_render.return_value = ('答案 [1]', '\n\n— sources —\n[1] doc')
         p_cb.return_value = cb
         out = _run(ag, 'q', output='答案 [1]')
     assert out.endswith('[1] doc')

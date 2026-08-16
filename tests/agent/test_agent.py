@@ -21,6 +21,7 @@ from src.agent.agent import Agent, SYSTEM_PROMPT
 from src.config import MAX_TOTAL_ROUNDS
 from src.agent.core.tool_call_engine import TOOL_EMPTY_HINT
 from src.agent.tools import ToolResult
+from src.rag.retriever import Hit
 
 
 # ── 辅助函数：构造 mock LLM response ─────────────────────────────────────────
@@ -158,6 +159,51 @@ class TestAgentToolCall:
 
         tool_messages = [m for m in captured if m.get("role") == "tool"]
         assert any(m.get("tool_call_id") == "call_xyz" for m in tool_messages)
+
+
+class TestAgentCitationRenumber:
+    """普通问答收尾：正文只用到部分检索编号时，压成从 1 起连续。"""
+
+    def test_sparse_citations_compacted_in_final_answer(self) -> None:
+        agent = Agent(verbose=False)
+
+        def mock_execute_tool(
+            name: str,
+            args: dict,
+            skill_bodies: dict | None = None,
+            **kwargs,
+        ) -> ToolResult:
+            cb = kwargs.get("citation_builder")
+            if name == "search_knowledge" and cb is not None:
+                hits = [
+                    Hit(source=f"f{i}.md", document="chunk", distance=0.1, collection="kb_zh")
+                    for i in range(5)
+                ]
+                cb.register(hits)
+            return ToolResult(status="ok", content="检索结果")
+
+        call_count = 0
+
+        def mock_chat(messages, tools=None, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _make_tool_call_response("search_knowledge", {"query": "q"})
+            # 分配了 [1]..[5]，正文只引 [4][1][5]
+            return _make_text_response("先看 [4]，再看 [1] 和 [5]。")
+
+        with patch("src.agent.agent.chat", side_effect=mock_chat), \
+             patch("src.agent.core.tool_call_engine.execute_tool", side_effect=mock_execute_tool):
+            result = agent.run("问题")
+
+        assert "先看 [1]，再看 [2] 和 [3]。" in result
+        assert "— sources —" in result
+        assert "[1] f3.md" in result
+        assert "[2] f0.md" in result
+        assert "[3] f4.md" in result
+        sources = result.split("— sources —", 1)[1]
+        assert "[4]" not in sources
+        assert "[5]" not in sources
 
 
 class TestAgentPlanExecuteE2E:
