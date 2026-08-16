@@ -164,51 +164,47 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
         thinking=ThinkingSpec(kind="openai_reasoning", enable_extra_body={"thinking": {"type": "enabled", "keep": "all"}}),
         tier="high",
     ),
+    "kimi-k3": ModelConfig(
+        provider="kimi", model_id="kimi-k3", label="Kimi K3",
+        # K3 始终思考，勿传 thinking 开关；temperature 官方固定 1.0
+        force_temperature=1.0,
+        thinking=ThinkingSpec(kind="openai_reasoning"),
+        tier="max",
+    ),
     # ── 通义千问（DashScope，全系列共用 _QWEN_EXTRA / _QWEN_THINKING）────────
-    "qwen3.6-flash": ModelConfig(
-        provider="qwen", model_id="qwen3.6-flash", label="Qwen3.6 Flash",
+    "qwen3.7-flash": ModelConfig(
+        provider="qwen", model_id="qwen3.7-flash", label="Qwen3.7 Flash",
         extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="low",
     ),
-    "qwen3.6-flash-2026-04-16": ModelConfig(
-        provider="qwen", model_id="qwen3.6-flash-2026-04-16", label="Qwen3.6 Flash (2026-04-16)",
+    "qwen3.7-flash-2026-07-15": ModelConfig(
+        provider="qwen", model_id="qwen3.7-flash-2026-07-15", label="Qwen3.7 Flash (2026-07-15)",
         extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="low",
     ),
-    "qwen3.6-27b": ModelConfig(
-        provider="qwen", model_id="qwen3.6-27b", label="Qwen3.6 27B",
-        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="low",
-    ),
-    "qwen3.6-35b-a3b": ModelConfig(
-        provider="qwen", model_id="qwen3.6-35b-a3b", label="Qwen3.6 35B-A3B",
-        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="low",
-    ),
-    "qwen3.6-plus": ModelConfig(
-        provider="qwen", model_id="qwen3.6-plus", label="Qwen3.6 Plus",
+    "qwen3.7-plus": ModelConfig(
+        provider="qwen", model_id="qwen3.7-plus", label="Qwen3.7 Plus",
         extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="medium",
     ),
-    "qwen3.6-plus-2026-04-02": ModelConfig(
-        provider="qwen", model_id="qwen3.6-plus-2026-04-02", label="Qwen3.6 Plus (2026-04-02)",
+    "qwen3.7-plus-2026-05-26": ModelConfig(
+        provider="qwen", model_id="qwen3.7-plus-2026-05-26", label="Qwen3.7 Plus (2026-05-26)",
         extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="medium",
     ),
-    "qwen3.6-max-preview": ModelConfig(
-        provider="qwen", model_id="qwen3.6-max-preview", label="Qwen3.6 Max (preview)",
+    "qwen3.7-max-2026-06-08": ModelConfig(
+        provider="qwen", model_id="qwen3.7-max-2026-06-08", label="Qwen3.7 Max (2026-06-08)",
         extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="high",
     ),
-    # 保留的旧版（其余 qwen3.5 已下线）
-    "qwen3.5-plus-2026-04-20": ModelConfig(
-        provider="qwen", model_id="qwen3.5-plus-2026-04-20", label="Qwen3.5 Plus (2026-04-20)",
-        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="medium",
+    "qwen3.8-max": ModelConfig(
+        provider="qwen", model_id="qwen3.8-max", label="Qwen3.8 Max",
+        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="max",
+    ),
+    "qwen3.8-2.4t-a95b": ModelConfig(
+        provider="qwen", model_id="qwen3.8-2.4t-a95b", label="Qwen3.8 2.4T-A95B",
+        extra_body=_QWEN_EXTRA, thinking=_QWEN_THINKING, tier="max",
     ),
     # ── DeepSeek ───────────────────────────────────────────────────────────
     "deepseek-v4-flash": ModelConfig(
         provider="deepseek", model_id="deepseek-v4-flash", label="DeepSeek V4 Flash",
         # V4 自带思考，开启时直接读 reasoning_content（不切模型、不加额外开关）
         thinking=ThinkingSpec(kind="openai_reasoning"), tier="min",
-    ),
-    "deepseek-chat": ModelConfig(
-        provider="deepseek", model_id="deepseek-chat", label="DeepSeek Chat",
-        # 思考能力在 deepseek-reasoner（thinking-only，无开关）；开启时切模型
-        thinking=ThinkingSpec(kind="openai_reasoning", thinking_model="deepseek-reasoner"),
-        tier="medium",
     ),
     "deepseek-v4-pro": ModelConfig(
         provider="deepseek", model_id="deepseek-v4-pro", label="DeepSeek V4 Pro",
@@ -398,21 +394,20 @@ USAGE_CURRENCY: str = os.getenv("USAGE_CURRENCY", "¥")
 # 内置默认单价 {model_id: (输入价, 输出价)}，单位：每 1M token，币种见 USAGE_CURRENCY。
 # 数值为美元公开价按汇率 7.1 折算的人民币。未列出的模型按 0 计成本（token 仍照常统计）。
 MODEL_PRICING_DEFAULTS: dict[str, tuple[float, float]] = {
-    # Moonshot Kimi
+    # Moonshot Kimi（k3 按公开 $3/$15 × 7.1）
     "kimi-k2.5": (3.91, 20.95),
     "kimi-k2.6": (6.75, 28.40),
-    # 通义千问（阶梯价取低档；qwen3.6 价格暂沿用 3.5 同档估算，待确认真实单价）
-    "qwen3.6-flash": (0.36, 2.84),
-    "qwen3.6-flash-2026-04-16": (0.36, 2.84),
-    "qwen3.6-27b": (0.71, 2.84),
-    "qwen3.6-35b-a3b": (0.71, 2.84),
-    "qwen3.6-plus": (0.85, 4.90),
-    "qwen3.6-plus-2026-04-02": (0.85, 4.90),
-    "qwen3.6-max-preview": (2.84, 8.52),
-    "qwen3.5-plus-2026-04-20": (0.85, 4.90),
-    # DeepSeek（v4-pro 为促销价；deepseek-chat 现映射 V4 Flash）
+    "kimi-k3": (21.30, 106.50),
+    # 通义千问（flash/plus/3.7-max 沿用旧档；qwen3.8-max 按公开 $2/$6 × 7.1）
+    "qwen3.7-flash": (0.36, 2.84),
+    "qwen3.7-flash-2026-07-15": (0.36, 2.84),
+    "qwen3.7-plus": (0.85, 4.90),
+    "qwen3.7-plus-2026-05-26": (0.85, 4.90),
+    "qwen3.7-max-2026-06-08": (2.84, 8.52),
+    "qwen3.8-max": (14.20, 42.60),
+    "qwen3.8-2.4t-a95b": (14.20, 42.60),
+    # DeepSeek（v4-pro 为促销价）
     "deepseek-v4-flash": (0.99, 1.99),
-    "deepseek-chat": (0.99, 1.99),
     "deepseek-v4-pro": (3.12, 6.18),
     # 智谱 GLM（Flash 系列免费；其余为估算）
     "glm-4-flash": (0.0, 0.0),

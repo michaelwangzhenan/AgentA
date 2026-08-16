@@ -137,7 +137,7 @@ class TestThinkingPathsSanitize:
         from src.llm.provider import call_with_thinking
 
         orig = config.ACTIVE_MODEL
-        config.ACTIVE_MODEL = "qwen3.6-flash"
+        config.ACTIVE_MODEL = "qwen3.7-flash"
         try:
             with patch("src.llm.openai_provider.chat_reasoning", return_value="ok") as m:
                 call_with_thinking(list(self._DIRTY), budget_tokens=4000)
@@ -154,7 +154,7 @@ class TestLlmErrorLogsProvider:
         from src.llm.provider import chat
 
         orig = config.ACTIVE_MODEL
-        config.ACTIVE_MODEL = "qwen3.6-flash"
+        config.ACTIVE_MODEL = "qwen3.7-flash"
         try:
             with patch("src.llm.openai_provider.chat",
                        side_effect=RuntimeError("boom 503")):
@@ -164,7 +164,7 @@ class TestLlmErrorLogsProvider:
         finally:
             config.ACTIVE_MODEL = orig
         assert "[LLM] 调用异常" in caplog.text
-        assert "qwen3.6-flash" in caplog.text  # model 出现在日志里
+        assert "qwen3.7-flash" in caplog.text  # model 出现在日志里
 
     def test_thinking_logs_provider_and_reraises(self, caplog) -> None:
         from src.llm.provider import call_with_thinking

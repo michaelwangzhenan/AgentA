@@ -194,9 +194,9 @@ class TestLlmSettings:
     def test_partial_update_keeps_other_fields(self, store: UserStore) -> None:
         store.set_settings(1, active_model="kimi-k2.5", thinking_enabled=True, thinking_budget=8000)
         # 只改模型，thinking 不动
-        store.set_settings(1, active_model="deepseek-chat")
+        store.set_settings(1, active_model="deepseek-v4-flash")
         s = store.get_settings(1)
-        assert s["active_model"] == "deepseek-chat"
+        assert s["active_model"] == "deepseek-v4-flash"
         assert s["thinking_enabled"] is True
         assert s["thinking_budget"] == 8000
 
@@ -209,9 +209,9 @@ class TestLlmSettings:
 
     def test_per_user_isolated(self, store: UserStore) -> None:
         store.set_settings(1, active_model="kimi-k2.5")
-        store.set_settings(2, active_model="deepseek-chat")
+        store.set_settings(2, active_model="deepseek-v4-flash")
         assert store.get_settings(1)["active_model"] == "kimi-k2.5"
-        assert store.get_settings(2)["active_model"] == "deepseek-chat"
+        assert store.get_settings(2)["active_model"] == "deepseek-v4-flash"
 
     def test_delete_user_clears_settings(self, store: UserStore) -> None:
         u = store.create_user("settingsuser", "pw")
