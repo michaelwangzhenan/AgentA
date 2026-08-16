@@ -529,15 +529,10 @@ class AutoGPTAgent:
         # RAG 引用块（B-3）：仅当本 run 持有 citation_builder（即经 run() 进入）时渲染。
         # 直接单测 _review 时 citation_builder 为 None，保持回答原样、不追加 sources。
         if self._citation_builder is not None:
-            # 与 Python Agent / 深度研究同一套：稀疏 [n] 压成从 1 起连续
+            # 与 Python Agent / 深度研究同一套：稀疏 [n] 压成从 1 起连续。
+            # 不把重排后的 sources 再当 token 推出去，避免正文旧号与列表新号打架。
             final_answer, sources_block = self._citation_builder.renumber_and_render(final_answer)
-            if sources_block:
-                # 同步给流式 UI（与正文 token 流衔接）；无订阅者静默
-                if self.events.subscribers(EVENT_TOKEN_CHUNK):
-                    self.events.publish(AgentEvent(
-                        type=EVENT_TOKEN_CHUNK, payload={"text": sources_block}
-                    ))
-                final_answer = final_answer + sources_block
+            final_answer = final_answer + sources_block
 
         return final_answer
 

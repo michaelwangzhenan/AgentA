@@ -208,9 +208,22 @@ export function useChat({ sessionId, onSettled }: Options) {
       let currentThinkingId: string | null = null
       let contentBuf = ''
       let flushTimer: ReturnType<typeof setTimeout> | null = null
+      // final_answer 已带重编号完整稿后，丢弃后续 token，避免旧号正文把定稿冲掉
+      let finalized = false
+
+      const discardContentBuf = () => {
+        contentBuf = ''
+        if (flushTimer != null) {
+          clearTimeout(flushTimer)
+          flushTimer = null
+        }
+      }
 
       const flushContent = () => {
-        if (!contentBuf) return
+        if (finalized || !contentBuf) {
+          contentBuf = ''
+          return
+        }
         const chunk = contentBuf
         contentBuf = ''
         update((m) => ({ ...m, content: m.content + chunk }))
@@ -280,6 +293,7 @@ export function useChat({ sessionId, onSettled }: Options) {
                   break
                 }
                 case 'token_chunk':
+                  if (finalized) break
                   contentBuf += ev.payload.text
                   scheduleContentFlush()
                   break
@@ -457,13 +471,19 @@ export function useChat({ sessionId, onSettled }: Options) {
                 case 'research_synthesizing':
                   updateResearch((r) => ({ ...r, phase: 'synthesizing' }))
                   break
-                case 'final_answer':
-                  flushContent()
+                case 'final_answer': {
+                  const finalText = ev.payload.text
+                  if (finalText) {
+                    // 有定稿就丢掉尚未刷入的流式旧稿，避免旧号正文与新号列表并存
+                    discardContentBuf()
+                    finalized = true
+                  } else {
+                    flushContent()
+                    finalized = true
+                  }
                   update((m) => ({
                     ...m,
-                    // 流式正文里的 [n] 是检索分配的原始编号；final_answer 已压成
-                    // 从 1 起连续。普通问答与深度研究都以最终稿覆盖，避免参考资料跳号。
-                    content: ev.payload.text || m.content,
+                    content: finalText || m.content,
                     streaming: false,
                     model: ev.payload.model ?? m.model,
                     cached: ev.payload.cached ?? false,
@@ -471,6 +491,7 @@ export function useChat({ sessionId, onSettled }: Options) {
                     research: m.research ? { ...m.research, phase: 'done' } : m.research,
                   }))
                   break
+                }
                 case 'error':
                   update((m) => ({ ...m, error: ev.payload.message }))
                   break

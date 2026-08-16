@@ -423,13 +423,10 @@ class Agent:
                 logger.info("[Agent] 第 %d 轮得到最终回答，退出循环", iteration)
                 # 与深度研究同一套：只保留正文实际用到的 [n]，压成从 1 起连续，
                 # 再拼 sources 块。用户 rules 禁引时无 [n]，sources 为空、答案原样。
+                # 流式正文仍是检索编号；不要把重排后的 sources 再当 token 推出去，
+                # 否则列表是 1..N、正文还是旧号。前端以 final_answer 覆盖显示。
                 final_answer = final_answer.strip()
                 final_answer, sources_block = citation_builder.renumber_and_render(final_answer)
-                if sources_block:
-                    # 把 sources 块也作为 token_chunk emit，让 CLI
-                    # 等流式 UI 能在正文 token 流完后继续渲染 sources 块；非流式
-                    # UI（EventBus 无 TOKEN_CHUNK 订阅者）这次 publish 静默无副作用
-                    _on_token(sources_block)
                 final_answer = final_answer + sources_block
                 # 将最终回答（含 sources 块）写入 DB，下一轮 LLM 可见统一来源
                 self._session_store.append(
